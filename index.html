@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#eaf0f3" />
+  <meta name="description" content="FRAME//BREAK — un prototype de FPS low-poly dans lequel le temps avance quand vous bougez. Jouable gratuitement dans votre navigateur." />
+  <title>FRAME//BREAK — Browser FPS Prototype</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main id="game-shell">
+    <canvas id="scene" tabindex="0" aria-label="Jeu de tir à la première personne, au clavier et à la souris"></canvas>
+    <div id="grain" aria-hidden="true"></div>
+    <div id="vignette" aria-hidden="true"></div>
+    <div id="damage-flash" aria-hidden="true"></div>
+    <div id="shoot-flash" aria-hidden="true"></div>
+    <div id="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i><span></span></div>
+    <div id="hud" hidden>
+      <header class="top-bar">
+        <div class="brand"><b>FRAME<span>//</span>BREAK</b><small>TIME IS A WEAPON</small></div>
+        <div class="level-indicator"><div class="eyebrow">SIMULATION</div><strong id="room-name">01 / THE ATRIUM</strong></div>
+      </header>
+      <div class="side-caption" aria-hidden="true">MOVE / AIM / SHOOT / REPEAT</div>
+      <div id="pickup-prompt" hidden><span class="keycap">E</span> RAMASSER L’ARME</div>
+      <div id="stage-banner" hidden>THE ATRIUM</div>
+      <footer class="hud-bottom">
+        <div class="time-wrap">
+          <div class="eyebrow">VITESSE DU MONDE <span id="time-pct">04%</span></div>
+          <div class="time-track"><div id="time-fill"></div></div>
+          <div class="time-hint">LE TEMPS AVANCE QUAND TU BOUGES</div>
+        </div>
+        <div class="health-wrap"><div class="eyebrow">INTÉGRITÉ</div><div id="health" aria-label="Vie restante">◆ ◆ ◆</div></div>
+        <div class="ammo-wrap"><div class="eyebrow">MUNITIONS <span class="subtle">/ R POUR RECHARGER</span></div><strong id="ammo">06<span>/06</span></strong></div>
+      </footer>
+      <div id="hint-bar">ZQSD / WASD · BOUGER <b>—</b> SOURIS · VISER <b>—</b> CLIC · TIRER <b>—</b> R · RECHARGER <b>—</b> F / CLIC DROIT · LANCER L'ARME <b>—</b> ESC · PAUSE</div>
+    </div>
+    <div id="overlay" class="overlay">
+      <div class="screen" id="menu-screen">
+        <div class="logo-tag"><span class="red-dot"></span> WEB FPS EXPERIMENT / V0.1</div>
+        <h1>FRAME<span>//</span><br>BREAK<span class="blink">_</span></h1>
+        <div class="menu-rule"></div>
+        <p class="main-caption">LE TEMPS N’AVANCE<br><b>QUE LORSQUE TU BOUGES.</b></p>
+        <p class="description">Fige les balles. Esquive. Vise. Élimine tous les ennemis pour progresser à travers 3 salles. Tout tourne directement dans ton navigateur.</p>
+        <button type="button" id="start-button" class="primary">DÉMARRER LA SIMULATION <span>↗</span></button>
+        <p class="controls">WASD / ZQSD · DÉPLACER &nbsp;&nbsp; SOURIS · VISER &nbsp;&nbsp; CLIC · TIRER<br>R · RECHARGER &nbsp;&nbsp; F / CLIC DROIT · LANCER L’ARME &nbsp;&nbsp; E · RAMASSER</p>
+      </div>
+      <div class="screen" id="pause-screen" hidden>
+        <div class="logo-tag"><span class="red-dot"></span> SIMULATION SUSPENDUE</div>
+        <h2>PAUSE<span class="blink">_</span></h2>
+        <p class="main-caption">LE MONDE T’ATTEND.</p>
+        <button type="button" id="resume-button" class="primary">REPRENDRE <span>↗</span></button>
+        <button type="button" id="restart-from-pause" class="text-button">RECOMMENCER</button>
+      </div>
+      <div class="screen" id="death-screen" hidden>
+        <div class="logo-tag"><span class="red-dot"></span> ÉCHEC DE LA SIMULATION</div>
+        <h2>YOU<span>//</span><br>DIED<span class="blink">_</span></h2>
+        <p class="main-caption">NE LAISSE PAS LE TEMPS TE RATTRAPER.</p>
+        <p class="description" id="death-stats"></p>
+        <button type="button" id="retry-button" class="primary">RÉESSAYER <span>↗</span></button>
+      </div>
+      <div class="screen" id="win-screen" hidden>
+        <div class="logo-tag"><span class="red-dot"></span> SIMULATION TERMINÉE</div>
+        <h2>FRAME<span>//</span><br>CLEARED<span class="blink">_</span></h2>
+        <p class="main-caption">TU AS BATTU LE TEMPS.</p>
+        <p class="description" id="win-stats"></p>
+        <button type="button" id="again-button" class="primary">REJOUER <span>↗</span></button>
+      </div>
+      <div class="menu-bottom">UNE EXPÉRIENCE ORIGINALE INSPIRÉE DES FPS À MANIPULATION TEMPORELLE. AUCUN ASSET COMMERCIAL UTILISÉ.</div>
+    </div>
+    <div id="error" role="alert" hidden></div>
+  </main>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

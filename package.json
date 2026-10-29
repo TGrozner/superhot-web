@@ -1,0 +1,14 @@
+{
+  "name": "superhot-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A dependency-free, SUPERHOT-inspired browser FPS prototype (original implementation/assets).",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "test": "node --test",
+    "check": "node --check src/main.js && node --check src/renderer.js && node --check src/levels.js && node --check src/math.js && node --check src/audio.js && npm test"
+  },
+  "engines": { "node": ">=20" }
+}
