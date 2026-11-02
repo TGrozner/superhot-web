@@ -215,6 +215,49 @@ export function originalSceneDrawEvidence(stats, { requireSkin = false } = {}) {
   };
 }
 
+
+/**
+ * The last COMPLETE frame snapshot describes what was actually submitted to
+ * the Web renderer, unlike the asynchronously sampled 1s metrics snapshot.
+ * Still not an independent GPU readback or an executed-native observation.
+ */
+export function renderedOriginalSceneEvidence(frame, { requireSkin = false } = {}) {
+  const reasons = [];
+  const scene = frame?.nativeScene;
+  const draw = frame?.generatedManifest;
+  const projection = frame?.projection;
+  if (!Number.isSafeInteger(frame?.frameId) || frame.frameId < 1 ||
+      frame?.activeScreen !== 'playing') reasons.push('PLAYING_RENDERED_FRAME_UNVERIFIED');
+  if (!scene || !Number.isSafeInteger(scene.meshes) || scene.meshes < 68 ||
+      !Number.isSafeInteger(scene.instances) || scene.instances < 360 ||
+      !Number.isSafeInteger(scene.textures) || scene.textures < 17)
+    reasons.push('RENDERED_FULL_SOURCE_SCENE_UNVERIFIED');
+  if (draw?.nativeGeometry !== true || draw?.nativeMaterialParity !== false ||
+      !Number.isSafeInteger(draw?.drawCalls) || draw.drawCalls < 1 ||
+      !Number.isSafeInteger(draw?.triangles) || draw.triangles < 1)
+    reasons.push('RENDERED_SOURCE_WORLD_SUBMISSION_UNVERIFIED');
+  if (!projection || !number(projection.verticalScale) || projection.verticalScale <= 0 ||
+      !number(projection.near) || projection.near <= 0 ||
+      !number(projection.far) || projection.far <= projection.near ||
+      !number(projection.aspect) || projection.aspect <= 0)
+    reasons.push('RENDERED_PROJECTION_UNVERIFIED');
+  if (!cameraOK(frame?.camera))
+    reasons.push('RENDERED_CAMERA_UNVERIFIED');
+  if (requireSkin) {
+    const enemy = frame?.nativeEnemy;
+    if (!enemy || enemy.skinned !== true || enemy.nativeClipSampled !== true ||
+        enemy.runtimeEnemyInstanceVerified !== false ||
+        !Number.isSafeInteger(enemy.drawCalls) || enemy.drawCalls < 1 ||
+        enemy.materialParity !== false)
+      reasons.push('RENDERED_ORIGINAL_SKIN_SUBMISSION_UNVERIFIED');
+  }
+  return {
+    status: reasons.length ? 'RENDERED_SOURCE_FRAME_UNVERIFIED' :
+      'WEB_RENDERED_SOURCE_FRAME_NOT_NATIVE_PARITY',
+    nativeParityCertified: false, independentGpuReadback: false, reasons,
+  };
+}
+
 /** Private local capture path and thresholds are *operator attestations*, not independent native certification. */
 export function compare(web, native, opts = {}) {
   const reasons=[];
@@ -358,6 +401,10 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
         if(proof.reasons.length)throw Error('Captured frame no longer has full source scene: '+proof.reasons.join(','));
       }
       const before=state.rendered;
+      if(requireOriginalScene){
+        const evidence=renderedOriginalSceneEvidence(before,{requireSkin:requireEnemy});
+        if(evidence.reasons.length)throw Error('Before PNG lacks rendered source frame: '+evidence.reasons.join(','));
+      }
       if(!Number.isSafeInteger(before?.frameId)||before.frameId<1 ||
          !['playing'].includes(before?.activeScreen))
         throw Error('Read-only rendered-frame counter absent or not playing');
@@ -365,12 +412,20 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       const after=await cdp.eval("window.__superhotGetRenderedFrameSnapshot?.()||null");
       if(!Number.isSafeInteger(after?.frameId)||after.frameId<before.frameId)
         throw Error('Screenshot could not be bracketed by real Web render frames');
+      if(requireOriginalScene){
+        const evidence=renderedOriginalSceneEvidence(after,{requireSkin:requireEnemy});
+        if(evidence.reasons.length)throw Error('After PNG lacks rendered source frame: '+evidence.reasons.join(','));
+      }
       const buf=Buffer.from(result.data,'base64'),image=decodePng(buf),file=name+'.png';
       writeFileSync(join(out,file),buf);
       frames.push({
         file,tMs:Date.now()-begin,phase:'displayed-frame-window',width:image.width,height:image.height,
         sha256:hash(buf),renderFrameIdBefore:before.frameId,renderFrameIdAfter:after.frameId,
         renderedCameraBefore:before.camera,renderedCameraAfter:after.camera,
+        renderedProjectionBefore:before.projection,renderedProjectionAfter:after.projection,
+        renderedOriginalSourceFrameEvidence:requireOriginalScene,
+        renderedSceneCountsBefore:requireOriginalScene?before.nativeScene:null,
+        renderedSceneCountsAfter:requireOriginalScene?after.nativeScene:null,
         exactSingleNativeFrame:false,
       });
       return state;
