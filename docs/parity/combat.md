@@ -144,3 +144,38 @@ by this fix. The primary-report request remains the private read-only
 `corpus-query` of `spec/combat/combat-specification.md:1-200`, followed by
 member-level Unity/IL and instantiated scene overrides. SH-05 alone can
 consider any browser integration after independent checks.
+
+## SH-03 overflow-safe slab regression — 2026-11-02 (Web only)
+
+**PROUVÉ — bug du code Web précédent :** `src/combat/trace.js` blob
+`f93fcd867f56ff8f842c9c516d66dfc3364cd70d` calculait les fractions AABB
+avec `(boundary - start) / (end - start)`, puis la position d'impact avec
+`start + (end - start) * t`. Des endpoints tous deux finis mais de signes
+opposés (fixtures synthétiques `±1e308`) peuvent déborder pendant ces
+soustractions. Une boîte traversée à mi-chemin était annoncée à `t=0` ;
+les impacts immédiats pouvaient renvoyer une coordonnée `NaN`.
+Sur Node 22.16.0, trois des quatre tests
+`tests/combat-overflow-slabs.test.mjs` échouaient **avant** le correctif.
+
+**PROUVÉ — comportement Web corrigé :** le traceur de combat utilise
+les fractions originales pour les nombres intermédiaires finis et une
+normalisation d'échelle locale seulement lorsqu'une soustraction intermédiaire
+déborde. Les coordonnées d'impact à `t=0` et `t=1` sont des copies exactes
+des endpoints ; les fractions intermédiaires dont le déplacement déborde
+utilisent une combinaison convexe. Les quatre régressions synthétiques passent
+en Node 22.16.0 dans une reproduction isolée du module. Les seuils,
+priorités de collisions et constantes de gameplay ne changent pas.
+Une validation du dépôt complet/CI doit être relevée séparément.
+
+**INCONNU — SUPERHOT MCD :** aucune vitesse, dimension de hitbox, politique de
+collision, ordre Unity, dégât, arme ni comportement IA n'est déduit de cette
+correction numérique. Les intersections de sphères à valeurs extrêmes
+restent hors du périmètre de ce test (seule la reconstruction du point
+lorsque `t=0` est couverte). L'extraction primaire est toujours bloquée :
+lecture privée bornée via `corpus-query` de
+`spec/combat/combat-specification.md:1-200`, puis membres IL et
+configurations sérialisées actives. Pas d'exécution du jeu natif et aucune
+publication d'asset ou de corpus original.
+
+**Intégration :** modules purs uniquement ; le câblage `src/main.js` et
+les mesures navigateur restent réservés à SH-05 (issue #5).
