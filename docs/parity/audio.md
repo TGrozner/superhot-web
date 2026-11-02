@@ -185,3 +185,17 @@ handoff run 41368361512 / artifact 13108420851. No native method/clip
 identity or audible test was obtained by this Web-only change. The bounded,
 private `corpus-query` read of `spec/world/audio-vfx-deep.md` lines 1–200
 is still the required next input; do not publish proprietary content.
+
+## SH-07: unprintable callback diagnostics (Web prototype)
+
+**PROUVÉ (source Web):** `src/sound/timeline.js` previously formatted
+callback exceptions inside an unguarded catch. If the thrown object's
+`message` getter or string conversion raised another exception, a flush
+stopped early. The formatter now uses its own error boundary and records a
+fixed fallback diagnostic. The two regressions are covered in
+`tests/sound-async-dispatch.test.mjs`.
+
+**INCONNU (MCD native):** playback producers, Unity methods, guards, clips,
+clock domains, mixing, and audibility are unverified. This is a Web-only
+safety improvement, not evidence of an original-game event or audible sound.
+No original audio, asset, or binary is included.
