@@ -106,20 +106,36 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
     }
   }
 
-  /** Flush all events due at the current real/world clock positions. */
+  // Nested flushing is deferred to the next explicit call. This prevents
+  // dispatch callbacks from recursively draining the current batch.
+  let flushing = false;
+
+  /** Flush eligible events. Callbacks may cancel/clear/reset later due events. */
   function flushDue() {
-    const due = [];
-    const future = [];
-    for (const event of pending) {
-      if (event.dueSeconds <= nowFor(event.clock) + EPSILON) due.push(event);
-      else future.push(event);
+    if (flushing) return 0;
+    flushing = true;
+    try {
+      // Snapshot IDs, not events removed from pending: cancellation during a
+      // dispatch must still be able to invalidate another already-due event.
+      // Across clocks there is no shared timestamp; enqueue order is WEB policy.
+      const dueIds = pending
+        .filter((event) => event.dueSeconds <= nowFor(event.clock) + EPSILON)
+        .map((event) => event.id);
+      let delivered = 0;
+      for (const id of dueIds) {
+        // clear(), reset() or cancel() inside a callback may have removed it.
+        const index = pending.findIndex((event) => event.id === id);
+        if (index < 0) continue;
+        const [event] = pending.splice(index, 1);
+        deliver(event);
+        delivered++;
+      }
+      // Enqueues made from a callback are not in dueIds and require another
+      // explicit flush, even if their due time is now.
+      return delivered;
+    } finally {
+      flushing = false;
     }
-    pending = future;
-    // Across different clocks there is no meaningful common timestamp.
-    // Creation order is stable and does not assert native ordering.
-    due.sort((a, b) => a.id - b.id);
-    for (const event of due) deliver(event);
-    return due.length;
   }
 
   /** Advance two independent monotonic clocks by caller-supplied deltas. */
