@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRenderer } from '../src/renderer.js';
+import { assessContainersBrowserMetrics } from '../scripts/integration-vertical.mjs';
 import { makeCylinderMesh } from '../src/render/mesh-format.js';
 import { planLocalMesh6Draws } from '../src/scenes/containers-mesh6-local-plan.js';
 import { drawContainersBuild28Preview } from '../src/levels.js';
@@ -85,4 +86,29 @@ test('local mesh6 proxy omission affects only its two sourced generated hulls an
   assert.equal(reduced.visible, draws.length);
   assert.equal(reduced.collisionConnected, false);
   assert.equal(reduced.nativeMeshMatch, false);
+});
+
+test('browser telemetry distinguishes two local OBJ files from four indexed instance draws', () => {
+  const telemetry = {
+    mode: 'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME',
+    browserMeasured: true,
+    locallyLoadedSourceGroups: 2,
+    generatedManifest: {
+      privateIndexedDraws: 4, sourceQualifiedMesh6DrawPackets: 3,
+      hiddenByPrivateMesh: 27,
+    },
+    totalWebGLDrawCalls: 42, p95FrameMs: 18.6,
+  };
+  const report = assessContainersBrowserMetrics(telemetry);
+  assert.equal(report.status, 'APP_REPORTED_INDEXED_MESH_DRAWS');
+  assert.equal(report.reportedSourceGroups, 2);
+  assert.equal(report.reportedPrivateIndexedDraws, 4);
+  assert.equal(report.sourceMatchedHullFraction, '3/5');
+  assert.equal(report.browserScreenshotCaptured, false);
+  assert.equal(report.nativeParityVerdict, 'UNASSESSED');
+  assert.equal(assessContainersBrowserMetrics({
+    ...telemetry, generatedManifest: {
+      ...telemetry.generatedManifest, sourceQualifiedMesh6DrawPackets: 2,
+    },
+  }).status, 'INVALID_COUNTERS');
 });
