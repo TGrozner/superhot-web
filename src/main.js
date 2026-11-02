@@ -5,6 +5,7 @@ import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
 import { planLocalMesh6Draws } from './scenes/containers-mesh6-local-plan.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
+import { prepareNativeScene } from './scenes/native-scene-local.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -37,13 +38,27 @@ let privateTextureGeneration = 0;
 let localNativeEnemy = null;
 let nativeEnemyGeneration = 0;
 let nativeEnemyStats = null;
+let nativeScene = null;
+let nativeSkinInfo = null;
+let nativeInspection = false;
+let nativeCombatStarted = false;
+const nativeGameplay = () => containersPreviewEnabled && nativeScene && !nativeInspection;
+const actorMatrix = new Float32Array(16);
+const weaponMatrix = new Float32Array(16);
 let previewCameraY = CONTAINERS_BUILD28_DEMO_CAMERA.y;
-// Inspection placement only: neither a native spawn nor an animated enemy.
+// Inspection placement is separate from a gameplay actor or observed native spawn.
 const enemyInspectionMatrix = new Float32Array([
   1,0,0,0, 0,1,0,0, 0,0,1,0, 11,.97,24,1,
 ]);
 function frameLocalEnemy() {
-  state.camera = { x: 11, y: enemyInspectionMatrix[13] + 1.15, z: 28, yaw: 0, pitch: -.04 };
+  nativeInspection = true;
+  if (nativeScene) {
+    const anchor = nativeScene.anchors.enemy[0].worldMatrix;
+    enemyInspectionMatrix[12] = anchor[12];
+    enemyInspectionMatrix[13] = anchor[13];
+    enemyInspectionMatrix[14] = anchor[14];
+  }
+  state.camera = { x: enemyInspectionMatrix[12], y: enemyInspectionMatrix[13] + 1.15, z: enemyInspectionMatrix[14] + 4, yaw: 0, pitch: -.04 };
   previewCameraY = state.camera.y;
   state.hop = 0; state.verticalSpeed = 0;
 }
@@ -62,26 +77,33 @@ if (containersPreviewEnabled) {
   const enemyInput = $('private-enemy');
   const enemyStatus = $('private-enemy-status');
   const enemySummary = () => localNativeEnemy
-    ? `${localNativeEnemy.variant === 'merged' ? 'EnemyMerged' : 'EnemyMergedHeadless'} original chargé · ${localNativeEnemy.triangles} triangles · pose statique, placement de visite, shader Web.`
+    ? `${localNativeEnemy.variant === 'merged' ? 'EnemyMerged' : 'EnemyMergedHeadless'} original · ${nativeSkinInfo ? 'squelette et poses originales chargés' : 'pose statique'} · ${localNativeEnemy.triangles} triangles.`
     : 'Aucun modèle ennemi local chargé.';
-  async function loadEnemyFile(file, variant) {
-    const generation = ++nativeEnemyGeneration;
+  async function loadEnemyFile(file, variant, generation = ++nativeEnemyGeneration) {
     if (!file) { enemyStatus.textContent = enemySummary(); return false; }
     enemyStatus.textContent = 'Vérification et chargement du modèle original…';
     try {
       const receipt = await loadNativeEnemyObj(file, { variant });
-      if (generation !== nativeEnemyGeneration) return;
-      renderer.acceptLocalEnemyReceipt(receipt);
+      const rigId = variant === 'headless' ? 'enemyHeadlessRig' : 'enemyRig';
+      let rig = null;
+      if (localAssetManifest?.assets?.[rigId]) {
+        const response = await fetch(`/local-assets/${rigId}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Animation originale locale indisponible.');
+        rig = await response.json();
+      }
+      if (generation !== nativeEnemyGeneration) return false;
+      nativeSkinInfo = renderer.replaceNativeCharacter(receipt, rig);
       localNativeEnemy = Object.freeze({
         owner: receipt.owner, meshPathId: receipt.meshPathId,
         variant: receipt.variant, triangles: receipt.mesh.triangleCount,
       });
       $('frame-private-enemy').disabled = false;
       enemyStatus.textContent = enemySummary();
-      if (containersPreviewEnabled) frameLocalEnemy();
+      if (containersPreviewEnabled && !nativeScene) frameLocalEnemy();
       return true;
     } catch (error) {
       if (generation === nativeEnemyGeneration) {
+        if (localNativeEnemy) $('private-enemy-variant').value = localNativeEnemy.variant;
         enemyStatus.textContent = `Échec du modèle : ${error.message} ${enemySummary()}`;
       }
     }
@@ -90,6 +112,7 @@ if (containersPreviewEnabled) {
   enemyInput.addEventListener('change', () => loadEnemyFile(enemyInput.files?.[0], $('private-enemy-variant').value));
   $('frame-private-enemy').addEventListener('click', frameLocalEnemy);
   $('frame-containers').addEventListener('click', () => {
+    if (nativeScene) { nativeInspection = false; loadLevel(0); return; }
     state.camera = { ...CONTAINERS_BUILD28_DEMO_CAMERA };
     previewCameraY = state.camera.y;
     state.hop = 0; state.verticalSpeed = 0;
@@ -162,13 +185,34 @@ if (containersPreviewEnabled) {
     if (!response.ok) throw new Error('Export local indisponible.');
     return new File([await response.blob()], descriptor.name, { type: descriptor.type });
   }
+  async function loadScene() {
+    if (!localAssetManifest?.assets?.scenePackage) return;
+    const file = await localAssetFile('scenePackage');
+    const source = await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).json();
+    const prepared = prepareNativeScene(source);
+    const images = new Map();
+    try {
+      const decoded = await Promise.allSettled([...prepared.textures].map(async ([id]) => {
+        const file = await localAssetFile(id);
+        images.set(id, await createImageBitmap(file, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' }));
+      }));
+      const failed = decoded.find(result => result.status === 'rejected');
+      if (failed) throw failed.reason;
+      renderer.replaceNativeWorld(prepared, images);
+      nativeScene = prepared;
+      nativeInspection = false;
+      loadLevel(0);
+    } finally { for (const image of images.values()) image.close(); }
+  }
   $('private-enemy-variant').addEventListener('change', async () => {
     if (!localAssetManifest) return;
     const variant = $('private-enemy-variant').value;
     const generation = ++nativeEnemyGeneration;
     try {
       const file = await localAssetFile(variant === 'merged' ? 'enemyMerged' : 'enemyHeadless');
-      if (generation === nativeEnemyGeneration) await loadEnemyFile(file, variant);
+      if (generation === nativeEnemyGeneration) {
+        await loadEnemyFile(file, variant, generation);
+      }
     } catch (error) {
       if (generation === nativeEnemyGeneration) enemyStatus.textContent = `${error.message} ${enemySummary()}`;
     }
@@ -191,6 +235,7 @@ if (containersPreviewEnabled) {
         localAssetFile('texture').then(file => privateTextureGeneration ? true : loadTextureFile(file)),
         localAssetFile('enemyMerged').then(file => nativeEnemyGeneration ? true : loadEnemyFile(file, 'merged')),
       ]);
+      await loadScene();
       status.textContent = results.every(Boolean)
         ? 'Originaux locaux chargés automatiquement. Aucun envoi externe.'
         : 'Chargement local incomplet : consulter les statuts ci-dessous.';
@@ -203,6 +248,8 @@ if (containersPreviewEnabled) {
 document.title = 'FRAME//BREAK — Modèles originaux locaux';
 $('scene-mode').addEventListener('change', () => {
   const mode = $('scene-mode').value;
+  nativeInspection = false;
+  nativeCombatStarted = false;
   containersPreviewEnabled = mode === 'original';
   syntheticManifestEnabled = mode === 'synthetic';
   syntheticManifest = syntheticManifestEnabled ? buildSyntheticManifest() : null;
@@ -218,9 +265,8 @@ $('scene-mode').addEventListener('change', () => {
 });
 let renderedFrameId = 0;
 let renderedFrameSnapshot = null;
-window.__superhotGetRenderedFrameSnapshot = () => renderedFrameSnapshot && ({
-  ...renderedFrameSnapshot, camera: { ...renderedFrameSnapshot.camera },
-});
+window.__superhotGetRenderedFrameSnapshot = () => renderedFrameSnapshot &&
+  structuredClone({ ...renderedFrameSnapshot, projection: renderer.getProjectionState() });
 let manifestStats = null;
 const measuredFrameMs = [];
 let metricsNextAt = 0;
@@ -261,7 +307,7 @@ function loadLevel(index) {
   state.camera = containersPreviewEnabled
     ? { ...CONTAINERS_BUILD28_DEMO_CAMERA }
     : { x: state.level.spawn.x, y: 1.68, z: state.level.spawn.z, yaw: 0, pitch: 0 };
-  if (containersPreviewEnabled && localNativeEnemy) frameLocalEnemy();
+  if (containersPreviewEnabled && localNativeEnemy && !nativeScene) frameLocalEnemy();
   else previewCameraY = state.camera.y;
   state.enemies = state.level.enemies.map((e, i) => ({
     ...e, y: 0, id: i, alive: true, active: false, clock: 0, face: 0,
@@ -273,6 +319,23 @@ function loadLevel(index) {
     state.objects = [];
     state.solids = [];
     state.enemies = [];
+    if (nativeScene && !nativeInspection) {
+      const anchor = nativeScene.anchors.player[0].worldMatrix;
+      state.camera = { x: anchor[12], y: anchor[13] + 1.6, z: anchor[14],
+        yaw: Math.atan2(anchor[8], -anchor[10]), pitch: 0 };
+      previewCameraY = state.camera.y;
+      state.solids = nativeScene.colliders.filter(c => !c.isTrigger).map(c => {
+        const [x0, y0, z0] = c.worldAabb.min, [x1, y1, z1] = c.worldAabb.max;
+        return { x: (x0+x1)/2, y: (y0+y1)/2, z: (z0+z1)/2,
+          w: x1-x0, h: y1-y0, d: z1-z0, min: vec(x0,y0,z0), max: vec(x1,y1,z1) };
+      });
+      // Authored candidate positions, with Web encounter timing—not a native spawner replay.
+      state.enemies = nativeScene.anchors.enemy.map((point, id) => {
+        const m = point.worldMatrix;
+        return { x:m[12], y:m[13], z:m[14], id, alive:true, active:true, clock:0,
+          face:0, delay:0, fireTimer:2+id, strafe:0, phase:0, walking:false, deathAt:null };
+      });
+    }
   }
   state.bullets = []; state.fragments = []; state.drops = [];
   state.speed = .04; state.shotPulse = 0; state.lookActivity = 0;
@@ -281,7 +344,7 @@ function loadLevel(index) {
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   $('room-name').textContent = containersPreviewEnabled
-    ? 'CONTAINERS · MODÈLES ORIGINAUX LOCAUX'
+    ? 'CONTAINERS · GÉOMÉTRIE ORIGINALE · COMBAT WEB'
     : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
   $('stage-banner').textContent = containersPreviewEnabled
     ? 'CONTAINERS · VISITE DES MODÈLES · PAS DE GAMEPLAY NATIF'
@@ -291,11 +354,14 @@ function loadLevel(index) {
 
 function resetGame() {
   state.health = 3; state.score = 0; state.shots = 0; state.hits = 0;
+  nativeInspection = false;
+  nativeCombatStarted = true;
   state.kills = 0; state.runClock = 0; state.worldClock = 0;
   loadLevel(0);
   setScreen('playing');
 }
 function requestMouse() {
+  canvas.focus({ preventScroll: true });
   if (document.pointerLockElement !== canvas) {
     const maybe = canvas.requestPointerLock();
     if (maybe && typeof maybe.catch === 'function') maybe.catch(() => {
@@ -315,6 +381,7 @@ function finish(win) {
 }
 
 $('start-button').addEventListener('click', start);
+$('play-original').addEventListener('click', start);
 $('resume-button').addEventListener('click', resume);
 $('retry-button').addEventListener('click', start);
 $('again-button').addEventListener('click', start);
@@ -349,7 +416,7 @@ document.addEventListener('mousemove', (event) => {
 document.addEventListener('contextmenu', (event) => { if (state.screen === 'playing') event.preventDefault(); });
 document.addEventListener('mousedown', (event) => {
   if ((event.button !== 0 && event.button !== 2) || state.screen !== 'playing') return;
-  if (document.pointerLockElement !== canvas) { requestMouse(); return; }
+  if (document.pointerLockElement !== canvas) { nativeCombatStarted = true; audio.init(); requestMouse(); return; }
   if (event.button === 2) throwWeapon();
   else shoot();
 });
@@ -417,7 +484,7 @@ function findMeleeTarget() {
   let selected = null, best = 2.25;
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
-    const point = vec(enemy.x, 1.25, enemy.z);
+    const point = vec(enemy.x, enemy.y + 1.25, enemy.z);
     const delta = { x: point.x - state.camera.x, y: point.y - state.camera.y, z: point.z - state.camera.z };
     const d = Math.hypot(delta.x, delta.y, delta.z);
     if (d < best && (delta.x * axes.forward.x + delta.y * axes.forward.y + delta.z * axes.forward.z) / d > .72) {
@@ -426,7 +493,7 @@ function findMeleeTarget() {
   }
   return selected;
 }
-function shatterAt(position, count, color = RED) {
+function shatterAt(position, count, color = RED, floorY = 0) {
   const number = Math.min(count, 80);
   for (let i = 0; i < number; i++) {
     state.fragments.push({
@@ -434,6 +501,7 @@ function shatterAt(position, count, color = RED) {
       vx: rand(-3.7, 3.7), vy: rand(.8, 5.6), vz: rand(-3.7, 3.7),
       sx: rand(.10, .31), sy: rand(.13, .37), sz: rand(.10, .33),
       rx: rand(-3, 3), ry: rand(-3, 3), rz: rand(-3, 3),
+      floorY,
       life: rand(2.1, 4.1), maxLife: 4.1, color: i % 4 === 0 ? RED_LIGHT : color,
     });
   }
@@ -442,10 +510,12 @@ function shatterAt(position, count, color = RED) {
 function killEnemy(enemy) {
   if (!enemy.alive) return;
   enemy.alive = false;
+  enemy.deathAt = state.worldClock;
   state.kills++; state.score += 100;
   state.hits++;
-  shatterAt(vec(enemy.x, 1.12, enemy.z), 23);
-  state.drops.push({ x: enemy.x, y: .38, z: enemy.z, bob: rand(0, 7) });
+  const floorY = floorAt(enemy.x, enemy.z, enemy.y);
+  shatterAt(vec(enemy.x, enemy.y + 1.12, enemy.z), 23, RED, floorY);
+  state.drops.push({ x: enemy.x, y: floorY + .38, z: enemy.z, bob: rand(0, 7) });
   state.shotPulse = Math.max(.65, state.shotPulse);
   audio.shatter();
   if (state.enemies.every((e) => !e.alive)) state.transition = 2;
@@ -467,7 +537,7 @@ function closestImpact(bullet, start, end) {
     for (const enemy of state.enemies) {
       if (!enemy.alive) continue;
       for (const [height, radius] of [[1.26, .58], [1.91, .37]]) {
-        const t = segmentSphere(start, end, vec(enemy.x, height, enemy.z), radius + (bullet.type === 'throw' ? .2 : 0));
+        const t = segmentSphere(start, end, vec(enemy.x, enemy.y + height, enemy.z), radius + (bullet.type === 'throw' ? .2 : 0));
         if (t !== null && t < best) { best = t; hit = { type: 'enemy', enemy, t }; }
       }
     }
@@ -478,6 +548,22 @@ function closestImpact(bullet, start, end) {
   return hit;
 }
 
+function floorAt(x, z, belowY) {
+  if (!nativeGameplay()) return 0;
+  let floor = -Infinity;
+  for (const solid of state.solids) {
+    if (x >= solid.min.x && x <= solid.max.x && z >= solid.min.z && z <= solid.max.z &&
+        solid.max.y <= belowY + .15) floor = Math.max(floor, solid.max.y);
+  }
+  return Number.isFinite(floor) ? floor : nativeScene.anchors.player[0].worldMatrix[13];
+}
+function walkThroughScene(position, feet) {
+  if (containersPreviewEnabled && nativeInspection) return position;
+  const obstacles = nativeGameplay()
+    ? state.solids.filter(s => s.max.y > feet + .12 && s.min.y < feet + 1.6)
+    : state.solids;
+  return resolveWalk(position, .34, obstacles);
+}
 function update(dt) {
   state.runClock += dt;
   state.waveClock += dt;
@@ -506,10 +592,10 @@ function update(dt) {
     const sx = Math.sin(yaw) * fwd + Math.cos(yaw) * horizontal;
     const sz = -Math.cos(yaw) * fwd + Math.sin(yaw) * horizontal;
     const velocity = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8.9 : 6.7;
-    const next = resolveWalk({ ...state.camera,
+    const next = walkThroughScene({ ...state.camera,
       x: state.camera.x + sx * norm * velocity * dt,
       z: state.camera.z + sz * norm * velocity * dt,
-    }, .34, state.solids);
+    }, state.camera.y - 1.6);
     state.camera.x = containersPreviewEnabled ? next.x : clamp(next.x, -14.9, 14.9);
     state.camera.z = containersPreviewEnabled ? next.z : clamp(next.z, -33.8, 21.8);
     state.walkCycle += dt * velocity * 1.4;
@@ -523,6 +609,8 @@ function update(dt) {
 
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
+    if (containersPreviewEnabled && (nativeInspection || !nativeCombatStarted)) continue;
+    enemy.walking = false;
     enemy.clock += worldDt;
     if (state.waveClock < enemy.delay) continue;
     enemy.active = true;
@@ -532,14 +620,15 @@ function update(dt) {
     // Enemies cautiously advance and strafe, sliding past level geometry.
     if (d > 5.5) {
       const strafe = Math.sin(state.worldClock * 1.15 + enemy.phase) * enemy.strafe * .42;
-      const next = resolveWalk({x:enemy.x + (dx / d * .55 + dz / d * strafe) * worldDt,
-        y:0,z:enemy.z + (dz / d * .55 - dx / d * strafe) * worldDt},.34,state.solids);
+      const next = walkThroughScene({x:enemy.x + (dx / d * .55 + dz / d * strafe) * worldDt,
+        y:enemy.y,z:enemy.z + (dz / d * .55 - dx / d * strafe) * worldDt}, enemy.y);
+      enemy.walking = Math.hypot(next.x-enemy.x, next.z-enemy.z) > 1e-7;
       enemy.x = next.x; enemy.z = next.z;
     }
     enemy.fireTimer -= worldDt;
     if (enemy.fireTimer <= 0 && d < 37) {
       enemy.fireTimer = rand(1.65, 2.55);
-      const origin = vec(enemy.x, 1.42, enemy.z);
+      const origin = vec(enemy.x, enemy.y + 1.42, enemy.z);
       const aim = vec(state.camera.x, state.camera.y - .25, state.camera.z);
       const direction = normalize3(vec(aim.x-origin.x,aim.y-origin.y,aim.z-origin.z));
       addBullet(origin, direction, false);
@@ -558,7 +647,7 @@ function update(dt) {
       else if (impact.type==='player') damagePlayer();
       if (bullet.type==='throw' && impact.type==='wall') {
         const p=add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
-        state.drops.push({x:p.x,y:.38,z:p.z,bob:0});
+        state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0});
       }
       state.bullets.splice(i,1);
     } else if (bullet.ttl<=0 || Math.abs(end.x)>40 || Math.abs(end.z)>48 || end.y>12 || end.y<-.5) {
@@ -570,14 +659,15 @@ function update(dt) {
     const f=state.fragments[i];
     f.x+=f.vx*worldDt;f.y+=f.vy*worldDt;f.z+=f.vz*worldDt;
     f.vy-=10*worldDt;f.rx+=worldDt*2.2;f.ry+=worldDt*3.1;
-    if (f.y<.13) {f.y=.13;f.vy=Math.abs(f.vy)*.20;f.vx*=.72;f.vz*=.72;}
+    const floor = f.floorY + .13;
+    if (f.y<floor) {f.y=floor;f.vy=Math.abs(f.vy)*.20;f.vx*=.72;f.vz*=.72;}
     f.life-=worldDt;
     if (f.life<=0) state.fragments.splice(i,1);
   }
   if (state.transition>0) {
     state.transition-=dt;
     if (state.transition<=0) {
-      if(state.levelIndex === LEVELS.length-1) finish(true);
+      if(nativeGameplay() || state.levelIndex === LEVELS.length-1) finish(true);
       else {state.health=Math.min(3,state.health+1);loadLevel(state.levelIndex+1);}
     }
   }
@@ -607,13 +697,24 @@ function rayTarget() {
   }
   for(const enemy of state.enemies) {
     if(!enemy.alive) continue;
-    const t=segmentSphere(from,to,vec(enemy.x,1.3,enemy.z),.57);
+    const t=segmentSphere(from,to,vec(enemy.x,enemy.y + 1.3,enemy.z),.57);
     if(t!==null && t<max) return enemy;
   }
   return null;
 }
 
 function drawEnemy(enemy) {
+  if (containersPreviewEnabled && localNativeEnemy) {
+    const angle = (nativeSkinInfo ? Math.PI : 0) - enemy.face, c = Math.cos(angle), s = Math.sin(angle);
+    const mirror = nativeSkinInfo ? -1 : 1;
+    actorMatrix.set([c*mirror,0,-s*mirror,0, 0,1,0,0, s,0,c,0, enemy.x,enemy.y,enemy.z,1]);
+    const dying = !enemy.alive;
+    const clip = dying ? 'hit' : enemy.walking ? 'walk' : 'idle';
+    const time = dying ? state.worldClock - enemy.deathAt : enemy.clock;
+    nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, clip, time)
+      ?? renderer.drawLocalEnemyDiagnostic(actorMatrix);
+    return;
+  }
   const { x,z }=enemy;
   const idle=Math.sin(state.worldClock*2.7+enemy.phase)*.026;
   const angle=-enemy.face;
@@ -634,9 +735,15 @@ function drawEnemy(enemy) {
 }
 function drawPickup(drop) {
   const bob = Math.sin(state.worldClock*2.3+drop.bob)*.075;
-  renderer.box(drop.x,.25+bob,drop.z,.58,.15,.16,GUN,0,state.worldClock*.65);
-  renderer.box(drop.x-.12,.12+bob,drop.z,.14,.24,.13,METAL,0,state.worldClock*.65);
-  renderer.box(drop.x,.025,drop.z,.65,.018,.44,'#c1cbd2');
+  if (nativeGameplay()) {
+    const angle = state.worldClock * .65, c = Math.cos(angle), s = Math.sin(angle);
+    weaponMatrix.set([c,0,-s,0, 0,1,0,0, s,0,c,0, drop.x,drop.y+bob,drop.z,1]);
+    if (renderer.drawNativeWeapon(weaponMatrix)) return;
+  }
+  const floorY = drop.y - .38;
+  renderer.box(drop.x,floorY+.25+bob,drop.z,.58,.15,.16,GUN,0,state.worldClock*.65);
+  renderer.box(drop.x-.12,floorY+.12+bob,drop.z,.14,.24,.13,METAL,0,state.worldClock*.65);
+  renderer.box(drop.x,floorY+.025,drop.z,.65,.018,.44,'#c1cbd2');
 }
 function drawViewModel(camera) {
   const axes=cameraAxes(camera.yaw,camera.pitch);
@@ -644,6 +751,12 @@ function drawViewModel(camera) {
   const bob=Math.cos(state.walkCycle*.5)*.012;
   const shot=state.recoil*.13;
   const origin=add3(add3(add3(camera,multiply3(axes.forward,.87-shot)),multiply3(axes.right,.37+sway)),multiply3(axes.up,-.31+bob-shot*.4));
+  if (nativeGameplay() && state.weapon) {
+    weaponMatrix.set([axes.right.x,axes.right.y,axes.right.z,0,
+      axes.up.x,axes.up.y,axes.up.z,0, -axes.forward.x,-axes.forward.y,-axes.forward.z,0,
+      origin.x,origin.y,origin.z,1]);
+    if (renderer.drawNativeWeapon(weaponMatrix)) return;
+  }
   const offset=(r,u,f)=>add3(add3(add3(origin,multiply3(axes.right,r)),multiply3(axes.up,u)),multiply3(axes.forward,f));
   const draw=(r,u,f,sx,sy,sz,color)=>{
     const p=offset(r,u,f);
@@ -673,17 +786,25 @@ function drawBullet(bullet) {
   if(!friendly) renderer.shard(pos.x,pos.y,pos.z,.27,.27,.27,RED_LIGHT);
 }
 function render() {
+  nativeEnemyStats = null;
   const cam={...state.camera};
   if(state.screen==='playing') cam.y+=Math.sin(state.walkCycle)*.012;
   // Private source #41: build28 serializes fog OFF. Runtime MCD frame is still unobserved.
   // All other modes preserve the generated Web fog profile.
-  renderer.begin(cam, containersPreviewEnabled ? { fogStrength: 0 } : undefined);
+  renderer.begin(cam, containersPreviewEnabled ? { fogStrength: 0, projection: nativeScene?.camera.projection } : undefined);
   if (!containersPreviewEnabled) {
     for(const object of state.objects) {
       renderer.box(object.x,object.y,object.z,object.w,object.h,object.d,object.color);
     }
   }
-  if (containersPreviewEnabled) {
+  if (containersPreviewEnabled && nativeScene) {
+    manifestStats = nativeInspection ? null : renderer.drawNativeWorld();
+    if (nativeInspection) {
+      enemyInspectionMatrix[0] = nativeSkinInfo ? -1 : 1;
+      nativeEnemyStats = renderer.drawNativeSkin(enemyInspectionMatrix, 'idle', state.worldClock)
+        ?? renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
+    }
+  } else if (containersPreviewEnabled) {
     // SH-04/11: three independently joined Mesh6 submeshes share almost
     // congruent, world-batched local geometry. This is a SOURCE-CONVERTED
     // approximation, drawn only from an owner-selected local OBJ6 group47.
@@ -722,15 +843,23 @@ function render() {
       aspect: canvas.width / Math.max(1, canvas.height),
     });
   }
-  if (!containersPreviewEnabled) {
+  if (!containersPreviewEnabled || nativeGameplay()) {
     for(const drop of state.drops) drawPickup(drop);
-    for(const enemy of state.enemies) if(enemy.alive) drawEnemy(enemy);
+    for(const enemy of state.enemies) {
+      if(enemy.alive || (containersPreviewEnabled && nativeSkinInfo && enemy.deathAt !== null && state.worldClock - enemy.deathAt < .8)) drawEnemy(enemy);
+    }
     for(const bullet of state.bullets) drawBullet(bullet);
     for(const p of state.fragments) renderer.shard(p.x,p.y,p.z,p.sx,p.sy,p.sz,p.color,p.rx,p.ry,p.rz,clamp(p.life/.6,0,1));
     if(state.screen==='playing') drawViewModel(cam);
   }
   renderedFrameSnapshot = {
     frameId: ++renderedFrameId, activeScreen: state.screen, camera: { ...cam },
+    worldClock: state.worldClock,
+    nativeEnemy: nativeEnemyStats,
+    generatedManifest: manifestStats,
+    totalWebGLDrawCalls: renderer.getDrawCalls(),
+    nativeScene: nativeScene ? { meshes: nativeScene.meshes.size,
+      instances: nativeScene.instances.length, textures: nativeScene.textures.size } : null,
   };
 }
 
@@ -752,7 +881,7 @@ function frame(now) {
     const sorted = [...measuredFrameMs].sort((a, b) => a - b);
     const at = (p) => sorted[Math.ceil(sorted.length * p) - 1];
     window.__superhotSceneMetrics = Object.freeze({
-      mode: containersPreviewEnabled ? 'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME' : 'SYNTHETIC_NOT_MCD',
+      mode: containersPreviewEnabled ? (nativeScene ? 'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY' : 'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME') : 'SYNTHETIC_NOT_MCD',
       matchedNativeScene: false,
       activeScreen: state.screen, samples: sorted.length,
       p95FrameMs: at(.95), fpsAtP95FrameMs: 1000 / at(.95),
@@ -763,7 +892,12 @@ function frame(now) {
       localNativeEnemy,
       nativeEnemyIndexedDrawCalls: nativeEnemyStats?.drawCalls ?? 0,
       nativeEnemySpawnVerified: false,
-      skinAnimationVerified: false,
+      skinAnimationVerified: Boolean(nativeEnemyStats?.skinned && nativeSkinInfo),
+      nativeSkin: nativeSkinInfo,
+      nativeScene: nativeScene ? { meshes: nativeScene.meshes.size, instances: nativeScene.instances.length,
+        textures: nativeScene.textures.size, sourceCameraProjection: nativeScene.camera.projection } : null,
+      enemies: state.enemies.map(e => ({ x:e.x,y:e.y,z:e.z,alive:e.alive,clip:e.alive ? (e.walking ? 'walk' : 'idle') : 'hit',clock:e.clock })),
+      worldClock: state.worldClock,
       camera: { ...state.camera },
       nativeMaterialShaderMatch: false,
       nativeLightingMatch: false,

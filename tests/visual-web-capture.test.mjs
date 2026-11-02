@@ -31,8 +31,18 @@ const metrics={
     sourceQualifiedMesh6DrawPackets:3,privateIndexedDraws:4,sourceConvertedApproximationOnly:true,
   },totalWebGLDrawCalls:61,p95FrameMs:17.5,
 };
+const nativeMetrics={
+  browserMeasured:true,mode:'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY',
+  nativeScene:{meshes:68,instances:360,textures:17},
+  generatedManifest:{drawCalls:360,triangles:185037,nativeGeometry:true,nativeMaterialParity:false},
+  totalWebGLDrawCalls:371,p95FrameMs:17.5,
+};
 const expectedCamera={x:1,y:2,z:3,yaw:0.5,pitch:-0.25};
-const frame={frameId:1,activeScreen:'menu',camera:expectedCamera};
+const projection={
+  verticalScale:1.58,near:0.045,far:120,aspect:16/9,
+  viewProjection:[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
+};
+const frame={frameId:1,activeScreen:'menu',camera:expectedCamera,projection,worldClock:1.25};
 const input={metrics,frame,expectedCamera,width:1920,height:1080,dpr:1};
 const metadata={
   schemaVersion:1,origin:'web',status:'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING',
@@ -44,6 +54,57 @@ test('real public preview counter contract uses 2 local files, 3 Mesh6 instances
   assert.equal(x.totalWebGLDrawCalls,61);
   assert.equal(x.nativeCameraMatched,false);
   assert.deepEqual(x.viewport,[1920,1080]);
+});
+test('default-root native world accepts real draw counters without manual File groups',()=>{
+  const report=requireContainersWebEvidence({...input,metrics:nativeMetrics});
+  assert.deepEqual(report.nativeScene,{meshes:68,instances:360,textures:17});
+  assert.deepEqual(report.generatedManifest,nativeMetrics.generatedManifest);
+  assert.equal(report.totalWebGLDrawCalls,371);
+  assert.equal(report.privateIndexedDraws,undefined);
+  assert.deepEqual(report.projection,projection);
+  assert.notEqual(report.projection.viewProjection,projection.viewProjection);
+  assert.equal(report.worldClock,1.25);
+  assert.equal(report.nativeWorldPoseMatched,false);
+  assert.equal(report.geometryProvenance,'BROWSER_TELEMETRY_NOT_SAME_FRAME_COUNTERS');
+});
+test('native root rejects missing or contradictory draw evidence, not arbitrary fixed counts',()=>{
+  for(const changes of [
+    {nativeScene:null},{nativeScene:{meshes:0,instances:360,textures:17}},
+    {generatedManifest:{...nativeMetrics.generatedManifest,drawCalls:0}},
+    {generatedManifest:{...nativeMetrics.generatedManifest,triangles:NaN}},
+    {generatedManifest:{...nativeMetrics.generatedManifest,nativeGeometry:false}},
+    {totalWebGLDrawCalls:359},
+  ]) assert.throws(()=>requireContainersWebEvidence({...input,metrics:{...nativeMetrics,...changes}}),/native world/);
+  const other={...nativeMetrics,nativeScene:{meshes:3,instances:8,textures:2},
+    generatedManifest:{...nativeMetrics.generatedManifest,drawCalls:9,triangles:120},totalWebGLDrawCalls:10};
+  assert.equal(requireContainersWebEvidence({...input,metrics:other}).generatedManifest.drawCalls,9);
+});
+test('same-frame native counters take precedence over telemetry',()=>{
+  const report=requireContainersWebEvidence({...input,metrics:nativeMetrics,frame:{
+    ...frame,generatedManifest:{...nativeMetrics.generatedManifest,drawCalls:350},
+    totalWebGLDrawCalls:355,nativeScene:nativeMetrics.nativeScene,
+  }});
+  assert.equal(report.generatedManifest.drawCalls,350);
+  assert.equal(report.totalWebGLDrawCalls,355);
+  assert.equal(report.geometryProvenance,'RENDERED_FRAME_COUNTERS');
+});
+test('projection and world-clock evidence must be finite and match canvas aspect',()=>{
+  for(const change of [{projection:null},{projection:{...projection,aspect:1}},
+    {projection:{...projection,viewProjection:[1]}},{worldClock:NaN}]){
+    assert.throws(()=>requireContainersWebEvidence({...input,frame:{...frame,...change}}),
+      /projection|worldClock/);
+  }
+});
+test('native sampled clip provenance belongs to capture frame, not later telemetry',()=>{
+  const nativeEnemy={clip:'idle',sampledTime:1.25,skinned:true,nativeClipSampled:true,
+    runtimeEnemyInstanceVerified:false,sourcePath:'private-source'};
+  const report=requireContainersWebEvidence({...input,metrics:{...nativeMetrics,nativeEnemy:{clip:'walk'}},
+    frame:{...frame,nativeEnemy}});
+  nativeEnemy.sampledTime=9;
+  assert.deepEqual(report.nativeEnemyPose,{clip:'idle',sampledTime:1.25,skinned:true,
+    nativeClipSampled:true,runtimeEnemyInstanceVerified:false});
+  assert.equal(report.nativeWorldPoseMatched,false);
+  assert.equal(requireContainersWebEvidence({...input,metrics:{...nativeMetrics,nativeEnemy}}).nativeEnemyPose,null);
 });
 test('browser visual gate rejects wrong rendered phase, mismatched viewport and false mesh metrics',()=>{
   assert.throws(()=>requireContainersWebEvidence({...input,dpr:2}),/DPR1/);
@@ -96,7 +157,7 @@ test('corrupted PNG bytes or false native parity metadata are refused',()=>{
   assert.throws(()=>readWebCaptureMetadata(bad),/CRC mismatch/);
   assert.throws(()=>embedWebCaptureMetadata(base,{...metadata,status:'PARITY_VERIFIED'}),/Invalid SH-15/);
 });
-function fakeBrowser({blank=false,beforeFrame,beforeEncodeComplete}={}){
+function fakeBrowser({blank=false,beforeFrame,beforeEncodeComplete,sceneMetrics=nativeMetrics}={}){
   const original=png(1920,1080);
   const requested=[];
   let encodedBlob;
@@ -128,7 +189,7 @@ function fakeBrowser({blank=false,beforeFrame,beforeEncodeComplete}={}){
   };
   const win={
     location:{search:''},devicePixelRatio:1,
-    __superhotSceneMetrics:{...metrics,camera:expectedCamera},crypto:webcrypto,
+    __superhotSceneMetrics:{...sceneMetrics,camera:expectedCamera},crypto:webcrypto,
     __superhotGetRenderedFrameSnapshot:()=>currentFrame,
     requestAnimationFrame(callback){beforeFrame?.(setFrame);callback();},
     createImageBitmap:async()=>({close(){}}),
@@ -140,15 +201,16 @@ function fakeBrowser({blank=false,beforeFrame,beforeEncodeComplete}={}){
 test('capture records the rendered pose in PNG and reports only an intended download request',async()=>{
   const mock=fakeBrowser({
     beforeFrame:set=>set({...frame,frameId:2,camera:{...expectedCamera,sourcePath:'private-source'}}),
-    beforeEncodeComplete:set=>set({...frame,frameId:3}),
+    beforeEncodeComplete:set=>set({...frame,frameId:3,worldClock:2.5}),
   });
   const report=await captureContainersWeb({...mock,webCommit:'abcdef0'});
   assert.equal(report.status,'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING');
   assert.equal(report.downloadRequested,true);
   assert.equal('downloadedLocally' in report,false);
-  assert.equal(report.privateIndexedDraws,4);
+  assert.equal(report.generatedManifest.drawCalls,360);
   assert.equal(report.frameId,2);
-  assert.equal(report.cameraStatus,'RENDERED_FRAME_POSE_ONLY');
+  assert.equal(report.worldClock,1.25);
+  assert.equal(report.cameraStatus,'RENDERED_FRAME_POSE_AND_PROJECTION_ONLY');
   assert.match(report.rawCanvasSha256,/^[0-9a-f]{64}$/);
   assert.match(report.intendedFilename,/^containers-web-.*\.png$/);
   assert.equal(mock.requested.length,1);
@@ -158,6 +220,11 @@ test('capture records the rendered pose in PNG and reports only an intended down
   assert.equal(embeddedMetadata.frameId,2);
   assert.deepEqual(embeddedMetadata.camera.pose,expectedCamera);
   assert.equal(embeddedMetadata.activeScreen,'menu');
+  assert.deepEqual(embeddedMetadata.projection,projection);
+  assert.deepEqual(embeddedMetadata.nativeScene,nativeMetrics.nativeScene);
+  assert.equal(embeddedMetadata.worldClock,1.25);
+  assert.equal(embeddedMetadata.nativeWorldPoseMatched,false);
+  assert.equal(embeddedMetadata.worldPoseProvenance,'WEB_RENDERED_WORLD_CLOCK_NOT_NATIVE_FRAME_MATCH');
   assert.equal(JSON.stringify(embeddedMetadata).includes('private-source'),false);
 });
 test('download disabled reports no request or saved-file claim',async()=>{

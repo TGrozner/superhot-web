@@ -13,15 +13,20 @@ const localAssetTypes = {
   texture: ['concrete.png', 'image/png'],
   enemyMerged: ['EnemyMerged.obj.gz', 'application/gzip'],
   enemyHeadless: ['EnemyMergedHeadless.obj.gz', 'application/gzip'],
+  enemyRig: ['enemy-merged-animated.json', 'application/json'],
+  enemyHeadlessRig: ['enemy-merged-headless-animated.json', 'application/json'],
+  scenePackage: ['containers-scene.json.gz', 'application/gzip'],
 };
 const localAssets = new Map();
 const inside = (file, directory) => file.toLowerCase().startsWith((directory.endsWith(sep) ? directory : directory + sep).toLowerCase());
 try {
   const config = JSON.parse(await readFile(resolve(privateRoot, 'browser-assets.json'), 'utf8'));
   const actualPrivateRoot = await realpath(privateRoot);
-  for (const [id, [name, type]] of Object.entries(localAssetTypes)) {
-    if (config[id] === undefined) continue;
-    if (typeof config[id] !== 'string') throw new TypeError('Invalid local asset configuration');
+  for (const id of Object.keys(config)) {
+    const descriptor = Object.hasOwn(localAssetTypes, id) ? localAssetTypes[id] :
+      (/^sceneTexture_[0-9]{3}$/.test(id) ? [`${id}.png`, 'image/png'] : null);
+    if (!descriptor) continue;
+    const [name, type] = descriptor;
     const file = await realpath(resolve(privateRoot, config[id]));
     if (!inside(file, actualPrivateRoot) || !(await stat(file)).isFile()) {
       throw new Error('Local asset must be a file inside private/');

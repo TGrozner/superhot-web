@@ -12,15 +12,19 @@ Open the published GitHub Pages URL once Pages is enabled. On Windows, unzip the
 npm start
 ```
 
-Then visit **http://localhost:4173/**, with no query parameters. The homepage opens the original-model inspection view immediately. On the owner's configured machine, original cargo geometry, concrete texture and EnemyMerged load automatically from the loopback-only server. They are **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
+Then visit **http://localhost:4173/**, with no query parameters. On the owner's configured machine, Containers opens with original local scenery, textures, an original pistol and skinned EnemyMerged characters. Click **Jouer dans Containers** to start the Web encounter. **Cadrer le modèle** isolates the character for inspection. Original data is **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
 
-The visible **Vue** menu switches to **Prototype jouable** (the original three-arena game) or **Scène de contrôle générée**. There are no URL feature flags. The original-model view is currently static geometry inspection, not reconstructed native gameplay or animation.
+The visible **Vue** menu also offers **Anciennes salles de démonstration** and **Scène de contrôle générée**. These retain their generated geometry. There are no URL feature flags. Original geometry and sampled animations do not imply native gameplay, physics, lighting or shader parity.
 
 ### Local original-asset configuration
 
 The ignored `private/browser-assets.json` maps `mesh6`, `mesh7`, `texture`,
-`enemyMerged`, and `enemyHeadless` to relative paths inside `private/`.
-Only those configured files are exposed through `/local-assets/<id>`, on
+`enemyMerged`, `enemyHeadless`, `enemyRig`, `enemyHeadlessRig`, `scenePackage`,
+and numbered `sceneTexture_NNN` IDs to relative paths inside `private/`.
+The rig JSON contains original geometry, skin weights, inverse binds, a 62-bone
+hierarchy and native sampled local poses. The gzip scene package contains
+source-qualified geometry, submeshes, materials, placements and collider records.
+Only configured, recognized IDs are exposed through `/local-assets/<id>`, on
 `127.0.0.1`; host and same-origin checks reject cross-site access. The private
 directory itself is not served. Restart `npm start` after changing this map.
 No original data or machine-specific paths should be committed.
@@ -45,7 +49,7 @@ upload them. The generated playable prototype remains available in **Vue**.
 | Escape | Pause / release mouse |
 | Enter | Start / restart on menu |
 
-**Time scales with your movement, aiming, shooting and reloading**. When standing still, bullets and enemies crawl. You move at full speed. Shoot crystals, dodge enemy bullets, clear three original arenas. Three hits = game over. Enemies drop weapons. Your ammo replenishes between rooms.
+**Time scales with movement, aiming, shooting and reloading.** Native sampled idle/walk/hit poses advance on the Web world clock and freeze during pause. Containers uses authored spawn candidates with Web encounter timing and axis-aligned collider approximations—not the original spawning system or PhysX. A hit plays the original reaction and creates Web debris; native ragdoll death is not reproduced. The older generated rooms retain their own prototype rules.
 
 ## Files
 
@@ -87,7 +91,7 @@ Requires [GitHub CLI](https://cli.github.com/) (`gh`) and Git installed; the scr
 
 ## Known limitations
 
-The playable prototype remains **an early gameplay prototype**, not a full recreation of SUPERHOT: three compact rooms, one gun type, basic geometric enemies, simple level collision, minimal enemy tactics, no multiplayer, saved progress or replay system. The default original-model view displays authentic local static exports, but native animation, materials, lighting and gameplay fidelity remain unverified. Desktop keyboard/mouse only. A static host can serve the code; automatic private-original loading requires the local Node server.
+This is **not a full recreation of SUPERHOT MCD**. The configured local route uses original assets and original leaf-clip poses, but AI, movement/collision, gun rules, spawning, death physics and audio remain Web implementations. Original controller transitions, layered blending, FinalIK, root motion, native lighting/shadows/post-processing and complete shader equivalence are not reproduced. Desktop keyboard/mouse only. Public static hosting cannot automatically access the owner's private files; automatic original loading requires the loopback Node server.
 
 ## License
 

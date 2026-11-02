@@ -68,6 +68,30 @@ function cameraPose(camera){
   }
   return Object.fromEntries(keys.map(key=>[key,camera[key]]));
 }
+function renderedProjection(projection){
+  if(!projection||['verticalScale','near','far','aspect'].some(key=>
+      !Number.isFinite(projection[key])||projection[key]<=0)||projection.far<=projection.near||
+      !Array.isArray(projection.viewProjection)||projection.viewProjection.length!==16||
+      !projection.viewProjection.every(Number.isFinite)){
+    throw new Error('Finite rendered projection and 16-value viewProjection required');
+  }
+  return Object.fromEntries(['verticalScale','near','far','aspect','viewProjection'].map(key=>
+    [key,key==='viewProjection'?[...projection[key]]:projection[key]]));
+}
+function renderedEnemyPose(enemy){
+  if(enemy==null)return null;
+  const pose={};
+  for(const key of ['clip','sampledTime','skinned','nativeClipSampled','runtimeEnemyInstanceVerified']){
+    if(enemy[key]!==undefined)pose[key]=enemy[key];
+  }
+  if(pose.clip!==undefined&&(typeof pose.clip!=='string'||pose.clip.length>256)||
+      pose.sampledTime!==undefined&&!Number.isFinite(pose.sampledTime)||
+      ['skinned','nativeClipSampled','runtimeEnemyInstanceVerified'].some(key=>
+        pose[key]!==undefined&&typeof pose[key]!=='boolean')){
+    throw new Error('Invalid rendered enemy pose provenance');
+  }
+  return pose;
+}
 function requireRenderedFrame(frame,expectedCamera,expectedScreen){
   const expected=cameraPose(expectedCamera);
   if(!frame||!Number.isSafeInteger(frame.frameId)||frame.frameId<1){
@@ -80,29 +104,65 @@ function requireRenderedFrame(frame,expectedCamera,expectedScreen){
   if(Object.keys(expected).some(key=>pose[key]!==expected[key])){
     throw new Error('Rendered camera differs from expected Containers camera pose');
   }
+  const projection=renderedProjection(frame.projection);
+  if(frame.worldClock!==undefined&&(!Number.isFinite(frame.worldClock)||frame.worldClock<0)){
+    throw new Error('Invalid rendered worldClock');
+  }
   return {
-    frameId:frame.frameId,activeScreen:frame.activeScreen,
-    camera:{status:'RENDERED_FRAME_POSE_ONLY',pose,viewMatrix:null,projectionMatrix:null},
+    frameId:frame.frameId,activeScreen:frame.activeScreen,projection,
+    camera:{status:'RENDERED_FRAME_POSE_AND_PROJECTION_ONLY',pose,viewMatrix:null,projectionMatrix:null},
+    worldClock:frame.worldClock??null,
+    nativeEnemyPose:renderedEnemyPose(frame.nativeEnemy),
+    nativeEnemyPoseProvenance:frame.nativeEnemy==null?'RENDERED_ENEMY_POSE_UNAVAILABLE':
+      'LAST_RENDERED_ENEMY_DRAW_NOT_ALL_ACTORS',
+    worldPoseProvenance:frame.worldClock===undefined?'RENDERED_WORLD_CLOCK_UNAVAILABLE':
+      'WEB_RENDERED_WORLD_CLOCK_NOT_NATIVE_FRAME_MATCH',
   };
 }
 export function requireContainersWebEvidence({metrics,frame,expectedCamera,expectedScreen='menu',width,height,dpr,strictViewport=true}){
   if(!Number.isSafeInteger(width)||width<=0||!Number.isSafeInteger(height)||height<=0)throw new Error('Invalid canvas size');
   if(strictViewport&&(width!==1920||height!==1080||dpr!==1))throw new Error('Require 1920x1080 canvas and DPR1 without resizing');
-  if(metrics?.browserMeasured!==true||metrics?.mode!=='CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME'){
+  if(metrics?.browserMeasured!==true){
     throw new Error('Measured Containers telemetry unavailable');
   }
-  const generated=metrics.generatedManifest;
-  if(metrics.locallyLoadedSourceGroups!==2||generated?.sourceQualifiedMesh6DrawPackets!==3||
-      generated?.privateIndexedDraws!==4||!(metrics.totalWebGLDrawCalls>=4)){
-    throw new Error('Need 2 File groups, 3 Mesh6 packets and 4 indexed draws');
+  const generated=frame?.generatedManifest??metrics.generatedManifest;
+  let geometry;
+  if(metrics.mode==='CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'){
+    const nativeScene=frame?.nativeScene??metrics.nativeScene;
+    const total=frame?.totalWebGLDrawCalls??metrics.totalWebGLDrawCalls;
+    if(!nativeScene||['meshes','instances','textures'].some(key=>
+        !Number.isSafeInteger(nativeScene[key])||nativeScene[key]<=0)||
+        generated?.nativeGeometry!==true||!Number.isSafeInteger(generated.drawCalls)||generated.drawCalls<=0||
+        !Number.isSafeInteger(generated.triangles)||generated.triangles<=0||
+        !Number.isSafeInteger(total)||total<generated.drawCalls){
+      throw new Error('Need loaded native scene and measured native world draws/triangles');
+    }
+    geometry={
+      nativeScene:Object.fromEntries(['meshes','instances','textures'].map(key=>[key,nativeScene[key]])),
+      generatedManifest:{drawCalls:generated.drawCalls,triangles:generated.triangles,
+        nativeGeometry:true,nativeMaterialParity:false},
+      totalWebGLDrawCalls:total,
+    };
+  }else if(metrics.mode==='CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME'){
+    if(metrics.locallyLoadedSourceGroups!==2||generated?.sourceQualifiedMesh6DrawPackets!==3||
+        generated?.privateIndexedDraws!==4||!(metrics.totalWebGLDrawCalls>=4)){
+      throw new Error('Need 2 File groups, 3 Mesh6 packets and 4 indexed draws');
+    }
+    geometry={locallyLoadedSourceGroups:2,mesh6DrawPackets:3,privateIndexedDraws:4,
+      totalWebGLDrawCalls:metrics.totalWebGLDrawCalls};
+  }else{
+    throw new Error('Measured Containers telemetry unavailable');
   }
   const rendered=requireRenderedFrame(frame,expectedCamera,expectedScreen);
+  if(Math.abs(rendered.projection.aspect-width/height)>1e-6){
+    throw new Error('Rendered projection aspect differs from canvas');
+  }
   return {
-    viewport:[width,height],dpr,...rendered,
-    locallyLoadedSourceGroups:2,mesh6DrawPackets:3,privateIndexedDraws:4,
-    totalWebGLDrawCalls:metrics.totalWebGLDrawCalls,
+    viewport:[width,height],dpr,...rendered,mode:metrics.mode,...geometry,
+    geometryProvenance:frame.generatedManifest&&frame.totalWebGLDrawCalls!==undefined?
+      'RENDERED_FRAME_COUNTERS':'BROWSER_TELEMETRY_NOT_SAME_FRAME_COUNTERS',
     p95FrameMs:Number.isFinite(metrics.p95FrameMs)?metrics.p95FrameMs:null,
-    nativeCameraMatched:false,pixelComparisonPerformed:false,
+    nativeCameraMatched:false,nativeWorldPoseMatched:false,pixelComparisonPerformed:false,
   };
 }
 function sampleNotBlank(windowRef,documentRef,blob){
@@ -124,8 +184,8 @@ function sampleNotBlank(windowRef,documentRef,blob){
 }
 const toHex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
 /**
- * In Chrome/Edge DevTools after loading both private OBJ files, import this
- * module and call captureContainersWeb({expectedCamera, expectedScreen:'playing', webCommit:'abcdef0'}).
+ * In Chrome/Edge DevTools on the default root (or the manual local preview),
+ * import this module and call captureContainersWeb({expectedCamera, expectedScreen:'playing', webCommit:'abcdef0'}).
  * expectedCamera must be the independently chosen Containers baseline pose
  * {x,y,z,yaw,pitch}, not a copy of whichever camera happens to be active.
  * The synchronous __superhotGetRenderedFrameSnapshot getter must describe the
@@ -181,7 +241,8 @@ export async function captureContainersWeb({
     source:'WEBGL_CANVAS_NOT_MCD',scene:{id:'Containers',buildIndex:28},
     capturedAt,webCommit:webCommit??'UNRECORDED',...report,rawCanvasSha256:toHex(digest),
     limitations:['No executed native MCD capture or paired active camera',
-      'Geometry/materials/runtime still contain generated approximations',
+      'Web world clock/animation is not a matched native pose, even when the camera is fixed',
+      'Original geometry does not establish native material, lighting or runtime parity',
       'No native/Web RGB, silhouette or 1:1 score computed'],
   };
   const marked=embedWebCaptureMetadata(base,metadata);

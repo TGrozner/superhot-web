@@ -145,14 +145,25 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     owner:'globalgamemanagers.assets',pathId:25,
     name:'XULM FULLFORWARD/Concrete 2019 MAIN',
     serializedKeyword:'_STRIPESONOFF_ON',
-    nativeShaderProgramDecoded:false,
+    authoredShaderSourceRecovered:false,
+    compiledD3d11PassesRecovered:true,
+    runtimePassAndVariantObserved:false,
   }),
   mainTexture:Object.freeze({
     property:'_MainTex',owner:'resources.assets',pathId:248,
     name:'doublebeton_diffuse-barcodezacieki',
     uvChannel:'uv0',uvScale:Object.freeze([0.10000000149011612,0.10000000149011612]),
     uvOffset:Object.freeze([0,0]),imagePixelsDecoded:false,
-    imageEncodingKnown:false,
+    serializedEncodingKnown:true,serializedColorTransfer:'sRGB',
+    // Exact serialized sampler metadata from PRIVATE #100. Runtime quality,
+    // LOD bias and shader sampler overrides were not observed.
+    nativeSampler:Object.freeze({
+      unityFilterMode:0,unityFilterName:'Point',
+      unityWrapU:0,unityWrapV:0,unityWrapName:'Repeat',
+      unityAniso:1,unityMipBias:0,
+      effectiveRuntimeSamplerVerified:false,
+      evidence:'private research #100 artifact 13141079714',
+    }),
     // Private #100 / 13141079714: stream metadata ONLY, no texels in Git/Web.
     nativeStream:Object.freeze({
       owner:'resources.assets',pathId:248,
@@ -182,8 +193,9 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     }),
   }),
   shaderProperties:Object.freeze({
-    // Do not translate these into Web uniforms before the shipped custom
-    // shader's stage logic and texture sampling/color-space are recovered.
+    // Serialized controls are retained verbatim. Do not reinterpret them as
+    // generic Web tints: recovered compiled passes also depend on unresolved
+    // global shader values, varyings, lighting and runtime property blocks.
     _Color:Object.freeze([1,1,1,1]),
     _HighlightColor:Object.freeze([0.15916955471038818,0.3011871874332428,0.3382353186607361,0]),
     _ShadowColor:Object.freeze([0.06617646664381027,0.11257605254650116,0.1764705777168274,0]),
@@ -199,7 +211,7 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     lightmapFlags:5,enableInstancingVariants:true,
     doubleSidedGI:false,customRenderQueue:-1,
   }),
-  status:'serialized-shader-and-texture-references-resolved-payload-unavailable',
+  status:'serialized-material-texture-sampler-and-compiled-pass-recovered-runtime-unobserved',
   runtimeDrawMatched:false,webShadingReady:false,
 });
 
@@ -313,8 +325,9 @@ export function containersBuild28CargoMaterialBinding(rendererPathId) {
  * #98 artifact 13141163607: shader owner qualified to globalgamemanagers:28.
  * #88/#90: independently checked OBJ triangles/positions (private bytes).
  *
- * No Unity shader pass, final fragments, animated pose or runtime instance
- * was observed. The color below is a *DIAGNOSTIC WEB INPUT*, not final MCD RGB.
+ * Compiled D3D11 candidates establish an opaque pass and bounded final math,
+ * but no runtime pass/variant/property-block match or final pixels were observed.
+ * The color below is serialized shader input, not final MCD RGB.
  */
 const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
   material:Object.freeze({
@@ -329,6 +342,8 @@ const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
     materialReference:Object.freeze({fileId:1,pathId:28}),
     serializedKeyword:'_ALLOWLOCALFOG_ON',
     actualPassAndVariantVerified:false,
+    compiledD3d11PassesRecovered:true,
+    authoredShaderSourceRecovered:false,
   }),
   shaderInputs:Object.freeze({
     _Color:Object.freeze([0.720588207244873,0,0,1]),
@@ -341,10 +356,11 @@ const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
     _FogLength:7,
   }),
   sourceEvidence:'private research #93/13139554254, #95/13141157351, #98/13141163607',
-  status:'unity-serialized-owner-qualified-params-no-render-pass',
+  status:'serialized-owner-qualified-params-and-compiled-pass-recovered-runtime-unobserved',
   webShadingReady:false,
   runtimeNativePixelsVerified:false,
   nativeTexturePixelsAvailable:false,
+  compiledBaseOutputAlpha:1,
   nativeSurfaceAlphaKnown:false,
   nativeLocalFogPixelsKnown:false,
 });
@@ -427,8 +443,8 @@ export function enemyRedCrystalDiagnosticWebPacket(rendererPathId) {
  * First 128x128xRGB24 bytes form mip0 according to the serialized format and
  * exact 65535-byte eight-mip size. Byte order is preserved RGB->RGBA with
  * alpha 255; no gamma conversion, shader replication or vertical flip is
- * applied. UV orientation, filtering, sampler state, postprocessing and
- * native pixel colors remain unverified. SH-05 must label the experiment.
+ * applied. UV orientation, effective runtime sampler overrides, postprocessing
+ * and native pixel colors remain unverified. SH-05 must label the experiment.
  */
 export function decodeContainersConcreteRgb24Mip0(streamBytes) {
   const meta=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeStream;
@@ -458,5 +474,29 @@ export function decodeContainersConcreteRgb24Mip0(streamBytes) {
     sourceMipsIncludedInInput:meta.mipCount,mipsDecoded:1,
     originVerified:false,colorTransferVerified:false,
     shaderPassVerified:false,lightmapSamplingEnabled:false,
+  });
+}
+
+/**
+ * Public-safe WebGL sampler contract for the source Concrete RGB24 chain.
+ * The eight-level form consumes the native mip chain; the one-level form
+ * must not synthesize levels and therefore uses plain nearest minification.
+ */
+export function containersConcreteGpuSamplerPacket({mipLevels=8}={}) {
+  if(mipLevels!==1&&mipLevels!==8) {
+    throw new RangeError('Use exactly 1 or 8 verified source RGB24 mip levels');
+  }
+  const native=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeSampler;
+  if(native.unityFilterMode!==0||native.unityWrapU!==0||native.unityWrapV!==0) {
+    throw new Error('Source sampler assumptions changed; revalidate Unity metadata');
+  }
+  return Object.freeze({
+    minFilter:mipLevels===8?'NEAREST_MIPMAP_NEAREST':'NEAREST',
+    magFilter:'NEAREST',wrapS:'REPEAT',wrapT:'REPEAT',
+    maxLevel:mipLevels-1,generateMipmaps:false,
+    mipLevels,serializedFilterMode:0,serializedWrapU:0,serializedWrapV:0,
+    serializedAniso:1,serializedMipBias:0,
+    originalRuntimeOverrideVerified:false,
+    filterProvenance:'Unity-serialized-Texture2D-Point-Repeat-private-100-not-shader-parity',
   });
 }

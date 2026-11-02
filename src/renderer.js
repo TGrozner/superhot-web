@@ -3,6 +3,8 @@ import { uploadIndexedMesh } from './render/gpu-mesh.js';
 import { createGeneratedLighting, lightingUniformPacket } from './render/lighting-model.js';
 import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
 import { enemyRedCrystalDiagnosticWebPacket } from './render/material-model.js';
+import { createNativeSkinPass } from './characters/native-skin-pass.js';
+import { createNativeWorldPass } from './render/native-world-pass.js';
 
 // Legacy Web fog is generated, not MCD. SH-13 owns the source-qualified lighting model.
 const GENERATED_FOG_STRENGTH = lightingUniformPacket(createGeneratedLighting()).fogStrength;
@@ -20,11 +22,8 @@ uniform int uUseAffine;
 uniform mat4 uAffineModel;
 uniform mat3 uAffineNormal;
 uniform vec3 uCamPos;
-uniform vec3 uRight;
-uniform vec3 uUp;
-uniform vec3 uForward;
 uniform vec4 uColor;
-uniform vec2 uProjection;
+uniform mat4 uViewProjection;
 out vec3 vColor;
 out float vFog;
 out float vAlpha;
@@ -41,12 +40,7 @@ void main() {
   vec3 world = uUseAffine == 1
     ? (uAffineModel * vec4(aPosition, 1.0)).xyz
     : rotate3(aPosition * uScale) + uTranslate;
-  vec3 rel = world - uCamPos;
-  vec3 cam = vec3(dot(rel, uRight), dot(rel, uUp), dot(rel, uForward));
-  float f = 1.58;
-  float near = .045, far = 120.0;
-  gl_Position = vec4(cam.x * f / uProjection.x, cam.y * f,
-    cam.z * (far+near) / (far-near) - 2.0 * far * near / (far-near), cam.z);
+  gl_Position = uViewProjection * vec4(world, 1.0);
   vec3 normal = normalize(uUseAffine == 1
     ? uAffineNormal * aNormal
     : rotate3(aNormal));
@@ -198,7 +192,7 @@ export function createRenderer(canvas) {
   if (!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program)||'Shader link failed');
   gl.useProgram(program);
   const uniforms={};
-  for (const key of ['uTranslate','uScale','uRotate','uUseAffine','uAffineModel','uAffineNormal','uCamPos','uRight','uUp','uForward','uColor','uProjection','uFogStrength','uTextureST','uUseTexture','uAlbedo']) {
+  for (const key of ['uTranslate','uScale','uRotate','uUseAffine','uAffineModel','uAffineNormal','uCamPos','uColor','uViewProjection','uFogStrength','uTextureST','uUseTexture','uAlbedo']) {
     uniforms[key]=gl.getUniformLocation(program,key);
   }
   const meshes={};
@@ -261,7 +255,11 @@ export function createRenderer(canvas) {
   gl.uniform1i(uniforms.uAlbedo, 0);
   gl.uniform1i(uniforms.uUseTexture, 0);
   let drawCalls=0;
-  function begin(camera, { fogStrength = GENERATED_FOG_STRENGTH } = {}) {
+  const viewProjection = new Float32Array(16);
+  let currentCamera = null;
+  let projectionState = null;
+  function begin(camera, { fogStrength = GENERATED_FOG_STRENGTH, projection = null } = {}) {
+    currentCamera = camera;
     if (!Number.isFinite(fogStrength) || fogStrength < 0 || fogStrength > 1) {
       throw new RangeError('fogStrength must be finite and within [0,1]');
     }
@@ -274,11 +272,28 @@ export function createRenderer(canvas) {
     gl.clearColor(.927,.948,.966,1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     gl.useProgram(program);
     const axes=cameraAxes(camera.yaw,camera.pitch);
+    const focal = projection ? 1 / Math.tan(projection.fieldOfViewDegrees * Math.PI / 360) : 1.58;
+    const near = projection?.near ?? .045, far = projection?.far ?? 120;
+    if (![focal, near, far].every(Number.isFinite) || focal <= 0 || near <= 0 || far <= near) {
+      throw new RangeError('Perspective projection requires finite positive scale and ordered clipping planes');
+    }
+    projectionState = { verticalScale: focal, near, far, aspect: width / height };
+    const depth = (far + near) / (far - near), offset = -2 * far * near / (far - near);
+    const right = axes.right, up = axes.up, forward = axes.forward;
+    for (let i = 0; i < 3; i++) {
+      const key = ['x', 'y', 'z'][i];
+      viewProjection[i * 4] = right[key] * focal * height / width;
+      viewProjection[i * 4 + 1] = up[key] * focal;
+      viewProjection[i * 4 + 2] = forward[key] * depth;
+      viewProjection[i * 4 + 3] = forward[key];
+    }
+    const dot = axis => axis.x * camera.x + axis.y * camera.y + axis.z * camera.z;
+    viewProjection[12] = -dot(right) * focal * height / width;
+    viewProjection[13] = -dot(up) * focal;
+    viewProjection[14] = -dot(forward) * depth + offset;
+    viewProjection[15] = -dot(forward);
+    gl.uniformMatrix4fv(uniforms.uViewProjection, false, viewProjection);
     gl.uniform3f(uniforms.uCamPos,camera.x,camera.y,camera.z);
-    gl.uniform3f(uniforms.uRight,...Object.values(axes.right));
-    gl.uniform3f(uniforms.uUp,...Object.values(axes.up));
-    gl.uniform3f(uniforms.uForward,...Object.values(axes.forward));
-    gl.uniform2f(uniforms.uProjection,width/height,1);
     gl.uniform1f(uniforms.uFogStrength,fogStrength);
     drawCalls=0;
   }
@@ -315,7 +330,7 @@ export function createRenderer(canvas) {
   function replacePrivateMesh(slot, sourceMesh) {
     if (slot !== 'mesh6' && slot !== 'mesh7') throw new RangeError('Unsupported private mesh slot');
     // Upload first, then dispose previous mesh: failed loads do not destroy preview.
-    const uploaded = uploadIndexedMesh(gl, program, sourceMesh);
+    const uploaded = uploadIndexedMesh(gl, program, sourceMesh, { requireUV: true });
     privateMeshes.get(slot)?.dispose();
     privateMeshes.set(slot, uploaded);
     return { triangles: uploaded.triangleCount, bounds: uploaded.bounds };
@@ -343,13 +358,6 @@ export function createRenderer(canvas) {
     return { width, height };
   }
   let nativeEnemyPass = null;
-  function acceptLocalEnemyReceipt(receipt) {
-    const next = createEnemyStaticIndexedPass(gl, program, uniforms, receipt, {
-      diagnosticColor: enemyRedCrystalDiagnosticWebPacket(receipt.rendererPathId).color,
-    });
-    nativeEnemyPass?.dispose();
-    nativeEnemyPass = next;
-  }
   function drawLocalEnemyDiagnostic(worldMatrix) {
     if (!nativeEnemyPass) return null;
     // Cargo concrete must never leak into the red crystal character pass.
@@ -357,6 +365,58 @@ export function createRenderer(canvas) {
     const report = nativeEnemyPass.draw(worldMatrix);
     drawCalls += report.drawCalls;
     return report;
+  }
+  let skinnedEnemy = null;
+  let skinClips = {};
+  function replaceNativeCharacter(receipt, sourcePackage = null) {
+    let nextSkin = null, nextStatic = null;
+    const instances = {};
+    try {
+      if (sourcePackage) {
+        if (sourcePackage.source?.variant !== receipt.variant) throw new Error('Character mesh and rig variants differ');
+        nextSkin = createNativeSkinPass(gl, sourcePackage);
+        for (const clip of ['idle', 'walk', 'hit']) {
+          instances[clip] = nextSkin.createInstance({ clip, playback: clip === 'hit' ? 'clamp' : 'loop' });
+        }
+      }
+      nextStatic = createEnemyStaticIndexedPass(gl, program, uniforms, receipt, {
+        diagnosticColor: enemyRedCrystalDiagnosticWebPacket(receipt.rendererPathId).color,
+      });
+    } catch (error) { nextSkin?.dispose(); nextStatic?.dispose(); throw error; }
+    skinnedEnemy?.dispose();
+    nativeEnemyPass?.dispose();
+    skinnedEnemy = nextSkin;
+    nativeEnemyPass = nextStatic;
+    skinClips = instances;
+    return nextSkin ? { bones: nextSkin.jointCount, weightedBones: nextSkin.weightedJointCount,
+      clips: nextSkin.availableClips } : null;
+  }
+  function drawNativeSkin(modelMatrix, clip, time) {
+    if (!skinnedEnemy) return null;
+    const report = skinnedEnemy.draw({
+      instance: skinClips[clip], modelMatrix, viewProjection, time,
+      color: [0.720588207244873, 0, 0, 1],
+    });
+    drawCalls += report.drawCalls;
+    return report;
+  }
+  let nativeWorld = null;
+  function replaceNativeWorld(prepared, images) {
+    const next = createNativeWorldPass(gl, prepared, images);
+    nativeWorld?.dispose();
+    nativeWorld = next;
+  }
+  function drawNativeWorld() {
+    if (!nativeWorld) return null;
+    const report = nativeWorld.draw(viewProjection, currentCamera);
+    drawCalls += report.drawCalls;
+    return report;
+  }
+  function drawNativeWeapon(modelMatrix) {
+    if (!nativeWorld) return false;
+    const report = nativeWorld.drawWeapon(viewProjection, currentCamera, modelMatrix);
+    drawCalls += report.drawCalls;
+    return true;
   }
   // A local, source-converted OBJ may be reused for different serialized
   // submesh placements via per-draw affine transforms (SH-04/11 #68/#63).
@@ -392,9 +452,11 @@ export function createRenderer(canvas) {
   }
   return {
     begin,draw,affineBox,replacePrivateMesh,replacePrivateTexture,drawPrivateMesh,
-    acceptLocalEnemyReceipt,drawLocalEnemyDiagnostic,
+    replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin,
+    replaceNativeWorld, drawNativeWorld, drawNativeWeapon,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,
+    getProjectionState: () => projectionState && ({ ...projectionState, viewProjection: Array.from(viewProjection) }),
   };
 }

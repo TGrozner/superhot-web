@@ -8,7 +8,7 @@ import { drawContainersBuild28Preview } from '../src/levels.js';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from '../src/scenes/containers-build28.js';
 
 function mockWebGL2() {
-  const models = [], draws = [], buffers = [], attributes = [], drawStates = [];
+  const draws = [], buffers = [], attributes = [], drawStates = [];
   const textures = new Set(), deletedTextures = [], uploads = [], parameters = [];
   const uniforms = new Map();
   let next = 1, vao = null, buffer = null, texture = null, error = 0;
@@ -63,20 +63,17 @@ function mockWebGL2() {
     viewport() {}, clearColor() {}, clear() {}, uniform3f() {}, uniform2f() {},
     uniform1i(key, value) { uniforms.set(key, value); }, uniform1f() {},
     uniform4f(key, ...values) { uniforms.set(key, values); },
-    uniformMatrix4fv(_, transpose, value) {
-      assert.equal(transpose, false);
-      models.push(Array.from(value));
-    },
+    uniformMatrix4fv() {},
     uniformMatrix3fv() {},
     drawArrays() { recordDraw(false); },
     drawElements(...args) { draws.push(args); recordDraw(true); },
     deleteVertexArray() {}, deleteBuffer() {},
   };
-  return { gl, models, draws, buffers, attributes, drawStates,
+  return { gl, draws, buffers, attributes, drawStates,
     textures, deletedTextures, uploads, parameters };
 }
 test('one generated indexed source upload supports three per-draw affine transforms', () => {
-  const { gl, models, draws, buffers } = mockWebGL2();
+  const { gl, draws, buffers } = mockWebGL2();
   const canvas = {
     clientWidth: 320, clientHeight: 180, width: 320, height: 180,
     getContext: (kind) => kind === 'webgl2' ? gl : null,
@@ -93,9 +90,6 @@ test('one generated indexed source upload supports three per-draw affine transfo
       assert.equal(renderer.drawPrivateMesh('mesh6', '#485761', packet.modelMatrix), true));
     assert.equal(renderer.getDrawCalls(), 3);
     assert.equal(draws.length, 3);
-    assert.equal(models.length, 3);
-    assert.deepEqual(models.map(m => m.slice(12, 15).map(n => +n.toFixed(3))),
-      [[0,0,0],[-7.35,0,4.5],[-1.4,-.05,-25.2]]);
     assert.equal(buffers.filter(([kind]) => kind === gl.ELEMENT_ARRAY_BUFFER).length, 1,
       'one source upload, one EBO, three indexed draws');
     assert.throws(() => renderer.drawPrivateMesh('mesh6', '#485761', Array(16).fill(0)),

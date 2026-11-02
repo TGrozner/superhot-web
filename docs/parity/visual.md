@@ -72,26 +72,32 @@ Avant de revendiquer le moindre progrès visuel chiffré : fournir le **HEAD SHA
 
 **Entrées réellement relues** : `superhot-research#15` (run `41427087945`, artifact privé `13133497389`, `result.json` = `read spec/time-input-camera.md`, 110 lignes), et `#68` (artifact `13136407658`, `result.json` = SQL `query`, **6 lignes**, `truncated=false`). La source #15 fournit pour Camera7605/GO1274, `level28`, les valeurs **sérialisées** 60.0000267°, near 0.03, far 1000 ; elle mentionne des observations et captures natives stockées dans le corpus, **pas livrées à SH-15 sous forme de paire utilisable**. La lecture #68 associe Mesh6:g47 et Mesh7:g48 à leurs Renderer/objets, 4 638 indices chacun ; ces données sont des liaisons sérialisées, pas un draw natif exécuté. Le `result.json` de #10 (artifact `13133542861`) a également été relu, `truncated=false`, pour le schéma seulement. Des sources privées supplémentaires nécessaires à gameplay/audio relèvent de leurs owners ; **aucun nouveau corpus-query demandé**.
 
-Pour reproduire exactement la comparaison **structurelle** avec le GLSL courant, sans valeurs Web recopiées en dur :
+L'audit utilise maintenant la projection de la **frame réellement rendue**, et non une expression GLSL recherchée dans le texte du renderer. Enregistrer le résultat privé de `window.__superhotGetRenderedFrameSnapshot()` :
 
 ```bash
-node --test tests/visual-framing.test.mjs
-node scripts/visual-framing.mjs --renderer src/renderer.js --native-vfov 60.0000267 --native-near 0.03 --native-far 1000 --height 1080 --reference-height 1 --reference-depth 10
+node scripts/visual-framing.mjs --web-frame private/frame.json --native-vfov 60.0000267 --native-near 0.03 --native-far 1000 --height 1080 --reference-height 1 --reference-depth 10
 ```
 
-Le module lit et valide **une** expression de projection WebGL2 constante réellement présente dans le vertex shader, refuse une évolution non reconnue du shader, calcule vertical FOV, near/far, ratio de taille et un *exemple idéal théorique* (objet vertical 1 unité à 10 unités de distance et hauteur image 1080 px). Il n'inspecte aucune photo native, ne connaît pas l'aspect natif, ni l'état du rig caméra. Verdict obligatoirement `SOURCE_PROJECTION_..._NO_PIXEL_MEASUREMENT`. **N'utilise pas l'audit pour annoncer une différence visuelle mesurée : il prévoit un décalage de cadrage seulement si les poses et la caméra active correspondent.**
+Le descripteur contient le numéro de frame, la caméra, le champ `projection` et la matrice `viewProjection` effectivement envoyée au GPU. L'analyse calcule FOV, near/far et taille idéale projetée ; son verdict `PROJECTION_..._NO_PIXEL_MEASUREMENT` reste structurel, pas une comparaison d'images.
 
-**Contrat d'intégration ciblé SH-05 :** rendre `f`, `near`, `far` pilotables **uniquement** dans `?scene=containers` pour un mode de calibration visuelle source-qualifié (sans réécrire les autres niveaux), exposer la projection Web exacte dans la télémétrie et un bouton de capture de cadre stable/HUD masqué. Ne pas attribuer le statut `nativeActiveCamera=true` avant une observation d'exécution. Le même état de caméra doit alimenter le `viewMatrix`/`projectionMatrix` Web du `manifest.json` de comparaison ; **ne jamais substituer une matrice native devinée**. Seul SH-05 touche le renderer/entrypoint.
+Containers utilise la projection sérialisée 60.0000267° / near0.03 / far1000. Sa position de départ vient d'un point de départ auteur ; le transform sérialisé de la caméra, situé hors du niveau sous Core Mechanics, n'est pas ajouté à ce point. Ce choix Web ne prouve pas la sélection aléatoire faite par le jeu natif.
 
-## Procédure de capture Web immédiatement exécutable par le propriétaire (privée)
+## Capture Web actuelle, sans flags
 
-1. Sur un clone à jour, lancer `npm start` et ouvrir **http://localhost:4173/** sans paramètres, dans Chrome/Edge avec WebGL2. Le serveur local charge les originaux configurés dans le fichier privé décrit au README. Pour une capture stricte : contenu1920×1080, DPR1 ; relever le commit et le GPU.
-2. Vérifier le message **Originaux locaux chargés automatiquement**, les deux groupes de cargos et le personnage. Les sélecteurs sous **Remplacer les fichiers locaux** restent utilisables. Cliquer **Vue des conteneurs** pour le cadrage de référence `(11,7,31, yaw0, pitch−0.19)` ; ne pas confondre avec **Cadrer le modèle**.
-3. Importer `/scripts/visual-web-capture.mjs`, puis appeler `captureContainersWeb({expectedCamera:{x:11,y:7,z:31,yaw:0,pitch:-0.19},expectedScreen:'playing',webCommit:'<SHA exact>'})`. Le script prend une image du canvas seul et vérifie la caméra effectivement rendue, pas uniquement les métriques périodiques. `downloadRequested` signifie qu'un téléchargement a été demandé : vérifier le fichier réellement enregistré avant de le déclarer disponible. Les originaux et captures restent privés.
-4. **Ne pas qualifier la paire comme appariée** en l'absence de la caméra MCD réellement active : obtenir *dans le privé* build natif, scène buildIndex28, état frame, pause/temps, FOV, near/far, orientation/position, exposition et capture PNG native. Même résolution, HUD désactivé, pas de recadrage/resize caché. Enregistrer deux manifests distincts selon le contrat plus haut.
-5. Seulement avec **les deux captures privées** et matrices appariées, exécuter `node scripts/visual-compare.mjs --native <manifest-natif> --web <manifest-web> --out <résumé-privé.json>`. Les métriques d'image sont nulles tant que scène/pose/projection ne sont pas conformes. Ne publier que l'agrégat, jamais l'image, le fichier OBJ ni ses chemins natifs.
+1. Lancer `npm start`, ouvrir **http://localhost:4173/** et attendre le chargement des originaux configurés. La scène complète remplace le précédent aperçu de quatre cargos.
+2. Pour une capture, conserver une caméra fixe et relever `window.__superhotGetRenderedFrameSnapshot()`. Passer sa caméra exacte et son `activeScreen` à `captureContainersWeb({expectedCamera,expectedScreen,webCommit,strictViewport})`, importé depuis `/scripts/visual-web-capture.mjs`. Le mode strict demande un canvas1920×1080 et DPR1.
+3. Le script vérifie la caméra et la phase pendant l'encodage PNG. Il conserve projection, horloge et compteurs de la frame lorsque disponibles. Le dernier draw ennemi n'est **pas** la pose de tous les acteurs. L'horloge du monde peut avancer : aucune correspondance de pose native n'en est déduite.
+4. `downloadRequested` indique une demande de téléchargement, pas un fichier effectivement enregistré. Les images, modèles, données de pose et références originales restent privés.
 
-**État local actualisé :** des captures Chromium/WebGL2 ont été réalisées avec les quatre cargos texturés et les modèles EnemyMerged/Headless. La capture du canvas avec pose enregistrée a également été exécutée sur `/`. Il manque toujours une image MCD exécutée avec caméra, pose et éclairage appariés ; aucun score natif/Web ni 1:1 n'est revendiqué.
+## Vérifications effectivement observées
+
+La racine a été exercée dans Chromium/WebGL2 avec 360 instances de décor,185037 triangles,68 meshes,17 textures, personnage original skinné et pistolet original. Marche, pause et impact ont été exercés ; l'impact utilise une caméra de scénario contrôlée, pas une assertion sur un parcours natif. Aucune erreur GL n'a été observée.
+
+Quatre références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75 et hit0.25, à960×540, caméra(0,1.15,4), orientation vers−Z et même projection. Leurs62 poses locales ont été revalidées contre l'échantillonnage natif (écart maximal observé0). La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux afin d'éviter le cache de skinning d'une capture immédiate. Le Web utilise son véritable pass de skinning GPU, sans redimensionnement des images.
+
+Les masques de silhouette, définis par un écart RGB maximal supérieur à32 par rapport au fond, donnent une intersection/union de **0.9554 à0.9615** ; les centres diffèrent de **0.63 à0.81 pixel**. La différence RGB moyenne normalisée sur l'union du personnage est **0.0940 à0.1022**. Ces nombres sont limités aux quatre vues isolées ; l'antialiasing diffère. **Ils ne sont pas un pourcentage de fidélité du jeu.**
+
+Écarts visibles restant établis : (1) matériau rouge cristallin natif contre lumière/couleur Web simplifiées ; (2) contours/antialiasing différents ; (3) absence du contexte de lumière, ombres et post-traitement d'une vraie frame de gameplay Containers. Aucun rendu complet1:1 n'est revendiqué.
 
 
 Les notes d'audit ci-dessous décrivent les constats antérieurs à ce raccord.

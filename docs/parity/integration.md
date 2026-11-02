@@ -2,7 +2,27 @@
 
 Run **node scripts/integration-vertical.mjs** from the repository root with Node 20+. It emits a machine-readable report of the actual checkout's static ES-module import reachability, existing Web renderer capabilities, and an optional **CPU-only** draw-packet probe of the generated cargo scene. The report is deliberately not a browser or native-executable test: nativeParityVerdict is UNASSESSED, and a reachable import is not proof that code executed.
 
-## State verified 2 November 2026
+## Current localhost integration — original assets and sampled poses
+
+The configured root URL `/` loads the private source-scene package automatically:
+68 meshes,360 eligible world instances,17 textures and the original pistol.
+EnemyMerged/Headless use a62-bone hierarchy with60/59 weighted GPU matrices and
+original idle/walk/hit poses evaluated in Unity. No query flags are required.
+
+`assessContainersBrowserMetrics` accepts `CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY`
+with actual source-world draw counts. The four-draw manual preview is a separate
+fallback contract, not the current complete-world acceptance criterion.
+
+Keyboard movement, pause, atomic variant switching and a controlled-camera
+projectile impact were exercised in Chromium. Source collider AABBs and authored
+spawn candidates are connected to Web gameplay; this is not native PhysX, spawner
+timing, navigation or ragdoll death. Source projection parameters are consumed by
+all draw passes through the same uploaded view-projection matrix. See
+`characters.md` and `visual.md` for bounded runtime and image-comparison evidence.
+
+The sections below preserve earlier integration observations, not current setup instructions.
+
+## Historical state verified 2 November 2026, before original-world integration
 
 - SH-05 PR #81, merged at d686de55: opt-in ?scene=synthetic uses buildSyntheticManifest -> buildSceneGraph -> planSceneDraws -> drawGeneratedManifest -> renderer.affineBox. This is an original generated fixture, not Containers. Its meshes do not contribute to state.solids.
 - SH-04 PR #86, merged at 390e64d4: src/scenes/containers-build28.js exposes CONTAINERS_BUILD28_HULLS (5 rounded, source-derived world-space AABBs), CONTAINERS_BUILD28_DEMO_CAMERA (x=11, y=7, z=31), createContainersBuild28Nodes(), and createContainersBuild28DrawPlan(camera). The generated scene is five cargo boxes, forty invented decorative ribs and an invented floor. It models collision envelopes only: **no original meshes, materials, textures, shaders, native camera or observed runtime instances.**
@@ -24,7 +44,7 @@ The scanner uses a conservative lexical static-import graph. It may miss dynamic
 
 This SH-16 PR changes only scripts/integration-vertical.mjs, tests/integration-vertical.test.mjs and docs/parity/integration.md. It does not modify shared game code, run native binaries or touch the Windows runner.
 
-## Current integration cut — 2026-11-02 (SH-16 HEAD follow-up, after #98/#97/#100)
+## Historical integration cut — before full scene and sampled skin integration
 
 **Actual source path now on public main:** `?scene=containers` → locally selected `File` → `readLocalObjFile` → `parseLocalObjGroup` → `replacePrivateMesh` (`uploadIndexedMesh`) → `renderer.drawPrivateMesh`. Merged #98 makes this path available for two selected groups; merged #97 offers a **separate**, stricter full-label OBJ adapter not yet used by #98. The only guaranteed default view without the private files is SH-04's five collider-derived generated hulls, their **40 invented ribs**, and a generated floor. This is a real wiring change, but the actual browser pixel output with the private `File` is still unobserved. The new report replaces the stale `syntheticModeOnlyDetected` with two independent **lexical** flags, `containersPreviewWired` and `localObjPreviewWired`. Neither asserts runtime invocation or GPU completeness.
 

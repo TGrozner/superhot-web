@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 // SH-15: inspect structural camera/projection differences before PNG registration.
-// This is an analytic SOURCE-PARAMETER check, never a screenshot or parity test.
+// This is an analytic PARAMETER check, never a screenshot or native parity test.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const NUMBER = '(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?';
 
 function finitePositive(value, name) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -14,44 +12,25 @@ function finitePositive(value, name) {
   return value;
 }
 
-function oneMatch(text, pattern, label) {
-  const hits = [...text.matchAll(pattern)];
-  if (hits.length !== 1) throw new Error('Expected one static GLSL ' + label + '; found ' + hits.length);
-  return Number(hits[0][1]);
-}
-
-/**
- * Read SH-05's *current* Web vertex shader, not a copy of its parameters.
- * Fail closed if its projection becomes dynamic or a new shader format is used.
- */
-export function readStaticWebProjection(rendererSource) {
-  if (typeof rendererSource !== 'string') throw new TypeError('Renderer source text required');
-  const tag = 'const vertexShaderSource';
-  const start = rendererSource.indexOf(tag);
-  if (start < 0 || rendererSource.indexOf(tag, start + tag.length) >= 0) {
-    throw new Error('Unique vertex shader source block not found');
+/** Read a saved completed-render snapshot, never renderer source or stale telemetry. */
+export function readRenderedWebProjection(frame) {
+  if (!frame || !Number.isSafeInteger(frame.frameId) || frame.frameId < 1 ||
+      !['menu', 'playing', 'paused'].includes(frame.activeScreen) ||
+      !frame.camera || ['x', 'y', 'z', 'yaw', 'pitch'].some(key => !Number.isFinite(frame.camera[key]))) {
+    throw new TypeError('Completed rendered frame with finite camera pose required');
   }
-  const tick = String.fromCharCode(96);
-  const open = rendererSource.indexOf(tick, start + tag.length);
-  const close = open < 0 ? -1 : rendererSource.indexOf(tick, open + 1);
-  if (close < 0) throw new Error('Unterminated vertex shader source block');
-  const glsl = rendererSource.slice(open + 1, close);
-  if (!glsl.includes('gl_Position')) throw new Error('Vertex shader missing gl_Position');
-  // Require exactly the perspective expression whose meaning is being audited.
-  if (!/cam\.x\s*\*\s*f\s*\/\s*uProjection\.x/.test(glsl) ||
-      !/cam\.y\s*\*\s*f/.test(glsl) ||
-      !/cam\.z\s*\*\s*\(\s*far\s*\+\s*near\s*\)\s*\/\s*\(\s*far\s*-\s*near\s*\)/.test(glsl)) {
-    throw new Error('Unrecognized Web perspective projection: audit manually');
+  const projection = frame.projection;
+  if (!projection) throw new TypeError('Rendered frame projection required');
+  const verticalScale = finitePositive(projection.verticalScale, 'projection.verticalScale');
+  const near = finitePositive(projection.near, 'projection.near');
+  const far = finitePositive(projection.far, 'projection.far');
+  const aspect = finitePositive(projection.aspect, 'projection.aspect');
+  if (far <= near) throw new RangeError('Web far must exceed near');
+  if (!Array.isArray(projection.viewProjection) || projection.viewProjection.length !== 16 ||
+      !projection.viewProjection.every(Number.isFinite)) {
+    throw new TypeError('Rendered viewProjection must contain 16 finite numbers');
   }
-  const f = finitePositive(oneMatch(glsl,
-    new RegExp('\\bfloat\\s+f\\s*=\\s*(' + NUMBER + ')\\s*;', 'g'), 'perspective scale'), 'f');
-  const clipMatch = [...glsl.matchAll(new RegExp(
-    '\\bfloat\\s+near\\s*=\\s*(' + NUMBER + ')\\s*,\\s*far\\s*=\\s*(' + NUMBER + ')\\s*;', 'g'))];
-  if (clipMatch.length !== 1) throw new Error('Expected one static near/far pair');
-  const near = finitePositive(Number(clipMatch[0][1]), 'near');
-  const far = finitePositive(Number(clipMatch[0][2]), 'far');
-  if (far <= near) throw new RangeError('Invalid Web near/far ordering');
-  return { verticalScale: f, near, far, sourceClass: 'WEB_GLSL_STATIC' };
+  return { verticalScale, near, far, aspect, viewProjection: [...projection.viewProjection] };
 }
 
 /**
@@ -87,9 +66,9 @@ export function analyzeStructuralFraming({
   const mismatch = Math.abs(webF - nativeF) > 1e-5 ||
     Math.abs(nativeNear - webNear) > 1e-6 || Math.abs(nativeFar - webFar) > 1e-6;
   return {
-    status: mismatch ? 'SOURCE_PROJECTION_MISMATCH_NO_PIXEL_MEASUREMENT'
-      : 'SOURCE_PROJECTION_EQUALITY_NO_PIXEL_MEASUREMENT',
-    evidenceClass: 'SERIALIZED_PARAMETERS_VS_WEB_SHADER_ONLY',
+    status: mismatch ? 'PROJECTION_MISMATCH_NO_PIXEL_MEASUREMENT'
+      : 'PROJECTION_EQUALITY_NO_PIXEL_MEASUREMENT',
+    evidenceClass: 'CAMERA_PARAMETERS_ONLY',
     native: { verticalFovDegrees: vfov, verticalScale: nativeF, near: nativeNear, far: nativeFar },
     web: { verticalFovDegrees: webFov, verticalScale: webF, near: webNear, far: webFar },
     signedWebMinusNativeFovDegrees: webFov - vfov,
@@ -111,21 +90,31 @@ export function analyzeStructuralFraming({
   };
 }
 
-export function runAuditFromSource(rendererSource, native, options = {}) {
-  return analyzeStructuralFraming({
-    native, web: readStaticWebProjection(rendererSource),
+export function runAuditFromFrame(frame, native, options = {}) {
+  const web = readRenderedWebProjection(frame);
+  const report = analyzeStructuralFraming({
+    native, web,
     viewportHeightPx: options.viewportHeightPx ?? 1080,
     referenceObjectHeight: options.referenceObjectHeight ?? 1,
     referenceDepth: options.referenceDepth ?? 10,
   });
+  return {
+    ...report,
+    evidenceClass: 'NATIVE_PARAMETERS_VS_WEB_RENDERED_FRAME',
+    renderedFrame: {
+      frameId: frame.frameId, activeScreen: frame.activeScreen,
+      camera: Object.fromEntries(['x', 'y', 'z', 'yaw', 'pitch'].map(key => [key, frame.camera[key]])),
+      projection: web,
+    },
+  };
 }
 
 function main(argv) {
   if (argv.includes('--help')) {
-    process.stdout.write('Usage: node scripts/visual-framing.mjs --renderer src/renderer.js --native-vfov 60 --native-near 0.03 --native-far 1000 [--height 1080] [--reference-height 1] [--reference-depth 10]\n');
+    process.stdout.write('Usage: node scripts/visual-framing.mjs --web-frame private/frame.json --native-vfov 60 --native-near 0.03 --native-far 1000 [--height 1080] [--reference-height 1] [--reference-depth 10]\n');
     return;
   }
-  const allowed = new Set(['--renderer', '--native-vfov', '--native-near', '--native-far',
+  const allowed = new Set(['--web-frame', '--native-vfov', '--native-near', '--native-far',
     '--height', '--reference-height', '--reference-depth']);
   const args = new Map();
   if (argv.length % 2) throw new Error('Every option must have a value');
@@ -135,10 +124,10 @@ function main(argv) {
     }
     args.set(argv[i], argv[i + 1]);
   }
-  if (!['--renderer', '--native-vfov', '--native-near', '--native-far'].every(k => args.has(k))) {
-    throw new Error('Missing explicit renderer or native camera metadata');
+  if (!['--web-frame', '--native-vfov', '--native-near', '--native-far'].every(k => args.has(k))) {
+    throw new Error('Missing explicit Web rendered frame or native camera metadata');
   }
-  const report = runAuditFromSource(readFileSync(resolve(args.get('--renderer')), 'utf8'),
+  const report = runAuditFromFrame(JSON.parse(readFileSync(resolve(args.get('--web-frame')), 'utf8')),
     {
       verticalFovDegrees: Number(args.get('--native-vfov')),
       near: Number(args.get('--native-near')),

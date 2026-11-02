@@ -86,11 +86,14 @@ export function createIndexedSkinBinding({
 /**
  * Pure CPU deform of a source-neutral indexed mesh.
  *
- * poseByBoneId is a Map or own-key object containing actual caller-supplied
- * bone transforms in MESH-LOCAL space, NOT global/world matrices. SH-06 owns
- * animation sample time and mapping; SH-03 owns collision/hit policy.
+ * poseByBoneId is a Map or own-key object containing caller-supplied
+ * HIERARCHY-GLOBAL bone transforms expressed in mesh-local/root space. It
+ * does not accept sampled local transforms or model-to-world matrices: callers
+ * compose parentGlobal * local first, then apply root model-to-world once
+ * after skinning. SH-06 owns animation sampling and hierarchy composition;
+ * SH-03 owns collision/hit policy.
  *
- * Palette_i = poseMeshLocal_i * inverseBindMeshLocal_i.
+ * Palette_i = globalPoseMeshLocal_i * inverseBindMeshLocal_i.
  * The returned SH-12 mesh can be uploaded/drawn with the existing indexed
  * render pipeline (a later dynamic GPU-buffer update is an integration choice).
  */
@@ -107,10 +110,9 @@ export function skinIndexedCharacter(binding, poseByBoneId) {
     : Object.hasOwn(poseByBoneId, id) ? poseByBoneId[id] : undefined;
   const palette = binding.boneIds.map((id, i) => {
     const matrix = lookup(id);
-    if (!matrix) throw new Error('Missing measured/caller pose for bone: ' + id);
+    if (!matrix) throw new Error('Missing hierarchy-global mesh-local pose for bone: ' + id);
     const posedBone = checkedMatrix(matrix, 'pose bone ' + id);
-    const skinMatrix = multiplyMatrices(posedBone, binding.inverseBindMatrices[i]);
-    return { matrix: skinMatrix, normal: meshModelMatrices(skinMatrix).normal };
+    return multiplyMatrices(posedBone, binding.inverseBindMatrices[i]);
   });
   const source = binding.mesh;
   const positions = new Float32Array(source.vertexCount * 3);
@@ -120,22 +122,36 @@ export function skinIndexedCharacter(binding, poseByBoneId) {
     const a = v * 8, b = v * 3;
     const x = source.vertices[a], y = source.vertices[a + 1], z = source.vertices[a + 2];
     const nx = source.vertices[a + 3], ny = source.vertices[a + 4], nz = source.vertices[a + 5];
-    let px = 0, py = 0, pz = 0, nnx = 0, nny = 0, nnz = 0;
+    let px = 0, py = 0, pz = 0;
+    let m0 = 0, m1 = 0, m2 = 0, m4 = 0, m5 = 0, m6 = 0, m8 = 0, m9 = 0, m10 = 0;
     for (let slot = 0; slot < INFLUENCES_PER_VERTEX; slot++) {
       const at = v * INFLUENCES_PER_VERTEX + slot;
       const weight = binding.boneWeights[at];
       if (weight === 0) continue;
-      const { matrix: m, normal: n } = palette[binding.boneIndices[at]];
+      const m = palette[binding.boneIndices[at]];
       px += weight * (m[0] * x + m[4] * y + m[8] * z + m[12]);
       py += weight * (m[1] * x + m[5] * y + m[9] * z + m[13]);
       pz += weight * (m[2] * x + m[6] * y + m[10] * z + m[14]);
-      nnx += weight * (n[0] * nx + n[3] * ny + n[6] * nz);
-      nny += weight * (n[1] * nx + n[4] * ny + n[7] * nz);
-      nnz += weight * (n[2] * nx + n[5] * ny + n[8] * nz);
+      m0 += weight*m[0]; m1 += weight*m[1]; m2 += weight*m[2];
+      m4 += weight*m[4]; m5 += weight*m[5]; m6 += weight*m[6];
+      m8 += weight*m[8]; m9 += weight*m[9]; m10 += weight*m[10];
     }
+    // The position deformation at this vertex is the weighted matrix. Its
+    // inverse-transpose—not a weighted sum of per-bone normal matrices—is the
+    // corresponding normal transform under nonuniform scale.
+    const c0x = m5*m10 - m6*m9, c0y = m6*m8 - m4*m10, c0z = m4*m9 - m5*m8;
+    const c1x = m9*m2 - m10*m1, c1y = m10*m0 - m8*m2, c1z = m8*m1 - m9*m0;
+    const c2x = m1*m6 - m2*m5, c2y = m2*m4 - m0*m6, c2z = m0*m5 - m1*m4;
+    const determinant = m0*c0x + m1*c0y + m2*c0z;
+    if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-30 ||
+        !Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) {
+      throw new RangeError('Degenerate or overflowing deformed vertex ' + v);
+    }
+    const nnx = (c0x*nx + c1x*ny + c2x*nz) / determinant;
+    const nny = (c0y*nx + c1y*ny + c2y*nz) / determinant;
+    const nnz = (c0z*nx + c1z*ny + c2z*nz) / determinant;
     const normalLength = Math.hypot(nnx, nny, nnz);
-    if (!Number.isFinite(normalLength) || normalLength < 1e-12 ||
-        ![px, py, pz].every(Number.isFinite)) {
+    if (!Number.isFinite(normalLength) || normalLength < 1e-12) {
       throw new RangeError('Degenerate or overflowing deformed vertex ' + v);
     }
     positions[b] = px; positions[b + 1] = py; positions[b + 2] = pz;

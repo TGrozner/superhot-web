@@ -75,3 +75,27 @@ test('SH16 distinguishes source-group upload path from a real measured browser s
     totalWebGLDrawCalls: 3, p95FrameMs: 16.7,
   }).status, 'INVALID_COUNTERS');
 });
+
+test('SH16 accepts native-root scene counters without requiring manual preview groups', () => {
+  const metrics = {
+    mode: 'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY', browserMeasured: true,
+    nativeScene: { meshes: 68, instances: 360, textures: 17 },
+    generatedManifest: { drawCalls: 360, triangles: 185037, nativeGeometry: true },
+    totalWebGLDrawCalls: 371, p95FrameMs: 16.7,
+  };
+  const report = assessContainersBrowserMetrics(metrics);
+  assert.equal(report.status, 'APP_REPORTED_NATIVE_WORLD_DRAWS');
+  assert.deepEqual(report.reportedNativeScene, metrics.nativeScene);
+  assert.equal(report.reportedNativeWorldDrawCalls, 360);
+  assert.equal(report.reportedNativeWorldTriangles, 185037);
+  assert.equal(report.browserScreenshotCaptured, false);
+  assert.equal(report.nativeParityVerdict, 'UNASSESSED');
+  for (const change of [
+    { nativeScene: null },
+    { nativeScene: { ...metrics.nativeScene, meshes: 0 } },
+    { generatedManifest: { ...metrics.generatedManifest, drawCalls: -1 } },
+    { generatedManifest: { ...metrics.generatedManifest, triangles: NaN } },
+    { generatedManifest: { ...metrics.generatedManifest, nativeGeometry: false } },
+    { totalWebGLDrawCalls: 359 }, { p95FrameMs: Infinity },
+  ]) assert.equal(assessContainersBrowserMetrics({ ...metrics, ...change }).status, 'INVALID_COUNTERS');
+});
