@@ -106,3 +106,31 @@ export function stepTime(state, {
     worldDelta,
   };
 }
+
+/**
+ * requestAnimationFrame callback delta from the original Web prototype's
+ * `src/main.js:frame` (baseline 9f01f924), independent of DOM/performance.
+ *
+ * PROVISIONAL_WEB_ONLY: the 50 ms cap and the callback re-anchor are observed
+ * in our own Web source, not in an MCD native method or runtime measurement.
+ *
+ * Call once on every frame, including paused frames, then pass `dt` to
+ * `stepTime` only while playing. Always use `nextTimestampMs` as the next
+ * previous timestamp: a long stall is discarded rather than caught up later.
+ * Backward/discontinuous timestamps yield dt=0 but still re-anchor.
+ */
+export const PROTOTYPE_FRAME_RULES = Object.freeze({
+  maximumDeltaSeconds: 0.05,
+});
+
+export function sampleFrameDelta(previousTimestampMs, timestampMs) {
+  requireFinite(previousTimestampMs, 'previousTimestampMs');
+  requireFinite(timestampMs, 'timestampMs');
+  return {
+    dt: Math.min(
+      PROTOTYPE_FRAME_RULES.maximumDeltaSeconds,
+      Math.max(0, (timestampMs - previousTimestampMs) / 1000),
+    ),
+    nextTimestampMs: timestampMs,
+  };
+}
