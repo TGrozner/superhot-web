@@ -31,6 +31,13 @@ const requireFinite = (value, label) => {
   return value;
 };
 
+// Guard caller-supplied Web decay/smoothing coefficients, not native MCD constants.
+const requireNonnegativeRate = (value, label) => {
+  requireFinite(value, label);
+  if (value < 0) throw new RangeError(`${label} must be nonnegative`);
+  return value;
+};
+
 /** A time state has separate real-time and world-time clocks. */
 export function createTimeState({
   timeScale = PROTOTYPE_TIME_RULES.initialScale,
@@ -91,10 +98,16 @@ export function stepTime(state, {
   if (paused) {
     return { ...state, targetScale: timeScale, realDelta: 0, worldDelta: 0 };
   }
-  const nextLook = Math.max(0, lookActivity - dt * rules.lookDecayRate);
-  const nextShot = Math.max(0, shotPulse - dt * rules.shotDecayRate);
+  // Negative rates turn decay into growth or smoothing into reverse time.
+  // Reject malformed WEB rules before computing an active tick; the pause path
+  // above stays a pure freeze, independent of caller configuration.
+  const lookDecayRate = requireNonnegativeRate(rules.lookDecayRate, 'lookDecayRate');
+  const shotDecayRate = requireNonnegativeRate(rules.shotDecayRate, 'shotDecayRate');
+  const smoothingRate = requireNonnegativeRate(rules.smoothingRate, 'smoothingRate');
+  const nextLook = Math.max(0, lookActivity - dt * lookDecayRate);
+  const nextShot = Math.max(0, shotPulse - dt * shotDecayRate);
   const targetScale = getTargetTimeScale({ moving, lookActivity: nextLook, shotPulse: nextShot, reloading }, rules);
-  const blend = 1 - Math.exp(-rules.smoothingRate * dt);
+  const blend = 1 - Math.exp(-smoothingRate * dt);
   const nextScale = requireFinite(timeScale + (targetScale - timeScale) * blend, 'next timeScale');
   const worldDelta = requireFinite(dt * nextScale, 'worldDelta');
   // A nonzero mathematical step must not silently round to zero. These are
