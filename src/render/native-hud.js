@@ -3,7 +3,7 @@ const kinds = ['none', 'gun', 'katana', 'takedown', 'hand', 'katanaFly', 'shurik
 const assetId = /^sceneHud_\d{3}$/;
 
 /** Local source glyphs, Crosshair/Crosshair2D clocks and normal-mode HUD fade.
- * configure(gameplay.hud); setActive(nativeGameplay); reset() on a new run.
+ * configure(gameplay.hud, loopbackManifest.assets); setActive(nativeGameplay); reset() on a new run.
  * update receives REAL dt, world timeScale, and WORLD cooldown/attackDelay.
  * kind is a source crosshair type, not a weapon name; hand means a usable pickup.
  * DOM luminance masks are not the native fullscreen composition shader.
@@ -29,7 +29,7 @@ export function createNativeHud(element, crosshair, health) {
     }
   }
 
-  function configure(packet) {
+  function configure(packet, availableAssets) {
     if (!assetId.test(packet?.heartTextureId) || kinds.some(kind => {
       const binding = packet?.crosshairs?.[kind];
       return !assetId.test(binding?.textureId) || !Number.isFinite(binding?.scale) || binding.scale <= 0;
@@ -38,8 +38,27 @@ export function createNativeHud(element, crosshair, health) {
       || !Number.isFinite(packet.initialHealthOpacity) || packet.initialHealthOpacity < 0 || packet.initialHealthOpacity > 1) {
       throw new TypeError('Complete source HUD textures, scales and timing are required');
     }
+    // The recovered package can reference sceneHud_NNN without its sprites
+    // being served. Check the existing loopback allowlist manifest before any
+    // DOM masks become active; never draw broken/private-asset placeholders.
+    // Manifest membership is NOT proof that the image has decoded successfully.
+    const referencedIds = [...new Set([
+      packet.heartTextureId,
+      ...kinds.map(kind => packet.crosshairs[kind].textureId),
+    ])];
+    const missingAssetIds = referencedIds.filter(id =>
+      availableAssets?.[id]?.type !== 'image/png');
+    if (missingAssetIds.length) {
+      setActive(false);
+      source = null;
+      reset();
+      return Object.freeze({
+        ready: false, missingAssetIds: Object.freeze(missingAssetIds),
+      });
+    }
     source = packet;
     reset();
+    return Object.freeze({ ready: true, missingAssetIds: Object.freeze([]) });
   }
 
   function setActive(value) {
