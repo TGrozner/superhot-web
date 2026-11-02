@@ -7,10 +7,9 @@
  * not executed here. `KeyboardEvent.code` values are physical-key codes.
  * Web-only numeric guards reject overflowing or malformed rule outputs without changing
  * the prototype's movement or camera coefficients.
- * SH-01's secondary MCD research handoff reports R = Replay (not reload);
- * its active input dispatcher still needs primary verification. `KeyR` below
- * deliberately retains the WEB PROTOTYPE's reload key until that contract is
- * proved. Do not infer native input semantics from these helpers.
+ * Primary delivered keyboard-profile code now proves R=Replay/Back but does
+ * not prove which profile or rebind is active. `KeyR` retains the WEB
+ * PROTOTYPE's reload action; source labels below are opt-in metadata only.
  */
 export const PROTOTYPE_INPUT_RULES = Object.freeze({
   walkSpeed: 6.7,
@@ -147,4 +146,22 @@ export function applyMouseLook({ yaw, pitch, movementX, movementY }, rules = PRO
   if (!Number.isFinite(nextPitch)) throw new RangeError('pitch must remain finite');
   if (!Number.isFinite(lookActivity)) throw new RangeError('lookActivity must remain finite');
   return { yaw: nextYaw, pitch: nextPitch, lookActivity };
+}
+
+/**
+ * Delivered source-profile labels, NOT an active native input dispatcher.
+ * PROUVÉ in KeyboardAndMouseProfile.cs:110-116,154-160 via private
+ * corpus-query #65 (artifact 13135667172) and #64 (artifact 13136031484).
+ * KeyCode names are Unity, not browser physical KeyboardEvent.code strings.
+ * Actual profile selection, user rebinds, and screen-specific routing UNKNOWN.
+ */
+export const MCD_SOURCE_KEYBOARD_PROFILE = Object.freeze({
+  'KeyCode.R': Object.freeze({ label: 'Replay', target: 'Back', rebindable: true }),
+  'KeyCode.D': Object.freeze({ label: 'Move Right', target: 'LeftStickRight', rebindable: true }),
+});
+
+export function deliveredMcdKeyboardBinding(unityKeyCode) {
+  return Object.hasOwn(MCD_SOURCE_KEYBOARD_PROFILE, unityKeyCode)
+    ? MCD_SOURCE_KEYBOARD_PROFILE[unityKeyCode]
+    : null;
 }
