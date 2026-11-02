@@ -5,6 +5,7 @@ import { webcrypto } from 'node:crypto';
 import {
   embedWebCaptureMetadata, readWebCaptureMetadata,
   requireContainersWebEvidence, readRenderedWebglRgba, captureContainersWeb,
+  captureDojoCompositionAtFrame,
 } from '../scripts/visual-web-capture.mjs';
 
 // Synthetic, never native-game, test image and telemetry.
@@ -160,12 +161,12 @@ test('corrupted PNG bytes or false native parity metadata are refused',()=>{
 });
 function fakeBrowser({
   blank=false,beforeFrame,beforeEncodeComplete,sceneMetrics=nativeMetrics,
-  gpuError=0,bufferMismatch=false,boundFramebuffer=false,
+  gpuError=0,bufferMismatch=false,boundFramebuffer=false,initialFrame=frame,
 }={}){
   const original=png(1920,1080);
   const requested=[];
   let encodedBlob,encodedFrames=0,pixelReads=0;
-  let currentFrame={...frame,camera:{...expectedCamera}};
+  let currentFrame={...initialFrame,camera:{...expectedCamera}};
   const setFrame=value=>{currentFrame=value;};
   const gl={
     FRAMEBUFFER_BINDING:0x8ca6,RGBA:0x1908,UNSIGNED_BYTE:0x1401,NO_ERROR:0,
@@ -326,4 +327,78 @@ test('blank WebGL buffer blocks screenshot even when counters are green',async()
   const mock=fakeBrowser({blank:true});
   await assert.rejects(captureContainersWeb({...mock}),/blank\/uniform/);
   assert.equal(mock.requested.length,0);
+});
+
+const dojoSceneSource = {
+  sceneBuildIndex:10,scenePath:'Assets/Scenes/SHRL/SHRL_Dojo2.unity',
+  serializedOwner:'level10',
+};
+const dojoSceneMetrics = {
+  ...nativeMetrics,
+  nativeScene:{...nativeMetrics.nativeScene,source:dojoSceneSource},
+};
+function dojoVisibleWindow(current) {
+  const displayed = (classes=[]) => ({
+    hidden:false,closest:()=>null,
+    classList:{contains:name=>classes.includes(name)},
+    style:{maskImage:'url("/local-assets/sceneHud_123.png")'},
+  });
+  const elements = {
+    hud:displayed(['native-hud']),
+    crosshair:displayed(['native-crosshair']),
+    health:{...displayed(),querySelectorAll:()=>[{}, {}, {}]},
+    scene:{width:1920,height:1080},
+  };
+  return {
+    __superhotGetRenderedFrameSnapshot:()=>current,
+    document:{getElementById:name=>elements[name]??null},
+    getComputedStyle:()=>({display:'block',visibility:'visible'}),
+  };
+}
+test('Dojo same-frame DOM receipt shows visible HUD and source-sampled hands, but never compositor pixels',()=>{
+  const frameNow={
+    ...frame,frameId:42,activeScreen:'playing',
+    nativeScene:dojoSceneMetrics.nativeScene,
+    nativeHands:{handsDrawCalls:2,handsTriangles:1040,sourcePoseSampled:true},
+  };
+  const win=dojoVisibleWindow(frameNow);
+  const receipt=captureDojoCompositionAtFrame(win,{
+    ...frameNow,nativeScene:dojoSceneMetrics.nativeScene,
+  });
+  assert.equal(receipt.status,'DOJO_HUD_DOM_AND_HANDS_APP_REPORTED_NO_PIXEL_PROOF');
+  assert.equal(receipt.hud.sourceCrosshairMaskId,'sceneHud_123');
+  assert.equal(receipt.hud.heartElements,3);
+  assert.equal(receipt.hands.appReportedIndexedDrawCalls,2);
+  assert.equal(receipt.hands.appReportedSourcePoseSampled,true);
+  assert.equal(receipt.webglCanvasIncludesDomOverlay,false);
+  assert.equal(receipt.fullViewportScreenshotCaptured,false);
+  assert.equal(receipt.nativeParityVerdict,'UNASSESSED');
+  assert.equal(JSON.stringify(receipt).includes('/local-assets/'),false);
+});
+test('Dojo DOM receipt rejects different frame IDs and ignores other scenes',()=>{
+  const frameNow={...frame,frameId:42,activeScreen:'playing',
+    nativeScene:dojoSceneMetrics.nativeScene};
+  const win=dojoVisibleWindow(frameNow);
+  assert.throws(()=>captureDojoCompositionAtFrame(win,{...frameNow,frameId:43}),
+    /does not match captured WebGL frame/);
+  assert.equal(captureDojoCompositionAtFrame(win,{
+    ...frameNow,nativeScene:{source:{...dojoSceneSource,sceneBuildIndex:28}},
+  }),null);
+  frameNow.nativeHands=null;
+  const report=captureDojoCompositionAtFrame(win,frameNow);
+  assert.equal(report.status,'DOJO_HUD_DOM_PRESENT_HANDS_GPU_UNOBSERVED');
+});
+test('Dojo WebGL PNG embeds same-render DOM status without claiming HUD pixels',async()=>{
+  const current={...frame,activeScreen:'playing',frameId:1,
+    nativeScene:dojoSceneMetrics.nativeScene};
+  const mock=fakeBrowser({sceneMetrics:dojoSceneMetrics,initialFrame:current});
+  const receipt=await captureContainersWeb({...mock,expectedScreen:'playing',webCommit:'abcdef0'});
+  assert.equal(receipt.frameId,2);
+  assert.equal(receipt.domComposition.status,'SOURCE_HUD_DOM_NOT_ACTIVE');
+  assert.equal(receipt.domComposition.fullViewportScreenshotCaptured,false);
+  const pngBytes=new Uint8Array(await mock.requested[0].blob.arrayBuffer());
+  const embedded=readWebCaptureMetadata(pngBytes).metadata;
+  assert.equal(embedded.domComposition.status,receipt.domComposition.status);
+  assert.equal(embedded.domComposition.webglCanvasIncludesDomOverlay,false);
+  assert.match(embedded.limitations.join(' '),/WebGL readPixels excludes DOM HUD/);
 });
