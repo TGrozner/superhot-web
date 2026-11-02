@@ -83,7 +83,7 @@ export function createProceduralBurst({
  */
 export function advanceFragment(fragment, dt, acceleration = { x: 0, y: 0, z: 0 }) {
   if (!fragment || typeof fragment !== 'object') throw new TypeError('fragment must be an object');
-  const { position: sourcePosition, velocity: sourceVelocity, age, lifetime } = fragment;
+  const { position: sourcePosition, velocity: sourceVelocity, age, lifetime, ...metadata } = fragment;
   const positionSnapshot = snapshotVector(sourcePosition, 'fragment.position');
   const velocitySnapshot = snapshotVector(sourceVelocity, 'fragment.velocity');
   const accelerationSnapshot = snapshotVector(acceleration, 'acceleration');
@@ -108,7 +108,7 @@ export function advanceFragment(fragment, dt, acceleration = { x: 0, y: 0, z: 0 
     }
   }
   const nextAge = Math.min(lifetime, age + step);
-  return { ...fragment, position, velocity, age: nextAge, lifetime, alive: nextAge < lifetime };
+  return { ...metadata, position, velocity, age: nextAge, lifetime, alive: nextAge < lifetime };
 }
 
 /** Retain only particles still alive after the step. Input stays unchanged. */
