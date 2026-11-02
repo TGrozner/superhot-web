@@ -200,3 +200,49 @@ Selecting either file decompresses/parses it in the browser, converts the OBJ's 
 **Private evidence (do not publish original resources):** `superhot-research#42/#43/#45/#47/#55/#60/#63` establishes the Unity indices, converted OBJ existence, first container submesh47 (4638 indices, 1546 triangles), and X-mirrored OBJ AABB matching its serialized source. Group48 has source-reported 4638 indices and corresponding collider envelope. This UI provides a real GPU rendering path but does not validate native material/shader/animation parity. Screenshots and performance should be assessed directly in a browser before claiming visible fidelity.
 
 Run `npm run check` for syntax and regression tests; perform a real WebGL2 browser smoke test with user-selected files separately. The tests use synthetic miniature OBJ fixtures only.
+
+
+## SH-05 — un seul OBJ6 privé, trois placements Containers source-qualifiés
+
+**Tranche Web opt-in, aucune ressource originale publique.** Dans
+`/?scene=containers`, choisir son **propre** export local `.obj` ou
+`.obj.gz` Mesh6 contenant le groupe `_47` (1 546 triangles). Le navigateur
+valide ce groupe par nombre de triangles et AABB, puis téléverse ses buffers
+**uniquement vers le GPU du navigateur**, pas vers un serveur. Le programme
+réutilise son unique VAO/VBO/EBO pour trois drawElements avec matrices
+affines : GO336/mesh6:g47 (identity), GO839/mesh6:g24
+(-7.35,0,+4.5), GO1003/mesh6:g32 (-1.4,-0.05,-25.2). Le mesh7:g48
+demeure un second fichier local facultatif et une seule instance distincte.
+Le preview par défaut (sans File sélectionné) reste entièrement généré.
+
+**PROUVÉ par les données statiques** : jointures Unity des trois GOs/
+MeshRenderers/submeshes dans `superhot-research#68` (artifact
+`13136407658`), source `level28` Unity 2018.4.14f1 SHA256
+`e0dae9e43ce59ff8f53e157bae277c382602efdf8b34386cacf8c34995b2db91`.
+**OBSERVÉ dans le corpus privé converti** : mesh6 OBJ complet, research#63
+artifact `13135277646`, groupes 24/32/47 de 1 546 triangles ; UVs/
+faces équivalents, géométrie presque superposable après translation
+(max delta centré ~2.01e-6). Réutiliser g47 pour les trois est une
+**approximation visuelle contrôlable**, pas une preuve de byte-égalité
+avec les trois groupes ni d'identité du rendu MCD.
+
+Une fois g47 chargé avec succès, les proxies générés `cargo-22`
+et `cargo-7` ainsi que leurs nervures inventées sont omis ; GO1003
+est ajouté (il n'avait pas de proxy dans les cinq hulls du preview).
+Quand mesh7:g48 charge également, son proxy `cargo-upper` est omis.
+Les deux autres hulls, les surfaces décoratives restantes et le sol sont
+toujours synthétiques. Les règles de combat, de collision et de progression
+Containers restent **non connectées**.
+
+**Contrôle visuel non encore exécuté :** relever sur la session réelle
+`window.__superhotSceneMetrics` avec les deux fichiers sélectionnés.
+Attendu dans un cadre où les instances sont dessinées :
+`locallyLoadedSourceGroups=2`, `generatedManifest.privateIndexedDraws=4`,
+`generatedManifest.sourceQualifiedMesh6DrawPackets=3`, et
+`generatedManifest.hiddenByPrivateMesh>0` ; relever `totalWebGLDrawCalls`,
+`p95FrameMs`, capture du canvas, résolution/DPR/GPU, puis comparer
+à une capture MCD native **à pose/projection réellement appariées**.
+Les compteurs de l'application ne remplacent pas une preuve GPU/pixel ;
+aucun de ces nombres n'est présenté comme observé avant ce test.
+Les matériaux natifs (référence sérialisée 5:3) restent non résolus,
+les couleurs sont synthétiques, et **aucun 1:1 n'est validé**.

@@ -2,6 +2,7 @@ import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
 import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
+import { planLocalMesh6Draws } from './scenes/containers-mesh6-local-plan.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
@@ -524,21 +525,35 @@ function render() {
     }
   }
   if (containersPreviewEnabled) {
+    // SH-04/11: three independently joined Mesh6 submeshes share almost
+    // congruent, world-batched local geometry. This is a SOURCE-CONVERTED
+    // approximation, drawn only from an owner-selected local OBJ6 group47.
+    const mesh6Plan = planLocalMesh6Draws({
+      group47Loaded: localNativeMeshes.has('mesh6'),
+    });
+    const omitCargoIds = [
+      ...mesh6Plan.omitGeneratedProxyIds,
+      ...(localNativeMeshes.has('mesh7') ? ['cargo-upper'] : []),
+    ];
     manifestStats = drawContainersBuild28Preview(renderer, cam, {
       aspect: canvas.width / Math.max(1, canvas.height),
-      omitCargoIds: localMeshPreviewSpec
-        .filter((spec) => localNativeMeshes.has(spec.slot)).map((spec) => spec.proxyId),
+      omitCargoIds,
     });
     let privateIndexedDraws = 0;
-    for (const spec of localMeshPreviewSpec) {
-      if (localNativeMeshes.has(spec.slot) &&
-          renderer.drawPrivateMesh(spec.slot, spec.slot === 'mesh6' ? '#485761' : '#f6f8f9')) {
+    for (const packet of mesh6Plan.drawPackets) {
+      if (renderer.drawPrivateMesh(packet.gpuSlot, '#485761', packet.modelMatrix)) {
         privateIndexedDraws++;
       }
+    }
+    if (localNativeMeshes.has('mesh7') &&
+        renderer.drawPrivateMesh('mesh7', '#f6f8f9')) {
+      privateIndexedDraws++;
     }
     manifestStats = {
       ...manifestStats,
       privateIndexedDraws, localFilePreviewOnly: true,
+      sourceConvertedApproximationOnly: true,
+      sourceQualifiedMesh6DrawPackets: mesh6Plan.drawPackets.length,
       nativeMeshMatch: false, // no runtime material, camera or pixel parity established
     };
   }

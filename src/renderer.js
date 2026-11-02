@@ -255,14 +255,28 @@ export function createRenderer(canvas) {
     privateMeshes.set(slot, uploaded);
     return { triangles: uploaded.triangleCount, bounds: uploaded.bounds };
   }
-  function drawPrivateMesh(slot, color) {
+  // A local, source-converted OBJ may be reused for different serialized
+  // submesh placements via per-draw affine transforms (SH-04/11 #68/#63).
+  // No original data is shipped; non-identity models remain opt-in.
+  function drawPrivateMesh(slot, color, modelMatrix = null) {
     const mesh = privateMeshes.get(slot);
     if (!mesh) return false;
+    let model = identity4, normal = identity3;
+    if (modelMatrix !== null) {
+      if (!modelMatrix || modelMatrix.length !== 16 ||
+          [...modelMatrix].some((v) => !Number.isFinite(v) || !Number.isFinite(Math.fround(v))) ||
+          modelMatrix[3] !== 0 || modelMatrix[7] !== 0 ||
+          modelMatrix[11] !== 0 || modelMatrix[15] !== 1) {
+        throw new TypeError('Private mesh requires a finite affine 4x4 model matrix');
+      }
+      model = new Float32Array(modelMatrix);
+      normal = new Float32Array(normalMatrixFromAffine(modelMatrix));
+    }
     if (!colorCache.has(color)) colorCache.set(color, colorToRgba(color));
     const rgba = colorCache.get(color);
     gl.uniform1i(uniforms.uUseAffine, 1);
-    gl.uniformMatrix4fv(uniforms.uAffineModel, false, identity4);
-    gl.uniformMatrix3fv(uniforms.uAffineNormal, false, identity3);
+    gl.uniformMatrix4fv(uniforms.uAffineModel, false, model);
+    gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
     gl.uniform4f(uniforms.uColor, rgba[0], rgba[1], rgba[2], 1);
     mesh.draw();
     drawCalls++;

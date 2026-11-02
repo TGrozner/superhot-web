@@ -189,7 +189,7 @@ export function drawContainersBuild28Preview(renderer, camera, options = {}) {
   const { omitCargoIds = [], ...planOptions } = options;
   const omitted = new Set(omitCargoIds);
   for (const id of omitted) {
-    if (id !== 'cargo-22' && id !== 'cargo-upper') throw new RangeError('Unknown source-matched cargo proxy');
+    if (id !== 'cargo-22' && id !== 'cargo-upper' && id !== 'cargo-7') throw new RangeError('Unknown source-matched cargo proxy');
   }
   const plan = createContainersBuild28DrawPlan(camera, planOptions);
   const graphNodes = createContainersBuild28Nodes();
