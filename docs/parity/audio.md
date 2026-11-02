@@ -471,7 +471,7 @@ audibility gate. `src/main.js` and `src/audio.js` remain exclusively SH-05.
 **PROUVÉ — native source request only.** Steam SUPERHOT MCD build `20299547`,
 Unity `2018.4.14f1`, Assembly-CSharp SHA-256
 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
-The PRIVATE existing artifacts were reused without a new bridge request:
+Two PRIVATE pre-existing artifacts were reused; two new narrow reads\n(#120/#121) resolved the prefab constructor and field binding:
 
 - Research [#89](https://github.com/TGrozner/superhot-research/issues/89),
   run `41442138603`, artifact `13139513152`,
