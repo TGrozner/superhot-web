@@ -667,3 +667,56 @@ probe can falsify this limited composition. A minimal private read of
 `Bullet.cs:510–594` was attempted once but the GitHub connector blocked
 issue creation *before submission*; no runner or corpus outage is claimed.
 SH-05 alone owns `src/main.js` wiring and browser acceptance.
+
+
+## SH-03 — parentWeaponId CanCollide, source-verified (2026-11-02)
+
+**PROUVÉ par lecture statique, NON observé en gameplay natif :** build MCD
+`20299547`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Private research [#122](https://github.com/TGrozner/superhot-research/issues/122),
+run `41471599115`, artifact `13155566748`,
+`managed/Assembly-CSharp/Bullet.cs:519–527`, SHA-256 du texte exact
+`61ba0220e6e6d083a734407ba1b76a846eedc8b01f934d118064ce89d277ab17`.
+La méthode `SetParentWeaponId` enregistre le `GetInstanceID` du
+`GameObject` parent fourni. `CanCollide(Bullet b)`, appelée **sur la
+balle rencontrée** par `Bullet.HandleCollision:301` (research #102,
+artifact `13141705847`, texte SHA-256
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`),
+accepte si les deux `parentWeaponId` sont distincts **ou** si celui du
+receveur est zéro. Ainsi, deux IDs égaux NON NULS refusent la demande de
+découpe; un ID nul du receveur l'autorise, même lorsque les deux sont
+nuls. Il ne s'agit **ni** du `ShotId`, ni d'une comparaison de tags ou
+des camps joueur/ennemi; les gardes same-shot, double-ricochet et
+double-deflected sont évaluées séparément, en amont.
+
+**Implémentation Web bornée :** `canEncounteredBulletCollideWithCurrent`
+expose cette décision pour deux IDs `int32` explicitement fournis et
+`planBulletPairContact` la consomme lorsque **les deux** états
+`parentWeaponId` sont présents. Absence d'un champ ≠ zéro. Un résultat
+externe `otherCanCollideCurrent` contradictoire donne
+`parent-weapon-guard-conflict`; présence partielle donne
+`parent-weapon-ids-incomplete`. Le compositeur
+`planBulletFixedContactSequence` bloque alors les contacts suivants au
+lieu d'inventer une mort. Les tests purement Node injectent phases
+d'émission, déplacements, contacts classés et destruction après handler;
+une demande `player-kill-request` ne prouve **pas** une mort jouée.
+
+**INCONNU, important pour la scène Containers :** quel objet appelle
+`SetParentWeaponId`, la valeur runtime des deux IDs des vraies balles,
+le résultat du pool, l'ordre des contacts PhysX, l'état `destroyed`
+après `SliceInHalf`, et tout effet réellement visible/entendu. Le
+`GetInstanceID` Unity ne doit pas être remplacé silencieusement par un
+ID d'entité Web. Les indices de projet ou valeurs C# par défaut ne
+prouvent pas les instances effectivement liées.
+
+**Handoff SH-05 :** pour comparer un projectile à un autre, renseigner
+les deux identités natives réelles ou une réponse native déjà vérifiée
+au même appel; jamais `undefined → 0`. Injecter aussi le contact PhysX
+réellement trié et `destroyedAfterHandler`. Tant que ces valeurs
+n'existent pas pour Containers, garder la paire **diagnostique**, et ne
+pas la câbler comme collision native dans `src/main.js`. Un scénario
+réfutable consiste à capturer deux bullets d'une même arme, puis de
+deux armes distinctes, relever les deux `parentWeaponId`, vérifier les
+demandes `SliceInHalf`, et refaire le même ordre de contacts et de
+destruction dans le Web. Aucun asset/code décompilé n'est publié.
