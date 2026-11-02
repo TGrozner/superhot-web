@@ -269,16 +269,17 @@ The report requires the **exact locally prepared scene draw budget** (never a ha
 The new independently testable `assessContainersBuild28VerticalEvidence` is **fail-closed** and deliberately not wired into `src/main.js`. To run it on the owner's machine (no native bytes leave the PC):
 
 ```js
-import { assessContainersBuild28VerticalEvidence } from './scripts/integration-native-world.mjs';
+import {
+  assessContainersBuild28VerticalEvidence, CONTAINERS_BUILD28_SERIALIZED_SOURCE,
+} from './scripts/integration-native-world.mjs';
 
-// expectedSource must be transcribed from an INDEPENDENT, private, source-
-// qualified serialized Containers scene record, not copied from the Web page.
-// These fields intentionally have no invented literal path or owner.
-const expectedSource = {
-  sceneBuildIndex: 28,
-  scenePath: verifiedPrivateContainersScenePath,
-  serializedOwner: verifiedPrivateSerializedOwner,
-};
+// Authoritative serialized scene metadata, NOT an active Unity camera/frame.
+// This constant comes from the independent existing private research #16
+// scenes table (one row, truncated=false), not from a Web metrics snapshot.
+const expectedSource = CONTAINERS_BUILD28_SERIALIZED_SOURCE;
+// { sceneBuildIndex: 28,
+//   scenePath: 'Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity',
+//   serializedOwner: 'level28' }
 const report = assessContainersBuild28VerticalEvidence({
   expectedSource,
   prepared: prepareNativeScene(ownerLocalPrivatePackage),
@@ -288,6 +289,8 @@ const report = assessContainersBuild28VerticalEvidence({
   ],
 });
 ```
+
+The scene identity is now **anchored to the actual primary serialized record**, not merely a caller-supplied object that says build28. SH-04 independently reopened existing private research [#16](https://github.com/TGrozner/superhot-research/issues/16), run `41430065967` artifact `13132978778`; SH-16 reopened its real `result.json` in this cycle, verified SHA-256 `bdbb4dbbef1a6984ede68c11443c77c40d12695d818a379d5f0efcfb9a3f9b8e`, confirmed one `scenes` row and `truncated:false`. The exact tuple is `(28, Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity, level28)`. The check rejects alternative build28 paths or owners **even if prepared package, rendered snapshots and metrics all repeat the same fabricated tuple**. This is static source-scene provenance, NOT proof that the owner's game executed Containers, nor a privacy-sensitive model or native binary asset.
 
 It checks source tuple `(sceneBuildIndex,scenePath,serializedOwner)` **exactly** against `prepared.source`, each same-rendered-frame `frame.nativeScene.source`, and independently against each **asynchronous** `metrics.nativeScene.source`. Wrong build10, mismatched private package, changed scene with identical draw counts, missing provenance and stale ~1 Hz telemetry all fail with distinct statuses. Only after these checks does it reuse the exact source draw-budget/actor/ammunition/async defeat gate. Positive status `CONTAINERS_BUILD28_WEB_SCENE_ACTOR_AND_ASYNC_ENCOUNTER_ONLY` **still does not prove** a same-projectile body-part hit, executed native PhysX, AI, shader fidelity or matched pixels. The results always set `nativeExecutionObserved=false`, `matchedNativeGameplayPixels=false`, `measuredVisualDelta=null` and `nativeParityVerdict='UNASSESSED'`.
 
@@ -299,3 +302,10 @@ It checks source tuple `(sceneBuildIndex,scenePath,serializedOwner)` **exactly**
 **Other PRs checked this cycle (18:45 UTC):** SH-16 #127 is merged on main at `78b4f8a6`; #152, #125, #147, #143, #144, #145, #146 and #151 are also merged. SH-14 #134 and SH-13 #150 remain open with `mergeable=false`; SH-03 #153 is open and its exact HEAD requires revalidation against the now advanced main. SH-05 owns review/rebase/merge. This SH-16 PR touches only the three reserved integration files, not the runtime.
 
 **Private primary reinspection (2026-11-02, no new corpus query):** actual `result.json` JSON was opened from existing research artifacts #8–#15 and hashed, not treated as proven merely because Actions succeeded. #8 is a partial 120-line static source read (`next_start=121`), #9 a bounded audio read, #10 an untruncated **five-row SQLite table schema** (not any world mesh/camera), #11–#12 bounded reads, #13 a 97-line TimeControl read, #14 a 75-line read and #15 a 110-line camera/time source read. None is a recorded executed Containers gameplay frame. Source text, binaries, OBJ, shaders and original captures remain private. This new public gate contains only synthetic fixture identifiers; it does not reproduce private source code.
+
+
+### SH-16 follow-up, 2026-11-02 19:45 UTC — resolved source identifier, unchanged GPU parity blocker
+
+Existing private research #8–#15 ZIP `result.json` files were **directly downloaded and parsed again**, plus #16. No new `[corpus-query]`, runner invocation or public original bytes. #10 has five `sqlite_master` table definitions (`hierarchy/objects/scenes/serialized/sources`) and **no native mesh or screenshot**. #16 independently resolves the exact Containers `scenes` triple; SHA-256 above. The actual game asset package/screenshot is not in these artifacts.
+
+**Next owner-local cross-lane handoff, executable only by SH-05:** select the actual owner-local `scenePackage` that preserves the canonical build28/source path/owner, call `prepareNativeScene(package)`, then capture two completed playing-frame+~1Hz snapshots where both `frame.nativeScene.source` and `metrics.nativeScene.source` equal the canonical tuple and invoke `assessContainersBuild28VerticalEvidence` with `expectedSource:CONTAINERS_BUILD28_SERIALIZED_SOURCE`. A correct static tuple is the first gate; check `generatedManifest.drawCalls` against the exact prepared source budget and `nativeEnemy.skinned`, not historical hard-coded 68/360 counts. SH-04's raised platforms GO379/GO392 (serialized enabled/nontrigger) must still have their actual package instance/collider IDs joined before GPU and collision claims. SH-15's existing `captureContainersWeb` + offline saved-PNG Web manifest / source-common mask comparison owns any **real** visual delta. SH-03's combat/AI modules remain disconnected from a source-causal PhysX/bodypart hit in shared gameplay. **No new browser image, pixel delta, native runtime or player→projectile→bodypart trace was observed by SH-16 in this cycle.** SH-05 alone changes shared runtime and merges this PR.

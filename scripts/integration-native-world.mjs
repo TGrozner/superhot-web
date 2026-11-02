@@ -490,6 +490,19 @@ export function assessNativeWorldEncounterTrace({ samples, sourceBudget } = {}) 
  * SH-05 owns the production scene selection, collision / combat event bridge.
  * SH-15 owns any real GPU/native matched-pixel receipt.
  */
+/**
+ * Independently recovered serialized SCENE identity, not the active MCD
+ * runtime, view/camera or playable Contents. Existing private research #16,
+ * run 41430065967 / artifact 13132978778 / result.json SHA-256
+ * bdbb4dbbef1a6984ede68c11443c77c40d12695d818a379d5f0efcfb9a3f9b8e
+ * (one SQLite scenes row, truncated=false). Metadata only; no game assets.
+ */
+export const CONTAINERS_BUILD28_SERIALIZED_SOURCE = Object.freeze({
+  sceneBuildIndex: 28,
+  scenePath: 'Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity',
+  serializedOwner: 'level28',
+});
+
 function integrationSourceSceneKey(source) {
   if (!source || typeof source !== 'object' ||
       !Number.isSafeInteger(source.sceneBuildIndex) || source.sceneBuildIndex < 0 ||
@@ -517,6 +530,11 @@ export function assessContainersBuild28VerticalEvidence({
   const expectedKey = integrationSourceSceneKey(expectedSource);
   if (!expectedKey || expectedSource.sceneBuildIndex !== 28) {
     return { status: 'INDEPENDENT_CONTAINERS_BUILD28_SOURCE_TUPLE_REQUIRED', ...limitations };
+  }
+  // Merely claiming buildIndex=28 (even on all Web snapshots) is insufficient.
+  // The independent serialized corpus has ONE exact Containers source row.
+  if (expectedKey !== integrationSourceSceneKey(CONTAINERS_BUILD28_SERIALIZED_SOURCE)) {
+    return { status: 'SOURCE_TUPLE_NOT_SERIALIZED_CONTAINERS_BUILD28', ...limitations };
   }
   if (!prepared || integrationSourceSceneKey(prepared.source) !== expectedKey) {
     return { status: 'PREPARED_PACKAGE_SCENE_IDENTITY_MISMATCH', ...limitations };
@@ -551,6 +569,8 @@ export function assessContainersBuild28VerticalEvidence({
       scenePath: expectedSource.scenePath,
       serializedOwner: expectedSource.serializedOwner,
       independentlyQualifiedByCaller: true,
+      exactSerializedSourceRecordMatched: true,
+      serializedSourceEvidence: 'superhot-research#16/result.json sha256:bdbb4dbbef1a6984ede68c11443c77c40d12695d818a379d5f0efcfb9a3f9b8e',
       originalMcdSceneExecutionProven: false,
     },
     webTraceStatus: webTrace.status,

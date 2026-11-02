@@ -5,7 +5,7 @@ import {
   assessNativeWorldBrowserFrame,
   assessNativeElevatedPlatformBindings, projectPreparedColliderRoi,
   assessPreparedColliderActivation, assessNativeWorldEncounterTrace,
-  assessContainersBuild28VerticalEvidence,
+  assessContainersBuild28VerticalEvidence, CONTAINERS_BUILD28_SERIALIZED_SOURCE,
 } from '../scripts/integration-native-world.mjs';
 
 const sampleSource = () => ({
@@ -402,11 +402,9 @@ test('SH16 does not infer source-native damage from an isolated target death or 
 // SH-16 source-identity regression: source-world mode is shared by build10
 // Dojo and build28 Containers. Identical counters cannot prove scene identity.
 function containersBuild28IdentityFixture() {
-  const source = {
-    sceneBuildIndex: 28,
-    scenePath: 'Assets/Scenes/level28.unity', // entirely synthetic test tuple
-    serializedOwner: 'fixture-level28',
-  };
+  // Source metadata comes from the independently inspected existing research #16
+  // SQLite scenes row, never the rendered browser's self-reported scene string.
+  const source = { ...CONTAINERS_BUILD28_SERIALIZED_SOURCE };
   const prepared = sampleSource();
   prepared.source = { ...source };
   const { samples } = browserEncounterTraceFixture();
@@ -422,10 +420,43 @@ test('SH16 P0 binds actual Containers scene identity to source package and every
   assert.equal(gate.status, 'CONTAINERS_BUILD28_WEB_SCENE_ACTOR_AND_ASYNC_ENCOUNTER_ONLY');
   assert.equal(gate.webTraceStatus, 'WEB_WORLD_ACTOR_AMMO_AND_ASYNC_DEFEAT_SEQUENCE_ONLY');
   assert.equal(gate.sourceIdentity.sceneBuildIndex, 28);
+  assert.equal(gate.sourceIdentity.exactSerializedSourceRecordMatched, true);
   assert.equal(gate.sourceIdentity.originalMcdSceneExecutionProven, false);
   assert.equal(gate.matchedNativeGameplayPixels, false);
   assert.equal(gate.measuredVisualDelta, null);
   assert.equal(gate.nativeParityVerdict, 'UNASSESSED');
+});
+
+test('SH16 rejects a plausible but fabricated build28 scene path even if all app counters agree', () => {
+  const fixture = containersBuild28IdentityFixture();
+  const spoof = { ...CONTAINERS_BUILD28_SERIALIZED_SOURCE,
+    scenePath: 'Assets/Scenes/level28.unity' };
+  fixture.expectedSource = spoof;
+  fixture.prepared.source = spoof;
+  for (const sample of fixture.samples) {
+    sample.frame.nativeScene.source = { ...spoof };
+    sample.metrics.nativeScene.source = { ...spoof };
+  }
+  const report = assessContainersBuild28VerticalEvidence(fixture);
+  assert.equal(report.status, 'SOURCE_TUPLE_NOT_SERIALIZED_CONTAINERS_BUILD28');
+  assert.equal(report.measuredVisualDelta, null);
+  assert.equal(report.nativeParityVerdict, 'UNASSESSED');
+});
+
+test('SH16 rejects a build28 tuple whose serialized Unity owner differs from the corpus', () => {
+  const fixture = containersBuild28IdentityFixture();
+  fixture.expectedSource = { ...CONTAINERS_BUILD28_SERIALIZED_SOURCE, serializedOwner: 'level10' };
+  assert.equal(assessContainersBuild28VerticalEvidence(fixture).status,
+    'SOURCE_TUPLE_NOT_SERIALIZED_CONTAINERS_BUILD28');
+});
+
+test('SH16 accepts exactly the separately qualified serialized source metadata, not a screenshot', () => {
+  const fixture = containersBuild28IdentityFixture();
+  const report = assessContainersBuild28VerticalEvidence(fixture);
+  assert.equal(report.sourceIdentity.serializedSourceEvidence,
+    'superhot-research#16/result.json sha256:bdbb4dbbef1a6984ede68c11443c77c40d12695d818a379d5f0efcfb9a3f9b8e');
+  assert.equal(report.nativeExecutionObserved, false);
+  assert.equal(report.matchedNativeGameplayPixels, false);
 });
 
 test('SH16 rejects current Dojo/build10 as Containers even with perfectly matching draw counts', () => {

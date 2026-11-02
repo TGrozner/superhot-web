@@ -759,3 +759,65 @@ proof that native sound assets or serialized prefab objects do not exist.
 Do not reuse the EnemyShatter WAV for either Stun cue or infer an original
 sample from an AudioPrefab field name. A future **index-backed, bounded**
 Unity owner/path_id mapping is required before local original-clip playback.
+
+## SH-07 — Source-bound EnemyStun/EnemyStunConcrete clip identity (2026-11-02)
+
+**PROUVÉ — serialized Unity data, NOT runtime pool or audition.** The previous
+source-qualified Stun guards and the two declared AudioPrefab pool sizes
+remain as documented above. Four **new, strictly bounded** private SQL
+queries against `resources/pass-01/corpus.sqlite`, all completed SUCCESS:
+
+- [research #144](https://github.com/TGrozner/superhot-research/issues/144),
+  artifact `13175332382`, result.json SHA256
+  `e2d14446a34bdaccb189c27eea108b9278a49b6a634c015bb73d4c88779cc0e7`:
+  three named GameObject identities, including the EnemyShatter control.
+- [#145](https://github.com/TGrozner/superhot-research/issues/145),
+  artifact `13175172636`, SHA256
+  `ce6ca8cb0a970ebf7eeb4305dabec390facc1fecea3857f4e6b5c1061029be02`:
+  GameObject component pointers and serialized active flags.
+- [#146](https://github.com/TGrozner/superhot-research/issues/146),
+  artifact `13174448535`, SHA256
+  `3f51ae2914870167d914b1358a7ff544f08f3f65b2655e58ceff084f6265eca1`:
+  corresponding AudioSource clip references and starting source values.
+- [#147](https://github.com/TGrozner/superhot-research/issues/147),
+  artifact `13174882773`, SHA256
+  `0693cca5ec2424bbec6e5ea12cc464a42f6e0f772d8532c619e876c7788ba144`:
+  exact AudioClip identities and serialized audio metadata.
+
+**Native serialized pointer chains, without commercial bytes:**
+
+| Stun AudioPrefab | Active serialized GO | AudioSource | AudioClip | Serialized starting volume | Clip metadata |
+| --- | --- | --- | --- | --- | --- |
+| EnemyStun (declared pool 3) | `resources.assets:1860` | `resources.assets:27512` | `resources.assets:1675` — `AC_Enemy_Stun` | 0.6340000033 | mono, 96000 Hz, 0.74374 s |
+| EnemyStunConcrete (declared pool 2) | `resources.assets:1886` | `resources.assets:27520` | `resources.assets:1611` — `AC_Enemy_Hit` | 0.6999999881 | mono, 48000 Hz, 0.38375 s |
+
+Both serialized AudioSources reference mixer fileID `3`, pathID `659`.
+The same query independently recovers the already-known EnemyShatter control:
+GO `resources.assets:1898` → AudioSource `:27523` → clip `:1579`
+(`AC_Enemy_Death`). This is a cross-check of the reference path, not an
+observation of any pool playing. The mixer reference's active channel, effects,
+any runtime modifications to starting gain/pitch, and actual prefab
+`Resources.Load` success remain **INCONNU**.
+
+**Delivered source-to-Web contract:** `src/sound/mcd-stun-serialized-clips.js`
+composes the *existing* SH-06 Stun and SH-07 prefab planners, adding the
+correct local-private clip identity *only when* the latter returns
+`audio-prefab-play-request`. If the pool is reported missing, the native
+0.25-second realtime sound-rest update still occurs but **no local clip request**
+is emitted. No sample is fetched, uploaded, embedded or synthesized by this
+module. `serializedStartingVolume` is explicitly not a final gain.
+The matching `tests/sound-mcd-stun-serialized-clips.test.mjs` asserts normal
+versus concrete contacts, cooldown equality, missing-pool silence and runtime
+pitch retention. These are Node source-contract tests, **not** browser audio
+or native execution measurements.
+
+**SH-05 integration gate:** first prove a specific executed Containers body
+part/armor contact reaches the SH-06 Stun branch; qualify the runtime pool and
+load the owner-local `resources.assets:1675` / `:1611` clip without publishing
+it. Only then route the emitted private-local clip request to
+`AudioBufferSourceNode`; measure actual decoded buffer metadata, playback
+start and analyser nonzero peak in Chromium, plus the absent-pool negative case.
+A graph signal is weaker than physical speaker audibility. The active
+Containers scene, pool, native mixer output and paired runtime timing are still
+**INCONNU**. Do not use `audio.shatter()` or a synthetic pistol cue as a
+substitute for a Stun sound.

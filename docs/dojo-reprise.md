@@ -20,7 +20,7 @@ Les originaux restent sous `private/`, exclus de Git. Le dépôt public ne fourn
 
 ## Vérifications réellement effectuées pour cette livraison
 
-`npm run check` : **1 058 tests réussis, aucun échec ni test ignoré**.
+`npm run check` : **1 058 tests réussis avant synchronisation, puis 1 087 après intégration des cinq commits concurrents de `origin/main` jusqu’à `2fe8291`** ; aucun échec ni test ignoré. Les PR #159, #160, #161, #162 et #163 déjà fusionnées à distance sont conservées, sans réécrire leur travail ni modifier leurs fichiers dans ce lot.
 
 Scénario dans Chromium sur le vrai localhost, par commandes souris/clavier, sans déplacement artificiel des personnages :
 
