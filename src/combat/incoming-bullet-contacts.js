@@ -8,8 +8,6 @@
 const point = value => value !== null && typeof value === 'object' &&
   Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z);
 
-const copy = value => ({ x: value.x, y: value.y, z: value.z });
-
 const stop = (status, events, consumedHits, stoppedAt) => ({
   status, events, consumedHits, stoppedAt,
 });
