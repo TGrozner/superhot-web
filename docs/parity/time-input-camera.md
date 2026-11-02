@@ -103,7 +103,7 @@ Le fichier [`tests/time-contract-web-gaps.test.mjs`](../../tests/time-contract-w
 
 
 
-## Qualification d'une comparaison temporelle (SH-01, TC-Q01 à TC-Q04)
+## Qualification d'une comparaison temporelle (SH-01, TC-Q01 à TC-Q05)
 
 Le test [`time-contract-qualification.test.mjs`](../../tests/time-contract-qualification.test.mjs) définit une **porte de recevabilité méthodologique**. Il ne déduit aucune règle supplémentaire de MCD : le résultat `COMPARABLE` signifie uniquement que l'on dispose des données nécessaires pour tenter une comparaison différentielle, **jamais** une parité 1:1 certifiée.
 
@@ -114,7 +114,9 @@ Le test [`time-contract-qualification.test.mjs`](../../tests/time-contract-quali
 | **TC-Q03** | **INCONNU — observation quantitative** : aucune trace native admissible n'a été lue. Une suite d'images ou des timestamps hors unité ne vaut pas mesure. | `runtime/observations.json` **non lu** ; source signalée par `HANDOFF.md:55` (TC-R06). | Deux échantillons au minimum, temps en secondes strictement croissant, valeur finie avec unité explicite, build et scène ; vérifier une trace contradictoire ou une mesure non calibrée. |
 | **TC-Q04** | **COMPARABLE uniquement sur fixture synthétique** ; **INCONNU pour MCD**, aucune certification de parité. | `tests/time-contract-qualification.test.mjs`, fixture de test artificielle ; version Web déterminée par le SHA du commit de la PR, **pas** un original MCD. | Pour un test réel, exiger aussi une trace Web horodatée et versionnée, même scène et événement ; même une concordance locale ne prouve pas 1:1 sur toutes les branches. |
 
-Les contrôles automatisés exigent simultanément : déclaration de source explicitement limitée ; méthode avec type, nom, bornes et SHA d'assembly ; binding d'instance active `(scene,owner,pathId)` ; traces native et Web finies, horodatées et versionnées. **Ils vérifient la présence/cohérence de métadonnées, pas l'authenticité du corpus ni l'exécution de la méthode.** Seules les lectures privées et les observations originales permettent de relever réellement le niveau de preuve.
+| **TC-Q05** | **INCONNU / non comparable** si scènes ou unités physiques diffèrent, même avec des séries numériques bien formées. | `tests/time-contract-qualification.test.mjs`, fixture artificielle sans observation MCD. | Réfuter un appariement en changeant l'identifiant de scène ou l'unité de la grandeur mesurée ; exiger la concordance des deux avant comparaison. |
+
+Les contrôles automatisés exigent simultanément : déclaration de source explicitement limitée ; méthode avec type, nom, bornes et SHA d'assembly ; binding d'instance active `(scene,owner,pathId)` ; traces native et Web finies, horodatées et versionnées, avec unités de mesure identiques et scène native correspondant au binding. **Ils vérifient la présence/cohérence de métadonnées, pas l'authenticité du corpus ni l'exécution de la méthode.** Seules les lectures privées et les observations originales permettent de relever réellement le niveau de preuve.
 
 ### Audit de disponibilité de la passerelle (2026-11-02)
 
