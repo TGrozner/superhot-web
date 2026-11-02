@@ -5,7 +5,7 @@
  *
  * Browser event listeners, focus and pointer-lock acquisition are intentionally
  * not executed here. `KeyboardEvent.code` values are physical-key codes.
- * Web-only numeric guards reject overflowing outputs without changing
+ * Web-only numeric guards reject overflowing or malformed rule outputs without changing
  * the prototype's movement or camera coefficients.
  * SH-01's secondary MCD research handoff reports R = Replay (not reload);
  * its active input dispatcher still needs primary verification. `KeyR` below
@@ -75,6 +75,7 @@ export function movementStep(keys, yaw, dt, rules = PROTOTYPE_INPUT_RULES) {
   const axes = movementAxes(keys);
   const sprinting = anyPressed(keys, SPRINT);
   const speed = sprinting ? rules.sprintSpeed : rules.walkSpeed;
+  if (!Number.isFinite(speed)) throw new RangeError('movement speed must be finite');
   if (!axes.moving) return { ...axes, sprinting, speed, dx: 0, dz: 0 };
   const inverse = 1 / Math.hypot(axes.forward, axes.horizontal);
   const sx = Math.sin(yaw) * axes.forward + Math.cos(yaw) * axes.horizontal;
@@ -123,13 +124,13 @@ export function applyMouseLook({ yaw, pitch, movementX, movementY }, rules = PRO
   }
   const nextYaw = yaw + movementX * rules.mouseSensitivity;
   if (!Number.isFinite(nextYaw)) throw new RangeError('yaw must remain finite');
-  return {
-    yaw: nextYaw,
-    pitch: clamp(pitch - movementY * rules.mouseSensitivity, -rules.pitchLimit, rules.pitchLimit),
-    lookActivity: clamp(
-      Math.hypot(movementX, movementY) / rules.lookActivityDivisor,
-      rules.minimumLookActivity,
-      1,
-    ),
-  };
+  const nextPitch = clamp(pitch - movementY * rules.mouseSensitivity, -rules.pitchLimit, rules.pitchLimit);
+  const lookActivity = clamp(
+    Math.hypot(movementX, movementY) / rules.lookActivityDivisor,
+    rules.minimumLookActivity,
+    1,
+  );
+  if (!Number.isFinite(nextPitch)) throw new RangeError('pitch must remain finite');
+  if (!Number.isFinite(lookActivity)) throw new RangeError('lookActivity must remain finite');
+  return { yaw: nextYaw, pitch: nextPitch, lookActivity };
 }

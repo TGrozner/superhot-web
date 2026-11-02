@@ -4,6 +4,7 @@
  * PROVENANCE: superhot-web/src/main.js at 9f01f92411b4e125b2c992deee53602a8c67c416
  * STATUS: PROVISIONAL. These numbers are the existing Web prototype, NOT
  * verified SUPERHOT: MIND CONTROL DELETE mechanics. SH-01 owns native parity.
+ * A malformed caller-provided ruleset must not leak non-finite target values.
  * SH-01 PR #12 proves only MCD TimeControl DECLARATIONS (e.g. minTimescale
  * initializer 0.01 and fixedTimestepDenominator initializer 60), not active
  * serialized overrides, update phase, or runtime law. Do not transplant them
@@ -51,13 +52,13 @@ export function createTimeState({
 export function getTargetTimeScale({ moving = false, lookActivity = 0, shotPulse = 0, reloading = false } = {}, rules = PROTOTYPE_TIME_RULES) {
   requireFinite(lookActivity, 'lookActivity');
   requireFinite(shotPulse, 'shotPulse');
-  return Math.max(
+  return requireFinite(Math.max(
     rules.minimumScale,
     moving ? rules.movingScale : 0,
     lookActivity * rules.lookScaleFactor,
     shotPulse * rules.shotScaleFactor,
     reloading ? rules.reloadingScale : 0,
-  );
+  ), 'targetScale');
 }
 
 /**
