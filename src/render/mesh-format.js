@@ -197,7 +197,7 @@ function readSourceComponent(view, byteOffset, format) {
  *
  * Payload:
  * {
- *   coordinateSpace: 'web-rh', compression: 'none', sourceWinding: 'ccw'|'cw',
+ *   coordinateSpace: 'web-rh', byteOrder: 'little', compression: 'none', sourceWinding: 'ccw'|'cw',
  *   vertexCount, streams: [{ bytes: Uint8Array, strideBytes, byteOffset? }],
  *   attributes: {
  *     position: { stream, offsetBytes, format },
@@ -223,6 +223,9 @@ export function decodeIndexedMeshPayload(payload) {
   }
   if (payload.coordinateSpace !== 'web-rh') {
     throw new Error('Coordinate conversion not proved: payload must be web-rh');
+  }
+  if (payload.byteOrder !== 'little') {
+    throw new Error('Source byte order must be explicit little-endian');
   }
   if (payload.sourceWinding !== 'ccw' && payload.sourceWinding !== 'cw') {
     throw new Error('Source triangle winding must be explicitly ccw or cw after conversion');
