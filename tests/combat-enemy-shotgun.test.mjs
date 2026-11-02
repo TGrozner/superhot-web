@@ -11,12 +11,17 @@ const fixture = (patch = {}) => ({
 });
 
 test('AI shotgun queues only if IsAttackReady and carries seen state even when blocked', () => {
-  assert.deepEqual(planEnemyShotgunAttack({ isAttackReady: false, haveBeenSeen: true }), {
+  assert.deepEqual(planEnemyShotgunAttack({ isAttackReady: false, haveBeenSeen: true, alreadyDeferred: false }), {
     shooterHaveBeenSeen: true, deferredBulletSpawn: false,
     shootHappened: false, soundCallRequested: false,
     onBulletSpawnRequested: false, alertRadius: null,
   });
-  assert.deepEqual(planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: false }), {
+  const pending = planEnemyShotgunAttack({
+    isAttackReady: false, haveBeenSeen: false, alreadyDeferred: true,
+  });
+  assert.equal(pending.deferredBulletSpawn, true); // non-ready Attack preserves earlier queued shot
+  assert.equal(pending.soundCallRequested, false);
+  assert.deepEqual(planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: false, alreadyDeferred: false }), {
     shooterHaveBeenSeen: false, deferredBulletSpawn: true,
     shootHappened: true, soundCallRequested: true,
     onBulletSpawnRequested: true, alertRadius: 5,
@@ -31,7 +36,7 @@ test('no pending deferred shot emits nothing, without inventing an active prefab
 });
 
 test('source default pelletCount=6 means SIX AI requests, unlike player 1+pelletsCount', () => {
-  const attack = planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: true });
+  const attack = planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: true, alreadyDeferred: false });
   const result = planEnemyShotgunLateVolley(fixture({
     deferredBulletSpawn: attack.deferredBulletSpawn,
   }));
@@ -90,11 +95,11 @@ test('active prefab values and random samples cannot be guessed', () => {
   const outsideSphere = Array.from({ length: 6 }, () => vec());
   outsideSphere[2] = vec(2);
   assert.throws(() => planEnemyShotgunLateVolley(fixture({ spreadSamples: outsideSphere })), TypeError);
-  assert.throws(() => planEnemyShotgunAttack({ isAttackReady: 1, haveBeenSeen: false }), TypeError);
+  assert.throws(() => planEnemyShotgunAttack({ isAttackReady: 1, haveBeenSeen: false, alreadyDeferred: false }), TypeError);
 });
 
 test('late pose provides spawn orientation and muzzle, no pre-IK position is assumed', () => {
-  const attack = planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: false });
+  const attack = planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: false, alreadyDeferred: false });
   const late = planEnemyShotgunLateVolley(fixture({
     deferredBulletSpawn: attack.deferredBulletSpawn,
     muzzlePosition: vec(9, 2, -1), weaponForward: vec(0, 0, -1),
