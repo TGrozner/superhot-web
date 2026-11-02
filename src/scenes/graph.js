@@ -121,14 +121,21 @@ export function buildSceneGraph(nodes, { coordinates = 'web' } = {}) {
       const parent = node.parentId == null ? null : visit(node.parentId, depth + 1);
       const sourceMatrix = multiplyMatrices(parent?.sourceMatrix ?? identity(), composeLocalMatrix(node.transform));
       const worldMatrix = coordinates === 'unity' ? mirrorZ(sourceMatrix) : sourceMatrix;
-      let bounds = null;
-      if (node.primitive != null) {
-        if (node.primitive.kind !== 'box') throw new TypeError('Unsupported generated primitive at ' + id);
-        bounds = boxBounds(worldMatrix, node.primitive.size);
+      let bounds = null, primitive = null;
+      const authoredPrimitive = node.primitive;
+      if (authoredPrimitive != null) {
+        if (authoredPrimitive.kind !== 'box') throw new TypeError('Unsupported generated primitive at ' + id);
+        // Bounds are cached at build time. Retaining the author's mutable size
+        // would let subsequent edits change draw dimensions but not culling.
+        // Snapshot the three size components once and keep that packet stable.
+        const authoredSize = authoredPrimitive.size;
+        const size = { x: authoredSize?.x, y: authoredSize?.y, z: authoredSize?.z };
+        bounds = boxBounds(worldMatrix, size);
+        primitive = Object.freeze({ kind: 'box', size: Object.freeze(size) });
       }
       const result = {
         id, parentId: node.parentId ?? null, sourceMatrix, worldMatrix, bounds,
-        primitive: node.primitive ?? null, material: node.material ?? 'chalk',
+        primitive, material: node.material ?? 'chalk',
         visible: node.visible !== false && (parent?.visible ?? true),
       };
       resolved.set(id, result);
