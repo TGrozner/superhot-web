@@ -130,6 +130,11 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
   if (!Array.isArray(solids) || !Array.isArray(targets)) {
     throw new TypeError('Geometry solids and targets must be arrays');
   }
+  // Fix candidate membership before reading any collider getters. Such getters
+  // may mutate the caller's arrays; newly added/removed entries must not change
+  // which objects this particular trace evaluates (Web-only contract).
+  const solidCandidates = solids.slice();
+  const targetCandidates = targets.slice();
   let closest = null;
   const consider = (t, kind, entity, index) => {
     if (t === null || !Number.isFinite(t) || t < 0 || t > 1) return;
@@ -138,8 +143,8 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
     }
   };
 
-  for (let i = 0; i < solids.length; i++) {
-    const solid = solids[i];
+  for (let i = 0; i < solidCandidates.length; i++) {
+    const solid = solidCandidates[i];
     const min = snapshotPoint(solid?.min), max = snapshotPoint(solid?.max);
     if (!isFinitePoint(min) || !isFinitePoint(max)) {
       throw new TypeError('Every solid needs finite min/max points');
@@ -149,8 +154,8 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
     }
     consider(sweptBoxFraction(from, to, min, max), 'solid', solid, i);
   }
-  for (let i = 0; i < targets.length; i++) {
-    const target = targets[i];
+  for (let i = 0; i < targetCandidates.length; i++) {
+    const target = targetCandidates[i];
     const center = snapshotPoint(target?.center), radius = target?.radius;
     if (!isFinitePoint(center) || !Number.isFinite(radius) || radius < 0) {
       throw new TypeError('Every target needs a finite center and nonnegative radius');
