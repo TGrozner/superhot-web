@@ -33,6 +33,18 @@ const alignedWindow = (nativeTrace, webTrace) =>
   nativeTrace.samples[0].t === 0 && webTrace.samples[0].t === 0
   && nativeTrace.samples.at(-1).t === webTrace.samples.at(-1).t;
 
+// Same commands do not establish comparable runs if their initial state,
+// active input profile or deterministic seed differs. Digests are metadata
+// checks and cannot authenticate a native capture on their own.
+const alignedInitialContext = (nativeTrace, webTrace) =>
+  sha256(nativeTrace?.initialStateSha256)
+  && nativeTrace.initialStateSha256 === webTrace?.initialStateSha256
+  && nonBlank(nativeTrace?.inputProfile)
+  && nativeTrace.inputProfile === webTrace?.inputProfile
+  && Number.isSafeInteger(nativeTrace?.randomSeed)
+  && nativeTrace.randomSeed >= 0
+  && nativeTrace.randomSeed === webTrace?.randomSeed;
+
 // An admission gate for *future comparison*, never a native 1:1 certificate.
 // All fields below must come from separately inspected evidence, not a handoff.
 const assessComparisonReadiness = ({ declaration, method, binding, nativeTrace, webTrace }) => {
@@ -61,12 +73,14 @@ const assessComparisonReadiness = ({ declaration, method, binding, nativeTrace, 
     missing.push('native-measurement');
   }
   if (!webWellFormed || !commitSha(webTrace?.commit)
-    || nativeTrace?.valueUnit !== webTrace?.valueUnit) {
+    || nativeTrace?.valueUnit !== webTrace?.valueUnit
+    || !nonBlank(webTrace?.scene) || webTrace.scene !== binding?.scene) {
     missing.push('web-measurement');
   }
   if (nativeWellFormed && webWellFormed) {
     if (!alignedStimulus(nativeTrace, webTrace)) missing.push('matched-stimulus');
     if (!alignedWindow(nativeTrace, webTrace)) missing.push('matched-time-window');
+    if (!alignedInitialContext(nativeTrace, webTrace)) missing.push('matched-initial-context');
   }
   return {
     status: missing.length ? 'INCONNU' : 'COMPARABLE',
@@ -86,6 +100,10 @@ const comparisonFixture = () => {
     scenarioId: 'synthetic-idle-v1',
     inputSha256: 'a'.repeat(64),
     observable: 'fixed-step-duration',
+    scene: 'synthetic-scene',
+    initialStateSha256: 'c'.repeat(64),
+    inputProfile: 'synthetic-keyboard-mouse-v1',
+    randomSeed: 17,
     samples: [{ t: 0, value: 1 / 60 }, { t: 0.1, value: 1 / 60 }],
   };
   return {
@@ -262,4 +280,41 @@ test('TC-Q15: blank binding identity cannot designate the active scene component
   assert.equal(result.status, 'INCONNU');
   assert.deepEqual(result.missing, ['active-scene-binding']);
   assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q16: a Web trace from a different canonical scene is not comparable', () => {
+  const candidate = comparisonFixture();
+  candidate.webTrace.scene = 'another-scene';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['web-measurement']);
+  assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q17: matching inputs with different initial states are not comparable', () => {
+  for (const initialStateSha256 of ['d'.repeat(64), 'missing-digest', undefined]) {
+    const candidate = comparisonFixture();
+    candidate.webTrace.initialStateSha256 = initialStateSha256;
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['matched-initial-context']);
+    assert.equal(result.parityCertified, false);
+  }
+});
+
+test('TC-Q18: input profile and deterministic seed must match across traces', () => {
+  for (const change of [
+    { inputProfile: 'synthetic-gamepad-v1' },
+    { inputProfile: '   ' },
+    { randomSeed: 18 },
+    { randomSeed: -1 },
+    { randomSeed: 0.5 },
+  ]) {
+    const candidate = comparisonFixture();
+    Object.assign(candidate.webTrace, change);
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['matched-initial-context']);
+    assert.equal(result.parityCertified, false);
+  }
 });
