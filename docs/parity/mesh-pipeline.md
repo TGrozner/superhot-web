@@ -50,3 +50,90 @@ Actual SH-05 shader currently exposes `aPosition`, `aNormal`, `uAffineModel`, `u
 - Next vertical-slice gate: SH-05 wires an opt-in **synthetic cylinder** first; obtains one browser screenshot and indexed draw-call telemetry; then swaps to a source-qualified generated replacement only after SH-04/SH-11 provide `owner,path_id -> approved geometry / material` plus matching scene transform. SH-15 compares native vs Web only with matched camera/reference observations.
 
 Ownership: SH-12 files `src/render/mesh-format.js`, `src/render/gpu-mesh.js`, `tests/render-mesh-*.test.mjs`, this document. SH-13 owns `src/render/material-model.js` and `src/render/lighting-model.js`. SH-05 alone touches existing renderer/entrypoint/levels.
+
+
+## 2026-11-02 P0: native stream payload boundary (SH-12 follow-up)
+
+This section **supersedes the previous suggestion to create more cylinders**. Existing #87 is already merged. The new `decodeIndexedMeshPayload` is strictly a **source-neutral decoded buffer contract** for future source-qualified meshes, not a Unity .assets parser. It does not fabricate geometry, parse `m_CompressedMesh`, fetch proprietary files, or introduce an asset to the public repository.
+
+### Evidence inspected, without copying private source bytes
+
+Private `superhot-research` result.json files **actually inspected**, not inferred from green workflow status:
+
+- [#42](https://github.com/TGrozner/superhot-research/issues/42), artifact `13134488644`: four `level28` cargo MeshFilters point to local mesh path IDs **6** and **7** (`m_FileID=0`). This proves serialized references, **not a runtime draw**.
+- [#43](https://github.com/TGrozner/superhot-research/issues/43), artifact `13134688163`: Mesh 6 is named a combined-scene mesh with **44,030 declared vertices / 61 submeshes**, Mesh 7 with **60,874 declared vertices / 85 submeshes**. Both include declared vertex stream paths and index format 0. Those figures are **source metadata only**.
+- [#45](https://github.com/TGrozner/superhot-research/issues/45), artifact `13135470613`: serialized index buffer fields are present, but `m_VertexData.m_Data` is not a resolved inline payload; **vertex data is referenced by an external stream**. The bounded SQL did not return decoded vertex or index bytes. Neither MCD triangles nor a shader/texture has been transported into the Web runtime.
+
+The original `result.json`, binary buffers, `level28.resS`, source materials and captures stay **private**. SH-11 owns the next extraction/resolution and must qualify real bytes, exact Unity stream/channel offsets and source licensing before any visual matching claim. No additional corpus query was issued by SH-12.
+
+### Required explicit descriptor, after PRIVATE source conversion
+
+```js
+import { decodeIndexedMeshPayload } from './render/mesh-format.js';
+import { uploadIndexedMesh } from './render/gpu-mesh.js';
+
+// All input bytes must be real, authorized, fully decoded and separately
+// verified against the source. This is a CONTRACT, not a payload example:
+const decoded = decodeIndexedMeshPayload({
+  coordinateSpace: 'web-rh',
+  byteOrder: 'little',
+  compression: 'none',
+  sourceWinding: 'ccw',  // or 'cw' AFTER Unity->Web axis conversion
+  vertexCount: verifiedVertexCount,
+  streams: [
+    { bytes: verifiedVertexBuffer, strideBytes: verifiedStrideBytes, byteOffset: 0 },
+    // multi-stream layouts accepted, each stream independently bounded
+  ],
+  attributes: {
+    position: { stream: 0, offsetBytes: positionOffset, format: 'float32' },
+    normal: { stream: 0, offsetBytes: normalOffset, format: 'snorm8' },
+    uv0: { stream: 0, offsetBytes: uvOffset, format: 'float16' },
+  },
+  indexBufferBytes: verifiedIndexBytes,
+  indexFormat: 'uint16', // or 'uint32', NOT Unity enum passed through blindly
+  submeshes: verifiedSubmeshes.map((sub, materialSlot) => ({
+    topology: 'triangles',  // explicit converted primitive type
+    firstByte: sub.firstByte, indexCount: sub.indexCount,
+    baseVertex: sub.baseVertex, firstVertex: sub.firstVertex,
+    vertexCount: sub.vertexCount, materialSlot,
+  })),
+  worldMatrix: verifiedWebColumnMajorAffine4x4, // OPTIONAL; no auto Unity conversion
+});
+// decoded.mesh = canonical Float32 pos|normal|uv mesh, uint16/32 indices
+// decoded.drawRanges = [{firstIndex,indexCount,materialSlot}] per source submesh
+// decoded.world = { model, normal, mirrored } if worldMatrix supplied
+```
+
+The formats currently understood are `float32`, `float16`, `snorm8`, `unorm8`, `snorm16`, `unorm16` (all little endian). Attribute **component counts are fixed** (position.xyz, normal.xyz, uv0.xy), so exotic formats, missing channels, unknown compression, missing streams, non-triangle topology, out-of-range submeshes, illegal offsets or unproven coordinate conversion are hard failures. `sourceWinding='cw'` swaps the triangle indices once; model-matrix reflection remains a **separate GPU front-face decision**. No silent approximation or normal reconstruction.
+
+Do **not** pass base64-encoded `tree_json`, external `m_StreamData.path`, compressed Unity blobs, a collider approximation, or a `MeshFilter` ID as `bytes`. Before this API can render MCD, SH-11 must prove actual buffer locations, byte lengths, channel mappings/strides, index format/endianness, primitive topology, submesh/material assignment and correct source->Web orientation. If bytes are not obtainable/authorized, the native mesh remains blocked.
+
+### SH-05 exact integration contract — no shared files changed by SH-12
+
+Inside SH-05's existing `createRenderer` (in `src/renderer.js`, exclusively SH-05), after the shader is linked and an **authorized** decoded mesh descriptor is supplied:
+
+```js
+const { mesh, drawRanges, world } = decodeIndexedMeshPayload(sourceQualifiedDescriptor);
+const gpu = uploadIndexedMesh(gl, program, mesh);  // once per source mesh
+// Per instance, after renderer.begin(camera) and SH-13 material binding:
+const { model, normal, mirrored } = world ?? meshModelMatrices(worldMatrix);
+gl.uniform1i(uniforms.uUseAffine, 1);
+gl.uniformMatrix4fv(uniforms.uAffineModel, false, model);
+gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
+// Reuse existing uColor / uAlpha and SH-13 material/light uniforms.
+// If CULL_FACE is enabled, set FRONT_FACE to mirrored ? CW : CCW,
+// then restore the caller's previous state after the draw batch.
+for (const range of drawRanges) {
+  const material = sourceQualifiedMaterials.get(range.materialSlot);
+  if (!material) throw new Error('Missing verified submesh material slot');
+  // bind material here; shader/texture ownership stays SH-13/SH-05
+  gpu.draw(range); // drawElements(TRIANGLES, range.indexCount, type,
+//                range.firstIndex * (uint32 ? 4 : 2))
+  drawCalls++; // existing SH-05 scene metric
+}
+// gpu.dispose() on context loss/shutdown
+```
+
+The uploader still validates/owns VAO+VBO+EBO; `gpu.draw()` remains backward compatible, while `gpu.draw({firstIndex,indexCount})` now draws only the requested triangle range. Material slots and world transforms are deliberately not inferred from buffer shape. SH-05 should first run a **synthetic/authorized in-memory split-stream fixture** through this contract, then capture a real browser frame and draw-call trace; only substitute a source-qualified mesh when its exact bytes and bindings are verified. SH-15 handles paired screenshot comparison with same native/Web camera.
+
+**Acceptance ladder:** (1) 6 synthetic vertices, two submeshes and two drawElements with offsets 0 and 6 bytes (uint16) in mocked WebGL2, not a screenshot; (2) SH-05's browser/GPU smoke screenshot, winding/reflection and draw call count; (3) verified private native buffer provenance + matching scene instance + authorized runtime draw; (4) matched camera, silhouette/material/color deltas measured by SH-15. Only (1) is established by this module's tests. Never conflate a parser unit test or green CI with MCD visual parity.
