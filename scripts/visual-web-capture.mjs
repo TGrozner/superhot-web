@@ -102,7 +102,12 @@ function sampleNotBlank(windowRef,documentRef,blob){
 const toHex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
 /**
  * In Chrome/Edge DevTools after loading both private OBJ files:
- * await (await import('/scripts/visual-web-capture.mjs')).captureContainersWeb({webCommit:'abcdef0'})
+ * Current server.mjs serves .mjs as octet-stream, not JS MIME; until SH-05
+ * changes that shared server file, run this local-only DevTools snippet:
+ * const src = await (await fetch('/scripts/visual-web-capture.mjs')).text();
+ * const url = URL.createObjectURL(new Blob([src], {type:'text/javascript'}));
+ * try { await (await import(url)).captureContainersWeb({webCommit:'abcdef0'}); }
+ * finally { URL.revokeObjectURL(url); }
  * Saves one PNG LOCALLY with SH15Capture tEXt metadata. No native frame claimed.
  */
 export async function captureContainersWeb({
