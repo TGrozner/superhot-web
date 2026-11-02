@@ -108,3 +108,24 @@ uses authored spawn candidates with Web encounter timing. Combat/hitboxes,
 axis-aligned collision, death fragments, audio and lighting remain Web behavior.
 Native death ragdoll physics and complete red-crystal shader/post-processing are
 not implemented. Tests and isolated pose images must not be called full 1:1 parity.
+
+## SH-14 Red Crystal final-output integration (2026-11-02)
+
+The live GPU-skinned character fragment shader now embeds and invokes
+`NATIVE_MATERIAL_GLSL.redCrystalOutput` from `src/render/native-material.js`.
+It applies the recovered final RGB mix, conditional green term and opaque alpha.
+The Unity-order positions, weights, compact joint palette and original sampled
+idle/walk/hit clips are unchanged; **no OBJ remap** is applied.
+
+This is **bounded shader math**, not full Red Crystal parity. Native
+`proceduralRgb`, `overlayRgbAmount`, and `additiveRgb` producers remain
+unverified. For now, the pass feeds its existing Web lit RGB into procedural,
+with zero overlay/additive signals. It does not invent specular, fog, reflectance,
+shatter or death inputs. Its draw report exposes
+`redCrystalFinalCompositor: true`, `redCrystalNativeInputsVerified: false`,
+and `materialParity: false`.
+
+The four pre-change isolated views in `docs/parity/visual.md` measure silhouette
+IoU 0.9554–0.9615 and RGB delta 0.0940–0.1022. No post-change comparison or
+visible improvement has been measured. SH-05 can integrate this pass without
+editing its caller integration or waiting for a different rig package.
