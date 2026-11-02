@@ -302,23 +302,20 @@ transfert GPU ; une erreur conserve le modèle précédent. Aucun envoi externe.
 
 Le modèle complet contient **2254 triangles**, la variante sans tête **2132**.
 Ce sont les véritables exports de `sharedassets0.assets:284/285`, pas le
-mannequin procédural. Ils sont affichés **statiquement**, en pose exportée :
-les animations, les apparitions et la simulation des ennemis natifs ne sont
-pas raccordées par cette intégration. La couleur rouge provient du paramètre
-du matériau, mais le shader et l'éclairage restent ceux du Web.
+mannequin procédural. Le chargement local raccorde désormais le squelette
+de 62 nœuds et les poses originales `idle`, `walk` et `hit` au temps du jeu.
+Les apparitions, le combat, les débris et l'éclairage restent des adaptations
+Web ; `hit` n'est pas une animation native de mort.
 
-**Cadrer le modèle** montre le personnage entier au-dessus du sol de visite.
-**Vue des conteneurs** restaure la caméra d'ensemble. Ces deux placements sont
-diagnostiques, pas des positions de jeu natives. La navigation Containers
-n'applique plus les limites de déplacement d'un autre niveau du prototype :
-le premier déplacement ne téléporte plus la caméra de z=31 à z=21.8.
-Les limites des modes de jeu ordinaires restent inchangées.
+**Cadrer le modèle** ouvre une inspection sans collision. **Vue des conteneurs**
+revient au point de départ auteur de la scène locale complète. Le bouton de
+combat démarre la rencontre Web avec les modèles originaux. Les positions
+auteur ne prouvent pas le choix des apparitions effectué par le moteur natif.
 
 La texture béton ne s'applique qu'aux conteneurs, jamais à l'ennemi.
-`window.__superhotSceneMetrics.localNativeEnemy` décrit le modèle chargé et
-`nativeEnemyIndexedDrawCalls` son draw distinct ; `camera` expose une copie
-de la caméra de visite. `nativeEnemySpawnVerified` et `skinAnimationVerified`
-restent `false`.
+`window.__superhotSceneMetrics` décrit les modèles, le squelette et les draws
+effectivement soumis. `skinAnimationVerified` indique le chargement du pass
+animé ; `nativeEnemySpawnVerified` reste `false`.
 
 **Vérification navigateur locale effectuée le 2026-11-02 :** Chromium/WebGL2
 a affiché les deux vrais modèles, chacun avec un draw indexé, ainsi que les
@@ -330,8 +327,17 @@ des UV et l'absence de modification du rendu des boîtes générées.
 Captures et fichiers originaux restent dans le corpus privé. Ce constat Web
 ne vaut pas comparaison pixel avec MCD ni validation des animations.
 
+Cette vérification statique est historique. Les vérifications actuelles du
+monde complet, du skinning et des quatre références natives isolées sont
+décrites dans [visual.md](visual.md) et [characters.md](characters.md).
+Elles ne constituent toujours pas une validation de fidélité 1:1.
 
-### SH-05 Containers playable vertical slice (2 Nov 2026)
+### SH-05 — Mode de secours sans package de scène complet (2 Nov 2026)
+
+Les apports de la PR #128 sont conservés lorsque le package privé de scène
+complète n'est pas disponible. Les paragraphes suivants concernent uniquement
+ce mode de secours : avec le package complet, les colliders, points auteur,
+armes et animations décrits plus haut prennent le relais.
 
 The default original-local-file view now uses **five level28 serialized BoxCollider envelopes** as provisional AABB contact obstacles and a clearly **invented Web spawn** (11, 2.65, 28). The serialized overhead cargo is excluded from ground-level 2D walking, but remains eligible for 3D projectile contact. This is **not** a Unity PhysX CharacterController replay or a native player spawn. Source: private research #16/#27/#30/#32/#37/#39, published derived hulls in `src/scenes/containers-build28.js`.
 

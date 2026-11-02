@@ -85,6 +85,24 @@ test('normal inverse-transpose is correct with nonuniform scale', () => {
   near(vertex(result.mesh,1), [2,0,0]);
 });
 
+test('mixed nonuniform influences transform normals from the blended position matrix', () => {
+  const diagonal = Math.SQRT1_2;
+  const mesh = defineIndexedMesh({
+    positions:[0,0,0, 1,0,0, 0,1,0],
+    normals: [diagonal,diagonal,0, diagonal,diagonal,0, diagonal,diagonal,0],
+    uvs:[0,0, 1,0, 0,1], indices:[0,1,2],
+  });
+  const mixedWeights = [.5,.5,0,0, .5,.5,0,0, .5,.5,0,0];
+  const binding = bind({ mesh, boneWeights: mixedWeights });
+  const result = skinIndexedCharacter(binding, {
+    'custom-joint-A': identity(), 'custom-joint-B': scaleX(2),
+  });
+  const expectedLength = Math.hypot(2 / 3, 1);
+  near(Array.from(result.mesh.vertices.slice(3,6)),
+    [(2 / 3) / expectedLength, 1 / expectedLength, 0]);
+  near(vertex(result.mesh,1), [1.5,0,0]);
+});
+
 test('skin binding refuses absent, fractional, out-of-range, negative and nonnormalized weights', () => {
   assert.throws(() => bind({ boneWeights: weights.slice(1) }), /exactly/);
   assert.throws(() => bind({ boneIndices: [2,...indices.slice(1)] }), /Invalid skin/);
@@ -97,7 +115,8 @@ test('skin binding refuses absent, fractional, out-of-range, negative and nonnor
 
 test('source-neutral pose contract refuses missing, singular and NaN joint matrices', () => {
   const binding = bind();
-  assert.throws(() => skinIndexedCharacter(binding, { 'custom-joint-A': identity() }), /Missing measured/);
+  assert.throws(() => skinIndexedCharacter(binding, { 'custom-joint-A': identity() }),
+    /Missing hierarchy-global/);
   assert.throws(() => skinIndexedCharacter(binding, {
     'custom-joint-A': identity(), 'custom-joint-B': scaleX(0),
   }), /Singular|unstable/);

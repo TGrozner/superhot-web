@@ -7,7 +7,7 @@
  * A malformed caller-provided ruleset must not leak non-finite target values.
  * Native TimeControl source #13 now establishes the order of its LateUpdate;
  * the explicit source-qualified model below is separate from these Web rules.
- * Active shifter inputs and runtime measurements are still unverified.
+ * Containers composes the source-qualified clock below; demos retain stepTime.
  *
  * Call stepTime only for an active simulation tick. The optional paused flag
  * freezes all time domains and activity decay when a caller needs a pure
@@ -353,4 +353,297 @@ export function mcdSourcePlayerTimeTargets({
     movementTarget: Math.fround(adjusted * power),
     jumpTarget: isGrounded ? 0 : Math.fround(Math.fround(0.75) * power),
   };
+}
+
+/**
+ * Default Containers runtime composition, without POWER/SlomoJump modifiers.
+ * PlayerController, CameraLookTimeControl and SimplifiedTimeShifter supply the
+ * three source time domains here; collision/Unity callback ordering remain Web.
+ */
+export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
+  const source = createMcdSourceTimeState({ fixedTimestepDenominator: 120, powerActive: false });
+  source.shifters = Array.from({ length: 3 }, () => ({
+    terminated: false, currentTimeModifier: 0,
+  }));
+  return {
+    source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
+    lookBuffer: 0, lookMeasuredAt: 0, lookWarmup: 10, yaw, pitch,
+  };
+}
+
+/** Native pulse durations use world time and expire strictly after the deadline. */
+export function addMcdGameplayPulse(clock, duration, amount) {
+  if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(amount) || amount < 0) {
+    throw new RangeError('Time pulse duration and amount must be finite and nonnegative');
+  }
+  clock.source.shifters.push({
+    terminated: false, currentTimeModifier: Math.fround(amount),
+    expiresAt: clock.worldTime + Math.fround(duration),
+  });
+}
+
+export function stepMcdGameplayClock(clock, {
+  dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
+}) {
+  if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
+    throw new RangeError('Gameplay time input must be finite with nonnegative dt');
+  }
+  clock.realTime += dt;
+  if (paused) {
+    clock.yaw = yaw; clock.pitch = pitch;
+    return { worldDelta: 0, timeScale: 0, aggregate: clock.aggregate };
+  }
+  // Update consumes the previously applied scale; LateUpdate writes the next.
+  const worldDelta = Math.fround(Math.fround(dt) * clock.timeScale);
+  clock.worldTime += worldDelta;
+  const targets = mcdSourcePlayerTimeTargets({
+    processedX: x, processedY: y, isGrounded: grounded,
+    cameraDollyMode: false, powerActive: false, canAlterTimescale: true,
+  });
+  const [movement, jump, look] = clock.source.shifters;
+  movement.currentTimeModifier = advanceMcdSourceLinearShifter({
+    ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.movement,
+    currentTimeModifier: movement.currentTimeModifier,
+    targetTimeModifier: targets.movementTarget, unscaledDeltaTime: dt,
+  });
+  jump.currentTimeModifier = advanceMcdSourceLinearShifter({
+    ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.jump,
+    currentTimeModifier: jump.currentTimeModifier,
+    targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: dt,
+  });
+  if (clock.lookWarmup > 0) {
+    clock.yaw = yaw; clock.pitch = pitch; clock.lookWarmup--;
+  }
+  if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
+    // Quaternion.Angle for the yaw/pitch camera, not raw mouse-pixel distance.
+    const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
+    const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+    clock.lookBuffer = Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03)));
+    look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
+    clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
+    clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
+  }
+  for (const pulse of clock.source.shifters) {
+    if (pulse.expiresAt !== undefined) pulse.terminated = clock.worldTime > pulse.expiresAt;
+  }
+  const next = advanceMcdSourceTime(clock.source);
+  clock.source = next.state;
+  if (next.wroteTimeScale) {
+    clock.timeScale = next.timeScale;
+    clock.aggregate = next.aggregate;
+  }
+  return { worldDelta, timeScale: clock.timeScale, aggregate: clock.aggregate };
+}
+
+/**
+ * Source-qualified pre-constraint player displacement, not full movement or
+ * a claim that this PlayerController is active in Containers.
+ *
+ * PROUVÉ as delivered code (not observed gameplay): private research #101,
+ * artifact 13141298923, PlayerController.cs:452 (Steam MCD 20299547).
+ * Quaternion is the caller-supplied Unity direction.rotation (x,y,z,w),
+ * velocity is the caller-supplied pre-constraint velocity in Unity units,
+ * scaledDeltaTime is caller-supplied Unity Time.deltaTime in seconds.
+ * The native method later modifies this delta for optional lock/offset then
+ * calls CharacterController.Move; collisions and those guards are NOT here.
+ * No inference from TimeControl.LateUpdate's latest write to the dt of the
+ * same UpdateMovement invocation is allowed without an execution trace.
+ * The quaternion-vector operation is a mathematical JS approximation, not
+ * a bit-exact simulation of the original Unity float32 implementation.
+ */
+export function mcdSourcePlayerPreConstraintMove({
+  velocity,
+  directionRotation,
+  scaledDeltaTime,
+} = {}) {
+  if (!velocity || !directionRotation) {
+    throw new TypeError('explicit velocity and directionRotation required');
+  }
+  if (!Number.isFinite(scaledDeltaTime) || scaledDeltaTime < 0) {
+    throw new RangeError('scaledDeltaTime must be finite and nonnegative');
+  }
+  const { x: vx, y: vy, z: vz } = velocity;
+  const { x: qx, y: qy, z: qz, w: qw } = directionRotation;
+  if (![vx, vy, vz, qx, qy, qz, qw].every(Number.isFinite)) {
+    throw new RangeError('velocity and directionRotation components must be finite');
+  }
+  // For an authentic Unity rotation quaternion, q*v*q^-1 applies its
+  // pre-existing local-space direction without inventing a camera yaw.
+  const tx = 2 * (qy * vz - qz * vy);
+  const ty = 2 * (qz * vx - qx * vz);
+  const tz = 2 * (qx * vy - qy * vx);
+  const x = (vx + qw * tx + qy * tz - qz * ty) * scaledDeltaTime;
+  const y = (vy + qw * ty + qz * tx - qx * tz) * scaledDeltaTime;
+  const z = (vz + qw * tz + qx * ty - qy * tx) * scaledDeltaTime;
+  if (![x, y, z].every(Number.isFinite)) {
+    throw new RangeError('pre-constraint displacement must be finite');
+  }
+  return { x, y, z };
+}
+
+/**
+ * Opt-in pure model of MCD CameraLookTimeControl's look-time shifter.
+ * PROUVÉ in delivered source, NOT observed in a Containers native frame:
+ * private research #148, artifact 13175262864, MCD build 20299547,
+ * managed/Assembly-CSharp/CameraLookTimeControl.cs:13,20-21,29-34,41-79,
+ * source SHA256 7e3d0bc64fc111a11b46643e2773c213051bd0c9a6fb4f71f85da42a170067d1.
+ * CameraAngle is a WORLD-space Transform quaternion, not DOM mouse pixels or
+ * necessarily yaw/pitch. Binding in CameraManager.Awake is source-qualified
+ * (#142) but execution and actual guards are UNKNOWN in Containers.
+ * No Unity lifecycle, input device, world timing or actor is invented here.
+ */
+const MCD_SOURCE_LOOK_SENSITIVITY = Math.fround(0.03);
+const MCD_SOURCE_LOOK_CAP = Math.fround(0.3);
+const MCD_SOURCE_LOOK_MEASURE_INTERVAL = Math.fround(1 / 60);
+
+const sourceWorldQuaternion = (rotation) => {
+  if (!rotation || ![rotation.x, rotation.y, rotation.z, rotation.w].every(Number.isFinite)) {
+    throw new TypeError('explicit finite world quaternion required');
+  }
+  return { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w };
+};
+
+/** Starting this model means CameraLookTimeControl.Start has been invoked. */
+export function createMcdSourceLookTimeshiftState({ cameraWorldRotation, currentTimeModifier } = {}) {
+  // Start receives a shifter from TimeControl; its initial modifier is NOT
+  // established by CameraLookTimeControl.cs, so the caller must supply it.
+  if (!Number.isFinite(currentTimeModifier)) {
+    throw new TypeError('initial shifter modifier must be explicitly supplied');
+  }
+  return {
+    previousWorldRotation: sourceWorldQuaternion(cameraWorldRotation),
+    warmupUpdatesRemaining: 10,
+    lastTimeMeasuredDeltaA: 0,
+    rotationAccumulated: 0,
+    timeShiftBuffer: 0,
+    currentTimeModifier,
+  };
+}
+
+/** Source ResetRotationAccumulated only resets the sum and previous angle. */
+export function resetMcdSourceLookRotationAccumulated(state, cameraWorldRotation) {
+  if (!state || typeof state !== 'object') throw new TypeError('look state required');
+  return {
+    ...state,
+    previousWorldRotation: sourceWorldQuaternion(cameraWorldRotation),
+    rotationAccumulated: 0,
+  };
+}
+
+const sourceQuaternionAngleDegrees = (a, b) => {
+  const dot = Math.abs(
+    Math.fround(Math.fround(a.x * b.x) + Math.fround(a.y * b.y)
+      + Math.fround(a.z * b.z) + Math.fround(a.w * b.w)),
+  );
+  return Math.fround(Math.acos(Math.min(1, dot)) * (360 / Math.PI));
+};
+
+/**
+ * One source Update, not one requestAnimationFrame or input tick. The explicit
+ * Wydmuszka, weapon and debug gates are inputs, not guessed Web defaults.
+ * A successful measurement with lock=true still adds to the buffer but does
+ * not update CurrentTimeModifier. A later zero-angle measurement may drain it.
+ * Float32 arithmetic is approximated; exact Unity rounding remains UNKNOWN.
+ */
+export function advanceMcdSourceLookTimeshift(state, {
+  unscaledTime,
+  cameraWorldRotation,
+  wydmuszkaMode,
+  activeWeaponIsTakedown,
+  takedownCanUseTimeshifts,
+  lockLookShifter,
+} = {}) {
+  if (!state || typeof state !== 'object' || !Number.isInteger(state.warmupUpdatesRemaining)
+      || state.warmupUpdatesRemaining < 0 || ![state.lastTimeMeasuredDeltaA,
+        state.rotationAccumulated, state.timeShiftBuffer, state.currentTimeModifier].every(Number.isFinite)) {
+    throw new TypeError('valid source look state required');
+  }
+  sourceWorldQuaternion(state.previousWorldRotation);
+  if (!Number.isFinite(unscaledTime) || unscaledTime < 0) {
+    throw new RangeError('unscaledTime must be finite nonnegative seconds');
+  }
+  for (const [name, value] of Object.entries({ wydmuszkaMode,
+    activeWeaponIsTakedown, takedownCanUseTimeshifts, lockLookShifter })) {
+    if (typeof value !== 'boolean') throw new TypeError(`${name} must be explicit boolean`);
+  }
+  const rotation = sourceWorldQuaternion(cameraWorldRotation);
+  if (wydmuszkaMode) {
+    return { state: { ...state, previousWorldRotation: { ...state.previousWorldRotation } },
+      measured: false, wroteModifier: false, deltaAngleDegrees: null };
+  }
+  const next = { ...state, previousWorldRotation: { ...state.previousWorldRotation } };
+  if (next.warmupUpdatesRemaining > 0) {
+    next.previousWorldRotation = rotation;
+    next.warmupUpdatesRemaining--;
+  }
+  // Source uses strict > on Time.unscaledTime, independent of Time.timeScale.
+  if (!(Math.fround(unscaledTime) > Math.fround(
+    Math.fround(next.lastTimeMeasuredDeltaA) + MCD_SOURCE_LOOK_MEASURE_INTERVAL))) {
+    return { state: next, measured: false, wroteModifier: false, deltaAngleDegrees: null };
+  }
+  let delta = sourceQuaternionAngleDegrees(rotation, next.previousWorldRotation);
+  if (activeWeaponIsTakedown && !takedownCanUseTimeshifts) delta = 0;
+  next.previousWorldRotation = rotation;
+  next.rotationAccumulated = Math.fround(next.rotationAccumulated + delta);
+  next.lastTimeMeasuredDeltaA = Math.fround(unscaledTime);
+  next.timeShiftBuffer = Math.fround(next.timeShiftBuffer
+    + Math.fround(delta * MCD_SOURCE_LOOK_SENSITIVITY));
+  if (lockLookShifter) {
+    return { state: next, measured: true, wroteModifier: false, deltaAngleDegrees: delta };
+  }
+  const amount = Math.min(MCD_SOURCE_LOOK_CAP, Math.max(0, next.timeShiftBuffer));
+  next.timeShiftBuffer = Math.fround(next.timeShiftBuffer - amount);
+  if (next.timeShiftBuffer < 0) next.timeShiftBuffer = 0;
+  next.currentTimeModifier = amount;
+  return { state: next, measured: true, wroteModifier: true, deltaAngleDegrees: delta };
+}
+
+/**
+ * Scene-identity gate for the Containers-only reconstructed gameplay clock.
+ *
+ * OBSERVED WEB: src/main.js currently constructs createMcdGameplayClock for
+ * every loaded native scene, including SHRL_Dojo2 (build10).
+ * PROVED SERIALIZED, NOT EXECUTED: private research #38, artifact 13134630168,
+ * identifies level28:TimeControl18679 with denominator 120 in Containers.
+ * Its TimeControl method contract is research #13, artifact 13134370412,
+ * MCD build 20299547. The Dojo/level10 instance and denominator are UNKNOWN.
+ *
+ * This is opt-in: SH-05 owns selection/fallback in src/main.js. Returning null
+ * for an unqualified scene preserves that distinction rather than guessing a
+ * Dojo denominator or silently applying the Containers profile.
+ */
+export const MCD_CONTAINERS_SERIALIZED_TIME_SCENE = Object.freeze({
+  sceneBuildIndex: 28,
+  scenePath: 'Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity',
+  serializedOwner: 'level28',
+});
+
+export function qualifyMcdGameplayClockScene(sceneSource) {
+  const known = MCD_CONTAINERS_SERIALIZED_TIME_SCENE;
+  const sourceQualified = sceneSource != null
+    && sceneSource.sceneBuildIndex === known.sceneBuildIndex
+    && sceneSource.scenePath === known.scenePath
+    && sceneSource.serializedOwner === known.serializedOwner;
+  return Object.freeze({
+    status: sourceQualified
+      ? 'CONTAINERS_SERIALIZED_TIME_PROFILE_ONLY'
+      : 'NATIVE_SCENE_TIME_UNKNOWN',
+    sourceQualified,
+    fixedTimestepDenominator: sourceQualified ? 120 : null,
+    nativeRuntimeObserved: false,
+  });
+}
+
+/**
+ * Only yield the historical Containers Web clock after exact source identity.
+ * No clock is created for Dojo/level10, unknown scenes or incomplete metadata;
+ * the caller must explicitly choose a WEB-PROVISIONAL fallback for those.
+ * This does not alter existing callers of createMcdGameplayClock.
+ */
+export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pitch = 0 } = {}) {
+  const qualification = qualifyMcdGameplayClockScene(sceneSource);
+  return Object.freeze({
+    qualification,
+    clock: qualification.sourceQualified ? createMcdGameplayClock({ yaw, pitch }) : null,
+  });
 }

@@ -447,3 +447,97 @@ asymmetric non-cubic wedge and a mock WebGL2 context to prove the 32-byte
 vertex offsets, partial `drawElements` byte offset, fail-before-upload,
 and legacy compatibility. **A real Chromium GPU frame / private local file
 test is still an independent SH-05 / SH-15 acceptance gate.**
+
+
+## SH-12 source-mesh orientation diagnostic (2026-11-02; read-only CPU gate)
+
+The current **locally loaded, source-backed** Containers world uses the
+indexed meshes/normal attributes consumed by SH-05's WebGL2 native world pass.
+SH-13's source worldNormal Concrete seam/diffuse work makes correct OBJ
+winding and source-normal signs visibly consequential. The parser already
+requires explicit axisSigns and winding when converting the OBJ; it
+must **not** silently change either from a guessed camera or pixel sample.
+
+New exported **auditIndexedMeshOrientation(mesh, options)** is an optional
+load-time geometric diagnostic, not a material shader or new mesh decoder.
+It compares cross(b-a,c-a) against the average of the three authored normals
+for each indexed triangle, separately for each source draw range. It does not
+allocate WebGL resources, modify vertices/indices, choose a conversion, resolve
+a shader, derive UV2, perform skinning, or assert native/runtime parity.
+
+~~~js
+import {
+  parseObjGroupsIntoIndexedMesh, auditIndexedMeshOrientation,
+} from './render/mesh-format.js';
+import { uploadIndexedMesh } from './render/gpu-mesh.js';
+
+// The OBJ text comes from a USER-SELECTED PRIVATE FILE, not public Git or fetch.
+// Source gates must come from separately checked owner/pathID/renderer evidence.
+const decoded = parseObjGroupsIntoIndexedMesh(localAuthorizedObjText,
+  ['2_24', '2_47'], {
+    axisSigns: independentlyVerifiedObjToWebSigns,
+    winding: independentlyVerifiedWinding, // 'keep'|'flip'
+    expectedGroups: independentSourceCountsAndBounds,
+  });
+const report = auditIndexedMeshOrientation(decoded.mesh, {
+  drawRanges: decoded.drawRanges,
+  // Omit for world-baked exported cargo geometry: never apply duplicate TRS.
+  // For non-baked geometry, pass the separately verified Web model matrix.
+  // worldMatrix: verifiedWebInstanceMatrix,
+});
+if (report.opposed > 0 || report.degenerate > 0 || report.zeroNormal > 0) {
+  // Diagnostic signal only. Inspect per-group ranges, don't auto-flip normals!
+  console.warn('Source mesh orientation needs qualification', report.ranges);
+}
+const gpu = uploadIndexedMesh(gl, program, decoded.mesh, { requireUV: true });
+for (const range of decoded.drawRanges) {
+  // SH-05 binds the actual source-qualified material/texture separately.
+  gpu.draw(range);
+}
+~~~
+
+The **exact returned structure** includes:
+{triangles,aligned,opposed,ambiguous,degenerate,zeroNormal,compared,
+meanSignedCosine,minSignedCosine,maxSignedCosine,ranges,
+alignmentThreshold,mirroredWorld,worldTriangleWindingReversed,
+geometryOnly:true,nativeShadingOrPixelParityProven:false}.
+Each ranges[] entry also exposes the supplied groupName,
+firstIndex, indexCount, and the per-group metrics. aligned means
+face cross/averaged normals have signed cosine > 0.25 by default;
+opposed means < -0.25; near-tangential source smoothing is ambiguous.
+Degenerate faces and zero/cancelling source normals are counted separately
+and are not misclassified as backwards faces. Custom smooth shading can be
+intentionally oblique; this assay **never** proves which face should be visible
+or whether source-native normal/sRGB/lightmap pixels match.
+
+**Important handedness boundary:** an axisSigns conversion with a
+negative determinant changes geometric triangle winding. Corrective index
+flipping must be an explicit independently source-qualified winding:'flip',
+not guessed by this assay. A separate negative-determinant Web world matrix
+changes GPU front-facing AGAIN: the returned mirroredWorld and
+worldTriangleWindingReversed flags report that fact, while the shader's
+normal matrix remains the affine inverse transpose. SH-05 alone owns
+gl.frontFace/gl.CULL_FACE decisions and the final material pass; a
+reflection flag is not authorization to silently negate source normals.
+
+**Tangible generated tests:** tests/render-mesh-orientation.test.mjs uses
+a slanted noncuboid wedge split across synthetic multiword OBJ groups
+2_24/2_47 with relative indices. One-axis mirror WITHOUT flipping
+faces reports 2/2 opposed; flipping explicitly reports 2/2 aligned;
+two-axis reflection keeps 2/2 aligned. A reflected world matrix leaves
+local face/normal coherence unchanged but reports reversed GPU front-facing.
+Tests also distinguish zero normals, degenerate and perpendicular faces,
+reject malformed data/ranges, and ensure the same two source groups still
+issue the original drawElements(TRIANGLES,3,UNSIGNED_SHORT,0|6) calls
+in a mocked GPU context. **These numbers are synthetic fixtures, not MCD
+measurements or a Chromium/browser capture.**
+
+**SH-05 acceptance gate:** run this read-only assay on a locally authorized
+*real* geometry packet already loaded by the existing Containers world
+and record the per-owner/per-group histograms along with a real Chromium
+rendered frame. Correlate the exact meshId/range/materialId to the source
+registry; compare **same camera/pose/time** original-vs-Web pixels with SH-15
+before any declaration of a visual improvement. Unknown UV2 lightmap, actual
+XULM shading, skinning and active-native instance state remain separate
+questions; do not fabricate their channels. No additional corpus query is
+needed to deliver this diagnostic and no commercial payload was included.

@@ -171,3 +171,93 @@ export function sampleGunPickupShatterProxy(plan, elapsed, { gravity, size, colo
   }
   return { active: primitives.length > 0, primitives };
 }
+
+/**
+ * Activate AUTHORED shard draw IDs, never procedural substitute geometry.
+ * Each modelMatrix is its current absolute world transform. Motion below is
+ * bounded ballistic Web physics: source impulse/mass/inherited velocity, but
+ * not PhysX angular integration or collisions. Torque remains available for
+ * a host physics solver. Gravity must come from the caller's source settings.
+ */
+export function createGunPickupShardRuntime({
+  shards, parentVelocity, attachedToEnemy, torqueSamples, fadeDelays, gravity,
+}) {
+  if (!Array.isArray(shards)) throw new TypeError('authored shards must be an array');
+  const ids = new Set();
+  const sourceShards = shards.map(shard => {
+    if (!shard || typeof shard.id !== 'string' || !shard.id || ids.has(shard.id))
+      throw new TypeError('each authored shard needs a unique source draw id');
+    ids.add(shard.id);
+    const m = shard.modelMatrix;
+    if ((!Array.isArray(m) && !ArrayBuffer.isView(m)) || m.length !== 16 ||
+        Array.from(m).some(v => typeof v !== 'number' || !Number.isFinite(v)) ||
+        m[3] !== 0 || m[7] !== 0 || m[11] !== 0 || m[15] !== 1)
+      throw new TypeError('shard modelMatrix must be finite column-major affine');
+    finiteNumber(shard.originalScale, 'originalScale');
+    if (shard.originalScale <= 0) throw new RangeError('originalScale must be positive');
+    return { id: shard.id, originalScale: shard.originalScale, sourceMatrix: new Float64Array(m) };
+  });
+  const plan = planGunPickupShatter({
+    alreadyShattered: false, hasShardInstance: true, attachedToEnemy, parentVelocity,
+    shardCenters: sourceShards.map(s => ({ x: s.sourceMatrix[12], y: s.sourceMatrix[13], z: s.sourceMatrix[14] })),
+    torqueSamples, fadeDelays,
+  });
+  if (plan.status !== 'planned') throw new Error('Native shatter branch unavailable: ' + plan.status);
+  return {
+    elapsed: 0, gravity: finiteVector(gravity, 'gravity'),
+    physics: 'source-impulse-ballistic-no-angular-or-collision-simulation',
+    shards: sourceShards.map((s, i) => ({
+      ...s, modelMatrix: new Float64Array(s.sourceMatrix), visible: true,
+      velocity: {
+        x: plan.shards[i].velocity.x + plan.shards[i].impulse.x / plan.shards[i].mass,
+        y: plan.shards[i].velocity.y + plan.shards[i].impulse.y / plan.shards[i].mass,
+        z: plan.shards[i].velocity.z + plan.shards[i].impulse.z / plan.shards[i].mass,
+      },
+      torque: plan.shards[i].torque, delay: fadeDelays[i], hdrPhase: 0,
+      localScale: s.originalScale, fadeSaturated: false, destroyed: false,
+    })),
+  };
+}
+
+/**
+ * Source HDRPhaseManager calls both delays with Time.deltaTime, despite its
+ * unscaledTimeDelay name. RegisterDisappearEffect never assigns its first
+ * scaledTimeDelay argument in this build (the pooled field starts at zero).
+ * The legacy plan's duration/delay names are NOT used as a linear fade here.
+ * Returns live authored draw records; skip invisible/destroyed shards.
+ */
+export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
+  finiteNumber(scaledDelta, 'scaledDelta');
+  if (scaledDelta < 0) throw new RangeError('scaledDelta must be nonnegative');
+  const elapsed = runtime.elapsed + scaledDelta;
+  if (!Number.isFinite(elapsed)) throw new RangeError('shard clock overflow');
+  for (const shard of runtime.shards) {
+    if (shard.destroyed) continue;
+    if (shard.fadeSaturated) {
+      shard.destroyed = true;
+      shard.visible = false;
+      continue;
+    }
+    const value = Math.min(1, Math.max(0, elapsed - shard.delay));
+    const sourceScale = 1 - Math.min(1, (value * 10 / 3) ** 2);
+    shard.hdrPhase = value > 0.05 ? Math.min(1, (value * 5 - 0.05) ** 2) : 0;
+    if (sourceScale < shard.originalScale) shard.localScale = sourceScale;
+    shard.fadeSaturated = sourceScale <= 0 && shard.hdrPhase >= 1;
+    shard.visible = shard.localScale > 0;
+    const ratio = shard.localScale / shard.originalScale;
+    for (let col = 0; col < 3; col++) {
+      for (let row = 0; row < 3; row++) {
+        const index = col * 4 + row;
+        shard.modelMatrix[index] = shard.sourceMatrix[index] * ratio;
+      }
+    }
+    for (const [axis, index] of [['x', 12], ['y', 13], ['z', 14]]) {
+      const position = shard.sourceMatrix[index] + shard.velocity[axis] * elapsed +
+        runtime.gravity[axis] * (elapsed / 2) * elapsed;
+      if (!Number.isFinite(position)) throw new RangeError('shard integration overflow');
+      shard.modelMatrix[index] = position;
+    }
+  }
+  runtime.elapsed = elapsed;
+  return runtime.shards;
+}

@@ -632,3 +632,312 @@ revendication de parité.
 rapport initial ne prouve donc PAS une animation automatique après
 chaque balle. SH-05 décide seul du câblage dans `src/main.js`, après
 un contact browser vérifié et une preuve native d'instance/phase.
+
+## SH-03 — Ordered Bullet.FixedUpdate composition (2026-11-02)
+
+**PROUVÉ PAR SOURCE STATIQUE, PAS PAR EXÉCUTION NATIVE :** private research
+[#102](https://github.com/TGrozner/superhot-research/issues/102), run
+41444508326 / artifact 13141705847, MCD build 20299547, Assembly-CSharp
+SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`,
+`managed/Assembly-CSharp/Bullet.cs:184–215,231–317`, returned-text SHA-256
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`.
+FixedUpdate sweeps a radius-0.02 sphere through the displacement, sorts
+contacts with its native comparer, and stops on `(handled && !sniperBullet) ||
+destroyed`. The Bullets branch of HandleCollision returns **false** even
+when it requests two slices: later contacts cannot be suppressed solely
+because slicing was requested. Ignored colliders bypass the alert.
+
+**WEB IMPLEMENTED, NOT NATIVE PARITY:** `src/combat/bullet-fixed-contact-sequence.js`
+composes the existing bullet-pair and incoming-player planners on **caller
+supplied, already ordered** contacts. The caller must supply the *evaluated*
+`other.CanCollide(this)` and the post-handler `destroyed` state; unknown
+values stop inference. Enemies, Glass, Pickups and other native branches are
+**UNMODELED**, not silently skipped. The synthetic
+`tests/combat-bullet-fixed-contact-sequence.test.mjs` covers enemy shotgun
+request → Update displacement → two projectiles' contact requests → possible
+player-kill request, with explicit alive/destroyed alternatives and source
+phase separation. It exercises **pure plans**; no PhysX, audible hit, health
+change, enemy reaction, or renderer proof.
+
+**Correction de composition :** une demande de déplacement du projectile courant
+lors d'un contact Bullets devient la position utilisée pour les contacts suivants.
+Ainsi un sniper survivant transmet au hit joueur l'origine calculée depuis ce
+nouveau point, sans modifier les données d'entrée. L'index du contact est conservé.
+
+**Source complémentaire désormais disponible :** `Bullet.cs:524–527` définit
+`CanCollide` par l'identité de l'arme parente ; `SliceInHalf` appelle
+`DestroyBullet` (ligne510), qui marque `destroyed` (ligne471). L'environnement
+appelle également la destruction (ligne782). Il ne faut plus qualifier ces corps
+de méthodes d'inconnus. Le plan accepte toujours les résultats fournis par son
+appelant et n'exécute pas ces effets Unity.
+
+**UNKNOWN / REFUTATION:** concrete Containers projectile masks, PhysX contact
+ordering, live parent-weapon identities, active shotgun prefab and timing remain
+unverified. Enemies/Glass/Pickups are not yet composed into this bounded planner;
+it is not substituted for the complete live collision path. A matched native
+trace remains necessary for collision parity.
+
+
+## SH-03 — parentWeaponId CanCollide, source-verified (2026-11-02)
+
+**PROUVÉ par lecture statique, NON observé en gameplay natif :** build MCD
+`20299547`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Private research [#122](https://github.com/TGrozner/superhot-research/issues/122),
+run `41471599115`, artifact `13155566748`,
+`managed/Assembly-CSharp/Bullet.cs:519–527`, SHA-256 du texte exact
+`61ba0220e6e6d083a734407ba1b76a846eedc8b01f934d118064ce89d277ab17`.
+La méthode `SetParentWeaponId` enregistre le `GetInstanceID` du
+`GameObject` parent fourni. `CanCollide(Bullet b)`, appelée **sur la
+balle rencontrée** par `Bullet.HandleCollision:301` (research #102,
+artifact `13141705847`, texte SHA-256
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`),
+accepte si les deux `parentWeaponId` sont distincts **ou** si celui du
+receveur est zéro. Ainsi, deux IDs égaux NON NULS refusent la demande de
+découpe; un ID nul du receveur l'autorise, même lorsque les deux sont
+nuls. Il ne s'agit **ni** du `ShotId`, ni d'une comparaison de tags ou
+des camps joueur/ennemi; les gardes same-shot, double-ricochet et
+double-deflected sont évaluées séparément, en amont.
+
+**Implémentation Web bornée :** `canEncounteredBulletCollideWithCurrent`
+expose cette décision pour deux IDs `int32` explicitement fournis et
+`planBulletPairContact` la consomme lorsque **les deux** états
+`parentWeaponId` sont présents. Absence d'un champ ≠ zéro. Un résultat
+externe `otherCanCollideCurrent` contradictoire donne
+`parent-weapon-guard-conflict`; présence partielle donne
+`parent-weapon-ids-incomplete`. Le compositeur
+`planBulletFixedContactSequence` bloque alors les contacts suivants au
+lieu d'inventer une mort. Les tests purement Node injectent phases
+d'émission, déplacements, contacts classés et destruction après handler;
+une demande `player-kill-request` ne prouve **pas** une mort jouée.
+
+**PROUVÉ statiquement — deux producteurs d'identité réutilisant des
+artifacts existants (aucune nouvelle requête) :** `Gun.SpawnPooledBullet:
+228–257` renseigne le `parentWeaponId` du projectile à partir du
+`GameObject` de l'arme du joueur, avant de le marquer
+`firedByPlayer`, de le lancer et d'affecter séparément son `ShotId`.
+Source privée [research #91](https://github.com/TGrozner/superhot-research/issues/91),
+run `41442386881`, artifact `13141281736`, texte SHA-256
+`e983e18faa3eba6b96581b4e22a12085ebb61ea62dd62b5ccc8f35c93b572fe3`.
+De même, `GunPejAiWeapon.SpawnBulletLate:74–117` renseigne l'ID parent
+avec son propre `GameObject` **après** obtention réussie d'une balle
+dans le pool et avant activation. Source privée
+[research #71](https://github.com/TGrozner/superhot-research/issues/71),
+run `41439732334`, artifact `13138660437`, texte SHA-256
+`2b8166a7ce25e3e93ad163c96326690853cc8244a937b4e5d3166f0ca3754989`.
+Ce sont deux chemins distincts arme joueur / arme IA, et non une
+valeur de `parentWeaponId` démontrée pour une instance Containers.
+L'absence de balle disponible dans le pool IA signifie **pas de
+renseignement ni de spawn réussi par ce chemin**.
+
+**INCONNU, important pour la scène Containers :** quel objet appelle
+`SetParentWeaponId`, la valeur runtime des deux IDs des vraies balles,
+le résultat du pool, l'ordre des contacts PhysX, l'état `destroyed`
+après `SliceInHalf`, et tout effet réellement visible/entendu. Le
+`GetInstanceID` Unity ne doit pas être remplacé silencieusement par un
+ID d'entité Web. Les indices de projet ou valeurs C# par défaut ne
+prouvent pas les instances effectivement liées.
+
+**Handoff SH-05 :** pour comparer un projectile à un autre, renseigner
+les deux identités natives réelles ou une réponse native déjà vérifiée
+au même appel; jamais `undefined → 0`. Injecter aussi le contact PhysX
+réellement trié et `destroyedAfterHandler`. Tant que ces valeurs
+n'existent pas pour Containers, garder la paire **diagnostique**, et ne
+pas la câbler comme collision native dans `src/main.js`. Un scénario
+réfutable consiste à capturer deux bullets d'une même arme, puis de
+deux armes distinctes, relever les deux `parentWeaponId`, vérifier les
+demandes `SliceInHalf`, et refaire le même ordre de contacts et de
+destruction dans le Web. Aucun asset/code décompilé n'est publié.
+
+Empty native-mode pistol throws now follow `Gun.SpawnThrowawayAdditional:282–293`:
+unpickable immediately, removed after two world seconds from the throw, including
+after wall impact. A controlled browser input scenario reproduced the old empty
+repickup, then observed no pickup and the actual pistol draw disappearing at2.054s
+of world time; GL error0. Pointer-lock was a simulated precondition. Loaded throws
+and the explicit demo mode retain their existing pickup policy.
+
+## SH-03 source-bound enemy body-part hit (2026-11-02)
+
+**PRIMARY STATIC SOURCE — no gameplay runtime observation:** private research [#127](https://github.com/TGrozner/superhot-research/issues/127), workflow run `41480911171`, artifact `13158822845`, `managed/Assembly-CSharp/Bullet.cs:785–970`; SHA-256 of extracted UTF-8 text `6051142396c9bef59e1795f5da69f0f9ebba61d7bba30f8eba03f6eb0c79561e`, result.json SHA-256 `36f72ab70fe0447a6c275bc0a2f2ee783a5c17c534c8dcee5d41347df2652aac`. Combined with private [#102](https://github.com/TGrozner/superhot-research/issues/102), artifact `13141705847`, `Bullet.cs:184–215,231–317`, text SHA `db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`. MCD build `20299547`; Assembly-CSharp SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`. **These are decompiled managed code decisions, not executed native traces. No source text or asset copied.**
+
+**PROUVÉ statiquement:** a live `PejAiBodyPart` with controller is eligible only if no owner, a different controller instance, or owner in hotswitch; `excludeInCollision` rejects it. `Bullet.owner` is a `PejAiController` identity and MUST NOT be confused with the separate `Bullet.parentWeaponId` of projectile-pair collisions. Effective bulletproof protection is overridden by `pierceConcreteBody` or by an active player-owned `PiercingShot` modifier. Non-bulletproof, non-boss, armored body parts request armor break and sometimes Stun **rather than** `PejAiBody.Kill`; an unarmored part requests replay slowdown if the controller was alive, then `PejAiBody.Kill` with Bullet as death source. `goThroughGlass` and player `PiercingShot` can preserve a projectile on *enemy* collision, subject to the later boss check. The Enemies-layer outer handler returns true even when the inner body-part method returned false; the second body part in the same FixedUpdate can be suppressed by the `enemyPartCollisionHandled` latch. `FixedUpdate` stops only according to its native handler/destroyed predicates.
+
+**PROUVÉ — direct call chain and negative boundary:** this ordinary live-body-part hit requests `PejAiBody.Kill`, which invokes `PejAiController.Kill`. Pre-existing private sources [#89](https://github.com/TGrozner/superhot-research/issues/89), artifact `13139513152`, `PejAiBody.cs:565–602`, text SHA `2f938d5c65af66128acd324d52b6fb542c2ca369bf2e6f1bb298227c5e913c60`, and [#87](https://github.com/TGrozner/superhot-research/issues/87), artifact `13139513073`, `PejAiController.cs:5766–5832`, text SHA `a9d6ba64589baabde7a908eacece546fde248fd23a0eda6c5b69f053fe846ebc`, show **no direct call to AddBlowForce in these three inspected method bodies**. `PejAiController.Kill` still invokes `OnKill` delegates and modifier callbacks whose transitive targets are NOT closed here. Thus SH-06's blow-force plan must not be attached to every hit without separate runtime/callsite evidence. Audio prefab is *requested* in `PejAiBody.Kill`; no audible playback is established. Actual death, VFX and body-part cut side effects are not supplied by the pure planner.
+
+**WEB ONLY / implemented behind explicit evidence inputs:** `src/combat/enemy-body-part-contact.js` emits requests for body kill, armor break, Stun, replay slowdown and projectile destruction; `bullet-fixed-contact-sequence.js` composes the supported body-part branch in ordered FixedUpdate contact plans. It does **not** simulate PhysX, Rigidbody, animations or deliver damage. Missing body-part evidence still returns an unsupported-layer blocker. Boss-mind and enemy-weapon collider routes remain unsupported. Each separate `CheckIfBossMind` result, post-handler destroyed value and modifier is an injected fact rather than an inferred default.
+
+**INCONNU / SH-05 integration gate:** actual Containers/build28 collider→`PejAiBodyPart`→controller instance bindings, `BodyPartMeshCutter.IsArmored`, `isBulletProof`, owner IDs, active modifier, contact order/timing, already-dead/stunned states and which visual actor corresponds to the contact. The Web `closestImpact` uses provisional spheres; **do not** route every sphere hit to `enemy-body-kill-request`. First capture a specific local-player shot→source body-part contact with instance states and a browser-visible reaction; compare against the same native scenario before making parity claims. SH-05 retains exclusive ownership of `src/main.js`, `src/renderer.js` and merging.
+
+Integration correction: once `enemyPartCollisionHandled` is true, later
+`Enemies` contacts are skipped even when no body-part chain is supplied.
+The layer-level guard precedes component inspection in native `Bullet.cs:244–251`.
+A sniper continuation regression exercises accepted body-part → unqualified
+enemy collider → environment; this remains a command-plan test, not PhysX execution.
+
+## SH-03 — PejAiController visibility: source-backed, not sight-by-distance (2026-11-02)
+
+**PROUVÉ — méthode C# statique, PAS frame de gameplay exécutée.**
+MCD Steam build `20299547`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Relectures PRIVÉES bornées via la passerelle, sans copie du C# dans ce dépôt :
+[research #134](https://github.com/TGrozner/superhot-research/issues/134),
+artifact `13164851813`, `PejAiController.cs:4383–4458`,
+SHA-256 du texte `aa08174c1bcc58da0d9217ea8cdedafb7e9eadd4b96f363031fec6391e090233` ;
+[research #135](https://github.com/TGrozner/superhot-research/issues/135),
+artifact `13164687081`, `PejAiController.cs:4459–4550`,
+SHA-256 `d87e07c3e2f12495d3be78abdb06a1fd4b82d4e831c784fe99969c8c759e15a9`.
+Contraste [research #133](https://github.com/TGrozner/superhot-research/issues/133),
+artifact `13163638635`, `AIEnvironment.cs:219–245`,
+SHA-256 `9791f6e263c9083ca24ab20c3189cae7d04e4ecf133a66c576ad1881af3877b1`.
+
+**Point de confusion évité :** `AIEnvironment.IsPlayerInSight` raycaste
+pour la navigation/probes ; ce n'est **pas** la méthode de visibilité du
+contrôleur qui viserait le joueur. `PejAiController.CanSeeTarget` exécute
+`SphereCastNonAlloc` rayon **0,2** depuis les yeux, le long de la direction
+normalisée vers la cible, limité par `sightDistance` et
+`eyesightLayerMask`. Ses propres colliders passent temporairement en layer
+2, puis retrouvent leur couche. Sur plusieurs hits, la méthode choisit
+**la distance minimale**, pas le premier ordre du buffer. Le hit doit être
+la transform cible exacte, ou un `PejAiBodyPart` dont le contrôleur pointe
+sur cette transform quand `isTargetEnemy` est vrai. Une collision sur un
+simple enfant du joueur n'est **pas** qualifiée dans ce chemin. Hors mode
+`disregardSightAngle`, l'angle avec `_eyes.forward` doit satisfaire à la
+fois dot>=0 et angle<=`SightAngle`. Avec zéro hit, la méthode renvoie
+false **avant** d'écrire le cache. Si `cache` est activé, un résultat
+encore frais est réutilisé selon `Time.timeSinceLevelLoad` et
+`CanSeeCacheRefreshTime` (expiration strictement `>`).
+
+**PROUVÉ — wrappers distincts :** `CanSeePlayer` rafraîchit
+`_currentCanSeeAfterGlow` lors d'une visibilité directe, et sinon utilise
+son compte à rebours positif ; `CanSeePlayer360` peut réutiliser cet
+afterglow sans le réinitialiser. Les variantes pour hotswitch ont d'autres
+gardes : pas d'afterglow, et seul le mode non-360 admet le bypass spécifique
+à l'AddictMind en hotswitch. Le fait qu'une méthode renvoie true **ne
+prouve pas un tir** : l'arbre de comportement, le readiness de l'arme,
+l'animation et l'IK restent des étapes séparées.
+
+**Livraison Web (générique, PAS PhysX)** :
+`src/combat/ai-visibility.js` expose un planificateur de cast et un
+classificateur des hits source-qualifiés, plus la décision d'afterglow.
+L'absence de vrai SphereCast renvoie `visible:null`, jamais un
+fallback inventé. `tests/combat-ai-visibility.test.mjs` couvre notamment
+mur plus proche que joueur, cible/partie corporelle, angle, 360, cache,
+afterglow et valeurs manquantes. Ces fixtures **synthétiques** ne sont pas
+des traces de Containers.
+
+**INCONNU et bloqueur SH-05 :** objets `Player`/`_eyes` réellement
+instanciés dans Containers, `sightDistance`, `SightAngle`,
+`eyesightLayerMask`, `CanSeeCacheRefreshTime`, buffer/hits PhysX,
+phase `CanSeeTarget` effectivement appelée, état afterglow, archetype,
+conditions qui rendent `GunAttack` actif, tirs et réactions observés.
+Le prototype public se déplace/tire encore selon distance/timer : raccorder
+un cast Web **qualifié** uniquement après obtention des vraies couches,
+masks et volumes, et comparaison d'une poursuite/tir de l'autre côté
+d'un obstacle dans les deux jeux. Ne pas transformer les valeurs par
+défaut d'une classe en paramètres natifs actifs. Aucun fichier SH-05
+n'est modifié par ce lot.
+
+## SH-03 — PejAiController GunAttack decision chain (2026-11-02)
+
+**PROUVÉ (méthode C# statique, pas exécution Containers)** : lecture privée
+`TGrozner/superhot-research#140`, run `41501049816`, artifact `13169030963`,
+`managed/Assembly-CSharp/PejAiController.cs:996–1082` ; SHA-256 UTF-8 du
+texte borné `3eb02696085f21386521dc93a88ab271894ed065d9e30bafd4f3acbbc826eb11` ;
+`result.json` SHA-256 `727306718289eb2f5338e9cac9c7739a970a4d12fb123e7ed0602f8328f9e866`.
+MCD Steam build `20299547`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Relecture directe des octets JSON de cet artifact effectuée le 02/11/2026
+et empreintes recalculees. Aucun code décompilé ou asset n'est publié ici.
+
+`GunAttackBehaviour.OnRun` demande d'abord `CanSeePlayer360()` ; si false,
+retourne Failure sans déplacement ni attaque. Si true, appelle le dispatch
+virtuel `UpdateLocation()` ; si `AimTargetComponent.IsTargetInSight()` est
+false, demande `SetAimTargetAtPlayer()` puis `WeaponLower()` et retourne
+Running. Sinon il demande `WeaponPrepare()`, puis `GunAttack()` ; un refus de
+`UpdateTargetReroll()` sort de cette dernière sans même `Aim()`. Lorsqu'il
+continue, la pose d'arme est vérifiée ; `GetTimeToReady()>stopAimingTime` ou
+la pose invalide demande `RefreshAimTarget()`, puis `Aim()`.
+Une demande `Weapon.Attack(animationAimTarget.position,haveBeenSeen)` suivie
+de `RerollTarget()` exige **toutes** les conditions `IsAttackReady`, pose
+valide et `(IsInMiddleOfSeries || AimTargetComponent.IsReady())`. Sinon,
+`CheckReload()` est demandé **seulement si** arme non prête ou pose invalide ;
+un aim non prêt hors série n'appelle pas CheckReload. Les preuves privées #134
+et #135 traitent séparément `CanSeePlayer360` ; la présence d'une simple cible
+à distance n'autorise donc pas un tir. Le `UpdateLocation()` virtuel peut être
+redéfini pour un `DefensiveGunAttackBehaviour`, où l'écart
+`MinimumDistanceToPlayer * 0.5` modifie le reroll de navigation.
+
+**WEB PROVISOIRE** : `src/combat/ai-gun-attack-branch.js` ne livre que des
+**demandes** de méthodes à partir de prédicats explicites ; `Weapon.Attack`
+**ne prouve pas** qu'un projectile a été émis par le Pooler. Les dix tests
+synthétiques couvrent refus de vue, IK, reroll, pose, série, préparation
+et demande d'attaque. Aucun appel PhysX/animation/IK, aucun navigateur et
+aucun tir effectif n'ont été mesurés.
+
+**INCONNU / raccord SH-05** : arbre et archétype actifs sur les ennemis de
+Containers, états runtime du `CanSeePlayer360`, `AimTarget`, `Weapon`,
+`UpdateTargetReroll`, couches et contact Physics, phase d'appel, rafraîchissement
+de `onBulletSpawnController`, transformation finale muzzle et succès de
+`PoolerScript`. Une tranche réfutable doit instrumenter **un seul ennemi**
+et sa chaîne `OnRun → Weapon.Attack → deferredBulletSpawn → LateUpdate → Bullet`,
+puis comparer le contact et la réaction sur la même scène source. Pas de raccord
+dans `src/main.js` avec des paramètres par défaut non vérifiés.
+
+## SH-03 — GunPejAiWeapon base gun: no pre-spawn wall veto (2026-11-02)
+
+**PROUVÉ — code C# statique, PAS instance Containers exécutée.** Corpus
+privé `TGrozner/superhot-research#71`, run `41439732334`, artifact
+`13138660437` relu directement (`managed/Assembly-CSharp/GunPejAiWeapon.cs:17–116`,
+SHA-256 UTF-8 `2b8166a7ce25e3e93ad163c96326690853cc8244a937b4e5d3166f0ca3754989`; 
+`result.json` SHA-256 `3b131b8ebed57a3625fa3359f6a4500603b67ead70a8ccf1303fd34abb371065`).
+Build Steam MCD `20299547`, Assembly SHA256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Contrôle croisé primaire : `PejAiController.cs:996–1082` research #140,
+artifact `13169030963` (SHA texte `3eb02696085f21386521dc93a88ab271894ed065d9e30bafd4f3acbbc826eb11`),
+`Bullet.cs:180–324` research #102 artifact `13141705847` (SHA texte
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`).
+Aucun original ou sortie privée n'est inclus dans le dépôt public.
+
+**PROUVÉ — séparation des phases (méthodes, pas cadence runtime)** :
+`GunAttackBehaviour.OnRun` peut *demander* `Weapon.Attack`. Dans
+`GunPejAiWeapon.Attack`, la readiness est revérifiée. Si elle est positive,
+`Shoot` met en attente un spawn, demande **dès ce moment** `FireSfx` avec
+argument 0.4 (ni clip ni volume audible garanti), signale shoot/callback,
+réinitialise le délai et alerte rayon 10. À `UpdateDeferredBulletSpawn`,
+`SpawnBulletLate` calcule l'orientation avec le *muzzle tardif* et appelle
+`Pooler.GetObject(bulletPrefab)` ; si aucun objet n'est retourné, aucun
+projectile n'est activé mais le pending est effacé au retour normal.
+Si l'objet existe, lancement, identité, owner, ignore collider conditionnel,
+flash conditionnel et activation sont demandés. **Aucun test de segment
+muzzle→target / occlusion avant Pooler** n'apparaît dans cette chaîne.
+Collision ultérieure qualifiée séparément par `Bullet.FixedUpdate`.
+
+**WEB-OBSERVÉ — divergence directement perceptible** : dans
+`src/main.js:1171–1175` sur `main@2297ccb6548004d02261615676d7d23466032016`,
+le rendu consomme `pendingShot` puis supprime **balle et son** lorsque
+`nativeSegmentHit(nativeShotCollision, shot.position, shot.target)`
+retourne une collision avec un mur. Ce n'est pas le garde de
+`GunPejAiWeapon` natif : l'obstacle devrait être traité en aval par
+le projectile simulé, sans prétendre reproduire PhysX/Pooler.
+
+**Livraison source-gated** : `src/combat/enemy-gun-late-spawn.js` est un
+planificateur pur du **base GunPejAiWeapon uniquement** ; le
+`ShotGunPejAiWeapon` possède un autre contrat (`enemy-shotgun.js`).
+Les tests couvrent FireSfx avant pool, pending après pool miss, absence
+de veto mural, phase tardive, muzzle, flags source et valeurs inconnues.
+Les `launchRequested` et `fireSfxCallRequested` ne sont ni une balle
+observée ni une audition réelle.
+
+**Raccord réservé SH-05 #5** : sur une vraie instance Containers/build28,
+qualifier type exact d'arme, `GunAttack`/readiness, phase
+`UpdateDeferredBulletSpawn` après pose, socket muzzle, Pooler et colliders.
+Pour l'arme base ainsi prouvée, supprimer seulement le **veto
+muzzle→target** de `main.js:1173` ; garder le test de collision
+sur la trajectoire via `closestImpact` (actuellement Web synthétique).
+Déclencher l'intention FireSfx au `Shoot` et non uniquement au rendu
+de la balle, sans affirmer une audition. Scénario réfutable :
+un ennemi armé tire vers le joueur avec un mur entre les deux ;
+la requête arme et SFX peuvent précéder un **projectile arrêté par le
+mur**, tandis que le Web actuel ne produit aucun projectile.
+Pooler/pertes de shot, PhysX, ordre des phases et instance runtime
+demeurent **INCONNUS** jusqu'à trace native et browser appariés.

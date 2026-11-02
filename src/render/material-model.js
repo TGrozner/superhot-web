@@ -145,16 +145,18 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     owner:'globalgamemanagers.assets',pathId:25,
     name:'XULM FULLFORWARD/Concrete 2019 MAIN',
     serializedKeyword:'_STRIPESONOFF_ON',
-    nativeShaderProgramDecoded:false,
+    authoredShaderSourceRecovered:false,
+    compiledD3d11PassesRecovered:true,
+    runtimePassAndVariantObserved:false,
   }),
   mainTexture:Object.freeze({
     property:'_MainTex',owner:'resources.assets',pathId:248,
     name:'doublebeton_diffuse-barcodezacieki',
     uvChannel:'uv0',uvScale:Object.freeze([0.10000000149011612,0.10000000149011612]),
     uvOffset:Object.freeze([0,0]),imagePixelsDecoded:false,
-    imageEncodingKnown:false,
-    // This is the serialized Texture2D sampler, NOT the XULM shader result.
-    // PRIVATE #100 result.json, exact resources.assets:248 metadata_head.
+    serializedEncodingKnown:true,serializedColorTransfer:'sRGB',
+    // Exact serialized sampler metadata from PRIVATE #100. Runtime quality,
+    // LOD bias and shader sampler overrides were not observed.
     nativeSampler:Object.freeze({
       unityFilterMode:0,unityFilterName:'Point',
       unityWrapU:0,unityWrapV:0,unityWrapName:'Repeat',
@@ -179,6 +181,14 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     targetOwner:'sharedassets28.assets',targetPathId:2,
     name:'Lightmap-0_comp_light',
     imagePixelsDecoded:false,uv2StreamDecoded:false,
+    // Serialized Texture2D source settings, private #100 result.json (no texels).
+    nativeSampler:Object.freeze({
+      unityFilterMode:1,unityFilterName:'Bilinear',
+      unityWrapU:1,unityWrapV:1,unityWrapName:'Clamp',
+      unityAniso:3,unityMipBias:0,serializedStreamingMipmaps:true,
+      effectiveRuntimeSamplerVerified:false,
+      evidence:'private research #100 artifact 13141079714',
+    }),
     // Private #100 / 13141079714: BC3/DXT5 atlas descriptor, NOT pixels.
     nativeStream:Object.freeze({
       owner:'sharedassets28.assets',pathId:2,
@@ -191,8 +201,9 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     }),
   }),
   shaderProperties:Object.freeze({
-    // Do not translate these into Web uniforms before the shipped custom
-    // shader's stage logic and texture sampling/color-space are recovered.
+    // Serialized controls are retained verbatim. Do not reinterpret them as
+    // generic Web tints: recovered compiled passes also depend on unresolved
+    // global shader values, varyings, lighting and runtime property blocks.
     _Color:Object.freeze([1,1,1,1]),
     _HighlightColor:Object.freeze([0.15916955471038818,0.3011871874332428,0.3382353186607361,0]),
     _ShadowColor:Object.freeze([0.06617646664381027,0.11257605254650116,0.1764705777168274,0]),
@@ -208,7 +219,7 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     lightmapFlags:5,enableInstancingVariants:true,
     doubleSidedGI:false,customRenderQueue:-1,
   }),
-  status:'serialized-shader-and-texture-references-resolved-payload-unavailable',
+  status:'serialized-material-texture-sampler-and-compiled-pass-recovered-runtime-unobserved',
   runtimeDrawMatched:false,webShadingReady:false,
 });
 
@@ -322,8 +333,9 @@ export function containersBuild28CargoMaterialBinding(rendererPathId) {
  * #98 artifact 13141163607: shader owner qualified to globalgamemanagers:28.
  * #88/#90: independently checked OBJ triangles/positions (private bytes).
  *
- * No Unity shader pass, final fragments, animated pose or runtime instance
- * was observed. The color below is a *DIAGNOSTIC WEB INPUT*, not final MCD RGB.
+ * Compiled D3D11 candidates establish an opaque pass and bounded final math,
+ * but no runtime pass/variant/property-block match or final pixels were observed.
+ * The color below is serialized shader input, not final MCD RGB.
  */
 const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
   material:Object.freeze({
@@ -338,6 +350,8 @@ const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
     materialReference:Object.freeze({fileId:1,pathId:28}),
     serializedKeyword:'_ALLOWLOCALFOG_ON',
     actualPassAndVariantVerified:false,
+    compiledD3d11PassesRecovered:true,
+    authoredShaderSourceRecovered:false,
   }),
   shaderInputs:Object.freeze({
     _Color:Object.freeze([0.720588207244873,0,0,1]),
@@ -350,10 +364,11 @@ const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
     _FogLength:7,
   }),
   sourceEvidence:'private research #93/13139554254, #95/13141157351, #98/13141163607',
-  status:'unity-serialized-owner-qualified-params-no-render-pass',
+  status:'serialized-owner-qualified-params-and-compiled-pass-recovered-runtime-unobserved',
   webShadingReady:false,
   runtimeNativePixelsVerified:false,
   nativeTexturePixelsAvailable:false,
+  compiledBaseOutputAlpha:1,
   nativeSurfaceAlphaKnown:false,
   nativeLocalFogPixelsKnown:false,
 });
@@ -436,8 +451,8 @@ export function enemyRedCrystalDiagnosticWebPacket(rendererPathId) {
  * First 128x128xRGB24 bytes form mip0 according to the serialized format and
  * exact 65535-byte eight-mip size. Byte order is preserved RGB->RGBA with
  * alpha 255; no gamma conversion, shader replication or vertical flip is
- * applied. UV orientation, filtering, sampler state, postprocessing and
- * native pixel colors remain unverified. SH-05 must label the experiment.
+ * applied. UV orientation, effective runtime sampler overrides, postprocessing
+ * and native pixel colors remain unverified. SH-05 must label the experiment.
  */
 export function decodeContainersConcreteRgb24Mip0(streamBytes) {
   const meta=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeStream;
@@ -547,8 +562,117 @@ export function containersConcreteGpuSamplerPacket({mipLevels=8}={}) {
     minFilter:mipLevels===8?'NEAREST_MIPMAP_NEAREST':'NEAREST',
     magFilter:'NEAREST',wrapS:'REPEAT',wrapT:'REPEAT',
     maxLevel:mipLevels-1,generateMipmaps:false,
-    mipLevels,serializedFilterMode:0,serializedAniso:1,serializedMipBias:0,
+    mipLevels,serializedFilterMode:0,serializedWrapU:0,serializedWrapV:0,
+    serializedAniso:1,serializedMipBias:0,
     originalRuntimeOverrideVerified:false,
     filterProvenance:'Unity-serialized-Texture2D-Point-Repeat-private-100-not-shader-parity',
+  });
+}
+
+
+/**
+ * P0 build28 native lightmap BC3/DXT5 byte-level handoff (PRIVATE #100).
+ *
+ * Exact resource: sharedassets28.assets:2, 2048x2048, 12 mips, 5592432 B
+ * at offset 0 of sharedassets28.assets.resS. The caller selects the ORIGINAL
+ * local file; bytes are never embedded, fetched, persisted, or published here.
+ *
+ * Returns zero-copy BC3 4x4 block slices for native compressed WebGL upload,
+ * not fake RGBA pixels or a sampled original MCD lightmap. Storage mip order
+ * is assumed largest-first; UV2 and XULM HDR bake interpretation are unknown.
+ */
+export function sliceContainersBuild28LightmapBc3Mips(streamBytes) {
+  const src=CONTAINERS_CONCRETE_SOURCE.lightmapTexture.nativeStream;
+  if(src.owner!=='sharedassets28.assets'||src.pathId!==2||src.unityFormatId!==12||
+     src.width!==2048||src.height!==2048||src.mipCount!==12||
+     src.sourceByteOffset!==0||src.sourceByteCount!==5592432) {
+    throw new Error('Native Containers BC3 descriptor changed');
+  }
+  return sliceNativeLightmapBc3Mips(streamBytes, src);
+}
+
+/** Zero-copy original BC3 mip slices, using the selected source texture metadata. */
+export function sliceNativeLightmapBc3Mips(streamBytes, src) {
+  if (!src || !Number.isSafeInteger(src.width) || src.width <= 0 ||
+      !Number.isSafeInteger(src.height) || src.height <= 0 ||
+      !Number.isSafeInteger(src.mipCount) || src.mipCount <= 0 ||
+      src.mipCount > 1 + Math.floor(Math.log2(Math.max(src.width, src.height))) ||
+      src.unityFormatId !== 12 || !Number.isSafeInteger(src.sourceByteCount) ||
+      src.sourceByteCount <= 0 || typeof src.owner !== 'string' ||
+      !Number.isSafeInteger(src.pathId)) {
+    throw new RangeError('Invalid source BC3 lightmap descriptor');
+  }
+  const bytes=streamBytes instanceof Uint8Array?streamBytes:
+    streamBytes instanceof ArrayBuffer?new Uint8Array(streamBytes):null;
+  if(!bytes) throw new TypeError('Local BC3 lightmap must be Uint8Array or ArrayBuffer');
+  if(bytes.byteLength!==src.sourceByteCount){
+    throw new RangeError('Exact source BC3 atlas byte count required');
+  }
+  let offset=0,width=src.width,height=src.height;
+  const levels=[];
+  for(let level=0;level<src.mipCount;level++){
+    const blocksX=Math.ceil(width/4),blocksY=Math.ceil(height/4);
+    const count=blocksX*blocksY*16;
+    if(offset+count>bytes.byteLength) throw new RangeError('Truncated BC3 mip '+level);
+    levels.push(Object.freeze({
+      level,width,height,blocksX,blocksY,
+      sourceByteOffsetWithinStream:offset,sourceByteCount:count,
+      compressedBytes:bytes.subarray(offset,offset+count),
+    }));
+    offset+=count;
+    width=Math.max(1,width>>1);height=Math.max(1,height>>1);
+  }
+  if(offset!==bytes.byteLength) throw new RangeError('Unexpected BC3 trailing bytes');
+  return Object.freeze({
+    levels:Object.freeze(levels),mipCount:levels.length,sourceBytesConsumed:offset,
+    sourceTexture:Object.freeze({owner:src.owner,pathId:src.pathId}),
+    sourceMipOrderingAssumed:'largest-first-contiguous-BC3-4x4',
+    colorTransferVerified:false,uv2Available:false,
+    shaderPassVerified:false,nativeBakeDecodingVerified:false,
+    provenance:'owner-local-BC3-byte-slices-NOT-native-lightmap-shading',
+  });
+}
+
+/**
+ * Source-serialized Bilinear/Clamp lightmap sampler, plus EXPLICIT transfer
+ * hypothesis. No default transfer assumption: m_ColorSpace=1 alone does NOT
+ * establish XULM sampling, HDR/RGBM decode, native framebuffer or exposure.
+ * SH-05 alone may bind this through compressedTexImage2D for a diagnostic
+ * atlas preview. SH-12 must supply authentic UV2 before cargo bake sampling.
+ */
+export function containersBuild28LightmapBc3GpuPacket({colorTransfer,mipLevels=12}={}) {
+  if(mipLevels!==1&&mipLevels!==12){
+    throw new RangeError('Only mip0 or all 12 original BC3 levels are supported');
+  }
+  const sampler=CONTAINERS_CONCRETE_SOURCE.lightmapTexture.nativeSampler;
+  if(sampler.unityFilterMode!==1||sampler.unityWrapU!==1||sampler.unityWrapV!==1){
+    throw new Error('Lightmap source sampler has changed');
+  }
+  return Object.freeze({
+    ...nativeLightmapBc3GpuPacket({ colorTransfer, mipLevels }),
+    serializedAniso:3,
+  });
+}
+
+/** Bilinear/Clamp upload of supplied source mips; never synthesize mip levels. */
+export function nativeLightmapBc3GpuPacket({colorTransfer,mipLevels}={}) {
+  if(colorTransfer!=='unorm-diagnostic'&&colorTransfer!=='srgb-diagnostic'){
+    throw new RangeError('Specify unorm-diagnostic or srgb-diagnostic explicitly');
+  }
+  if(!Number.isSafeInteger(mipLevels)||mipLevels<1){
+    throw new RangeError('Source BC3 mip count must be a positive integer');
+  }
+  const srgb=colorTransfer==='srgb-diagnostic';
+  return Object.freeze({
+    extensionName:srgb?'WEBGL_compressed_texture_s3tc_srgb':'WEBGL_compressed_texture_s3tc',
+    internalFormatName:srgb?'COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT':'COMPRESSED_RGBA_S3TC_DXT5_EXT',
+    minFilter:mipLevels>1?'LINEAR_MIPMAP_NEAREST':'LINEAR',
+    magFilter:'LINEAR',wrapS:'CLAMP_TO_EDGE',wrapT:'CLAMP_TO_EDGE',
+    maxLevel:mipLevels-1,generateMipmaps:false,mipLevels,
+    serializedFilterMode:1,serializedMipBias:0,
+    originalRuntimeOverrideVerified:false,
+    colorTransferHypothesis:colorTransfer,uv2RequiredForNativeBake:true,
+    nativeLightmapShaderVerified:false,
+    safePreviewUse:'diagnostic-atlas-only-until-uv2-and-shader-proven',
   });
 }

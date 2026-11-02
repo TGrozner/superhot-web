@@ -2,6 +2,18 @@
 
 **Périmètre :** SUPERHOT: MIND CONTROL DELETE (Steam app `690040`), pas SUPERHOT 2016. Ce document accompagne les primitives Web indépendantes. Il ne constitue **pas** une certification de parité native.
 
+
+## SH-06 — réaction avec force avant mort (preuve native 2026-11-02)
+
+**PROUVÉ — code natif statique, non observé dans une partie Containers.** MCD build `20299547`. `PejAiController.AddBlowForce` est lu dans la source privée [research #87](https://github.com/TGrozner/superhot-research/issues/87), artifact `13139513073` (`PejAiController.cs:5835–5849`, SHA du texte `a9d6ba64589baabde7a908eacece546fde248fd23a0eda6c5b69f053fe846ebc`), puis sa continuation [research #123](https://github.com/TGrozner/superhot-research/issues/123), run `41476466212`, artifact `13157108175` (`PejAiController.cs:5840–5939`, SHA256 du texte `b1e3f974e4f171684e4180a372de6774225c0d09d1817f7ee2affffa71b5f0e7`). La source complète reste privée.
+
+**Chemin de méthode PROUVÉ :** si l'Animator existe, le contrôleur prend le premier Rigidbody de la partie demandée (Head par défaut), **appelle `_animator.Kill()`**, abandonne son arme, récupère ou ajoute `ConstantForce`, puis choisit la direction locale `normalize(Random.Range(-0.15, 0.15), Random.Range(-0.25, 0.25), 1)`. Il applique la partie linéaire de la matrice `StandardCameraTransform.localToWorldMatrix` à cette direction, multiplie par la force reçue et active le composant. Si **`blowInterval > 0`**, il demande de désactiver la force et de remettre son vecteur à zéro après le délai, via `DelayedInvokeMarshal` avec `isRealtime:false`; sans Animator, il retourne null. **`KillWithBlowForce`** appelle cette méthode, puis demande `Invoke("Kill", blowInterval)` même si l'Animator est absent. Une demande d'Invoke n'est pas la preuve d'un callback exécuté à l'écran.
+
+**Contrat Web pur :** `src/animation/enemy-blow-force-plan.js` exporte `planPejAiAddBlowForce` et `planPejAiKillWithBlowForce`. Les deux n'émettent que les commandes natives demandées après **invocation confirmée de cette méthode précise**. L'instance de caméra (basis), les deux tirages RNG, la force, l'intervalle, la partie touchée et la présence d'Animator/ConstantForce sont fournis par l'appelant : aucun spawn, impact, pose ni hasard MCD inventé. `tests/animation-enemy-blow-force-plan.test.mjs` couvre ordre Animator→arme→force→timer, transformation directionnelle, absence d'Animator, intervalle nul/négatif et garde des données inconnues. La simulation PhysX des rigidbodies et la lecture de leur état ne sont **pas** implémentées.
+
+**INCONNU — conditions d'activation et résultat visible :** callsite réel d'un hit Containers vers `AddBlowForce` ou `KillWithBlowForce`, valeur active de `force`/intervalle, matrice caméra à l'instant de l'impact, samples RNG, présence des parties/rigidbodies, cinématique PhysX et effet rendu. L'assemblage `Body.Kill → Controller.Kill` **ne suffit pas** à établir ce chemin : il n'appelle pas directement Animator.Kill (research #87/#89). Le module doit rester non raccordé à `src/main.js` sans trace indépendante du callsite. **Scénario de réfutation :** une mort Containers traverse uniquement `PejAiBody.Kill` sans `AddBlowForce`; la force et les commandes d'Animator.Kill ne doivent alors pas être émises. Une trace positive doit enregistrer ID de contrôleur, méthode appelée, arguments, samples caméra et moment de désactivation avant test visuel.
+
+
 ## Preuves disponibles au 2026-11-02
 
 | Statut | Assertion précise | Source et limite |
@@ -262,3 +274,41 @@ vérifiés **séparément** ; aucun test Unity runtime n'a été exécuté.
 
 
 **Plan de commandes fracture source-borné :** `src/vfx/enemy-explode-plan.js::planPejAiBodyExplode` reflète uniquement **l'ordre des appels de `PejAiBody.Explode`**, sans créer de shards : `body-kill` → demande `Head/Shatter` inconditionnelle → chaque `bodyPartMeshCutter` avec `CutMode.Shatter` si sample `Random.value >= 0.9`, sinon `None`, `deadPhase:true` et troisième argument booléen `!IsCivilian()` → `animator-kill(0)` si l'Animator existe. Chaque roll et identifiant de cutter est fourni par le caller ; aucun nombre de parties, seed ou topologie n'est inventé. Le cutter Head peut apparaître également dans la boucle : la source ne déduplique pas. `tests/vfx-enemy-explode-plan.test.mjs` teste l'ordre, la borne `0.9`, l'Animator absent et l'absence de hasard synthétique. **Attention :** `CutMode.Shatter` est une demande au système de fracture, pas la preuve qu'un fragment a été rendu. Le callback `animator-kill(0)` reste planifié via `DelayedInvokeMarshal`, pas supposé instantané. Ne pas déclencher ce plan depuis n'importe quelle mort ennemie.
+
+
+## SH-06 — `PejAiBody.Stun` : garde de transition et remise à zéro du focus (2026-11-02)
+
+**PROUVÉ — corps de méthode, pas une trace de Containers.** Source privée primaire : SUPERHOT MCD Steam build **20299547**, Assembly-CSharp SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`; `managed/Assembly-CSharp/PejAiBody.cs:478–536`, lecture [research #105](https://github.com/TGrozner/superhot-research/issues/105), artifact `13144030637`, SHA-256 UTF-8 du texte `578030aa9ee719e10eb61b454d5379f47237a15160875c9eb6852237207f29ca`. Cette méthode est distincte de `PejAiBody.Explode` (lignes 462–475) et de `Kill`.
+
+**Prédicats et ordre exacts dans la méthode statique :** l'argument `stun` est mémorisé avant la garde kamikaze ; lorsque `kamikazeAnimFired && kamikazeStunCurrentTime >= __kamikazeStunableTime`, retour immédiat. Sinon, une animation kamikaze active déclenche `onStunEnd`, `EndStun`, un réglage Animator `LeftRight`, puis la remise à zéro des champs kamikaze. Point important : `EndStun` remet le timer de stun à−1 avant le test suivant. Le flag `stunedConcretePart` devient donc `isConcrete` après cette annulation, même si l'état d'entrée était déjà stunned. Sans annulation, un ennemi déjà stunned conserve son flag sur impact concret ; `isConcrete=false` le remet à false.
+
+**PROUVÉ — commandes visuelles et sonores demandées :** si `stunSoundRest < Time.realtimeSinceStartup` (comparaison stricte), demande de l'une des ressources `EnemyStunConcrete` / `EnemyStun` à `bodyPosition + (0,1.5,0)`, puis `stunSoundRest = realtime + 0.25s`. Le code marque `stunnedThisFrame` et `HasEverBeenStunned` ; `PejAiController.Stun(direction)` n'est appelé que si le contrôleur existe et n'est pas boss. Les `RendererWrapper` non nuls reçoivent une demande `_Focus=0`, ainsi que `enemyModManager.SetMaterialFloat(focusMaterialValueHandle,0)` et `AvailablePickupEffectFadeOut`. **Ce sont des commandes de méthode**, pas la preuve qu'un shader a dessiné un changement ni qu'un clip a été audible.
+
+**Livraison bornée :** `src/animation/enemy-stun-command-plan.js::planPejAiBodyStun` prend tous les états, temps Unity réels, IDs de renderers et vecteurs en arguments ; elle émet des commandes ordonnées et n'exécute aucune action Unity. `tests/animation-enemy-stun-command-plan.test.mjs` couvre la garde au seuil, l'annulation kamikaze, la comparaison stricte audio, boss/hors boss, les renderers nuls et la remise à zéro du focus. Aucune durée d'animation, clip de réaction, coefficient shader ni effet audio synthétique n'est inventé.
+
+**INCONNU / scénarios réfutables :** aucun chemin `tir → hit → PejAiBody.Stun` n'est établi sur l'instance réellement chargée de Containers. Les paramètres kamikaze et la présence des renderers actifs restent à vérifier pour cette instance. Une mort appelée seulement via `PejAiBody.Kill` ne doit pas être rejouée comme Stun. Le runtime Web fige désormais la pose au moment du décès au lieu d'utiliser le clip `hit`, avec des fragments encore provisoires : ce comportement ne valide ni un événement Stun ni un ragdoll natif. Le plan reste réservé à une invocation Stun confirmée.
+
+## Raccord visible des armes originales
+
+Les paquets privés v9 conservent les poses v8 et ajoutent l'attache droite du
+pistolet : WeaponSocket5567/Transform2227, enfant du poignet1973. Le rendu compose
+la pose finale du poignet et l'attache source, puis dessine le pistolet tenu.
+Repos, marche, course et tir isolé ont été affichés dans Chromium ; les variantes
+complète et sans tête conservent leur arme. La visée IK et le ragdoll restent distincts.
+
+Le joueur n'utilise plus ce modèle de pickup : son modèle actif est
+`sharedassets0.assets::149`, via Container1723 et modèle2232 du PistolGun711.
+La position de main vient de Gun4849 ; la projection20° vient de
+`level28::24367`, avec le shader8 et le matériau10. L'orientation a été observée
+dans la racine, puis après changement yaw/pitch et tir5→4. Le recul Web reste
+une approximation ; aucun alignement temporel complet des tweens natifs n'est revendiqué.
+
+## SH-06 — PejAiBody.Kill : garde de tête brisée, focus, son et IK (2026-11-02)
+
+**PROUVÉ — méthode statique, pas exécution Containers :** TGrozner/superhot-research issue privée #89, run `41442138603`, artifact `13139513152`, source `managed/Assembly-CSharp/PejAiBody.cs:565–602`, SHA-256 de la lecture UTF-8 `2f938d5c65af66128acd324d52b6fb542c2ca369bf2e6f1bb298227c5e913c60`, MCD Steam build `20299547` (Assembly-CSharp SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`). Les lignes originales de l'artifact ont été relues localement, sans publier la source propriétaire.
+
+Le chemin `PejAiBody.Kill` retourne **sans effet** si `controller.IsDead`. Sinon, la demande de découpe **Head/Shatter est conditionnelle à `shouldExplodeFromDog`** ; le flag est ensuite effacé. Le boss réactive son renderer de tête et ses meshes. Pour chaque RendererWrapper non nul, les paramètres `_Focus` puis `_HotswitchFocus` sont remis à zéro ; les deux paramètres du gestionnaire de matériaux le sont aussi, puis le pickup effect est demandé en fade-out. **Ensuite seulement** la méthode invoque `controller.Kill(deathSource, bullet)`, **demande** `EnemyShatter` à la position du corps + (0,1.5,0), met à zéro les poids des deux IK de mêlée puis désactive leurs GameObjects. Une **demande de son** ne démontre ni déclenchement réussi ni audibilité, une **demande Shatter** ne démontre ni mesh coupé ni rendu.
+
+**Contrat Web conditionnel :** `src/animation/enemy-body-kill-plan.js::planPejAiBodyKill` produit exclusivement les commandes directes ci-dessus, sans exécuter Unity, l'animation, les découpes ni l'audio. Les tests couvrent les gardes, le dog, le boss, le focus, le son demandé et les IK. Il ne faut pas confondre absence de commande directe `Animator.Kill` et absence de réaction transitive : `Body.Kill` appelle `Controller.Kill`, qui déclenche `OnKill` ; l'Animator abonné y appelle son propre `Kill` (`PejAiAnimator.cs:557,735–738`). Il ne faut donc ni exclure cette réaction, ni ajouter un deuxième appel direct au plan Body.Kill. La découpe Head/Shatter directe reste conditionnée au flag dog ; `Body.Explode` et `Body.Stun` demeurent des chemins distincts.
+
+**INCONNU / réfutation et intégration #5 :** prouver un appel réel à `PejAiBody.Kill` sur l'ennemi chargé dans Containers, `shouldExplodeFromDog`, `IsDead`, rendu des RendererWrapper, sortie du `Controller.Kill`, et mesurer son/image sur vrai navigateur. Si un tir appelle seulement un autre chemin, ce plan n'est **pas applicable**. Si la tête est visiblement fracturée sans flag dog dans une trace native, chercher un autre producteur (notamment `Explode` / `RemoveBodyPart`) plutôt que rendre chaque mort shatter par défaut. SH-05 reste seul owner de `main.js`/`renderer.js` ; aucune intégration navigateur ni parité 1:1 n'est revendiquée ici.

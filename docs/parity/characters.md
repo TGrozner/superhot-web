@@ -1,249 +1,405 @@
-# SH-14 — Native enemy rig evidence and WebGL2 character slice (2026-11-02)
+# Original characters: local geometry and sampled animation
 
-## Native evidence ledger — inspected actual PRIVATE result.json
+## Current implementation — 2 November 2026
 
-**Authority:** SUPERHOT: MIND CONTROL DELETE (not original SUPERHOT), Steam 690040, build 20299547; Unity 2018.4.14f1, Assembly-CSharp SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`. Original private sources, decoded Unity blobs and raw artifacts stay in `TGrozner/superhot-research`; only source IDs/counts and synthetic code appear here. No native MCD application execution or paired screenshot has been seen by SH-14.
+The configured localhost homepage uses original EnemyMerged geometry in Containers,
+not a generated humanoid. The complete/headless selector replaces the OBJ receipt
+and optional skin package as one generation. Failed or stale loads cannot replace
+a newer complete character. A supported static-only selection clears the old skin.
 
-The **exact new SH-14 bounded source query** [private research #74](https://github.com/TGrozner/superhot-research/issues/74), run `41440009982`, artifact `13138705902` was opened and `result.json` parsed: `operation=query`, `database=resources/pass-01/corpus.sqlite`, **13 rows**, `truncated=false`, no error. It joined *original serialized* Animator `m_GameObject` to exact owner-qualified GameObject and selected `m_Controller.m_PathID=638`. Observations:
+Original data remains under ignored `private/`; no original vertices, weights,
+bind matrices, clips, textures, binaries, decompiled code or captures are published.
 
-- **1 same-file chain**: `sharedassets0.assets:(Animator 4659 → GO 870 "EnemyBodyPrefab")`, `m_Enabled=0`, `m_Controller=(fileID 0,pathID 638)`, `m_Avatar=(fileID 0,pathID 632)`. SH-06's pre-existing animation source inventory labels `sharedassets0.assets:638` as the candidate `AnimCtrl_EnemyMain`. **This is a serialized prefab component, not a runtime active enemy.** Avatar identity 632 and skeleton/skin links are not independently qualified here.
-- **12 additional prefab chains**: `resources.assets` Animator pathIDs **27622, 27625, 27627–27632, 27634–27637** → separately identified GOs named `EnemyBodyPrefab`. All disabled in serialized data, all `m_Controller=(fileID 3,pathID 638)`, `m_Avatar=(fileID 3,pathID 632)`. `fileID 3` requires its exact external-reference owner mapping: **do not silently call these sharedassets0 bindings** merely because the numeric pathID matches.
-- **Not proved:** any `EnemyBodyPrefab` instance actually spawned in `level28/Containers`, its active Animator/controller/Avatar, clip/pose evaluated, SkinnedMeshRenderer, bone list or mesh pointer. The serialized prefab/disabled state does not rule out runtime instantiation or enabling.
+## Source identity
 
-This used **one** new `[corpus-query]` issue only. No corpus scan, duplicate read, rerun or Windows command was issued by this lane.
+Target: **SUPERHOT: MIND CONTROL DELETE**, Steam AppID 690040, build 20299547,
+Unity 2018.4.14f1. This is not original SUPERHOT.
 
-### Prior private evidence reused, without duplicate queries
-
-| Request/result | What its parsed `result.json` actually establishes | Limit |
-|---|---|---|
-| [#8](https://github.com/TGrozner/superhot-research/issues/8), artifact `13132969099` | `spec/combat/combat-specification.md` text SHA `a6541443...` records `PejAiController.Update:3477–3534` and **`PejAiAnimator.LateUpdate:1114–1211`**; pose/LookAt/FinalIK precedes `UpdateDeferredBulletSpawn:1196–1199`. | These are static managed-code observations; neither pose nor muzzle is observed in a game run. SH-03 controls contact/hit. |
-| [#10](https://github.com/TGrozner/superhot-research/issues/10), artifact `13133542861` | Direct SQLite schema of `objects(owner,path_id,type,name,tree_json)`, `hierarchy` and `scenes`, `truncated=false`; allowed scoped exact join for #74. | Table schema is not proof of an enemy instance. |
-| [#11](https://github.com/TGrozner/superhot-research/issues/11), artifact `13133782424` | Decoded `verification.json` SHA `22ac2e6e...`: **511 AnimationClip / 15 AnimatorController / 25 Avatar / 247 Animator**, streamed/dense channel counts verified. | Not Unity runtime clip evaluation. |
-| [#12](https://github.com/TGrozner/superhot-research/issues/12), artifact `13133383280` | `link-verification.json` SHA `6d23cbe9...`: controller/Avatar TOS hashes verified, 243 explicit curve joins, **1,028** subtree binding absences retained. | Asset reference/curve linkage ≠ active pose or bone matrix. |
-| [#9](https://github.com/TGrozner/superhot-research/issues/9), [#13](https://github.com/TGrozner/superhot-research/issues/13), [#14](https://github.com/TGrozner/superhot-research/issues/14), [#15](https://github.com/TGrozner/superhot-research/issues/15) | Their private `result.json` reads were examined: separate audio/event, time control, world/progression, camera/time-input contracts. | No missing enemy mesh or skin data supplied by them. |
-| Existing SH-06 [#52](https://github.com/TGrozner/superhot-research/issues/52), [#54](https://github.com/TGrozner/superhot-research/issues/54), [#58](https://github.com/TGrozner/superhot-research/issues/58) | Serialized **`level28`** has Animator `level28:18510` on GO `3451 "bHands"` with `AnimCtrl_PlayerMain` candidate, and legacy Animation on `Camera`. | **These are player hands/camera, NOT an enemy.** Does not exclude dynamically spawned enemies. |
-| [SH-06 closure report](https://github.com/TGrozner/superhot-research/issues/18), artifact `13134221322` | Humanoid/Mecanim/FinalIK/retarget math has substantial static analysis; missing runtime reachability, masked blend cases and IK details remain explicit. | Do not invent quaternion muscle conversion, root-motion, clip state or event dispatch. |
-
-## P0 drawable module: explicit diagnostic geometry, not MCD silhouettes
-
-- `src/characters/generated-meshes.js` creates faceted **non-cubic indexed triangle surfaces** (head, tapered torso, tapered limbs) with coherent normals and UVs via SH-12 `defineIndexedMesh`. All vertices, colors and dimensions are **newly authored substitutes**, with no game-derived mesh or skin weights.
-- `src/characters/rig.js` constructs a source-neutral 13-joint graph, checks parents/cycles, composes `parent * bind * callerDelta` in column-major affine matrices via SH-04, and emits one SH-12-compatible indexed draw packet per part with inverse-transpose normal matrix and reflection flag. It has **no animation evaluator**. The generated diagnostic skeleton is not a decoded enemy Avatar.
-- `src/characters/indexed-pass.js` uploads three unique indexed GPU meshes once using SH-12 `uploadIndexedMesh`, draws **11 articulated mesh parts** per character in the host WebGL2 program, applies caller-supplied or *explicit generated* color, handles winding when culling is enabled, and restores program/VAO/front-face state. No own canvas, shader, server asset or gameplay hooks. Returns `{drawCalls,triangles,geometryProvenance}` to SH-05 for telemetry.
-- **Pose interface:** `poseCharacterRig(rig,{rootMatrix,jointDeltas})`, where each jointDelta is a **quaternion TRS delta after the bind**. SH-06 owns sampling, transition selection, retargeting and animation-time rules; it must supply verified local joint transforms. SH-03 owns hit/collision and cannot treat our diagnostic part boundaries as native hitboxes. There is **no** native muzzle or damage window inferred from this module.
-
-### Exact SH-05 integration handoff (ONLY SH-05 edits shared files)
-
-Inside SH-05-owned `createRenderer()`, after the existing WebGL2 program and `uniforms` are created:
-
-```js
-import { makeGeneratedDiagnosticEnemyRig, poseCharacterRig } from './characters/rig.js';
-import { makeGeneratedDiagnosticEnemyMeshes } from './characters/generated-meshes.js';
-import { createCharacterIndexedPass } from './characters/indexed-pass.js';
-
-const characterRig = makeGeneratedDiagnosticEnemyRig(); // DIAGNOSTIC only
-const characterPass = createCharacterIndexedPass(
-  gl, program, uniforms, makeGeneratedDiagnosticEnemyMeshes(),
-);
-// after renderer.begin(camera) each frame:
-function drawDiagnosticCharacter(rootMatrix, externallyVerifiedJointDeltas = {}) {
-  const pose = poseCharacterRig(characterRig, {
-    rootMatrix, jointDeltas: externallyVerifiedJointDeltas,
-  });
-  const report = characterPass.draw(pose.packets);
-  drawCalls += report.drawCalls; // same existing SH-05 telemetry counter
-  return report;
-}
-// dispose pass on GL context cleanup, if implemented
-```
-
-The `rootMatrix` must be an explicit Web right-handed **world** transform (not a double-applied Unity transform). To prove a GPU slice without native assets, place one **visibly labeled procedural diagnostic** in the existing opt-in `?scene=containers` scene, without claiming a source enemy spawn or collision. Feed any procedural joint delta from the caller as diagnostic only. Once SH-06 supplies an actually sampled retargeted pose, pass those joint TRS deltas unchanged. The P0 target is a noncuboid articulated enemy appearing in a real browser scene with a frame capture and draw-call telemetry, followed by source-to-runtime provenance.
-
-**Do not** connect this stand-in as if it were an original `EnemyBodyPrefab` or wire it to active combat without the missing native chain. Three independent acceptance gates remain: (1) **native prefab → SkinnedMeshRenderer → mesh/submeshes → bones/bindposes** owner-qualified (not supplied); (2) **runtime Containers spawn → enabled Animator → chosen clip/state → native retargeted pose** (not supplied); (3) **browser frame + matched-camera MCD frame → measurable silhouette delta**, including front-face normals, materials, skinning, hit contacts (not supplied). An original skinned mesh needs actual weights + vertex skinning, not merely these rigid-part draw packets. Report these as blockers, not as finished 1:1.
-
-## Tests / limitations
-
-`node --test tests/character-*.test.mjs` covers generated non-box triangle shape and normals, hierarchy/rotations and reference safety, mirrored matrices, indexed draw calls and state restoration in a mock WebGL2 API. Mock calls and Node CI cannot establish a visible GPU frame, actual native render, active enemy clip, material color, hit reaction or 1:1. No new private-game assets are committed or uploaded.
-
-
-## P0 2026-11-02: REAL enemy geometry locally, static until skin evidence
-
-**This section supersedes the old native-mesh blocker in the first SH-14 delivery above.** The original rig/11-piece character remains a clearly labeled procedural fallback. The **real converted enemy mesh geometry now has exact owner-qualified source and byte-level receipts**; this is more useful visually than generating another approximated humanoid.
-
-### Native proof ledger, pre-existing PRIVATE requests (no new corpus scan in this slice)
-
-1. [research #74](https://github.com/TGrozner/superhot-research/issues/74), result artifact `13138705902`: serialized `sharedassets0.assets:Animator4659` → `GO870 EnemyBodyPrefab`, candidate controller `(fileID0,path638)`, Avatar `(fileID0,path632)`, `m_Enabled=0` in prefab data only. This does **not** establish active animator runtime.
-2. [research #78/#79/#80](https://github.com/TGrozner/superhot-research/issues/80), result artifact `13140750302`: prefab GO870/Transform2048 has piecewise `SkinnedMeshRenderer` components, and exact `SkinnedMeshRenderer4748 → m_Mesh(fileID0,pathID284), 60 bone references` (`EnemyMerged`), `renderer4749 → (fileID0,pathID285), 59 bone references` (`EnemyMergedHeadless`). These are **same-owner sharedassets0.assets** pointers. `resources.assets:pathID284/285` instead names unrelated **glass shards**; never resolve by pathID alone.
-3. [research #81](https://github.com/TGrozner/superhot-research/issues/81), run `41440880253`, artifact `13140480419`: exact Mesh284/285 exported by the private UnityPy conversion as OBJ position/normal/UV and triangular faces. The OBJ format **does not encode weights, bindposes, clips, skin transforms or native materials**.
-4. [research #88/#90](https://github.com/TGrozner/superhot-research/issues/88), artifacts `13139108195`/`13140612009`: prior SH-14 independent private reads inspected `result.json`, recomputed gzip and uncompressed OBJ SHA-256, enumerated group labels, vertex/UV/normal declarations, triangles and bounds. These receipts are encoded as **metadata only** in `src/characters/native-enemy-local.js`. They are NOT an additional native execution or newly downloaded data in this PR.
-
-| Strict local source check | `merged`: sharedassets0:284 | `headless`: sharedassets0:285 |
+| Identity | Complete | Headless |
 |---|---:|---:|
-| Serialized renderer / `m_Bones` refs | 4748 / 60 | 4749 / 59 |
-| Exact OBJ group | `EnemyMerged_0` | `EnemyMergedHeadless_0` |
-| Source `v/vt/vn` declarations | 5237 each | 4895 each |
+| Owner | sharedassets0.assets | sharedassets0.assets |
+| Mesh path ID | 284 | 285 |
+| SkinnedMeshRenderer path ID | 4748 | 4749 |
+| Original vertex count | 5237 | 4895 |
 | Triangles | 2254 | 2132 |
-| Exact .obj.gz bytes | 110391 | 103229 |
-| Exact uncompressed .obj bytes | 660805 | 618720 |
-| Uncompressed SHA-256 | `acd05fef8f85ce06a1b6a6255247b01d3e27b5f3687525504ef39f45d2f67add` | `e6146e67cd0a9fb49b2641cc59fb397f5c236f78eb5c290a2206a74764305cff` |
+| Weighted bone palette | 60 | 59 |
 
-Source OBJ AABB: X ±0.878194034, Y [0.0000810648,1.9474926] (headless max1.78382015), Z [-0.122781016,0.24209635]. Pipeline explicitly maps `(-x,y,-z)` and keeps triangle winding, following the existing Containers preview convention. Web AABB Z [-0.24209635,0.122781016]. This is **converted authored geometry with no independently observed Unity runtime draw**, not evidence of 1:1 silhouette in the game's running scene.
+The matching prefab is GameObject870 / Transform2048 / Animator4659,
+Avatar632 (`EnemyHandsHumanoidAvatar`), Controller638 (`AnimCtrl_EnemyMain`).
+The full topological hierarchy contains **62 bones**; the palette contains only
+weighted bones. Same numeric IDs in `resources.assets` are unrelated glass shards.
+Do not use the separate resources-based 11-piece body package as this model's rig.
 
-### SH-14 implementation — public code only, files reserved to this lane
+Prior source joins remain available in private research
+[#74](https://github.com/TGrozner/superhot-research/issues/74),
+[#80](https://github.com/TGrozner/superhot-research/issues/80),
+[#81](https://github.com/TGrozner/superhot-research/issues/81),
+[#88](https://github.com/TGrozner/superhot-research/issues/88), and
+[#104](https://github.com/TGrozner/superhot-research/issues/104).
+Those serialized observations alone were not runtime animation proof; the later
+local extraction and native sampling below supply the additional evidence.
 
-`src/characters/native-enemy-local.js` exports:
+## Native sampling actually executed
 
-- `NATIVE_ENEMY_OBJ_EXPORTS.merged/headless`: immutable public **metadata**, qualified by source file *and* path ID, with exact compressed/decompressed hashes and sizes.
-- `loadNativeEnemyObj(file,{variant:'merged'|'headless'})`: owner-provided local File API `.obj` or `.obj.gz` **only**. Rejects wrong extension, size, SHA-256, missing exact OBJ group, wrong `v/vt/vn` counts, triangle count, source bounds, or malformed normals/UV/indices. No network request, automatic path access, asset serialization, clipboard, storage or upload. Strictness intentionally rejects alternate conversions until independently qualified.
-- `decodeSourceNeutralEnemyObj(text,evidence)`: source-neutral shape conversion via **SH-12** `parseObjGroupsIntoIndexedMesh`, not itself a proof of native source. Its result always labels itself **unverified**.
-- `createEnemyStaticIndexedPass(gl,program,uniforms,receipt)`: loads one SH-12 indexed mesh via the existing SH-14 WebGL2 character pass; provides `draw(worldMatrix)` and `dispose()`. The returned report explicitly distinguishes *digest-verified static export geometry* from a caller-provided mock, *generated red material* from native shader, and `skinned:false/nativeEnemySpawnVerified:false` from an activated EnemyBodyPrefab. One draw packet, no invented hitbox or fake bone matrices. Root transforms may later be supplied by SH-06 without creating false limb animation.
+An isolated clone was created in the original running Unity player. Cloned scripts
+were removed before activation, the AnimatorController detached, animation events
+and physics disabled. The original Avatar and exact source leaf clips were evaluated
+using `AnimationClipPlayable` and a manual playable graph. Local bone TRS values
+were recorded at 60 Hz; no motion was synthesized.
 
-The exact exported data remains in the user's private `superhot-research` corpus. **No OBJ files, original vertex buffers, source binaries, texture, shader, copyrighted game code, Unity bindposes or captures enter public Git or Actions logs.** The only tests use a *newly generated 3-vertex OBJ*, and cannot prove real-browser GPU drawing.
+| Browser clip/state | Exact source clip | Owner / path ID | Source controller state | Samples | Source duration | State speed |
+|---|---|---|---|---:|---:|---:|
+| idle | `rig\|standing-0-idle-MR` | sharedassets0.assets / 540 | `Base Layer.Idle` | 2 | 0.0166666675 s | 1 |
+| walk | `rig\|walking-forward-MR` | sharedassets0.assets / 585 | `Base Layer.Walking` | 61 | 1 s | 1.75 |
+| run | the same `walk` data, without a second copy | sharedassets0.assets / 585 | `Base Layer.Running` | 61 | 1 s | 2.25 |
+| hit | `rig\|standing-stun-0-epsilon-MR` | sharedassets0.assets / 569 | `Effects.Stun Blend Tree` | 50 | 0.8000001 s | 1 |
+| fire | `rig\|main-pistol-strzal-epsilon-MR` | sharedassets0.assets / 578 | `Shooting.RangeAttacks_BlendTree` | 50 | 0.8000001 s | 8 |
+| punch | `OA_Melee_Fist_01_Epsilon_MR` | sharedassets0.assets / 468 | `Melee.Punch` | 121 | 2 s | 1 |
 
-### Exact SH-05 hook: static native mesh first, real skin/pose later
+The v3 sample is 1,628,004 bytes, SHA-256
+`e2e50a6cc5b1d284d5fdea3799901f2d8dde93afbd95fe3cf2b9d4691264db73`.
+The complete/headless browser packages are distinct ignored private files. Their
+clip frames remain in the source Unity vertex/weight/bone order.
 
-SH-05 alone may edit shared `src/main.js`, `src/renderer.js`, `src/levels.js`, `index.html`. Do **not** edit them from SH-14 or claim this PR is visible automatically.
+The native player also rendered six isolated 960×540 source references: idle,
+walk at 0.25/0.75 second, hit at 0.25 second, fire at 0.25 second, and punch at
+0.5 second. Every captured local pose matched the retained sample with maximum
+component difference 0; private manifest SHA-256 is
+`09e2df6ff63448dca88db0b019803737b7438c103080f0e218241f0961a0475a`.
+These are source-engine pose references, not gameplay-frame or material parity.
 
-Inside SH-05's existing `createRenderer()` after `gl`, `program`, `uniforms` are available:
+The sampled hierarchy has finite transforms and normalized quaternions. Applying
+its original weights/inverse binds produced changing, finite skinned geometry,
+not a moving T-pose. The serialized-rest residual of approximately 0.005259 Unity
+units was retained rather than silently corrected.
 
-```js
-import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
-let nativeEnemyPass = null;
-function acceptLocalEnemyReceipt(receipt) {
-  const newPass = createEnemyStaticIndexedPass(gl, program, uniforms, receipt);
-  nativeEnemyPass?.dispose();
-  nativeEnemyPass = newPass;
-}
-function drawLocalEnemyDiagnostic(worldMatrix) {
-  if (!nativeEnemyPass) return { drawCalls: 0, triangles: 0 };
-  const stats = nativeEnemyPass.draw(worldMatrix);
-  drawCalls += stats.drawCalls; // SH-05's shared renderer counter
-  return stats;
-}
-// Include acceptLocalEnemyReceipt/drawLocalEnemyDiagnostic in renderer return.
-// No native EnemyBodyPrefab ID, combat entity, or active Animator inferred.
-```
+The controller supplies fixed locomotion transition durations, and only those
+durations are accepted by the skin pass:
 
-In SH-05's existing opt-in `?scene=containers` **local-only UI** (no server upload):
+| Transition | Duration |
+|---|---:|
+| idle → walk, walk → idle | 0.10000000149011612 s |
+| idle → run, run → idle | 0.10000000149011612 s |
+| walk → run, run → walk | 0.25 s |
 
-```js
-import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
-const receipt = await loadNativeEnemyObj(fileFromInput, { variant: 'merged' });
-renderer.acceptLocalEnemyReceipt(receipt);
-// Render-only diagnostic placement, intentionally NOT sourced from a native
-// Containers EnemyBodyPrefab spawn. Scene camera currently roughly
-// (11,7,31,yaw0,pitch-0.19): z~5 puts a 0..2m model near its sightline.
-const diagnosticWebWorldMatrix = [
-  1,0,0,0, 0,1,0,0, 0,0,1,0, 11,0,5,1,
-];
-// Every frame AFTER renderer.begin(camera), never as a gameplay enemy:
-const nativeEnemyMetrics = renderer.drawLocalEnemyDiagnostic(diagnosticWebWorldMatrix);
-```
+Fire has evidenced fixed 0.10000000149011612-second entry and exit durations and
+normalized exit time 0.875. Punch has a fixed 0.10000000149011612-second entry;
+its normal exit is fixed 0.33426880836486816 second at normalized time
+0.8341996669769287. These action timings are retained as package provenance, not
+silently generalized into locomotion crossfades.
 
-Show the text **`STATIC SOURCE-EXPORTED ENEMY · DIAGNOSTIC POSITION · NOT MCD SPAWN / MATERIAL / ANIMATION`** in the browser. Telemetry fields should separately report `sourceMeshOwner='sharedassets0.assets'`, `sourceMeshPathID=284|285`, `nativeIndexedDrawCalls`, `nativeStaticTriangleCount`, `nativeEnemySpawnVerified=false`, `skinAnimationVerified=false`. No native gameplay hit test should use this stand-in; SH-03 owns combat and SH-06 owns evaluated animation.
+### Action layers
 
-**Visual acceptance requires** a real user-selected local OBJ loaded in a WebGL2 browser, an actual frame with **nonzero** enemy indexed draws and screenshot, correct front-face/normal orientation, then a matching native MCD capture and matched camera/scale/material checks. Until that exists, **1:1 is unmeasured**. Full animated original 60/59-bone rig requires owner-qualified ordered `m_Bones`, Mesh `m_BindPose`, per-vertex bone weights/indices, Avatar632 resolution, SH-06 clip/retarget pose and verified runtime instantiation — still OPEN. One static mesh cannot legitimately be presented as skinned just by moving its root.
+Controller638 supplies transform masks for both actions. Fire layer 4 is additive
+with serialized default weight 1; it affects bones 10–13 (spine), 37–38 (neck),
+and 39–61 (right arm/hand). Punch layer 5 is override; it affects bones 10–61
+(spine, neck and both arms/hands), while root, hips and legs remain locomotion.
+Runtime layer weights are not constants: `PejAiAnimator` writes
+`gunFightLayerWeight` to layer 4 and `meleeLayerWeight` to layer 5. Entering or
+exiting melee linearly tweens the latter over 0.1 second and grab IK can reduce it.
+The Shooting layer does **not** start from the `Shoot` trigger: that trigger is
+consumed by the melee and melee-weapon layers. Controller638 serializes a
+conditionless, fixed-0.1-second `IdleLeftRightBlend -> RangeAttacks_BlendTree`
+edge and a fixed-0.1-second return at normalized time 0.875. That edge alone does
+not prove activation: no managed `Animator.Play`/`CrossFade` targets the range
+state, and an isolated `AnimatorControllerPlayable` with `LeftRight=1`,
+`Weapon=0`, and layer-4 weight 1 remained in `IdleLeftRightBlend` for the full
+0.8-second observation. Browser activation must therefore come from explicit Web
+attack intent; it is not described as a recovered projectile-event restart or
+native periodic cycle.
 
-## SH-14: source-qualified serialized skin/bind matrices, NOT live pose (2026-11-02)
+The first isolated native `AnimationLayerMixerPlayable` capture evaluated fire over
+four walk phases at five fire times. It produced 20 records, 134,155 bytes,
+SHA-256 `56ef75a661dfccf2d11a106062f8724c2091af949c961e74a9aa20e7eb051dc1`.
+Fire frame zero was the native additive neutral: its maximum difference from the
+base was 1.3e-9 position and 2.98e-8 radians. However, the later Humanoid additive
+result is **not** a base-independent local-TRS delta. Across the four base phases,
+the same action sample changed the inferred post-rotation delta by as much as
+0.03370358391045004 radians and position delta by 0.0006914484000000009 Unity
+units. Reusing one guessed local delta would therefore be observably different from
+Unity's muscle-space composition.
 
-**New bounded private query:** [research #104](https://github.com/TGrozner/superhot-research/issues/104), run `41447003094`, artifact `13141584125`. Its `result.json` was inspected directly: **two joined rows, no error, `truncated=false`**. The query selected only exact owner `sharedassets0.assets`, Mesh IDs 284/285 and matching SkinnedMeshRenderer IDs 4748/4749. No earlier query was duplicated; OBJ assets, original matrices and ordered full bone arrays stay private.
+V8 contains bounded native precomposition for the default right-handed pistol
+branch (`LeftRight=1`, `Weapon=0`): `zeta:rig|main-pistol-strzal-epsilon`, duration
+2 seconds, state speed 8. This differs from the retained raw comparison API's
+0.8000001-second `fire` MR leaf. The grid covers one idle phase and 16 periodic
+walk phases, 33 action knots from 0 through 2 raw source seconds, and native
+external layer weights 0.5 and 1; weight 0 is the unduplicated raw base pose. Run
+aliases the same walking leaf. Its 17,991,271-byte native capture has SHA-256
+`cef9ef6aee2684628bb14e5e0c95274db4b3340a5af802ef00560d301d3d57c2`
+and contains 1,122 training, 1,088 unseen weight/time/phase, and 648 locomotion
+transition hold-out records.
 
-| Serialized metadata proved | EnemyMerged Mesh284 / SMR4748 | EnemyMergedHeadless Mesh285 / SMR4749 |
-|---|---:|---:|
-| Vertex count | 5,237 | 4,895 |
-| Ordered `m_Bones` array | 60 refs (all unique) | 59 refs (all unique) |
-| `Mesh.m_BindPose` array | **60 matrices** | **59 matrices** |
-| Bone-name hashes | 60 | 59 |
-| Same-owner root bone | Transform 2257 | Transform 2257 |
-| `Mesh.m_BoneWeights` / `Mesh.m_Skin` JSON | absent / absent | absent / absent |
-| `Mesh.m_CompressedMesh.m_Weights` | present as **object, not decoded** | present as **object, not decoded** |
-| `Mesh.m_VertexData.m_Channels` | serialized array | serialized array |
+The 1,088 grid hold-outs bound maximum component position error at
+0.00003745558245 Unity units, scale error at zero, and rotation error at
+0.0183600885 radians. Locomotion-transition hold-outs bound endpoint
+precomposition at 0.0000065005 position and 0.0455490398 radians. A separate
+162-record native entry/exit capture (SHA-256
+`5b1c94610817c25e636ec171cbb8bb92f3a188f4c344822bbb7a76848d42f13c`)
+bounds the Web effective-weight approximation at 0.0000221286897 position /
+0.0192482490 radians on entry and 0.000150717612 / 0.0786473024 radians on exit.
+The Shooting-idle leaf differs from raw base by at most 0.0000021615 position and
+0.0000706999 radians. These are measured approximations, not exact parity or a
+reconstructed Humanoid solver.
 
-The headless ordered `m_Bones` list is exactly the 60-bone merged list with one reference **`sharedassets0.assets:Transform1939` removed at zero-based index 17**, with the other 59 refs in the same order. This is a **structural comparison, not proof of that bone's anatomical identity or runtime removal**. Serialized bindpose matrices contain `e00…e33` fields; their full numeric contents, Unity-to-Web basis conversion, bind/pose multiplication and per-vertex matching remain **unverified**. Do not equate equal counts with executable skinning. Animator4659, Avatar632 and Controller638 are serialized prefab references, not a sampled native clip/pose. Rendering `m_Enabled=1` of both SMRs from #93 is separate from the serialized disabled Animator.
+An earlier controller-based sampling attempt emitted StateMachineBehaviour errors
+after gameplay scripts were stripped. That result is not the shipped pose source;
+the separate playable capture avoids those callbacks. Native death has **no clip**
+in this controller: `PejAiAnimator.Kill` disables the Animator and releases limb
+rigidbodies for ragdoll/shatter physics. No death clip is invented.
 
-### Working pure geometry deformation engine, strictly source-neutral
+The source prefab does serialize 11 body-part cutter meshes: torso (mesh 254),
+right shin (217), right thigh (274), left shin (278), right forearm (283), left
+upper arm (280), left thigh (279), left forearm (282), head (281), hips (269), and
+right upper arm (276). Native separation first calls `SkinnedMeshRenderer.BakeMesh`
+at the actual kill pose, groups triangles by the first vertex's color (red-channel
+tolerance 10), recenters each generated mesh at its arithmetic vertex mean, then
+places it with the source part transform and applies runtime joint/force behavior.
+Consequently there is no exact static fragment placement to export: it depends on
+the actor pose at the kill frame and subsequent native physics/randomness. A fixed
+hit-pose or authored death placement would be fabricated and is intentionally absent.
 
-New `src/characters/skinning.js` exports `createIndexedSkinBinding()` and `skinIndexedCharacter()`: CPU **linear-blend skinning of real indexed triangle geometry**, using SH-12's `defineIndexedMesh` canonical interleaved 32-byte vertex layout. It is **not** another procedural enemy mesh or animation. Caller supplies *all* bone mapping and 4 influences per vertex. No fallback/invented weights, clips, transforms, hitboxes or source bytes.
+## Public integration APIs
 
-```js
-import { createIndexedSkinBinding, skinIndexedCharacter } from './characters/skinning.js';
+- `native-enemy-local.js` validates exact local OBJ exports and provides the static
+  indexed pass. The OBJ's split/conversion ordering is not used for skin weights.
+- `native-skin-pass.js` validates original vertex-order skin packages, interpolates
+  local position/scale and shortest-arc quaternion samples, composes parent-first
+  transforms, and draws one indexed GPU-skinned mesh.
+- `renderer.replaceNativeCharacter(receipt, sourcePackage)` installs a complete
+  static/animated pair atomically. A null package explicitly selects static-only.
+- A loaded skin exposes `states`, `clipDurations`, `actionTiming`,
+  `actionLayers`, `actionPrecompositions`, `availableTransitions`, and
+  `availableActions`. `createStateInstance(name)` preserves state aliases such as
+  run → walk without copying frames. `draw(...)` accepts optional
+  `transition: { from, fromTime, elapsed }`, where `from` is a prior skin instance.
+  If transition is absent the target is sampled directly; if its exact
+  `from->to` contract is absent the draw fails rather than inventing a duration.
+- The fire action API is
+  `action: { state: "fire", time: rightPistolSourceSeconds, weight, blend }`.
+  `time` is raw, unscaled time in the 2-second default-right-pistol leaf; the
+  caller advances it at controller speed 8. `weight` is the external
+  `gunFightLayerWeight` in `[0,1]`. `blend` is the Shooting state contribution in
+  `[0,1]` (default 1); entry/exit use the evidenced approximation
+  `effectiveWeight = weight * blend`. `null` means inactive. Fractional native
+  weights are interpolated between captured 0, 0.5, and 1 knots.
+- Punch remains
+  `action: { state: "punch", time: sourceClipSeconds, weight: 1 }`; its override
+  weight and blend must both be exactly 1. The raw `clip: "fire"` comparison API
+  is unchanged and remains the separate 0.8000001-second MR leaf.
+- Fire samples its bounded native precomposition over current base time, action
+  time, and effective weight. During an idle/walk/run transition it precomposes
+  both endpoints before the recovered locomotion transition. V4 and earlier
+  packages retain the explicit blocker; V8 exposes the weighted default-right
+  branch with all measured hold-outs.
+- Caller base and action clocks apply the exposed source state speeds before this
+  API. Idle/walk/run loop; hit/fire/punch clamp. The gameplay integration freezes
+  all animation clocks at its recorded kill time because native `Kill` disables
+  the Animator. Missing states, clips, transitions, or action contracts are errors.
 
-// This input is BLOCKED for native EnemyMerged until private source skin weights,
-// bone order and full bindpose coordinate conversion have been validated.
-const binding = createIndexedSkinBinding({
-  mesh: localEnemyReceipt.mesh, // SH-12-compatible indexed OBJ mesh
-  boneIds: verifiedBoneIdsInRendererOrder, // 60 or 59 owner-qualified
-  inverseBindMatrices: verifiedInverseBindsInWebMeshLocal,
-  boneIndices: verifiedFourIndicesPerVertex, // length vertexCount*4
-  boneWeights: verifiedFourNormalizedWeightsPerVertex, // same length
-});
-// SH-06 must supply the ACTUAL pose, bone matrices already Web mesh-local:
-const frame = skinIndexedCharacter(binding, verifiedPoseByBoneId);
-// frame.mesh = NEW SH-12 mesh with deformed pos/normals + unchanged UV/indices.
-// frame.nativePoseVerified remains false: the caller must prove native execution.
-```
+The skin equation is `sum(weight * globalBoneInMeshSpace * inverseBind * vertex)`.
+The world transform is applied once afterward. Original skin packages retain Unity
+coordinates; the actor world matrix performs the X reflection. The older static
+OBJ loader uses a different converted basis and needs its corresponding heading.
+Do not attach the original weights to the parsed OBJ's different vertex order.
 
-The calculation is `skin_i = posedBoneInMeshLocalSpace_i × inverseBind_i`, `p' = Σ weight_j * (skin_j * p)`; normals use per-influence inverse-transpose and are normalized. The solver rejects singular/invalid matrices, missing bone matrices, invalid indices/weights, non-unit weight sums and degenerate normals. Triangles/UVs stay intact, deformed bounds recalculate, and there are no geometry or shader assets bundled. **Web RH mesh-local basis must be proven identical across OBJ positions, bindposes and sampled bones**; do not transpose Unity `eij` or mirror axes speculatively. Apply root world matrix only at draw time, not twice. `tests/character-skinning.test.mjs` uses only a newly-authored 3-vertex non-cube triangle with two bones, including 50/50 blending, inverse bind cancellation and nonuniform-scale normals.
+The reusable CPU `skinning.js` also requires **hierarchy-global bone matrices in
+mesh-local space**, not parent-local matrices. Normals use the inverse transpose of
+the blended skin transform, including nonuniform scale. The GPU uses the same rule.
 
-**SH-05 exact integration handoff:** Continue showing the already-merged #114 **STATIC** local EnemyMerged OBJ in `?scene=containers` immediately; **do not gate the first native-geometry screenshot on skins**. No SH-05 shared files have been touched by SH-14. When authentic weights and poses exist, accept `frame.mesh` as SH-12 indexed data and update the existing WebGL2 vertex buffer per frame (`DYNAMIC_DRAW/bufferSubData` on cached GPU resources rather than rebuilding VBO/EBO every tick). Reuse host `renderer.begin(camera)`, `aPosition`/`aNormal`/UV32B layout, source-derived static mesh as safe fallback, and original root model-to-world once. SH-06 alone supplies clip/time/pose; SH-03 owns hit/collisions. Telemetry must separate **verified private static mesh**, **algorithmic source-neutral deform**, and **runtime-sampled native pose**. No 1:1 claim before original/Web synchronized screenshots and bone/hit comparisons.
+## Behavior observed in Chromium
 
-**One exact native blocker for next research cycle:** decode the **compressed** `m_CompressedMesh` skin weight and bone-index encoding (or alternate vertex stream weight channels) for Mesh284/285, including ordering correspondence with exported OBJ vertices; determine the actual bone transform chain and map bindposes to runtime-sampled pose. Existing #104 proves their serialized presence/counts, **not usable per-vertex influence values**. No new private request should repeat #104.
+- Root auto-loads complete geometry and the 62-bone/60-weighted-bone package.
+- The character appears in its sampled idle pose rather than the original bind pose.
+- Actual keyboard movement advances the world clock and original walking poses.
+- Pausing freezes the world clock and sampled pose time.
+- A controlled-camera projectile scenario exercised the actual input/projectile
+  path, killed an original actor, rendered its sampled hit reaction and Web debris,
+  and produced a dropped original pistol above the source floor.
+- World rendering used 360 original instances / 185037 triangles, with the original
+  held pistol; no GL errors were observed in these scenarios.
 
+`Cadrer le modèle` is collision-free and hides scenery so it cannot occlude the
+inspected character. Generated control/demo views retain their generated actors.
 
-## SH-14 — verified OBJ-source-position → WebGL2 skin-slot permutation (2026-11-02)
+## Remaining limits
+The locomotion crossfades use recovered fixed controller durations, and the punch
+path uses the recovered layer-5 override mask over simultaneous locomotion. Fire is
+active through a bounded native precomposition grid; it is not reconstructed as a
+base-independent local-TRS delta. Grid, fractional external weight, Shooting
+entry/exit effective weight, and endpoint locomotion-transition interpolation
+retain the measured errors above. Only the default right-handed pistol branch is
+packaged. Native activation of the serialized Shooting range state remains
+unobserved, so Web attack intent is an explicit integration input rather than a
+claimed source event mapping. FinalIK, root motion and active native spawning are
+not reconstructed. Containers uses authored spawn candidates with Web encounter
+timing. Combat/hitboxes, axis-aligned collision, death fragments, audio and
+lighting remain Web behavior. Native death ragdoll physics and complete red-crystal
+shader/post-processing are not implemented. Isolated pose and layer captures must
+not be called full 1:1 parity.
 
-**P0 finding, based on a fresh direct reinspection of PRIVATE `result.json`, not merely workflow status.** Reused [research #88](https://github.com/TGrozner/superhot-research/issues/88), artifact `13139108195`, and [research #90](https://github.com/TGrozner/superhot-research/issues/90), artifact `13140612009`, with compressed exported objects read only in the private analysis environment. Both `result.json` payloads were `operation=bytes` with complete base64 gzip, SHA-256 matches their already published metadata receipts (no new corpus issue, no new runner requests). The original OBJ text and all original vertex/faces stay private. Also rechecked [research #104](https://github.com/TGrozner/superhot-research/issues/104), artifact `13141584125`: two complete DB rows, no truncation, **60/59** serialized bindpose counts and `m_CompressedMesh.m_Weights` object existence only; this is not a decompressed weight stream or a runtime pose.
+## SH-14 Red Crystal final-output integration (2026-11-02)
 
-**Crucial interoperability defect:** SH-12's `parseObjGroupsIntoIndexedMesh` numbers GPU vertices in **first-seen triangle-corner order**, NOT in the original Wavefront `v` declaration order. This is a completely deterministic fact about the existing Web implementation, independently rechecked against each original private OBJ's `f v/vt/vn` records:
+The live GPU-skinned character fragment shader now embeds and invokes
+`NATIVE_MATERIAL_GLSL.redCrystalOutput` from `src/render/native-material.js`.
+It applies the recovered final RGB mix, conditional green term and opaque alpha.
+The Unity-order positions, weights, compact joint palette and the previously
+sampled idle/walk/hit data are unchanged; fire/punch are added in the same direct
+order and run aliases the walk data. **No OBJ remap** is applied.
 
-| Private owner-qualified OBJ | Declared OBJ positions | Distinct referenced positions | Web unique corner vertices | GPU index identical to OBJ position index | Different index (requires remap) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `sharedassets0.assets:284` EnemyMerged | 5237 | 5237 | 5237 | **2225** | **3012** |
-| `sharedassets0.assets:285` Headless | 4895 | 4895 | 4895 | **2103** | **2792** |
+This is **bounded shader math**, not full Red Crystal parity. Native
+`proceduralRgb`, `overlayRgbAmount`, and `additiveRgb` producers remain
+unverified. For now, the pass feeds its existing Web lit RGB into procedural,
+with zero overlay/additive signals. It does not invent specular, fog, reflectance,
+shatter or death inputs. Its draw report exposes
+`redCrystalFinalCompositor: true`, `redCrystalNativeInputsVerified: false`,
+and `materialParity: false`.
 
-All **6,762** merged face corners and **6,396** headless face corners have exact positive, matching `v/vt/vn` numeric indices. There are no unreferenced OBJ positions and no UV/normal seam-induced GPU duplicates **in these exact two exports**. Even so, most GPU slots are **permuted**. Feeding an eventual original source-vertex weight array directly to `createIndexedSkinBinding({mesh:receipt.mesh,...})` based only on equal vertex counts would bind the wrong weight *slots* for 3,012/5,237 and 2,792/4,895 GPU vertices. This does NOT prove that the associated weight values differ; it proves index correspondence is incorrect without permutation. One must still verify privately that the original Unity per-vertex weight order equals the OBJ exported `v` order.
+The four pre-change isolated views in `docs/parity/visual.md` measure silhouette
+IoU 0.9554–0.9615 and RGB delta 0.0940–0.1022. No post-change comparison or
+visible improvement has been measured. SH-05 can integrate this pass without
+editing its caller integration or waiting for a different rig package.
 
-### New PURE module, no gameplay modifications
+## Dojo/build10 — first-person hands and katana (SH-14 WEB-ONLY, 2026-11-02)
 
-`src/characters/obj-skin-map.js` exports:
+The current priority is **SHRL_Dojo2 / build10**, replacing the old Containers
+first milestone. The baseline is `main@2297ccb6548004d02261615676d7d23466032016`
+and `docs/dojo-reprise.md` is the archive handoff. The old source-authored
+held katana REST placement is already in `native-items.js`; this new pass
+must not duplicate or replace that path unless real swing package data exists.
 
-- `createObjSkinVertexMap({objText,mesh,groupName,sourcePositionCount,axisSigns:[-1,1,-1],winding:'keep'})`: produces `sourceVertexForGpu` in the same first-use order as SH-12. Strictly validates every face index, GPU triangle order, exact float32 positions/normals/UVs and input source-position count. The canonical full local OBJ MUST be supplied by the owner, not copied into the repo. This map is **not** a Unity original-vertex index proof.
-- `remapObjPositionSkinInfluences(map,sourceBoneIndices,sourceBoneWeights)`: duplicates/remaps four per-position influences into **SH-12 GPU order**, including authored fixture UV seams; returns arrays directly consumable by the merged `createIndexedSkinBinding` CPU solver. No weights, bone names, matrices, clips or poses are inferred.
-- Newly authored **non-cuboid two-triangle fixture** tests assert source→GPU reordering, seam duplication, correctly deformed geometry when passed to the existing LBS solver, and hard fail on index/attribute drift. These tests contain no MCD values.
+The private checkpoint
+`private/checkpoints/dojo-fidelity-before-stabilization/work-in-progress.zip`
+contains an unfinished `native-player-animation.js`, source extraction and
+renderer changes. **That local archive is not available to Web-only SH-14.**
+Neither its contents nor a new private `result.json` were inspected for this
+change. No native player-hand clip timings, active Animator state, material,
+weapon socket transforms or live frame are newly claimed from it.
 
-**SH-05 exact static→animated handoff (no shared-file changes here):**
+### Already known static rig identities (from dojo-reprise.md)
 
-```js
-import {
-  createObjSkinVertexMap, remapObjPositionSkinInfluences,
-} from './characters/obj-skin-map.js';
-import {
-  createIndexedSkinBinding, skinIndexedCharacter,
-} from './characters/skinning.js';
+For build10 `SHRL_Dojo2`, use the *scene-configured* player-hand hierarchy:
+Animator `6333` (`AnimCtrl_PlayerMain`), HandManager `6545`,
+SkinnedMeshRenderer `6378`, weapon-bone Transform `2896` (GO `1435`).
+The isolated `bHands.prefab` is NOT a substitute for that active hierarchy.
+These serialized links do not establish which animation/weight was played in a
+particular native frame. The pistol's original first-person view does not
+show hands holding it; its pickup/recoil uses DOTween. Three katana swing
+sound references are null; no synthetic swing sound is added.
 
-// Only AFTER the owner supplies the SAME local, digest-checked OBJ text as the
-// already-loaded static enemy receipt AND private/native source weights
-// independently qualified as matching the OBJ 'v' declaration order:
-const sourceMap = createObjSkinVertexMap({
-  objText: ownerLocalDecodedObjText,  // never upload / store / publish
-  mesh: staticReceipt.mesh,
-  groupName: staticReceipt.variant === 'merged'
-    ? 'EnemyMerged_0' : 'EnemyMergedHeadless_0',
-  sourcePositionCount: staticReceipt.variant === 'merged' ? 5237 : 4895,
-  axisSigns: [-1,1,-1],
-  winding: 'keep',
-});
-const remapped = remapObjPositionSkinInfluences(
-  sourceMap, verifiedSourcePositionBoneIndices, verifiedSourcePositionBoneWeights,
-);
-const binding = createIndexedSkinBinding({
-  mesh: staticReceipt.mesh,
-  boneIds: verifiedOrderedOwnerQualifiedBoneIds,
-  inverseBindMatrices: independentlyQualifiedWebMeshLocalBinds,
-  boneIndices: remapped.boneIndices, boneWeights: remapped.boneWeights,
-});
-const posed = skinIndexedCharacter(binding, verifiedPoseByBoneId);
-// SH-05/isolated GPU worker owns dynamic VBO upload. SH-06 owns timeline/pose.
-// SH-03 owns hit; DO NOT create native hitboxes from a skin mesh.
-```
+### Executable Web slice supplied
 
-**Hard gates:** source weights compressed format, original Unity→OBJ `v` correspondence, actual numerical bindposes in Web basis, source hierarchy/palette and time-sampled native pose are still unproven. **Do not postpone the existing real STATIC EnemyMerged Containers capture** while solving these. New mapping has no browser GPU screenshot and is NOT a runtime-native animation or a 1:1 claim. Native resource IDs and aggregate counts are safe metadata; original buffers remain private.
+`src/characters/native-player-animation.js` exports
+`createDojoPlayerAnimationPass(gl, {sourcePackage, rig, clips, lighting})`.
+It directly REUSES `createNativeSkinPass` for genuine indexed,
+four-influence GPU deformations and the original source clip samples. This
+does **not** create another skinner or a procedural hand model.
+
+- `sourcePackage`: **raw private source skin package**, schemaVersion 1,
+  in Unity-order vertices/weights, containing the sampled scene hands mesh,
+  `clips`, `bones`, inverse binds and a verified
+  `weaponAttachment:{bone,localMatrix,source,coordinates}`. Never use
+  EnemyMerged 284/285 or the unrelated isolated bHands prefab as a stand-in.
+- `rig`: exact source scene IDs above, plus
+  `weaponBoneName` equal to the source package attachment bone's name,
+  and a nonempty `provenance` identifying the private archive evidence.
+- `clips:{held,swing}`: explicit **names already present in the raw package**.
+  No guessed first-person katana clip name, duration or transition is provided.
+  Held loops; swing clamps, using caller's source-clip seconds. The caller must
+  supply the active event/phase, not infer an Animator transition from
+  `fireDelay` or an arbitrary timeout.
+- `pass.draw({heldItem,phase,sourceClipTime,modelMatrix,viewProjection,
+  cameraPosition,shaderTime,color,katanaMeshLocalMatrix})`: only draws hands
+  when `heldItem.isKatana === true`. It requires actual camera-relative
+  player-hands `modelMatrix`, real scene viewProjection and explicit Web
+  preview color. It does not draw pistol hands. With `phase='swing'`,
+  the source sample moves the bone and its attached katana socket in the
+  **same draw**, not a hand-follow animation bolted on afterward.
+- `draw` returns `weaponBoneWorldMatrix` (copied, no scratch alias) and,
+  only if source-qualified `katanaMeshLocalMatrix` is supplied, a
+  `katanaModelMatrix` suitable for the existing indexed native item draw.
+  If mesh-local placement is unavailable, hands still draw but the sword
+  stays on the previous source-backed held-placement path. It never guesses
+  a new blade offset or invokes hit/damage planning.
+- `nativeHandsMaterialParity: false`, `nativePlayerControllerTransitionVerified:
+  false`. The reused enemy pass would incorrectly apply Red Crystal to hand
+  UV0. The Web preview therefore deliberately omits UV0 **only in its
+  in-memory draw view** to select existing generic Web lighting, preserving
+  original UV0, geometry, skin weights and clips in the private source object.
+  This is a **diagnostic Web material**, not a native hand texture/shader.
+
+### Exact SH-05 exclusive integration contract
+
+After privately restoring and validating the archived hands source package,
+SH-05 owns `renderer.js/main.js`: create the pass ONCE on the existing
+WebGL2 context, then call `draw` inside `drawViewModel(camera)`, after the
+native world has prepared the same projection/camera but before HUD. Pass
+the *source-authored camera-relative hand model matrix*, original clip names,
+phase and clip seconds from the genuine katana action path. The draw itself
+restores host GL program/VAO/front-face state and does not modify combat.
+
+If `katanaModelMatrix` is returned, draw the current held source katana
+instances with `renderer.drawNativeInstance(instanceId,katanaModelMatrix,true)`
+using the model's private source-local offset, avoiding a second draw via
+`nativeItemDraws().held`. If no native socket/local offset exists, preserve
+the currently working static held katana instead of making one up. Dispose
+the pass on package replacement/reset, never create it once per frame.
+Do not repurpose the enemy `drawNativeSkin` state map or alter SH-06 and SH-03.
+
+### Evidence / acceptance boundary
+
+`tests/character-native-player-animation.test.mjs` uses an **authored
+non-cuboid fixture** to exercise real WebGL2 indexed draw calls (mock context),
+exact source-clip pose interpolation, a moving weapon socket,
+non-katana invisibility, invalid-source rejection, GL state restoration and
+preservation of private UV data. These tests are not an actual browser/GPU
+screenshot or a reverse-engineered katana animation.
+
+**Blocked before owner-visible rendering:** the private archived scene hands
+mesh/clips/weapon-bone socket/source material and their real first-person
+matrix have not been made available through approved Web-only resources.
+The SHA and location of the checkpoint are in `docs/dojo-reprise.md`; no
+local runner, research workflow, native binary or asset was accessed. SH-05
+must verify the recovered archive (without re-running its extractor), integrate
+the shared hook on a green baseline, and provide Thomas a localhost hand+katana
+idle/swing pair to test. Comparing native/Web frames at matched camera,
+time, action and joint poses is still required; **no 1:1 claim**.
+
+## SH-14 — OBJ declaration-order to SH-12 GPU skin-slot permutation (PR #134)
+
+This **source-neutral compatibility path** applies only when SH-12 has decoded
+an OBJ into first-used-face-corner vertex order. It must **not** be applied to
+the direct Unity-order animated EnemyMerged/Headless skin packages already used
+by `native-skin-pass.js`; those retain their original ordered vertices and
+bone weights. Dojo/build10 remains the visual integration priority.
+
+The earlier PRIVATE research receipts cited in PR #134 (research #88 artifact
+`13139108195`, #90 artifact `13140612009`, and #104 artifact `13141584125`)
+record an OBJ/GPU permutation of 3,012 out of 5,237 positions for EnemyMerged
+(`sharedassets0.assets:284`), and 2,792 out of 4,895 for Headless
+(`:285`). Prior proof documents identical referenced OBJ position counts and
+face-corner ordering, but **does not prove Unity native vertex indices equal
+OBJ declaration-order indices**. These source receipts were documented in the
+existing PR; no new original bytes or `result.json` were obtained this cycle.
+
+`src/characters/obj-skin-map.js` implements
+`createObjSkinVertexMap({objText,mesh,groupName,sourcePositionCount,axisSigns,winding})`:
+validate every triangle corner, attribute layout and index correspondence
+against the actual SH-12 decoded mesh, then return `sourceVertexForGpu`.
+`remapObjPositionSkinInfluences(map,sourceBoneIndices,sourceBoneWeights)`
+projects four per-position influences into the indexed GPU order, duplicating
+values where UV/normal seams generate multiple GPU vertices. Synthetic
+non-cuboid tests deform the actual mapped indexed mesh through the existing
+`createIndexedSkinBinding`/`skinIndexedCharacter` CPU path. No copied
+commercial mesh, rigs, decoded source shader, pose, or asset is committed.
+
+**SH-05 integration gate:** keep using the already working animated native
+package unchanged. Only invoke this remap for a separately verified, exported
+OBJ source whose weights are *independently proven to correspond to OBJ `v`
+declaration order*. Use the exact decoded source OBJ (private, digest-checked),
+SH-12 `mesh`, source-position count, axis signs and winding; fail closed on
+ordering drift. Pass output weight arrays to `createIndexedSkinBinding` only
+after independent native palette, inverse binds, and posed-bone matrices are
+verified in the same mesh-local coordinate frame. SH-03 owns hitboxes and
+SH-06 the timeline. This module is **not** a runnable native animation or
+Dojo visual-parity measurement; do not replace the current direct GPU skin pass.

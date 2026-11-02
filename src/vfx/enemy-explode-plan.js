@@ -21,8 +21,9 @@ const nativeRoll = (v, name) => {
  * The head is deliberately requested separately even if the list contains it:
  * the source does not deduplicate that operation.
  *
- * `nonCivilian` corresponds only to the third positional argument handed
- * to RemoveBodyPart; this does NOT interpret that method's behavior.
+ * `nonCivilian` comes from !controller.IsCivilian() in PejAiBody.Explode.
+ * It is forwarded as the third RemoveBodyPart argument `spawnParticles`;
+ * its meaning is now source-proven by BodyPartMeshCutter.cs:270,351 (#138).
  */
 export function planPejAiBodyExplode({
   deathSource, bodyPartIds, randomValues, nonCivilian, hasAnimator,
@@ -40,7 +41,7 @@ export function planPejAiBodyExplode({
     cutMode: nativeRoll(randomValues[i], 'randomValues[' + i + ']') >= 0.9
       ? 'Shatter' : 'None',
     deadPhase: true,
-    nonCivilian,
+    spawnParticles: nonCivilian,
   }));
 
   return {

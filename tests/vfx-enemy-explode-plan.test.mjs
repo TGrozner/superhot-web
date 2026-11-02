@@ -16,9 +16,9 @@ test('source order: body Kill, unconditional head Shatter, each cutter, Animator
   assert.deepEqual(p.actions, [
     { op: 'body-kill', deathSource: 'Other' },
     { op: 'remove-body-part', partId: 'Head', cutMode: 'Shatter' },
-    { op: 'remove-body-part', partId: 'arm-left', cutMode: 'None', deadPhase: true, nonCivilian: true },
-    { op: 'remove-body-part', partId: 'head', cutMode: 'Shatter', deadPhase: true, nonCivilian: true },
-    { op: 'remove-body-part', partId: 'leg-right', cutMode: 'Shatter', deadPhase: true, nonCivilian: true },
+    { op: 'remove-body-part', partId: 'arm-left', cutMode: 'None', deadPhase: true, spawnParticles: true },
+    { op: 'remove-body-part', partId: 'head', cutMode: 'Shatter', deadPhase: true, spawnParticles: true },
+    { op: 'remove-body-part', partId: 'leg-right', cutMode: 'Shatter', deadPhase: true, spawnParticles: true },
     { op: 'animator-kill', killTime: 0, clock: 'scaled-not-realtime-queue' },
   ]);
 });
@@ -43,4 +43,14 @@ test('samples are caller-supplied, not synthesized or collapsed to a hit effect'
   assert.throws(() => planPejAiBodyExplode({ ...state(), randomValues: [NaN, 0.5, 0.5] }), /randomValues/);
   assert.throws(() => planPejAiBodyExplode({ ...state(), nonCivilian: undefined }), /booleans/);
   assert.throws(() => planPejAiBodyExplode({ ...state(), bodyPartIds: ['x', '', 'y'] }), /nonempty/);
+});
+
+test('nonCivilian input is forwarded only as RemoveBodyPart.spawnParticles', () => {
+  const p = planPejAiBodyExplode({ ...state(), nonCivilian: false });
+  const cuts = p.actions.filter(a => a.op === 'remove-body-part').slice(1);
+  assert.equal(cuts.length, 3);
+  assert.ok(cuts.every(a => a.spawnParticles === false));
+  assert.ok(cuts.every(a => !Object.hasOwn(a, 'nonCivilian')));
+  // The separately requested head Shatter uses native default args.
+  assert.ok(!Object.hasOwn(p.actions[1], 'spawnParticles'));
 });

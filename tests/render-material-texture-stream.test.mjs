@@ -58,7 +58,7 @@ test('Containers Lightmap-0 source is DXT5 2048 square with 12 mips and separate
 });
 
 test('Metadata alone cannot turn the two stream references into an accepted Web shader',()=>{
-  assert.equal(source.status,'serialized-shader-and-texture-references-resolved-payload-unavailable');
+  assert.equal(source.status,'serialized-material-texture-sampler-and-compiled-pass-recovered-runtime-unobserved');
   assert.equal(source.webShadingReady,false);
   assert.equal(source.mainTexture.imagePixelsDecoded,false);
   assert.equal(source.lightmapTexture.imagePixelsDecoded,false);

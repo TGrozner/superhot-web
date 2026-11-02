@@ -12,15 +12,22 @@ Open the published GitHub Pages URL once Pages is enabled. On Windows, unzip the
 npm start
 ```
 
-Then visit **http://localhost:4173/**, with no query parameters. The homepage opens the original-model inspection view immediately. On the owner's configured machine, original cargo geometry, concrete texture and EnemyMerged load automatically from the loopback-only server. They are **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
+Then visit **http://localhost:4173/**, with no query parameters. On the owner's configured machine, the selected private scene currently opens **Dojo (`SHRL_Dojo2`, build index 10)** with original local scenery and textures, from the viewpoint observed in the running replay. Click **Jouer dans SHRL_Dojo2** to start the Web encounter. The source equipment baseline is unarmed; common original pistol models remain available for enemy weapons and pickups. **Cadrer le modèle** isolates the character for inspection. Original data is **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
 
-The visible **Vue** menu switches to **Prototype jouable** (the original three-arena game) or **Scène de contrôle générée**. There are no URL feature flags. The original-model view is currently static geometry inspection, not reconstructed native gameplay or animation.
+The visible **Vue** menu also offers **Anciennes salles de démonstration** and **Scène de contrôle générée**. These retain their generated geometry. There are no URL feature flags. Original geometry and sampled animations do not imply native gameplay, physics, lighting or shader parity.
 
 ### Local original-asset configuration
 
 The ignored `private/browser-assets.json` maps `mesh6`, `mesh7`, `texture`,
-`enemyMerged`, and `enemyHeadless` to relative paths inside `private/`.
-Only those configured files are exposed through `/local-assets/<id>`, on
+`enemyMerged`, `enemyHeadless`, `enemyRig`, `enemyHeadlessRig`, `scenePackage`,
+numbered `sceneTexture_NNN` IDs, `sceneLightmap_000`, `sceneLightmapBc3`,
+and the `sceneConcrete*` textures to relative paths inside `private/`.
+The rig JSON contains original geometry, skin weights, inverse binds, a 62-bone
+hierarchy and native sampled local poses. The gzip scene package contains
+source-qualified geometry, submeshes, materials, placements and collider records,
+scene identity, initial equipment, lightmap dimensions/mips and an optional observed
+entry camera. Captured map-variant exclusions retain their separate runtime provenance.
+Only configured, recognized IDs are exposed through `/local-assets/<id>`, on
 `127.0.0.1`; host and same-origin checks reject cross-site access. The private
 directory itself is not served. Restart `npm start` after changing this map.
 No original data or machine-specific paths should be committed.
@@ -36,16 +43,26 @@ upload them. The generated playable prototype remains available in **Vue**.
 | --- | --- |
 | WASD / ZQSD | Move |
 | Mouse | Look |
-| Left click | Shoot / punch if disarmed |
-| R | Reload |
-| F / right click | Throw gun (instantly kills on hit) |
-| E | Pick up a dropped gun |
+| Left click | Shoot / punch if disarmed; throw a held object or strike with a katana |
+| R | Reload in the generated prototype rooms |
+| F / right click | Throw the held gun or object |
+| E | Pick up an aimed, reachable gun or usable object |
 | Space | Jump |
-| Shift | Sprint |
+| Shift | Sprint in the generated prototype rooms |
 | Escape | Pause / release mouse |
 | Enter | Start / restart on menu |
 
-**Time scales with your movement, aiming, shooting and reloading**. When standing still, bullets and enemies crawl. You move at full speed. Shoot crystals, dodge enemy bullets, clear three original arenas. Three hits = game over. Enemies drop weapons. Your ammo replenishes between rooms.
+**Time scales with movement, aiming and shooting.** Native sampled poses advance on the Web world clock and freeze during pause. The older generated rooms retain their own prototype rules.
+
+The configured Dojo encounter uses the source navigation polygons and connected doorways, source startup/door delays and difficulty limits. Enemy, player, projectile and object collisions use their distinct source layer masks. Movement sweeps a finite capsule against transformed source boxes, including stairs, slopes and ceilings; combat contacts follow the sampled enemy bone colliders. This is a Web implementation, not Unity PhysX or the complete native AI.
+
+Source-authored bowls, cups, bottles, bonsai, fans, shurikens and katanas can be picked up and thrown. Picking up an object removes its original world draw and colliders rather than duplicating it. Ordinary blunt hits stun and disarm; sharp objects can kill and remain recoverable after sticking. Breakable objects use their authored fragments, not random substitute debris. Enemy weapons drop from their current animated socket. Death freezes the sampled enemy pose; native ragdolls are not reproduced.
+
+The encounter currently equips enemies with pistols rather than reproducing the complete weighted native weapon selection. The original red-light doorway warning is not rendered, although its source delay is retained. Katana held placement uses its original sampled idle weapon-bone pose; animated player hands and katana swings are not reproduced. Stuck-object attachment does not follow a native ragdoll, and fragment motion is ballistic rather than a full fragment-to-world rigid-body simulation.
+
+When the private scene package supplies recovered audio descriptors, object pickup/throw/break, enemy stun and katana contact use their original local clips. The three doorway sounds are continuous distance-gated ambience, not spawn-warning one-shots. Source mixer groups determine which sounds follow the world clock; Unity reverb, mixer DSP and spatial spread are not reproduced. Missing source clips are not replaced with invented sounds.
+
+**Reprise du travail : [état vérifié, sauvegarde des travaux incomplets et prochaines étapes](docs/dojo-reprise.md).** This is a stabilized Web adaptation, not a completed 1:1 vertical slice.
 
 ## Files
 
@@ -55,7 +72,7 @@ upload them. The generated playable prototype remains available in **Vue**.
 - `src/main.js` — simulation, player controls, enemies, hit detection, levels
 - `src/levels.js` — original level layouts and procedural architecture
 - `src/math.js` — camera, collision and vector math
-- `src/audio.js` — generated Web Audio sound effects
+- `src/audio.js` — local source-backed native audio and separate procedural prototype effects
 - `server.mjs` — zero-dependency local HTTP server
 - `tests/` — Node native unit tests
 - `.github/workflows/verify.yml` — lightweight CI
@@ -87,7 +104,7 @@ Requires [GitHub CLI](https://cli.github.com/) (`gh`) and Git installed; the scr
 
 ## Known limitations
 
-The playable prototype remains **an early gameplay prototype**, not a full recreation of SUPERHOT: three compact rooms, one gun type, basic geometric enemies, simple level collision, minimal enemy tactics, no multiplayer, saved progress or replay system. The default original-model view displays authentic local static exports, but native animation, materials, lighting and gameplay fidelity remain unverified. Desktop keyboard/mouse only. A static host can serve the code; automatic private-original loading requires the local Node server.
+This is **not a full recreation of SUPERHOT MCD**. The configured local route uses original assets and original leaf-clip poses, but AI, movement/collision, gun rules, spawning, death physics and audio remain Web implementations. Original controller transitions, layered blending, FinalIK, root motion, native lighting/shadows/post-processing and complete shader equivalence are not reproduced. Desktop keyboard/mouse only. Public static hosting cannot automatically access the owner's private files; automatic original loading requires the loopback Node server.
 
 ## License
 
