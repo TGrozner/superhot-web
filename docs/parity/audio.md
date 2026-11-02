@@ -390,3 +390,77 @@ Do not treat the prototype's magazine reload or \`R\` key as the native
 ready-to-shoot callback. Explicit browser AudioContext-resume + output
 measurement and native paired observation are the acceptance gate for
 \`audible\`; \`src/main.js\` and \`src/audio.js\` remain SH-05-owned.
+
+
+## SH-07 P0 — AudioManager.PlayClip: native request gate and mixer intent
+
+**PROUVÉ, managed source only** — SUPERHOT: MIND CONTROL DELETE Steam
+build 20299547, Unity 2018.4.14f1, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Three **private bounded reads**, SHA-256 independently checked:
+
+- Research [#111](https://github.com/TGrozner/superhot-research/issues/111):
+  `AudioManager.cs:179–358`, run 41462927229 / artifact 13150122330,
+  UTF-8 excerpt SHA-256 `99389e315cdcbbf5bbee01482f33df113ab05ba86158221bd716352986cb879d`.
+- Research [#112](https://github.com/TGrozner/superhot-research/issues/112):
+  `AudioManager.cs:359–533`, run 41463059993 / artifact 13149727115,
+  SHA-256 `f75f9293ead262b90f1ec9f65534cd15b503aee50d3d9f413c15f02d2125c6b4`.
+- Research [#113](https://github.com/TGrozner/superhot-research/issues/113):
+  `AudioManager.cs:534–643`, run 41463176601 / artifact 13148839109,
+  SHA-256 `0f5ace43712f182a9961ce6088bfc50f03580d7c433a28bae5a9f189b7be0b89`.
+
+`AudioManager.PlayClip(AudioClip,...)` at lines 499–573 returns its empty
+effect **in this order** if the clip is null, the mixer channel is null, or
+the clip is still on cooldown. The cooldown path consults an enabled
+`SetCooldown` effect on a currently tracked playing instance sharing the
+clip instance ID. Passing those checks requests a pooled AudioSource;
+if the pool reused an instance, it first pauses it. The source is configured
+with the requested volume, priority, loop flag, pitch and mixer channel,
+a 0-second clip playhead, logarithmic rolloff, and spatialBlend=1 **only**
+when a position was supplied (otherwise 0). Explicit bypass OR the interface
+SFX channel sets all three audio bypass switches. A **strictly positive**
+playDelay requests `AudioSource.PlayDelayed`; zero/negative requests
+`AudioSource.Play`. Pitch zero **warns**, but is not a blocking guard.
+`PlayClip(AudioResource,...)` forwards that resource's serialized fields;
+their presence alone does not prove a particular clip played.
+
+**PROUVÉ, additional native mixer request:** `AudioManager.Update` calls
+`CalculateSoundScale` before `UpdateMixers`. The former uses custom audio
+timescale when strictly greater than -0.5; otherwise each Update uses
+`Lerp(previous, Clamp01(aggregateTargetTimescale/0.65), 0.1)`, snapping
+values strictly above 0.99 to 1. Mixer writes are skipped when
+`Time.unscaledDeltaTime > 0.2`; otherwise `UpdateMixerScale` requests
+the Pitch/Reverb parameters via `ScaleMapping(soundScale)` at
+`AudioManager.cs:378–414`. This is **not** a measured audio pitch, and
+the 0.1 Lerp factor is per Update, not per second. Initial/scene
+overrides and actual mixer responses remain unverified.
+
+**PROUVÉ, isolated Web contract only:** `src/sound/mcd-playclip-intent.js`
+models ordered early exits and explicit AudioSource configuration/Play
+requests without instantiating Unity AudioSources. No callback, generated
+waveform, PCM, clip or proprietary content is included. The input requires
+the **actual** clip, channel, cooldown and interface-routing facts:
+unknown is not represented by false. Strict finite-value checks are a
+Web boundary policy, not an assertion about Unity native validation.
+`tests/sound-mcd-playclip-intent.test.mjs` covers null/absent-channel/
+cooldown exits, positional and non-positional routing, bypass, delays,
+pitch-zero and immutability. Node tests verify JavaScript decisions, **not**
+speaker output or MCD execution.
+
+**INCONNU:** exact Containers weapon subtype/virtual Fire override, serialized
+`SFXAttack/SFXAttack2/SFXReadyToShoot` clip identities, actual mixer binding,
+cooldown at callback time, pool state, AudioContext permission, filters,
+hardware playback and audibility. A native `PlayClip` request can return an
+empty effect; even `AudioSource.Play` requested successfully is **not** a
+verified heard sound. Native/Web synchronized waveform and timing comparison
+have not been run.
+
+**SH-05 integration only (not performed):** after proving a concrete
+`Gun.Attack` → base/subclass Fire → clip/mixer route, pass runtime
+clip/channel/cooldown facts into `planMcdPlayClip` **at the manager-call
+stage**. Reject empty-effect results. The prototype `audio.shoot()` and
+`audio.empty()` are independently authored **synthetic** oscillators;
+mapping accepted native intents to them must be explicitly labeled
+substitution, not parity. A browser user gesture, resumed AudioContext and
+recorded non-silent output plus a paired native observation remain the
+audibility gate. `src/main.js` and `src/audio.js` remain exclusively SH-05.
