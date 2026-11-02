@@ -54,7 +54,10 @@ export function captureRoomScope(session) {
 export function reduceRoomScopedFlow(session, event, originScope) {
   assertSession(session);
   if (!event || typeof event !== 'object') throw new TypeError('Expected a flow event');
-  if (isRoomLocal(event.type)) {
+  // Decide the origin guard using the same event type that the reducer sees.
+  // A caller-controlled getter must not change type between these stages.
+  const type = event.type;
+  if (isRoomLocal(type)) {
     if (!originScope || typeof originScope !== 'object'
       || !isCounter(originScope.generation) || !isCounter(originScope.roomIndex)
       || typeof originScope[originKey] !== 'symbol') {
@@ -68,10 +71,17 @@ export function reduceRoomScopedFlow(session, event, originScope) {
     throw new TypeError('Only room-local events accept a captured origin scope');
   }
 
-  const next = reduceFlow(session.flow, event, session.rules);
+  // Read only the payload required by this event, once. Inherited payload
+  // remains accepted, exactly as in reduceFlow; unrelated getters stay unread.
+  const stableEvent = {
+    type,
+    ...(type === FLOW_EVENT.DAMAGE && 'amount' in event ? { amount: event.amount } : {}),
+    ...(type === FLOW_EVENT.TICK && 'realSeconds' in event ? { realSeconds: event.realSeconds } : {}),
+  };
+  const next = reduceFlow(session.flow, stableEvent, session.rules);
   if (next === session.flow) return session;
 
-  const newLifetime = (event.type === FLOW_EVENT.START || event.type === FLOW_EVENT.RESTART
+  const newLifetime = (type === FLOW_EVENT.START || type === FLOW_EVENT.RESTART
     || next.roomIndex !== session.flow.roomIndex);
   const generation = session.generation + Number(newLifetime);
   if (!isCounter(generation)) throw new RangeError('Room generation exceeded safe integer range');
