@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+/**
+ * SH-15: locally quantify WHERE registered native/Web screenshots differ.
+ *
+ * This does NOT acquire native images, invent an active MCD camera, or
+ * authenticate a user-declared native capture. Images and object IDs remain
+ * private: stdout/JSON only contain aggregated zone metrics.
+ *
+ * Usage:
+ * node scripts/visual-region-scorecard.mjs --native PRIVATE/native.json
+ *   --web PRIVATE/web.json --regions PRIVATE/regions.json [--out PRIVATE/report.json]
+ */
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  compareFiles, decodePng, registration,
+  silhouetteMetrics, pixelMetrics,
+} from './visual-compare.mjs';
+
+const MAX_REGIONS = 32;
+const CLASSES = new Set([
+  'actor', 'cargo', 'floor', 'architecture', 'background', 'shadow', 'lighting',
+]);
+const MAX_PIXELS = 8_000_000;
+
+function invalid(message) { throw new Error('SH-15 region scorecard: ' + message); }
+function jsonFile(path, label) {
+  const bytes = readFileSync(resolve(path));
+  if (bytes.length > 1024 * 1024) invalid(label + ' JSON exceeds 1 MiB');
+  return JSON.parse(bytes.toString('utf8'));
+}
+function checkViewport(image, viewport, name) {
+  if (image.width !== viewport[0] || image.height !== viewport[1] ||
+      image.width * image.height > MAX_PIXELS) {
+    invalid(name + ' dimensions differ from registered viewport');
+  }
+}
+function localPng(manifestPath, path, viewport, label) {
+  if (typeof path !== 'string' || !path.endsWith('.png') || path.length > 1024) {
+    invalid(label + ' must be a private PNG path');
+  }
+  const file = readFileSync(resolve(dirname(resolve(manifestPath)), path));
+  if (file.length > 64 * 1024 * 1024) invalid(label + ' PNG exceeds 64 MiB');
+  const image = decodePng(file);
+  checkViewport(image, viewport, label);
+  return image;
+}
+function requireRegions(document) {
+  if (!document || document.schemaVersion !== 1 ||
+      !Array.isArray(document.regions) ||
+      document.regions.length < 1 || document.regions.length > MAX_REGIONS) {
+    invalid('schemaVersion 1 and 1..32 explicit matched mask regions required');
+  }
+  const names = new Set();
+  for (const region of document.regions) {
+    if (!region || !CLASSES.has(region.kind) ||
+        !Number.isSafeInteger(region.slot) || region.slot < 0 || region.slot > 99 ||
+        typeof region.nativeMask !== 'string' ||
+        typeof region.webMask !== 'string') {
+      invalid('Each region needs known kind, slot and two explicit mask PNGs');
+    }
+    const key = region.kind + ':' + region.slot;
+    if (names.has(key)) invalid('Duplicate region kind/slot');
+    names.add(key);
+    if (region.kind !== 'background' && region.kind !== 'lighting' &&
+        (typeof region.sourceObjectId !== 'string' || !region.sourceObjectId)) {
+      invalid('Foreground source-matched region requires private sourceObjectId');
+    }
+    if (region.sourceObjectId !== undefined && region.sourceObjectId !== null &&
+        (typeof region.sourceObjectId !== 'string' || !region.sourceObjectId)) {
+      invalid('Invalid sourceObjectId');
+    }
+  }
+}
+function requireSourceMatch(region, native, web) {
+  if (!region.sourceObjectId) return { paired: false, translationErrorWorldUnits: null };
+  const a = native.objects.find(object => object.id === region.sourceObjectId);
+  const b = web.objects.find(object => object.id === region.sourceObjectId);
+  if (!a || !b) invalid('Region sourceObjectId is not paired in both capture manifests');
+  const translationErrorWorldUnits = Math.hypot(
+    a.worldMatrix[12] - b.worldMatrix[12],
+    a.worldMatrix[13] - b.worldMatrix[13],
+    a.worldMatrix[14] - b.worldMatrix[14],
+  );
+  if (!Number.isFinite(translationErrorWorldUnits)) invalid('Invalid matched source translation');
+  return { paired: true, translationErrorWorldUnits };
+}
+function checkGrayscaleMask(mask, name) {
+  for (let p = 0; p < mask.rgb.length; p += 3) {
+    if (mask.rgb[p] !== mask.rgb[p + 1] || mask.rgb[p] !== mask.rgb[p + 2]) {
+      invalid(name + ' must be a grayscale mask, not a color screenshot');
+    }
+  }
+}
+function compactPixelMetrics(a, b, indexes) {
+  if (!indexes.length) return null;
+  const n = new Uint8Array(indexes.length * 3);
+  const w = new Uint8Array(indexes.length * 3);
+  for (let i = 0; i < indexes.length; i++) {
+    const source = indexes[i] * 3, target = i * 3;
+    n.set(a.rgb.subarray(source, source + 3), target);
+    w.set(b.rgb.subarray(source, source + 3), target);
+  }
+  const m = pixelMetrics({ width: indexes.length, height: 1, rgb: n },
+    { width: indexes.length, height: 1, rgb: w });
+  return {
+    pixels: m.pixels, rgbMae01: m.rgbMae01, rgbRmse01: m.rgbRmse01,
+    perChannelMae01: m.perChannelMae01,
+    meanAbsoluteLinearLuminanceDelta01: m.meanAbsoluteLinearLuminanceDelta01,
+    p95MaxChannelError255: m.p95MaxChannelError255,
+  };
+}
+
+/**
+ * Only measure user-defined AND source-registered regions. RGB on the
+ * intersection separates material/color error from boundary mismatch;
+ * union RGB includes missing silhouette/background and is reported separately.
+ * Masks are explicit grayscale 8-bit PNGs, threshold >=128. No fake segmentation.
+ */
+export function measureRegisteredRegion(nativeImage, webImage, nativeMask, webMask) {
+  const viewport = [nativeImage.width, nativeImage.height];
+  for (const [name, image] of [
+    ['Web screenshot', webImage], ['native mask', nativeMask], ['Web mask', webMask],
+  ]) checkViewport(image, viewport, name);
+  checkGrayscaleMask(nativeMask, 'native mask');
+  checkGrayscaleMask(webMask, 'Web mask');
+  const shape = silhouetteMetrics(nativeMask, webMask, 128);
+  if (!shape.nativeArea || !shape.webArea) invalid('Both masks must have positive visible area');
+  const intersection = [], union = [];
+  for (let p = 0; p < viewport[0] * viewport[1]; p++) {
+    const n = nativeMask.rgb[3 * p] >= 128;
+    const w = webMask.rgb[3 * p] >= 128;
+    if (n && w) intersection.push(p);
+    if (n || w) union.push(p);
+  }
+  return {
+    maskThreshold: 128,
+    nativeAreaPixels: shape.nativeArea,
+    webAreaPixels: shape.webArea,
+    intersectionPixels: shape.intersection,
+    unionPixels: shape.union,
+    silhouetteIou: shape.iou,
+    centroidDistancePx: shape.centroidDistancePx,
+    materialIntersection: compactPixelMetrics(nativeImage, webImage, intersection),
+    silhouetteUnion: compactPixelMetrics(nativeImage, webImage, union),
+  };
+}
+function rank(results, measure, descending = true) {
+  return results.filter(x => measure(x) !== null)
+    .sort((a, b) => descending ? measure(b) - measure(a) : measure(a) - measure(b))
+    .slice(0, 3)
+    .map(r => ({ kind: r.kind, slot: r.slot, value: measure(r) }));
+}
+
+/**
+ * Produces only reports; never writes, uploads or embeds native/Web images.
+ * Native origin and active camera remain owner-attested, not verified by API.
+ */
+export function scoreVisualRegions(nativePath, webPath, regionsPath) {
+  const native = jsonFile(nativePath, 'native manifest');
+  const web = jsonFile(webPath, 'web manifest');
+  const regions = jsonFile(regionsPath, 'regions');
+  requireRegions(regions);
+  const alignment = registration(native, web);
+  const header = {
+    schemaVersion: 1, status: alignment.blockers.length
+      ? 'UNREGISTERED_NO_REGION_METRICS' : 'PAIRED_REGIONS_NOT_PARITY_VERIFIED',
+    evidenceClass: alignment.evidenceClass,
+    blockers: alignment.blockers,
+    sourceIdentityAndNativeExecution: 'USER_ATTESTED_NOT_INDEPENDENTLY_VERIFIED',
+    nativeWebPairVerifiedOneToOne: false,
+    method: 'EXPLICIT_GRAYSCALE_MASKS_THRESHOLD_128_INTERSECTION_AND_UNION_RGB',
+    regions: [], topMaterialColorDifferences: [], topSilhouetteDifferences: [],
+    topUnionColorDifferences: [], global: null,
+    limitations: [
+      'Only regions declared by owner; unmasked geometry and occlusion remain unscored',
+      'Captures and native execution are not independently authenticated',
+      'Screenshots must have matching active camera, projection, scene and state',
+      'No 1:1 inference or overall gameplay acceptance',
+    ],
+  };
+  if (alignment.blockers.length) return header;
+  const global = compareFiles(nativePath, webPath);
+  if (global.blockers.length || !global.pixel) invalid('Registered source PNGs are required');
+  const n = localPng(nativePath, native.capture.png, native.capture.viewport, 'native image');
+  const w = localPng(webPath, web.capture.png, web.capture.viewport, 'Web image');
+  header.global = { ...global.pixel, matchedObjects: global.objects.matchedCount,
+    missingObjectsInWeb: global.objects.missingInWeb };
+  for (const region of regions.regions) {
+    const source = requireSourceMatch(region, native, web);
+    const nm = localPng(nativePath, region.nativeMask, native.capture.viewport, 'native region mask');
+    const wm = localPng(webPath, region.webMask, web.capture.viewport, 'Web region mask');
+    if (resolve(dirname(resolve(nativePath)), region.nativeMask) ===
+        resolve(dirname(resolve(webPath)), region.webMask)) {
+      invalid('Native and Web region masks must refer to different files');
+    }
+    header.regions.push({
+      kind: region.kind, slot: region.slot,
+      sourceObjectPaired: source.paired,
+      sourceTranslationDeltaWorldUnits: source.translationErrorWorldUnits,
+      ...measureRegisteredRegion(n, w, nm, wm),
+    });
+  }
+  header.topMaterialColorDifferences = rank(header.regions,
+    r => r.materialIntersection?.rgbMae01 ?? null);
+  header.topSilhouetteDifferences = rank(header.regions, r => r.silhouetteIou, false);
+  header.topUnionColorDifferences = rank(header.regions,
+    r => r.silhouetteUnion.rgbMae01);
+  return header;
+}
+function cli(args) {
+  const params = new Map();
+  if (args.length < 6 || args.length > 8 || args.length % 2 !== 0) {
+    invalid('Usage: --native N.json --web W.json --regions R.json [--out PRIVATE/report.json]');
+  }
+  for (let i = 0; i < args.length; i += 2) {
+    if (!['--native', '--web', '--regions', '--out'].includes(args[i]) ||
+        params.has(args[i]) || !args[i + 1]) invalid('Invalid/duplicate option');
+    params.set(args[i], args[i + 1]);
+  }
+  if (!['--native', '--web', '--regions'].every(x => params.has(x))) invalid('Missing input');
+  const report = scoreVisualRegions(params.get('--native'), params.get('--web'),
+    params.get('--regions'));
+  const json = JSON.stringify(report, null, 2) + '\n';
+  if (params.has('--out')) {
+    writeFileSync(resolve(params.get('--out')), json, { flag: 'wx', mode: 0o600 });
+  } else process.stdout.write(json);
+  if (report.blockers.length) process.exitCode = 2;
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { cli(process.argv.slice(2)); }
+  catch (error) {
+    process.stderr.write(error.message + '\n');
+    process.exitCode = 2;
+  }
+}
