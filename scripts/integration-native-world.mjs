@@ -479,6 +479,86 @@ export function assessNativeWorldEncounterTrace({ samples, sourceBudget } = {}) 
   };
 }
 
+/**
+ * P0 scene-identity gate (Containers/build28), not a claim of native runtime.
+ *
+ * The generic "NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY" mode covers both Dojo
+ * and Containers. Equal mesh/instance counters are NOT a scene identifier.
+ * An independent caller-qualified serialized scene identity is required,
+ * and must match the prepared owner-local package AND each browser sample.
+ *
+ * SH-05 owns the production scene selection, collision / combat event bridge.
+ * SH-15 owns any real GPU/native matched-pixel receipt.
+ */
+function integrationSourceSceneKey(source) {
+  if (!source || typeof source !== 'object' ||
+      !Number.isSafeInteger(source.sceneBuildIndex) || source.sceneBuildIndex < 0 ||
+      typeof source.scenePath !== 'string' || !source.scenePath.endsWith('.unity') ||
+      typeof source.serializedOwner !== 'string' || !source.serializedOwner.length) {
+    return null;
+  }
+  // JSON tuple avoids delimiter collisions in paths/owners.
+  return JSON.stringify([
+    source.sceneBuildIndex, source.scenePath, source.serializedOwner,
+  ]);
+}
+
+export function assessContainersBuild28VerticalEvidence({
+  expectedSource, prepared, samples,
+} = {}) {
+  const limitations = {
+    evidenceKind: 'OWNER_LOCAL_SERIALIZED_IDENTITY_AND_APP_REPORTED_WEB_TRACE_ONLY',
+    nativeExecutionObserved: false,
+    executedNativeColliderContactObserved: false,
+    matchedNativeGameplayPixels: false,
+    measuredVisualDelta: null,
+    nativeParityVerdict: 'UNASSESSED',
+  };
+  const expectedKey = integrationSourceSceneKey(expectedSource);
+  if (!expectedKey || expectedSource.sceneBuildIndex !== 28) {
+    return { status: 'INDEPENDENT_CONTAINERS_BUILD28_SOURCE_TUPLE_REQUIRED', ...limitations };
+  }
+  if (!prepared || integrationSourceSceneKey(prepared.source) !== expectedKey) {
+    return { status: 'PREPARED_PACKAGE_SCENE_IDENTITY_MISMATCH', ...limitations };
+  }
+  if (!Array.isArray(samples) || samples.length < 2 || samples.length > 64) {
+    return { status: 'REQUIRE_TWO_TO_64_CONSECUTIVE_BROWSER_SAMPLES', ...limitations };
+  }
+  for (let index = 0; index < samples.length; index++) {
+    const sample = samples[index];
+    if (integrationSourceSceneKey(sample?.frame?.nativeScene?.source) !== expectedKey) {
+      return {
+        status: 'RENDERED_FRAME_SCENE_IDENTITY_MISMATCH', failingSample: index, ...limitations,
+      };
+    }
+    // Async metrics are updated ~1Hz. A stale scene must not be associated with
+    // the new rendered frame merely because the scene budgets happen to agree.
+    if (integrationSourceSceneKey(sample?.metrics?.nativeScene?.source) !== expectedKey) {
+      return {
+        status: 'STALE_OR_DIFFERENT_ASYNC_METRICS_SCENE_IDENTITY',
+        failingSample: index, ...limitations,
+      };
+    }
+  }
+  const sourceBudget = summarizePreparedNativeWorld(prepared);
+  const webTrace = assessNativeWorldEncounterTrace({ samples, sourceBudget });
+  return {
+    status: webTrace.status === 'WEB_WORLD_ACTOR_AMMO_AND_ASYNC_DEFEAT_SEQUENCE_ONLY'
+      ? 'CONTAINERS_BUILD28_WEB_SCENE_ACTOR_AND_ASYNC_ENCOUNTER_ONLY'
+      : 'CONTAINERS_BUILD28_SCENE_IDENTITY_WITH_INCOMPLETE_WEB_TRACE',
+    sourceIdentity: {
+      sceneBuildIndex: expectedSource.sceneBuildIndex,
+      scenePath: expectedSource.scenePath,
+      serializedOwner: expectedSource.serializedOwner,
+      independentlyQualifiedByCaller: true,
+      originalMcdSceneExecutionProven: false,
+    },
+    webTraceStatus: webTrace.status,
+    webTrace,
+    ...limitations,
+  };
+}
+
 /** Bounded code-read contract audit. Strings prove references, NOT execution. */
 export function auditNativeWorldStaticWiring(root = ROOT) {
   const read = path => {
