@@ -118,3 +118,29 @@ any MCD pellet/AI policy. Five additional `tests/combat-regression.test.mjs`
 cases verify these contracts, thin-wall swept traversal and noncollision step
 composition. These are tests of authored **WEB-PROVISIONAL** code only; they do
 not raise the native-evidence status.
+
+## SH-03 precision-sweep regression (Web only, 2026-11-02)
+
+**PROUVÉ — source Web** (branch based on `main`): `src/math.js`, Git blob
+`5d200c382306b0ee69c13e69218f5fb5e2a694de`, `segmentSphere` line 27 (point-like cutoff
+`a < 1e-10` line 31), and `segmentAabb` line 42
+(parallel cutoff `abs(delta) < 1e-8` line 46).
+Those thresholds make nonzero, very short segments miss suitably small
+synthetic spheres and AABBs even when the mathematical sweep crosses them.
+Two deterministic tests failed before the SH-03 correction.
+
+**PROUVÉ — Web implementation/tests only**: `src/combat/trace.js`
+now uses combat-local fraction solvers that distinguish *exactly zero*
+movement from short, nonzero movement. `tests/combat-microsweep.test.mjs`
+checks a tiny solid, a tiny sphere, an unobstructed/zero-length control,
+and `advanceProjectile` expiry/age on impact. The original `src/math.js`
+and all integrator files are unchanged. The inputs are artificial regression
+fixtures, **not** MCD weapon sizes or hitbox settings.
+
+**INCONNU — MCD**: Native physics substep precision, hit test order,
+collision layers, projectile scale, damage rules, and whether MCD ever
+produces such microscopic world-space sweeps. No native result is implied
+by this fix. The primary-report request remains the private read-only
+`corpus-query` of `spec/combat/combat-specification.md:1-200`, followed by
+member-level Unity/IL and instantiated scene overrides. SH-05 alone can
+consider any browser integration after independent checks.
