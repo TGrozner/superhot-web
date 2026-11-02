@@ -21,6 +21,19 @@ const number = (v) => typeof v === 'number' && Number.isFinite(v);
 const present = (v) => typeof v === 'string' && v.trim().length > 0;
 const MAX_PIXELS = 12_000_000;
 
+// SH-04 rechecked this serialized Containers/build28 tuple using existing
+// private corpus #16. This identifies source-package provenance only,
+// NOT the executed native MCD scene, camera, or gameplay.
+export const CONTAINERS_BUILD28_SOURCE = Object.freeze({
+  sceneBuildIndex: 28,
+  scenePath: 'Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity',
+  serializedOwner: 'level28',
+});
+const containersBuild28SourceOK = source =>
+  source?.sceneBuildIndex === CONTAINERS_BUILD28_SOURCE.sceneBuildIndex &&
+  source?.scenePath === CONTAINERS_BUILD28_SOURCE.scenePath &&
+  source?.serializedOwner === CONTAINERS_BUILD28_SOURCE.serializedOwner;
+
 export function decodePng(raw) {
   const b = Buffer.from(raw);
   if (b.length < 32 || !b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) throw Error('PNG signature');
@@ -181,8 +194,12 @@ export function originalSceneDrawEvidence(stats, { requireSkin = false } = {}) {
   const reasons = [];
   const scene = stats?.nativeScene;
   const draw = stats?.generatedManifest;
-  if (stats?.mode !== 'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY')
+  if (stats?.mode !== 'NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY')
     reasons.push('ORIGINAL_SOURCE_SCENE_WEB_MODE_UNVERIFIED');
+  // The shared native-source mode also serves Dojo/build10. Budgets alone
+  // cannot identify Containers; require independently qualified source tuple.
+  if (!containersBuild28SourceOK(scene?.source))
+    reasons.push('CONTAINERS_BUILD28_SOURCE_IDENTITY_UNVERIFIED');
   if (stats?.matchedNativeScene !== false)
     reasons.push('NATIVE_SCENE_NOT_PROVEN_FLAG_MISSING');
   if (stats?.activeScreen !== 'playing' || stats?.browserMeasured !== true)
@@ -234,6 +251,8 @@ export function renderedOriginalSceneEvidence(frame, { requireSkin = false } = {
   const scene = frame?.nativeScene;
   const draw = frame?.generatedManifest;
   const projection = frame?.projection;
+  if (!containersBuild28SourceOK(scene?.source))
+    reasons.push('RENDERED_CONTAINERS_BUILD28_IDENTITY_UNVERIFIED');
   if (!Number.isSafeInteger(frame?.frameId) || frame.frameId < 1 ||
       frame?.activeScreen !== 'playing') reasons.push('PLAYING_RENDERED_FRAME_UNVERIFIED');
   if (!scene || !Number.isSafeInteger(scene.meshes) || scene.meshes < 68 ||
