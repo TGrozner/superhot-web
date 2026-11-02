@@ -34,7 +34,9 @@ export function planEnemyShotgunAttack({ isAttackReady, haveBeenSeen, alreadyDef
   return {
     shooterHaveBeenSeen: haveBeenSeen,
     deferredBulletSpawn: alreadyDeferred || isAttackReady,
-    shootHappened: isAttackReady,
+    setShootHappenedTrue: isAttackReady,
+    setReloadedFalse: isAttackReady,
+    resetAttackDelayRequested: isAttackReady,
     soundCallRequested: isAttackReady,
     onBulletSpawnRequested: isAttackReady,
     alertRadius: isAttackReady ? 5 : null,
