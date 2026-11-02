@@ -581,3 +581,38 @@ time variation. R/Replay, Containers 120 vs initializer 60, time
 cap/override, player Time.deltaTime and projectile phases stay provisional
 until a matching original runtime trace is available. No CI workflow, runtime,
 research request, runner or private asset touched.
+
+### SH-10 — P0 intégrité des paires PNG (2026-11-02, gate manuelle)
+
+La gate Web/natif ne peut plus déclarer un écart mesuré simplement parce
+que deux manifests désignent des noms de fichiers compatibles. Chaque frame
+Web **et** native doit désormais déclarer le SHA-256 exact de son PNG.
+Le comparateur vérifie les octets effectivement lus avant tout pixel,
+impose deux frames chronologiques et les IDs de rendu Web qui encadrent
+chacune, refuse les noms de fichier traversant les répertoires, les symlinks
+sortants, les ROI invalides et les images absentes. Tout manque retourne
+`INCONNU` avec une raison explicite, non `REFUTED`.
+
+La recherche des contours 3×3 respecte désormais les limites de chaque ROI :
+aucun voisin n'est artificiellement trouvé sur la ligne précédente/suivante.
+Une région sans aucun contour dans les deux sources est `INCONNU` pour la
+position/silhouette, et non automatiquement un écart mesuré. Un autre
+écart visible et correctement observé peut toujours être déclaré.
+
+Vérification automatisable (images PNG **synthétiques**, métadonnées de
+référence fictives réservées au test ; aucune capture MCD) :
+
+    node --test tests/acceptance-image-integrity.test.mjs
+
+Les quatre tests couvrent la matrice PNG appariée, l'altération des octets,
+les entrées non sûres/incomplètes et l'absence d'une frame. Un test unitaire
+vert certifie la logique de la gate, **jamais** un screenshot MCD.
+Aucune exécution Chromium/natif n'est revendiquée et aucun seuil natif
+n'est inventé. Le script manuel reste isolé de la CI de parité rouge.
+
+**Handoff P0 SH-05, trois critères visibles :** (1) obtenir la même instance
+Containers et la même caméra/projection/phase sur Web et MCD ; (2) comparer
+les vrais PNG de silhouettes cargo+ennemi et leurs centroïdes/contours ;
+(3) mesurer couleur, lumière et deux instants temporels sur les mêmes ROI.
+Le jeu Web affiche des meshes source locaux mais la vraie instance native,
+les matériaux/lumières et les mouvements/réactions demeurent non appariés.

@@ -89,9 +89,15 @@ export function metrics(a, b, roi = [0,0,1,1]) {
     return {chroma:sum?rgb.map(v=>v/sum):[0,0,0],lum:lum/cnt,edge,centroid:edge.size?[cx/edge.size,cy/edge.size]:null};
   };
   const p=feat(a),q=feat(b);
-  const near=(index, set)=>{if(set.has(index))return true;
-    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(set.has(index+dy*a.width+dx))return true;
-    return false;};
+  // Linear pixel offsets must NOT wrap across scanlines/ROI boundaries.
+  const near=(index, set)=>{
+    const x=index%a.width, y=Math.floor(index/a.width);
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+      const nx=x+dx,ny=y+dy;
+      if(nx>=x0&&nx<x1&&ny>=y0&&ny<y1&&set.has(ny*a.width+nx))return true;
+    }
+    return false;
+  };
   let pa=0,pb=0;
   for(const i of p.edge)if(near(i,q.edge))pa++;
   for(const i of q.edge)if(near(i,p.edge))pb++;
@@ -258,6 +264,23 @@ export function renderedOriginalSceneEvidence(frame, { requireSkin = false } = {
   };
 }
 
+/**
+ * All PNGs must be attached to their exact manifest bytes. A filename or an
+ * operator's attestation alone must not upgrade unrelated pixels to parity.
+ * This verifies file integrity, NOT the native game's authenticity.
+ */
+const sha256OK = value => typeof value==='string' && /^[0-9a-f]{64}$/.test(value);
+const pngBasenameOK = value => typeof value==='string' &&
+  /^[a-z0-9][a-z0-9._-]*\\.png$/i.test(value) && !value.includes('..');
+const captureFramesOK = capture => Array.isArray(capture?.frames) &&
+  capture.frames.length===2 &&
+  capture.frames.every(f=>pngBasenameOK(f?.file) && sha256OK(f?.sha256) &&
+    number(f?.tMs) && f.tMs>=0 && present(f?.phase)) &&
+  capture.frames[0].tMs<capture.frames[1].tMs;
+const roiOK = roi => Array.isArray(roi) && roi.length===4 &&
+  roi.every(number) && roi[0]>=0 && roi[1]>=0 && roi[2]>0 && roi[3]>0 &&
+  roi[0]+roi[2]<=1 && roi[1]+roi[3]<=1;
+
 /** Private local capture path and thresholds are *operator attestations*, not independent native certification. */
 export function compare(web, native, opts = {}) {
   const reasons=[];
@@ -269,8 +292,24 @@ export function compare(web, native, opts = {}) {
   if(!present(web?.stimulusId) || web.stimulusId!==native?.stimulusId || !present(web?.initialStateId) || web.initialStateId!==native?.initialStateId) reasons.push('STIMULUS_UNPAIRED');
   if(!number(web?.timeScale) || !number(native?.timeScale) || web.timeScale!==native.timeScale) reasons.push('TIME_DOMAIN_UNPAIRED');
   if(!web?.viewport || !native?.viewport || web.viewport.width!==native.viewport.width || web.viewport.height!==native.viewport.height || web.viewport.dpr!==native.viewport.dpr) reasons.push('VIEWPORT_UNPAIRED');
-  if(!Array.isArray(web?.frames) || !Array.isArray(native?.frames) || web.frames.length!==2 || native.frames.length!==2 || web.frames.some((f,i)=>!present(f.file)||!number(f.tMs)||!present(f.phase)||f.phase!==native.frames[i]?.phase)) reasons.push('FRAMES_UNPAIRED');
-  if(!Array.isArray(native?.regions) || native.regions.length===0 || native.regions.some(r=>!present(r.id))) reasons.push('ROI_UNKNOWN');
+  if(!captureFramesOK(web) || !captureFramesOK(native) ||
+      web.frames.some((f,i)=>f.phase!==native.frames[i].phase))
+    reasons.push('FRAMES_UNPAIRED');
+  if(web?.webRenderedFrameBracketsObserved!==true ||
+      !Array.isArray(web?.frames) || web.frames.length!==2 ||
+      web.frames.some(f=>!Number.isSafeInteger(f?.renderFrameIdBefore) ||
+        !Number.isSafeInteger(f?.renderFrameIdAfter) ||
+        f.renderFrameIdBefore<1 || f.renderFrameIdAfter<f.renderFrameIdBefore) ||
+      (web.frames.length===2 &&
+        web.frames[1]?.renderFrameIdBefore<=web.frames[0]?.renderFrameIdAfter))
+    reasons.push('WEB_FRAME_BRACKETS_UNVERIFIED');
+  if(!present(opts.webPath) || !present(opts.nativePath))
+    reasons.push('MANIFEST_PATHS_UNKNOWN');
+  if(!Array.isArray(native?.regions) || native.regions.length===0 ||
+      native.regions.some(r=>!present(r?.id)||!roiOK(r?.rect)) ||
+      (Array.isArray(native?.regions) &&
+        new Set(native.regions.map(r=>r?.id)).size!==native.regions.length))
+    reasons.push('ROI_UNKNOWN');
   const fields=['positionPx','shapeEdgeF1','chromaL1','luminanceDelta','temporalLuma','timingMs','cameraPosition','cameraAngle','cameraFov'];
   const tolerances=opts.thresholds;
   if(!tolerances || fields.some(k=>!number(tolerances[k])||tolerances[k]<0) || tolerances.shapeEdgeF1>1) reasons.push('TOLERANCES_UNKNOWN');
@@ -278,14 +317,34 @@ export function compare(web, native, opts = {}) {
   if(reasons.length) return outcome;
   const pose=maxCameraDiff(web.camera,native.camera);
   if(pose.position>tolerances.cameraPosition || pose.angle>tolerances.cameraAngle || pose.fov>tolerances.cameraFov) return {...outcome,status:'NON_COMPARABLE_CAMERA_POSE',camera:pose};
-  const load=(m,path)=>m.frames.map(f=>{
-    const png=resolve(dirname(path),f.file);
-    if(!existsSync(png))throw Error('PNG missing '+basename(png));
-    const raw=readFileSync(png); const image=decodePng(raw);
-    if(image.width!==m.viewport.width || image.height!==m.viewport.height)throw Error('PNG viewport mismatch');
-    return {image,tMs:f.tMs,sha256:hash(raw)};
-  });
-  const wf=load(web,opts.webPath),nf=load(native,opts.nativePath);
+  const load=(m,path)=>{
+    const base=realpathSync(dirname(resolve(path)));
+    return m.frames.map(f=>{
+      const candidate=resolve(base,f.file);
+      if(!isInside(candidate,base))throw Error('PNG_PATH_UNSAFE');
+      let png;
+      try{png=realpathSync(candidate);}catch{throw Error('PNG_FILE_MISSING');}
+      if(!isInside(png,base))throw Error('PNG_PATH_UNSAFE');
+      let raw;
+      try{raw=readFileSync(png);}catch{throw Error('PNG_FILE_MISSING');}
+      if(hash(raw)!==f.sha256)throw Error('PNG_HASH_MISMATCH');
+      let image;
+      try{image=decodePng(raw);}catch{throw Error('PNG_DECODE_INVALID');}
+      if(image.width!==m.viewport.width || image.height!==m.viewport.height)
+        throw Error('PNG_VIEWPORT_MISMATCH');
+      return {image,tMs:f.tMs,sha256:f.sha256};
+    });
+  };
+  let wf,nf;
+  try{
+    wf=load(web,opts.webPath);
+    nf=load(native,opts.nativePath);
+  }catch(error){
+    const safe=['PNG_PATH_UNSAFE','PNG_FILE_MISSING','PNG_HASH_MISMATCH',
+      'PNG_DECODE_INVALID','PNG_VIEWPORT_MISMATCH'];
+    const reason=safe.includes(error?.message)?error.message:'CAPTURE_DIRECTORY_UNAVAILABLE';
+    return {...outcome,status:'INCONNU',reasons:[...reasons,reason]};
+  }
   const drift=wf.map((f,i)=>Math.abs(f.tMs-nf[i].tMs));
   const temporal=(f,g,rect)=>{
     const x0=Math.floor(rect[0]*f.width),y0=Math.floor(rect[1]*f.height);
@@ -294,19 +353,26 @@ export function compare(web, native, opts = {}) {
       const i=(y*f.width+x)*4;s+=Math.abs(luma(f.rgba,i)-luma(g.rgba,i));n++;
     }return s/n;
   };
-  const exceeded=[];
+  const exceeded=[],unobservable=[];
   if(drift.some(d=>d>tolerances.timingMs))exceeded.push('timing');
   for(const region of native.regions){
     const frames=wf.map((f,i)=>metrics(f.image,nf[i].image,region.rect));
     const temporalError=Math.abs(temporal(wf[0].image,wf[1].image,region.rect)-temporal(nf[0].image,nf[1].image,region.rect));
     outcome.regions.push({id:region.id,frames,temporalError});
-    if(frames.some(r=>r.positionPx===null||r.positionPx>tolerances.positionPx))exceeded.push(region.id+':position');
+    if(frames.some(r=>r.edgePixels[0]===0 && r.edgePixels[1]===0))
+      unobservable.push(region.id+':EDGELESS_ROI_POSITION_UNKNOWN');
+    if(frames.some(r=>(r.positionPx===null && (r.edgePixels[0]>0 || r.edgePixels[1]>0)) ||
+      (r.positionPx!==null && r.positionPx>tolerances.positionPx)))
+      exceeded.push(region.id+':position');
     if(frames.some(r=>r.shapeEdgeF1<tolerances.shapeEdgeF1))exceeded.push(region.id+':shape');
     if(frames.some(r=>r.chromaL1>tolerances.chromaL1))exceeded.push(region.id+':color');
     if(frames.some(r=>r.luminanceDelta>tolerances.luminanceDelta))exceeded.push(region.id+':light');
     if(temporalError>tolerances.temporalLuma)exceeded.push(region.id+':temporal');
   }
-  return {...outcome,status:exceeded.length?'MEASURED_VISIBLE_GAP':'OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED',camera:pose,timingErrorsMs:drift,exceeded};
+  return {...outcome,
+    status:exceeded.length?'MEASURED_VISIBLE_GAP':
+      unobservable.length?'INCONNU':'OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED',
+    reasons:[...reasons,...unobservable],camera:pose,timingErrorsMs:drift,exceeded};
 }
 
 class Devtools {
