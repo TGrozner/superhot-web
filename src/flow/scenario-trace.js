@@ -3,7 +3,7 @@
  * Not a native MCD sequence or checkpoint contract.
  * No DOM, global clock, persisted save or side effect is involved.
  */
-import { createFlowRules, createFlowState, reduceFlow } from './state-machine.js';
+import { FLOW_EVENT, createFlowRules, createFlowState, reduceFlow } from './state-machine.js';
 
 const STATE_FIELDS = Object.freeze([
   'phase', 'roomIndex', 'health', 'clearRemainingSeconds', 'bannerRemainingSeconds',
@@ -25,10 +25,13 @@ export function traceFlowScenario(events, ruleOverrides = {}) {
     // Record precisely what the reducer consumes. Re-reading a caller-owned
     // getter after reduceFlow could otherwise falsify the diagnostic trace.
     if (!event || typeof event !== 'object') throw new TypeError('Flow event must be an object');
+    const type = event.type;
+    // A trace must not read an unrelated getter: the reducer only consumes
+    // amount for DAMAGE and realSeconds for TICK. Preserve inherited fields.
     const eventSnapshot = Object.freeze({
-      type: event.type,
-      ...('amount' in event ? { amount: event.amount } : {}),
-      ...('realSeconds' in event ? { realSeconds: event.realSeconds } : {}),
+      type,
+      ...(type === FLOW_EVENT.DAMAGE && 'amount' in event ? { amount: event.amount } : {}),
+      ...(type === FLOW_EVENT.TICK && 'realSeconds' in event ? { realSeconds: event.realSeconds } : {}),
     });
     const before = state;
     const after = reduceFlow(before, eventSnapshot, rules);
