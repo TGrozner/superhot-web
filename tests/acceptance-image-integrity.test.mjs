@@ -169,3 +169,24 @@ test('native serialized camera projection is not a frame observation',()=>{
     assert.equal(result.regions.length,0);
   }finally{rmSync(f.dir,{recursive:true,force:true});}
 });
+
+// Native manifest labels and CDP no-HUD receipts are mandatory, not pixel proof.
+test('unqualified HUD or canvas surface cannot become a measured MCD renderer gap',()=>{
+  const f=fixture();
+  try{
+    const badWeb={...f.web,captureSurface:null};
+    const w=compare(badWeb,f.native,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(w.status,'INCONNU');
+    assert.ok(w.reasons.includes('WEB_CANVAS_SURFACE_UNVERIFIED'));
+    const badNative={...f.native,frames:f.native.frames.map((frame,i)=>
+      i===1?{...frame,captureSurface:null}:frame)};
+    const n=compare(f.web,badNative,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(n.status,'INCONNU');
+    assert.ok(n.reasons.includes('NATIVE_HUD_ISOLATION_UNVERIFIED'));
+    const badWebFrame={...f.web,frames:f.web.frames.map((frame,i)=>
+      i===1?{...frame,canvasSurfaceAfter:'WEB_CANVAS_CAPTURE_UNVERIFIED'}:frame)};
+    const frame=compare(badWebFrame,f.native,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(frame.status,'INCONNU');
+    assert.ok(frame.reasons.includes('WEB_CANVAS_SURFACE_UNVERIFIED'));
+  }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
