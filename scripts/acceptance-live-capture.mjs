@@ -384,7 +384,19 @@ export function compare(web, native, opts = {}) {
     const reason=safe.includes(error?.message)?error.message:'CAPTURE_DIRECTORY_UNAVAILABLE';
     return {...outcome,status:'INCONNU',reasons:[...reasons,reason]};
   }
-  const drift=wf.map((f,i)=>Math.abs(f.tMs-nf[i].tMs));
+  // Each capture starts its own wall clock. A per-frame absolute tMs delta
+  // compares two unrelated origins and can falsely indict the renderer.
+  // Only compare elapsed time BETWEEN the two screenshots. Even a matching
+  // interval remains wall-clock evidence, not MCD Time.deltaTime proof.
+  const captureIntervalsMs={
+    web:wf[1].tMs-wf[0].tMs,
+    native:nf[1].tMs-nf[0].tMs,
+  };
+  const intervalErrorMs=Math.abs(captureIntervalsMs.web-captureIntervalsMs.native);
+  if(intervalErrorMs>tolerances.timingMs)
+    return {...outcome,status:'NON_COMPARABLE_CAPTURE_INTERVAL',
+      reasons:[...reasons,'CAPTURE_INTERVAL_UNPAIRED'],
+      camera:pose,frameAlignment,captureIntervalsMs,intervalErrorMs};
   const temporal=(f,g,rect)=>{
     const x0=Math.floor(rect[0]*f.width),y0=Math.floor(rect[1]*f.height);
     const x1=Math.ceil((rect[0]+rect[2])*f.width),y1=Math.ceil((rect[1]+rect[3])*f.height);
@@ -393,7 +405,7 @@ export function compare(web, native, opts = {}) {
     }return s/n;
   };
   const exceeded=[],unobservable=[];
-  if(drift.some(d=>d>tolerances.timingMs))exceeded.push('timing');
+
   for(const region of native.regions){
     const frames=wf.map((f,i)=>metrics(f.image,nf[i].image,region.rect));
     const temporalError=Math.abs(temporal(wf[0].image,wf[1].image,region.rect)-temporal(nf[0].image,nf[1].image,region.rect));
@@ -411,7 +423,7 @@ export function compare(web, native, opts = {}) {
   return {...outcome,
     status:exceeded.length?'MEASURED_VISIBLE_GAP':
       unobservable.length?'INCONNU':'OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED',
-    reasons:[...reasons,...unobservable],camera:pose,frameAlignment,timingErrorsMs:drift,exceeded};
+    reasons:[...reasons,...unobservable],camera:pose,frameAlignment,captureIntervalsMs,intervalErrorMs,exceeded};
 }
 
 class Devtools {
