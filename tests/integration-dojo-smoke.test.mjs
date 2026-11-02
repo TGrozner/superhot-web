@@ -156,7 +156,9 @@ test('SH16 rejects world-clock reverse/reset and non-playing frames in a suppose
   assert.equal(assessDojoWorldActorSmoke(data).status, 'FRAME_OR_WORLD_CLOCK_REVERSED');
   data.samples[1].frame.worldClock = 1.2;
   data.samples[1].frame.activeScreen = 'win';
-  assert.equal(assessDojoWorldActorSmoke(data).status, 'NOT_PLAYING_SOURCE_WORLD_CLOCK');
+  assert.equal(assessDojoWorldActorSmoke(data).status, 'SOURCE_WORLD_SUBMISSION_INVALID');
+  assert.equal(assessDojoWorldActorSmoke(data).failingGate,
+    'INVALID_FRAME_OR_SOURCE_DRAW_COUNTERS');
 });
 
 test('SH16 treats synthetic source submissions as evidence candidates, never a native/Web pixel comparison', () => {
