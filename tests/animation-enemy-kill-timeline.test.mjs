@@ -108,3 +108,15 @@ test('unknown flags, invalid time and absent callback evidence cannot be silentl
   assert.throws(() => planPejAiAnimatorKillStart({ ...start(), killTime: NaN }), /killTime/);
   assert.throws(() => planPejAiAnimatorKillCleanup({ ...cleanup(), hdrReactionTriggered: null }), /boolean/);
 });
+
+
+test('PejAiBody.Explode directly calls Animator.Kill(0) when animator exists; zero remains queued', () => {
+  // Private native evidence: research #105, PejAiBody.cs:462-475.
+  // This is NOT evidence that a normal Body.Kill goes through Animator.Kill.
+  const actual = planPejAiAnimatorKillStart({ ...start(), killTime: 0 });
+  assert.equal(actual.status, 'scheduled');
+  assert.deepEqual(actual.cleanupRequest, {
+    afterSeconds: 0, clock: 'scaled-not-realtime', sampleStateAtCallback: true,
+  });
+  assert.ok(actual.immediate.some(v => v.op === 'set-to-kill'));
+});
