@@ -50,8 +50,8 @@ export function startDojoCapture({ intervalMs = 250, maxFrames = 15000 } = {}) {
     return { frames: frames.slice() };
   };
   let sampleStopped = false;
-  sample();
   timer = window.setInterval(sample, intervalMs);
+  sample();
   return Object.freeze({
     get length() { return frames.length; },
     get stopped() { return sampleStopped; },
