@@ -124,3 +124,105 @@ Le correctif capture seulement `x/y/z` de chaque vecteur et vérifie exactement 
 **OBSERVÉ — accès de provenance privée :** la passerelle `corpus-issue.yml` a permis une lecture seule non invasive de l'inventaire du dossier `spec/animation` (run privé `41424923806`, artifact `13130968293`). Les preuves détaillées ne sont pas recopiées ici. La présence de `verification.json` et `link-verification.json` ne certifie pas les conditions de transition ou les trajectoires exécutées ; chaque lecture doit être inspectée avant toute assertion.
 
 **INCONNU — MCD :** pistes instanciées, tangentes, échantillonnage, conditions d'état, time scaling, liaisons de rig, fracture et VFX effectifs. Pour un contrat natif, il faut relier une source versionnée et un `(owner,path_id)` à une méthode/garde et une observation réfutable. Aucun raccord aux fichiers partagés de #5 n'est autorisé par cette preuve de robustesse Web.
+
+
+## SH-06 — preuves primaires clôturées, événements natifs et retour de hit Web (2026-11-02)
+
+**Identité source.** MCD build **20299547**, Unity **2018.4.14f1** ;
+\`Assembly-CSharp\` SHA-256 \`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257\`.
+La route native analysée appartient à \`UnityPlayer.dll\`, SHA-256
+\`bf707463943762db64a67f5b61ed75ed3fdb8220afdc9539c09dd2af25e29290\`,
+PDB apparié GUID \`AEBAD5BD-F711-488A-B83C-CD402DFC1228\`, age 1.
+La preuve est **statique** (sérialisation, CIL, tables natives + PDB), pas un replay du jeu.
+
+**PROUVÉ — inventaire/décode, pas temps d'exécution.**
+Les deux lectures indépendantes de \`spec/animation/verification.json\`
+(issues privées #4 et #11, artifacts \`13134300647\` et \`13133782424\`)
+ont renvoyé le même texte SHA-256
+\`22ac2e6e87887f84cfc2d57be5d8ea10000465c1c69791945d24ecdd72d0f71b\`.
+Ce rapport comptabilise 511 clips, 15 contrôleurs, 25 Avatars,
+135 états, 292 transitions et 213 événements; leur présence ne prouve
+pas une lecture de clip pendant une partie. L'autre rapport
+\`spec/animation/link-verification.json\` (issue privée #12, artifact
+\`13133383280\`, SHA-256 du texte
+\`6d23cbe93310da72e01cd44f707358ea410b0d16cee17c5dbd2496c1cd71dd54\`)
+décrit 36 séquences d'événements associées aux dommages et 15 857
+paires clip-instance issues de jointures **statiques** ; l'héritage
+de certaines méthodes et la sélection runtime restent distincts.
+
+**PROUVÉ — chaîne moteur à conditions, pas occurrence observée.**
+La lecture privée de \`spec/animation/closure/README.md\` (issue #18,
+artifact \`13134221322\`, SHA-256 texte
+\`9bdffa8683b22915b7b7d2dd52d2c661f437f217e5fb40e616313384af5ca8ab\`)
+renvoie aux contrats natifs. \`events-mecanim-contract.md:5-24\`
+(issue #25, artifact \`13133114713\`, SHA texte
+\`ecd2d8604860fdf7767f3b167979011cacb1f91d8371eda4f4d6c4cc4e2dbbf9\`)
+identifie 19 occurrences de trois noms d'AnimationEvent sans déclaration
+dans les 100 assemblies expédiées, sur 14 clips référencés.
+L'attaque de mêlée citée par le rapport est représentée dans
+\`Attack_BlendTree\` ; des chemins sérialisés et des écritures de paramètres
+existent, mais **aucun contact, déclenchement de fracture ni clip joué
+pendant un run n'a été observé**. Ne jamais transformer un callback
+absent en effet de hit implicite.
+
+**PROUVÉ — sous-contrat algorithmique natif borné.**
+\`spec/animation/closure/native-events-contract.md:7-37\`
+(issue privée #29, artifact \`13133602811\`, SHA-256 texte
+\`07b23e8182166e8630a90f1020e8906ba4f3325a479b98a8bc6be2775f2272f6\`)
+relie le préparateur d'événements, le balayage temporel et la recherche
+littérale du callback sur les MonoBehaviours actifs. En intervalle
+déjà préparé, fini, **sans boucle**, le moteur parcourt
+\`last < event <= current\` en avant et \`current <= event < last\`
+en arrière, sans balayage si les deux temps sont égaux. Un callback
+non déclaré n'est pas automatiquement converti en une commande de
+l'Animator. **Limites explicites :** à l'activation initiale, les
+événements reçoivent des ajustements de bord de fenêtre ; les clips
+pondérés, boucles, transitions interrompues, vitesse inversée,
+masquage/culling et instances actives nécessitent le contexte de
+\`PrepareAnimationEvents\`. Ces règles supplémentaires ne sont **pas**
+implémentées dans notre scanner.
+
+**Contrat Web restreint prêt à tester :**
+\`src/animation/native-event-interval.js\` expose uniquement le
+balayage de fenêtres \`scanNativeEventInterval(events, lastTime, currentTime)\`.
+Il accepte des marqueurs fournis par l'appelant, triés et non bouclés ;
+il ne déclenche pas les callbacks. Tests d'intervalles avant/arrière,
+égalité et bornes dans \`tests/animation-native-event-interval.test.mjs\`.
+Ne pas l'utiliser à la place de l'Animator tant que l'intégrateur n'a
+pas prouvé la préparation du temps/poids et le clip actif.
+
+**Substitut visible Web — NON NATIF :**
+\`src/vfx/impact-cue.js\` génère une couronne d'octaèdres au point d'une
+**collision Web confirmée**. \`createImpactCue\` exige coordonnées, heure,
+durée, rayon, nombre de fragments, seed et couleur **tous choisis par
+l'appelant** ; \`sampleImpactCue\` rend un plan de primitives opaques
+compatibles avec \`renderer.shard\`, déterministe et éteint hors fenêtre.
+La limite de 32 satellites est un budget **Web**, non un paramètre MCD.
+Il n'y a aucun mesh, texture, clip, palette ou VFX original fourni.
+Les tests \`tests/vfx-impact-cue.test.mjs\` valident la présence du cue
+au hit, sa disparition et son échantillonnage indépendant des sous-pas.
+Ce module corrige un **manque de feedback perceptible potentiel** dans
+le prototype, mais il ne corrige pas encore une parité MCD démontrée.
+
+**Demande à SH-05 (issue #5) :** décider d'un raccord seulement
+à partir de \`closestImpact\`/événements de collision effectivement
+résolus côté Web, jamais depuis les clips inventoriés. Lors d'un vrai
+impact, conserver les paramètres visuels explicitement provisoires ;
+échantillonner avec un domaine d'horloge choisi explicitement puis
+dessiner \`primitives\` via \`renderer.shard\`. Mesurer le nombre de
+draw calls WebGL2 et comparer une capture avant/après pour établir un
+gain **visible Web**. SH-06 ne modifie ni \`src/main.js\` ni
+\`src/renderer.js\`. L'effet n'est pas une preuve de hit MCD.
+
+**INCONNU, condition de réfutation :** quel Animator/clip est actif à
+un hit réel, la sélection d'un événement avec poids non nul, le
+callback effectivement dispatché, la garde de fracture et la pose/rig
+visible. Un traceur natif read-only montrant l'absence d'un événement
+alors que notre scanner le rapporte réfuterait l'utilisation directe du
+scanner sans préparation du graphe. Une capture Web sans changement
+perceptible après raccord réfuterait l'intérêt visuel de la couronne.
+
+**Validation locale initiale :** Node v22.16.0, \`node --check\` sur les
+deux modules nouveaux et 9/9 tests ciblés du prototype réussis.
+La CI GitHub sur SHA de PR et le rendu WebGL2 réel doivent être
+vérifiés **séparément** ; aucun test Unity runtime n'a été exécuté.
