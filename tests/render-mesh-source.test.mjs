@@ -58,7 +58,7 @@ test('decodes split streams, half UVs, signed normalized normals, baseVertex and
   assert.equal(out.mesh.triangleCount, 2);
   assert.equal(out.mesh.vertices[8 + 6], 1);
   assert.equal(out.mesh.vertices[2 * 8 + 7], 1);
-  assert.equal(out.mesh.vertices[3 + 5], 1); // snorm8 Z normal at vertex 0
+  assert.equal(out.mesh.vertices[5], 1); // snorm8 Z normal at vertex 0
   assert.deepEqual(out.mesh.bounds.max, [8, 1, 0]);
   assert.equal(out.world.mirrored, true);
   assert.equal(out.world.model[12], 7);
