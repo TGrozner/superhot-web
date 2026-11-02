@@ -332,3 +332,93 @@ minimum outstanding private-only read is
 `spec/combat/combat-specification.md` lines 1–200 through the authorized
 `corpus-query` gateway, followed by exact Unity member references and
 instantiated overrides. SH-05 alone may integrate into `src/main.js`.
+
+
+## SH-03 P0 native-source report recovered: bounded pistol encounter (2026-11-02)
+
+The private **issue-triggered** corpus bridge is working (the older statements in
+this ledger about unavailable `workflow_dispatch` are historical and superseded).
+Original reports, C# and serialized assets remain in `TGrozner/superhot-research`;
+**no private raw content is copied to this public repository**.
+
+**PROUVÉ — native static-code report, not execution:** MCD build `20299547`,
+Unity `2018.4.14f1`, `Assembly-CSharp` SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Private issue **#8**, run `41425737208`, artifact `13132969099`,
+`spec/combat/combat-specification.md:1-120` (returned text SHA-256
+`a6541443d3b745155c4e2341ed6fdd601956be88bb31240838fca87b7748d8db`):
+
+- `PlayerActions.Update:129-223` gates input; `CanPlayerAttack:568+` and
+  `Weapon.isWeaponReady:889-904` are not equivalent to a constant cooldown.
+- `Gun.Attack:99-147` gates Thrown/readiness/AdditionalShootingCheck,
+  fires when ammunition is positive, then consumes **one** round;
+  `NoShooting`, zero-ammo click and negative-ammo throw have **different** paths.
+  `PistolGun.cs:1-17` delegates to `Gun.Fire:158-204`.
+- `Gun.SpawnPooledBullet:228-257` sets `firedByPlayer` and uses a
+  noisy muzzle; `Bullet.LaunchInDirectionWithSpeed:396+` stores
+  `direction × speed` without a final normalization. The test injects
+  muzzle and direction rather than inventing their runtime resolution.
+- `Bullet.Update:320-371` translates by velocity × scaled `Time.deltaTime`,
+  while `Bullet.FixedUpdate:184-215` separately SphereCasts the swept
+  motion (native radius `0.02` in this report). Neither a single RAF
+  collision pass nor the existing Web segment tracer equals PhysX SphereCast.
+- `Bullet:785-970` takes the ordinary, unarmored/non-concrete/non-boss enemy
+  route to `PejAiBody.Kill:565-603`, then `PejAiController.Kill:5766-5832`.
+  The follow-on ragdoll/animation is `PejAiAnimator.Kill:1008-1112`;
+  **no invented enemy numeric HP subtraction** is introduced for this path.
+  Armored, concrete, boss, owner and modifier cases remain separate.
+
+**PROUVÉ — decoded Unity candidate data, not active scene binding:** private
+issue **#21**, run `41430166074`, artifact `13133798009`,
+`spec/combat/serialized-settings.md:1-120` (text SHA-256
+`e40dbffcad81ffadd6b986746b13acd41366e95c79f9fe6a9c5bfa1938f4cfa6`).
+Candidate `PistolGun` at `sharedassets0.assets:4849` has serialized
+`ammoMin=5`, `ammoMax=5`, `bulletSpeed=36`, `attackDelay≈0.6`.
+Candidate `ShotGun` at `sharedassets0.assets:4850` has
+`pelletsCount=8`, ammunition `2/2`, speed `36`: paired with
+`ShotGun.Fire:51-92` in the code report, the **static** count is
+`1 + 8 = 9` projectiles, **not** the code initializer default 12.
+Presence in sharedassets does **not** establish that either prefab is
+instantiated in a specific MCD level or selected run.
+
+**PROUVÉ — additional source paths reported:** issue **#22**, run
+`41430169938`, artifact `13133014952`,
+`combat-specification.md:121-163` (text SHA-256
+`b6b74c87c9dd15af25f54314d928bc906309e33afa7923cbe9273c27893dc5c3`),
+and issue **#23**, run `41430174654`, artifact `13134326224`,
+`implementation-extension.md:1-100` (text SHA-256
+`a9b0e000ce276260f5321e371dff60bdb5afe47c179338dcb450720ba6664c41`).
+Enemy spawn and weapon lifecycle use `PejAiFactory.SpawnForReal:82-130`,
+`EnemyPooler.Create:22+` and `HandManager.Pickup:106+`. These
+reports contain **static paths**, not proof that our fixture was observed
+in a running native game.
+
+**WEB-TESTED, PROVISIONAL end-to-end fixture:**
+`src/combat/shot-phases.js` keeps `beginPistolFire`,
+`advanceBulletUpdate`, `traceBulletFixedStep` and
+`classifyOrdinaryEnemyImpact` separate. With injected gates, muzzle and
+serialized-candidate speed `36`, a five-round Pistol plan emits one
+projectile and leaves four rounds. An artificial unobstructed sphere at
+`x=5` is contacted after a Web step of `0.2` scaled seconds, leading
+only to a `kill-enemy(deathSource=Bullet)` **command request**. A wall
+blocks it; armor/concrete/boss/owner/special rules do not silently kill.
+The fixture's enemy coordinates/radius, simple Web segment intersection,
+clock step and guards are **synthetic**, not MCD scene observations.
+Tests: `tests/combat-shot-phases.test.mjs` (six cases). Neither native
+animation nor actual browser integration is claimed.
+
+**INCONNU / native parity gates:** actual `(owner,path_id)` scene
+activation and weapon selection; active modifiers, shot muzzle perturbation
+and spread; physics masks, PhysX contacts, pooling and lifecycle; Unity
+inter-component scheduling; native runtime trace and enemy ragdoll timings.
+`PejAiAnimator.LateUpdate:1114-1211` defers **enemy** bullet spawn until
+pose/IK adjustment, and is not modeled by this player-Pistol fixture.
+No clone of original C#, model, textures, sounds or prefabs is published.
+
+**SH-05 integration request (#5):** do not change `src/main.js` in this
+lane. After code review, feed real input/readiness/scene-derived muzzle,
+all shot modifiers, world `Time.deltaTime` and collision geometry into the
+pure module; route `kill-enemy` to an existing death/reaction handler only
+for a proven unprotected-target context. Preserve Update/FixedUpdate phase
+boundary, avoid interpreting Web Node tests as 1:1 parity, and require a
+visible browser acceptance plus native capture before declaring fidelity.
