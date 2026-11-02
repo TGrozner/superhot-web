@@ -418,6 +418,9 @@ export function prepareNativeScene(scenePackage) {
     interactables: Object.freeze(interactables),
     navigation: scenePackage.navigation ?? null,
     gameplay: scenePackage.gameplay ?? null,
+    // Optional, privately supplied first-person source animation package.
+    // Forward only; SH-05 owns clip/rig selection and rendered playback.
+    playerAnimation: scenePackage.playerAnimation ?? null,
     instanceMap,
     materialMap,
     textures,
