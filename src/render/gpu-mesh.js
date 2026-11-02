@@ -53,10 +53,17 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW } 
   return {
     vao, indexCount: mesh.indexCount, triangleCount: mesh.triangleCount,
     indexType: type, bounds: mesh.bounds,
-    draw() {
+    draw(range = null) {
       if (disposed) throw new Error('Cannot draw a disposed mesh');
+      const firstIndex = range?.firstIndex ?? 0;
+      const indexCount = range?.indexCount ?? mesh.indexCount;
+      if (!Number.isSafeInteger(firstIndex) || !Number.isSafeInteger(indexCount) ||
+          firstIndex < 0 || indexCount <= 0 || indexCount % 3 !== 0 ||
+          firstIndex + indexCount > mesh.indexCount) {
+        throw new RangeError('Invalid triangle draw range');
+      }
       gl.bindVertexArray(vao);
-      gl.drawElements(gl.TRIANGLES, mesh.indexCount, type, 0);
+      gl.drawElements(gl.TRIANGLES, indexCount, type, firstIndex * (type === gl.UNSIGNED_INT ? 4 : 2));
     },
     dispose() {
       if (disposed) return;
