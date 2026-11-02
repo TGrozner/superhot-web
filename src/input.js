@@ -5,6 +5,10 @@
  *
  * Browser event listeners, focus and pointer-lock acquisition are intentionally
  * not executed here. `KeyboardEvent.code` values are physical-key codes.
+ * SH-01's secondary MCD research handoff reports R = Replay (not reload);
+ * its active input dispatcher still needs primary verification. `KeyR` below
+ * deliberately retains the WEB PROTOTYPE's reload key until that contract is
+ * proved. Do not infer native input semantics from these helpers.
  */
 export const PROTOTYPE_INPUT_RULES = Object.freeze({
   walkSpeed: 6.7,
@@ -27,6 +31,26 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 /** Whether a browser keydown handler should suppress page movement. */
 export const shouldPreventDefault = (code) => PREVENT_DEFAULT_CODES.has(code);
+
+/**
+ * Pure pressed-key buffer reducer matching existing WEB event ordering.
+ * Browser keydown adds the key even on auto-repeat, keyup removes it, and
+ * setScreen(non-playing) clears the entire buffer. Callers own that screen
+ * transition and must not keep held movement keys across pause/resume.
+ * Input snapshots remain immutable; native MCD key-buffer semantics UNKNOWN.
+ */
+export function updatePressedKeys(keys, { type, code } = {}) {
+  if (!keys || typeof keys[Symbol.iterator] !== 'function' || typeof keys.has !== 'function') {
+    throw new TypeError('keys must be a Set-like iterable');
+  }
+  if (type === 'clear') return new Set();
+  if (type !== 'keydown' && type !== 'keyup') throw new TypeError('unknown key transition');
+  if (typeof code !== 'string' || code.length === 0) throw new TypeError('code is required');
+  const next = new Set(keys);
+  if (type === 'keydown') next.add(code);
+  else next.delete(code);
+  return next;
+}
 
 /**
  * Signed forward/strafe axes. Opposing inputs cancel; synonyms do not stack.
