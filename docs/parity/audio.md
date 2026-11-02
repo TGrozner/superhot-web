@@ -1,5 +1,9 @@
 # SH-07 sound evidence ledger
 
+> Current status (2026-11-02): the issue-triggered private corpus bridge is
+> functional; legacy access-blocked notes below are historical. Newly verified
+> source-level Gun branches and their limits appear at the end of this ledger.
+
 Scope: SUPERHOT: MIND CONTROL DELETE, Steam app 690040,
 build 20299547, Unity 2018.4.14f1 (Mono Windows x86).
 This ledger distinguishes native evidence from the independent Web prototype.
@@ -199,3 +203,75 @@ fixed fallback diagnostic. The two regressions are covered in
 clock domains, mixing, and audibility are unverified. This is a Web-only
 safety improvement, not evidence of an original-game event or audible sound.
 No original audio, asset, or binary is included.
+
+
+## SH-07 P0 — source-native Gun audio branches (2026-11-02)
+
+**Bridge status:** historical passages above about missing `workflow_dispatch` are
+superseded. The authorized PRIVATE issue-triggered `corpus-query` bridge now works.
+Private issue #9, run `41425740901`, artifact `13133582906` returned
+`spec/world/audio-vfx-deep.md` (50 lines; UTF-8 text SHA-256
+`bf67f8f38a00b191a3bfbaf5aa69fa09f24be7f410e174838e6e58229fc3d691`).
+The separate #7 returned the same report. No raw corpus result is copied here.
+
+**PROUVÉ — native managed *source branches*, not their runtime activation:**
+private issue #34 / run `41430553462` / artifact `13134122741`,
+`managed/Assembly-CSharp/Gun.cs:99–147,158–204,206–217`, retrieved
+text SHA-256 `ae7d70585e54e8c7887357a49aa2b86e384001c89ebdba6b36021bf605b1fdbf`.
+Build `20299547`, Assembly SHA-256 recorded above. After the `Gun.Attack`
+early exit (Thrown, not ready, or failing optional shooting check), positive
+ammo and inactive NoShooting reach the virtual `Fire` call; positive ammo
+with NoShooting instead goes to Throw. At exactly zero ammo, `FireNoAmmo`
+executes and decrements ammo; with NoShooting inactive its branch requests
+`PlayClip` for `SFXNoAmmo` at explicit gain `0.4` through the
+`mixerSfxEnvironment` field. Below zero ammo goes to a different throw
+path. This proves a request site, not the final waveform.
+
+In the **base `Gun.Fire` implementation**, selection of secondary shot SFX
+requires **both** `Random.value > 0.6` (strict) and non-null `SFXAttack2`;
+otherwise the primary `SFXAttack` is selected. Both branches request
+`PlayClip` at `0.6` through `mixerGunshots`, followed by randomized audio
+parameters `(0.15, 0.15, startFromBeginning: true, relativePitch: true)`.
+The virtual `Fire` may be overridden by a derived gun: **do not** generalize
+the base sound selection to every weapon family. A separate optional
+`SFXReadyToShoot` schedules a later method at the attack delay in
+`Gun.Attack:120–123`; this PR does **not** reproduce that deferred sound.
+
+**PROUVÉ — separate native layer source:** private issue #19 / artifact
+`13133617525`, `AudioClipChangerGroupPlay.cs:1–70` text SHA-256
+`9ad76fa465849c52ab78a1536a1600519da3739a58291802767ed6fa543f17aa`;
+issue #28 / artifact `13133373200`, `AudioClipChanger.cs:1–41`
+text SHA-256 `5cc071c17f4ac855ee6d4dd6417e19c761ca7a0c17c1a62dbbb374d0465c4c04`.
+The group starts both AudioSources at Awake, ramps its progress toward slow
+only below timescale 0.1 or toward fast only above 0.1 with nonzero player
+velocity, stepping with **unscaled** delta; at exactly 0.1 neither branch
+changes it. The pair maps progress to respective volumes and periodically
+synchronizes clip positions. The C# field initializers for ramp times are
+1 and 0.5 seconds, but scene-serialized overrides and actually instantiated
+pairs remain **INCONNU**; no layer audio was ported in this gun-focused PR.
+
+**PROUVÉ — independent Web mapping only:**
+`src/sound/mcd-gun-cues.js` provides pure explicit-argument branch selection
+and a generated-sound adapter to the *pre-existing Web oscillator methods*
+`shoot` and `empty`. Both native shot variants deliberately reuse the
+same **synthetic** Web sound. `tests/sound-mcd-gun-cues.test.mjs` verifies
+the strict branch guards and callback accounting (7/7 local Node tests).
+This validates source-level rule translation only, not scene or auditory parity.
+
+**INCONNU:** bindings of `SFXAttack`, `SFXAttack2` and `SFXNoAmmo` on a
+specific weapon instance; the active channel and mixer output; clip identity,
+filters, spatial attenuation, Unity mixer gain, exceptions, speaker output and
+human audibility. No synchronized native/browser test has been conducted.
+The synthesis adapter's returned `true` means **callback invoked only**.
+
+**SH-05 integration request, NOT performed by this lane:** only when a specific
+weapon/fire path and serialized fields are verified, pass the real readiness,
+NoShooting, ammo and optional check state into `classifyMcdGunAttack`;
+call `selectBaseGunFireCue` **only after actual base `Gun.Fire`**, or
+`selectGunDryFireCue` for the confirmed dry-fire path, and pass the selected
+cue to `createGeneratedMcdGunCueSink(audio)`. The existing `audio.init()`
+needs a resumed browser AudioContext after user gesture. No changes to
+`src/main.js` or `src/audio.js` are authorized here; SH-05 owns the
+browser-side connection, explicit speaker test and resulting waveform check.
+The current Web prototype reloads magazines and does not yet model native
+weapon states, so wiring on matching labels alone would be a false parity claim.
