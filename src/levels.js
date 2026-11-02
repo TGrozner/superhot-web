@@ -186,22 +186,34 @@ export function drawGeneratedManifest(renderer, graph, camera, options = {}) {
  * gameplay collision scene. No original geometry or materials are included.
  */
 export function drawContainersBuild28Preview(renderer, camera, options = {}) {
-  const plan = createContainersBuild28DrawPlan(camera, options);
+  const { omitCargoIds = [], ...planOptions } = options;
+  const omitted = new Set(omitCargoIds);
+  for (const id of omitted) {
+    if (id !== 'cargo-22' && id !== 'cargo-upper') throw new RangeError('Unknown source-matched cargo proxy');
+  }
+  const plan = createContainersBuild28DrawPlan(camera, planOptions);
   const graphNodes = createContainersBuild28Nodes();
+  let proxyDraws = 0, hiddenByPrivateMesh = 0;
   for (const packet of plan.packets) {
-    // Source-derived proxy modules supply only generated axis-aligned boxes;
-    // fail rather than flatten a future oblique mesh to AABB without consent.
+    // Omit the generated hull AND its artificial ribs when its matching
+    // user-supplied, privately loaded OBJ group is actually available.
+    if ([...omitted].some((id) => packet.id === id || packet.id.startsWith(id + '-rib-'))) {
+      hiddenByPrivateMesh++;
+      continue;
+    }
     if (!packet.legacyBoxArgs) throw new Error('Containers preview packet needs explicit affine renderer contract');
     renderer.box(...packet.legacyBoxArgs);
+    proxyDraws++;
   }
   return {
     objects: graphNodes.length,
     nativeDerivedHullCount: 5,
-    visible: plan.packets.length,
+    visible: proxyDraws,
     culled: plan.culled,
     hidden: plan.hidden,
+    hiddenByPrivateMesh,
     affineDraws: 0,
-    legacyDraws: plan.packets.length,
+    legacyDraws: proxyDraws,
     collisionConnected: false,
     nativeMeshMatch: false,
   };
