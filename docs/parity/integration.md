@@ -233,3 +233,34 @@ active scene/camera → a real browser render with platform ROI and actor →
 actual guarded bullet contact + action → paired original MCD frame at
 the same active pose/time/material state. None of those native-vs-Web
 paired gameplay pixels or native PhysX contacts was observed by SH-16.
+
+
+## 2026-11-02 SH-16 P0 — observable scene → actor → Web shot/death trace (no native contact claim)
+
+The browser currently exposes one world-frame snapshot through `window.__superhotGetRenderedFrameSnapshot()` and a separate **~1 Hz asynchronous** metrics object `window.__superhotSceneMetrics`. Both can be captured owner-locally; neither contains exact `Bullet.FixedUpdate` contacts or an original MCD game frame. The first exposes `frameId`, `worldClock`, `nativeScene`, `generatedManifest`, last rendered `nativeEnemy`, and `gameplay.nativeClock/ammo/weapon`; the second exposes coarse `enemies[].alive` without collision identity. The `nativeEnemy` packet is only the **last** actor drawn. Neither tells us which body part an individual bullet hit.
+
+New offline integration API (SH-16 only):
+```js
+import {
+  summarizePreparedNativeWorld, assessNativeWorldEncounterTrace,
+} from './scripts/integration-native-world.mjs';
+
+const sourceBudget = summarizePreparedNativeWorld(preparedNativeScene); // actual local package
+const samples = []; // collect at least two samples from the SAME active browser scene
+// At capture-time, after each rendered frame; no automatic cloud upload:
+// samples.push({
+//   frame: window.__superhotGetRenderedFrameSnapshot(),
+//   metrics: structuredClone(window.__superhotSceneMetrics),
+// });
+const report = assessNativeWorldEncounterTrace({ samples, sourceBudget });
+```
+
+The report requires the **exact locally prepared scene draw budget** (never a hardcoded 68 meshes / 360 instances), validates the source-world mode and app's self-reported draw counters **for each sample**, rejects resets/scene drift and non-monotonic frame/world clocks, checks that at least one *last drawn* skinned actor appeared, and separates a one-round ammunition decrease from a delayed `enemies[].alive: true→false` transition. The strongest accepted status is **`WEB_WORLD_ACTOR_AMMO_AND_ASYNC_DEFEAT_SEQUENCE_ONLY`**: a **candidate app sequence**. It can never certify that a shot caused that death, which subobject was hit, that the animation corresponds to the hit, or anything about native PhysX/material/parity. Neither a test fixture nor `browserMeasured=true` attests independent GPU pixels.
+
+**Concrete SH-05 wiring contract, owned files only:** To establish genuine contact causality, the runtime must eventually emit an ordered, same-frame/per-tick, uniquely identified receipt for `shotId→hit.collider/source instance→PejAiBodyPart→controller state→guard decision→resulting actual effect→actor pose`, with post-handler projectile destruction and separate animation/event identity. Do **not** fill missing values with the current `closestImpact` two-sphere Web target; its unconditional `killEnemy` is provisional. SH-03's [#152](https://github.com/TGrozner/superhot-web/pull/152) independently offers source-bounded armor/bulletproof/boss/owner/planner requests but **not** an executed contact or a native-to-Web collider binding. SH-03 [#153](https://github.com/TGrozner/superhot-web/pull/153) also plans AI line-of-sight independently; no source Settings/PhysX cast in Containers has yet been measured. SH-05 alone may import either after reviewing exact HEAD CI, integrating components and instrumenting actual scene contacts.
+
+**Visualization gate remains SH-15:** Use the private same-state Containers *executed* native screenshot + Web GPU readback, matched active projection/viewport and source-identity region masks, then SH-15's visual-region-scorecard. The latest published source report on `docs/parity/visual.md` concerns **six isolated actor pairs** (IoU 0.99172–0.99880; normalized RGB MAE 0.07162–0.08074), *not a full environment/gameplay comparison*. No new matched full Containers pixels were measured in this SH-16 cycle; actor sequence tests add **zero independently measured pixel improvement**.
+
+**Privacy and source reuse:** Existing private research #8–#15 `result.json` archives were reopened, JSON-validated and SHA256-checked locally without new corpus queries. None of the originals, binaries, OBJ data, images or native source excerpts is included in public files. No SH-05 or SH-15 reserved file is modified.
+
+**Run** `node --test tests/integration-native-world.test.mjs` as a local unit gate, then require GitHub Actions `npm run check` on the exact PR HEAD; this is not a browser/GPU/native test.
