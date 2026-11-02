@@ -679,3 +679,83 @@ asset presence does not substitute for observing `Resources.Load`.
 with **explicit** runtime inputs; it never assumes pool presence. SH-05 may
 use this gate at the native/Web join, but no native runtime pool, AudioContext
 trace for enemy-death, or sampled speaker output is established here.
+
+
+## SH-07 P0 — Stun audio : provenance primaire et raccord sans duplication SH-06
+
+**PROUVÉ — contrat source statique, PAS son audible.** SUPERHOT: MIND CONTROL
+DELETE Steam build `20299547`, Unity `2018.4.14f1`, Assembly-CSharp
+SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Relecture réelle des trois artifacts privés **existants**, sans nouvelle issue
+ni requête générale (chaque extrait SHA-256 UTF-8 vérifié) :
+
+- [research #105](https://github.com/TGrozner/superhot-research/issues/105),
+  artifact `13144030637`, `PejAiBody.cs:478–519`, source SHA-256
+  `578030aa9ee719e10eb61b454d5379f47237a15160875c9eb6852237207f29ca`.
+- [research #120](https://github.com/TGrozner/superhot-research/issues/120),
+  artifact `13154468332`, `AudioGameObjectResources.cs:1–46`, source SHA-256
+  `2c5a4f14fe7747063cd86b4a402d19550d5a7cf81f8cdd471794753046255ef5`.
+- [research #113](https://github.com/TGrozner/superhot-research/issues/113),
+  artifact `13148839109`, `AudioManager.cs:579–612`, source SHA-256
+  `0f5ace43712f182a9961ce6088bfc50f03580d7c433a28bae5a9f189b7be0b89`.
+- Pool initialization already proved by [research #124](https://github.com/TGrozner/superhot-research/issues/124),
+  artifact `13156944529`, `AudioManager.cs:137–168`, SHA-256
+  `17669c58516f42155a59c1cbfc3972c4f39cae2880a6c9f2a7a7bd5ef0cc2b1d`.
+
+**Exact native chain:** only AFTER an actual `PejAiBody.Stun` invocation
+passes the kamikaze early return, `stunSoundRest < Time.realtimeSinceStartup`
+(strict) requests either `EnemyStunConcrete` when `isConcrete` is true
+(declared prefab pool size **2**) or `EnemyStun` otherwise (declared pool
+size **3**), at the body GameObject position + **(0, 1.5, 0)**.
+With normal return from `PlayPrefabSound`, `stunSoundRest` advances to
+`realtimeSinceStartup + 0.25`, **even when the named pool is missing and the
+request returns an empty effect**. This timer is Unity realtime, not world
+time or Web audio context time. Calling `Controller.Stun` on a boss is a
+separate later guard, and does not suppress the earlier audio request.
+The default pitchRandomization argument for this call is **0**. No
+`PlayClip` clip-null/mixer/cooldown gate applies to this `AudioPrefab`
+overload. Declared pool sizes are **not** runtime pool occupancy.
+
+**WEB ONLY — new bounded composition:** existing
+`src/animation/enemy-stun-command-plan.js` (SH-06) already emits the
+source-qualified `request-stun-prefab-sound` then `set-stun-sound-rest`
+commands, including the world-space Y offset and strict time gate. New SH-07
+`src/sound/mcd-enemy-stun-prefab.js` converts **only** that prior command
+into the existing `planMcdAudioPrefabPlay` request. It never rechecks
+kamikaze, adds a second 1.5-unit offset, reimplements the timer, or assumes
+a prefab pool exists. Explicit `poolExists`, `reused` and
+`pitchBeforeRequest` are required where appropriate. No sound is generated
+or loaded; a returned `audio-prefab-play-request` is not playback.
+`tests/sound-mcd-enemy-stun-prefab.test.mjs` exercises the full
+source-command → audio-plan chain with normal/concrete, strict equality,
+kamikaze, boss, missing pool and reuse cases. These are Node behavior
+tests, not a native execution or a browser/speaker recording.
+
+**INCONNU — blockers before SH-05 wiring:** whether the gameplay enemy in
+Containers actually dispatches `PejAiBody.Stun` for a given projectile;
+the original `Resources.Load<GameObject>` outcome for either Stun prefab;
+runtime pool instances, prefab AudioSource/clip owner+path_id, mixer response,
+the actual activation timestamp and any **audible** native or browser sound.
+No original bytes, PCM or managed source are present in this public repo.
+SH-05 may feed an **observed** Stun command stream to the adapter and,
+only with a locally supplied licensed sample, add the sound in its
+reserved `src/audio.js`/`src/main.js`. The browser acceptance gate is:
+confirmed Stun invocation → chosen prefab with body-position offset →
+pool/asset readiness → nonzero Web Audio graph trace and (separately) a
+native run comparison. Never substitute a generic `killEnemy` callback.
+
+
+**NEW PRIVATE INVENTORY CHECK (2026-11-02):** bounded [research #141](https://github.com/TGrozner/superhot-research/issues/141)
+SUCCESS, run `41507466400`, artifact `13171486453`; read
+`spec/world/browser-audio/manifest.json:1–82`, complete result
+(`next_start=null`, text SHA-256
+`e19d4893ecb3e61c8bd46d5de2814cb5667a6b615856a5ab387a88ca`,
+result.json SHA-256
+`dd31714e2cd86515b70ec096a2dacf61ed4de9043c34547eadaf4105e158b657`).
+The **existing selected browser-audio binding manifest** describes pistol,
+enemy fire, player hit and EnemyShatter but has **no** EnemyStun or
+EnemyStunConcrete mapping. This is proof of a **manifest gap only**, not
+proof that native sound assets or serialized prefab objects do not exist.
+Do not reuse the EnemyShatter WAV for either Stun cue or infer an original
+sample from an AudioPrefab field name. A future **index-backed, bounded**
+Unity owner/path_id mapping is required before local original-clip playback.
