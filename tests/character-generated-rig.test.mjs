@@ -25,7 +25,7 @@ test('diagnostic silhouette is a genuine indexed non-box surface with normals an
 test('lathe construction preserves outward triangle winding and fails invalid profiles', () => {
   const m = makeGeneratedLatheMesh([[-.5, .3, .3], [.5, .3, .3]], { segments: 8 });
   assert.equal(m.triangleCount, 32);
-  const a = m.vertices.slice(0, 3), b = m.vertices.slice(8, 11), c = m.vertices.slice(16, 19);
+  const a = m.vertices.slice(0, 3), b = m.vertices.slice(9 * 8, 9 * 8 + 3), c = m.vertices.slice(8, 11);
   const cross = (u, v) => [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]];
   const n = cross(b.map((v,i)=>v-a[i]),c.map((v,i)=>v-a[i]));
   assert.ok(n[0] > 0);
