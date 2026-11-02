@@ -39,8 +39,8 @@ test('walking hits grounded source hull but not an overhead stacked container', 
   const grounded = containersWalkSolids(solids, CONTAINERS_WEB_FALLBACK_SPAWN.y);
   assert.equal(grounded.some(s => s.id === 'cargo-upper'), false);
   assert.equal(grounded.some(s => s.id === 'cargo-7'), true);
-  const stopped = resolveWalk({ x: 10, y: 2.65, z: 21 }, .34, grounded);
-  assert.ok(stopped.z > 22, 'body cannot walk through cargo-7 from the front');
+  const stopped = resolveWalk({ x: 10, y: 2.65, z: 22.8 }, .34, grounded);
+  assert.ok(stopped.z >= 22.9, 'body cannot enter the front of cargo-7');
   assert.equal(containersWalkSolids(solids, 5.6).some(s => s.id === 'cargo-upper'), true);
   const sourceContact = segmentAabb(
     { x: 10, y: 2.5, z: 25 }, { x: 10, y: 2.5, z: 20 },
