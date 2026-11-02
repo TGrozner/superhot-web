@@ -1,13 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MCD_PREFAB_SOUND_RESULT, planMcdAudioPrefabPlay, planMcdBodyKillShatterPrefab,
+  MCD_ENEMY_SHATTER_PREFAB, MCD_PREFAB_SOUND_RESULT,
+  planMcdAudioPrefabPlay, planMcdBodyKillShatterPrefab,
 } from '../src/sound/mcd-prefab-sound-intent.js';
 
 const present = (extra = {}) => ({
   prefabName: 'resolved-prefab-name', poolExists: true, reused: false,
   position: {x: 2, y: 4, z: -3}, pitchBeforeRequest: 1,
   ...extra,
+});
+
+test('EnemyShatter source initializer fixes prefab Name and declared PoolSize', () => {
+  assert.deepEqual(MCD_ENEMY_SHATTER_PREFAB, {name: 'EnemyShatter', declaredPoolSize: 5});
 });
 
 test('missing prefab pool returns empty effect before accessing AudioSource facts', () => {
@@ -58,11 +63,11 @@ test('controller already dead never requests enemy shatter prefab', () => {
 test('body kill sends enemy shatter to position lifted 1.5 Unity units', () => {
   const result = planMcdBodyKillShatterPrefab({
     controllerAlreadyDead: false, bodyWorldPosition: {x: 3, y: -2, z: 9},
-    resolvedPrefabName: 'resolved-enemy-shatter', poolExists: true,
+    poolExists: true,
     reused: false, pitchBeforeRequest: 0.85,
   });
   assert.deepEqual(result.position, {x: 3, y: -0.5, z: 9});
-  assert.equal(result.prefabName, 'resolved-enemy-shatter');
+  assert.equal(result.prefabName, 'EnemyShatter');
   assert.equal(result.pitch, 0.85);
   assert.equal(result.action, 'AudioSource.Play');
 });
@@ -70,7 +75,7 @@ test('body kill sends enemy shatter to position lifted 1.5 Unity units', () => {
 test('missing enemy shatter pool yields empty effect, not a played sound', () => {
   const result = planMcdBodyKillShatterPrefab({
     controllerAlreadyDead: false, bodyWorldPosition: {x: 0, y: 0, z: 0},
-    resolvedPrefabName: 'unknown-prefab-name', poolExists: false,
+    poolExists: false,
   });
   assert.equal(result.status, MCD_PREFAB_SOUND_RESULT.EMPTY_EFFECT);
 });
