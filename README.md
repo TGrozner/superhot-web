@@ -12,9 +12,25 @@ Open the published GitHub Pages URL once Pages is enabled. On Windows, unzip the
 npm start
 ```
 
-Then visit **http://localhost:4173**. No `npm install` needed. Alternatively use any static HTTP server in this folder. Do **not** open `index.html` as `file://`: ES modules require a server.
+Then visit **http://localhost:4173/**, with no query parameters. The homepage opens the original-model inspection view immediately. On the owner's configured machine, original cargo geometry, concrete texture and EnemyMerged load automatically from the loopback-only server. They are **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
 
-## Controls
+The visible **Vue** menu switches to **Prototype jouable** (the original three-arena game) or **Scène de contrôle générée**. There are no URL feature flags. The original-model view is currently static geometry inspection, not reconstructed native gameplay or animation.
+
+### Local original-asset configuration
+
+The ignored `private/browser-assets.json` maps `mesh6`, `mesh7`, `texture`,
+`enemyMerged`, and `enemyHeadless` to relative paths inside `private/`.
+Only those configured files are exposed through `/local-assets/<id>`, on
+`127.0.0.1`; host and same-origin checks reject cross-site access. The private
+directory itself is not served. Restart `npm start` after changing this map.
+No original data or machine-specific paths should be committed.
+
+Without that private configuration (including a public static deployment),
+the page explicitly reports that originals are unavailable. Personal files
+can still be selected under **Remplacer les fichiers locaux**; it does not
+upload them. The generated playable prototype remains available in **Vue**.
+
+## Playable prototype controls
 
 | Key | Action |
 | --- | --- |
@@ -71,7 +87,7 @@ Requires [GitHub CLI](https://cli.github.com/) (`gh`) and Git installed; the scr
 
 ## Known limitations
 
-This is an **early gameplay prototype**, not a full recreation of SUPERHOT: three compact rooms, one gun type, basic geometric enemies, simple level collision, minimal enemy tactics, no multiplayer, no saved progress, no replay system, desktop keyboard/mouse only. No outside assets; it works without a server-side component (except static hosting).
+The playable prototype remains **an early gameplay prototype**, not a full recreation of SUPERHOT: three compact rooms, one gun type, basic geometric enemies, simple level collision, minimal enemy tactics, no multiplayer, saved progress or replay system. The default original-model view displays authentic local static exports, but native animation, materials, lighting and gameplay fidelity remain unverified. Desktop keyboard/mouse only. A static host can serve the code; automatic private-original loading requires the local Node server.
 
 ## License
 

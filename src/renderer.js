@@ -2,6 +2,7 @@ import { cameraAxes } from './math.js';
 import { uploadIndexedMesh } from './render/gpu-mesh.js';
 import { createGeneratedLighting, lightingUniformPacket } from './render/lighting-model.js';
 import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
+import { enemyRedCrystalDiagnosticWebPacket } from './render/material-model.js';
 
 // Legacy Web fog is generated, not MCD. SH-13 owns the source-qualified lighting model.
 const GENERATED_FOG_STRENGTH = lightingUniformPacket(createGeneratedLighting()).fogStrength;
@@ -344,8 +345,7 @@ export function createRenderer(canvas) {
   let nativeEnemyPass = null;
   function acceptLocalEnemyReceipt(receipt) {
     const next = createEnemyStaticIndexedPass(gl, program, uniforms, receipt, {
-      // Serialized Material13 color; the Web lighting/shader remains diagnostic.
-      diagnosticColor: [0.7205882072, 0, 0, 1],
+      diagnosticColor: enemyRedCrystalDiagnosticWebPacket(receipt.rendererPathId).color,
     });
     nativeEnemyPass?.dispose();
     nativeEnemyPass = next;

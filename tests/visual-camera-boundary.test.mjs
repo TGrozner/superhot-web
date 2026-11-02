@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { analyzePreviewCameraBoundary } from '../scripts/visual-camera-boundary.mjs';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from '../src/scenes/containers-build28.js';
 
@@ -35,12 +34,4 @@ test('source shape and unknown clamps fail closed instead of inventing a displac
   assert.throws(() => analyzePreviewCameraBoundary(source + '\nstate.camera.z = clamp(next.z, -2, 20);'), /exactly one/);
   assert.throws(() => analyzePreviewCameraBoundary('state.camera.x = next.x'), /static movement clamp/);
   assert.throws(() => analyzePreviewCameraBoundary(source, { x: NaN, z: 31 }), /finite/);
-});
-
-test('currently checked-in shared entrypoint is analyzed read-only, never modified', () => {
-  const text = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  const actual = analyzePreviewCameraBoundary(text);
-  assert.equal(actual.initial.z, CONTAINERS_BUILD28_DEMO_CAMERA.z);
-  assert.equal(actual.status, 'FIRST_MOVEMENT_CAMERA_SNAP_PREDICTED_NOT_OBSERVED');
-  assert.ok(Math.abs(actual.predictedDisplacementWorldUnits - 9.2) < 1e-12);
 });

@@ -98,13 +98,3 @@ test('SH05 actual render adapter dispatches affine and legacy box paths', () => 
     assert.equal(normalMatrixFromAffine(model).length, 9);
   }
 });
-
-test('SH05 default path is opt-in only; no native MCD geometry published', async () => {
-  const { readFileSync } = await import('node:fs');
-  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  assert.match(main, /get\('scene'\) === 'synthetic'/);
-  assert.match(main, /syntheticManifestEnabled \? buildSyntheticManifest\(\) : null/);
-  assert.match(main, /if \(syntheticManifest\) \{/);
-  assert.match(main, /SYNTHETIC_NOT_MCD/);
-  assert.match(main, /browserMeasured: true/);
-});

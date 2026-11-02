@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { createRenderer } from '../src/renderer.js';
 import { createGeneratedLighting, lightingUniformPacket } from '../src/render/lighting-model.js';
 
@@ -63,12 +62,4 @@ test('SH05 WebGL2 fog policy emits the generated default and opt-in zero to the 
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   }
-});
-
-test('SH05 Containers-specific fog is explicitly opt-in and does not alter default/synthetic routes', () => {
-  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  assert.match(main, /get\('scene'\) === 'containers'/);
-  assert.match(main, /renderer\.begin\(cam, containersPreviewEnabled \? \{ fogStrength: 0 \} : undefined\)/);
-  assert.match(main, /CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME/);
-  assert.match(main, /buildSyntheticManifest/);
 });

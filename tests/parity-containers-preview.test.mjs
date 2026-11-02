@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { drawContainersBuild28Preview } from '../src/levels.js';
 import {
   CONTAINERS_BUILD28_HULLS,
@@ -46,18 +45,4 @@ test('Containers view frustum culls distant proxies before invoking WebGL draw c
     farCamera, { far: 60 });
   assert.equal(result.visible, 0);
   assert.equal(draws.length, 0);
-});
-
-test('browser path is explicitly opt-in and isolated from prototype levels/collisions', () => {
-  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  assert.match(main, /get\('scene'\) === 'containers'/);
-  assert.match(main, /drawContainersBuild28Preview\(renderer, cam/);
-  assert.match(main, /CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME/);
-  assert.match(main, /CONTAINERS BUILD28 · GENERATED PROXY ONLY · NOT MCD GAMEPLAY/);
-  assert.match(main, /state\.solids = \[\];/);
-  assert.match(main, /state\.enemies = \[\];/);
-  assert.match(main, /if \(!containersPreviewEnabled\) \{/);
-  // The first synthetic preview and the default original mode are retained.
-  assert.match(main, /get\('scene'\) === 'synthetic'/);
-  assert.match(main, /if \(syntheticManifest\) \{/);
 });

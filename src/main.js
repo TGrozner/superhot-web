@@ -25,13 +25,12 @@ catch (error) {
 }
 const RED = '#d51e3b', RED_LIGHT = '#f43c53', RED_DARK = '#9c152e';
 const BLACK = '#202932', METAL = '#394650', GUN = '#0d171e';
-// Opt-in only: ?scene=synthetic. This is NOT a reconstructed MCD level.
-const syntheticManifestEnabled = new URLSearchParams(window.location.search).get('scene') === 'synthetic';
-const syntheticManifest = syntheticManifestEnabled ? buildSyntheticManifest() : null;
-const containersPreviewEnabled = new URLSearchParams(window.location.search).get('scene') === 'containers';
-const visualPreviewEnabled = syntheticManifestEnabled || containersPreviewEnabled;
-// These slots are populated ONLY from user-selected local files in the browser.
-// Nothing is fetched or persisted, and no original game asset is in the repo.
+// Original local models are the default homepage; other views use the visible menu.
+let syntheticManifestEnabled = false;
+let syntheticManifest = null;
+let containersPreviewEnabled = true;
+let visualPreviewEnabled = true;
+// Original bytes come from the loopback allowlist or user-selected files, never Git.
 const localNativeMeshes = new Set();
 let localPrivateTexture = null;
 let privateTextureGeneration = 0;
@@ -58,18 +57,16 @@ if (containersPreviewEnabled) {
   $('private-mesh-controls').hidden = false;
   // File controls must not trigger gameplay keyboard/mouse shortcuts.
   for (const eventName of ['keydown', 'mousedown']) {
-    $('private-mesh-controls').addEventListener(eventName, event => event.stopPropagation());
+    $('scene-controls').addEventListener(eventName, event => event.stopPropagation());
   }
   const enemyInput = $('private-enemy');
   const enemyStatus = $('private-enemy-status');
   const enemySummary = () => localNativeEnemy
     ? `${localNativeEnemy.variant === 'merged' ? 'EnemyMerged' : 'EnemyMergedHeadless'} original chargé · ${localNativeEnemy.triangles} triangles · pose statique, placement de visite, shader Web.`
     : 'Aucun modèle ennemi local chargé.';
-  enemyInput.addEventListener('change', async () => {
+  async function loadEnemyFile(file, variant) {
     const generation = ++nativeEnemyGeneration;
-    const file = enemyInput.files?.[0];
-    if (!file) { enemyStatus.textContent = enemySummary(); return; }
-    const variant = $('private-enemy-variant').value;
+    if (!file) { enemyStatus.textContent = enemySummary(); return false; }
     enemyStatus.textContent = 'Vérification et chargement du modèle original…';
     try {
       const receipt = await loadNativeEnemyObj(file, { variant });
@@ -81,13 +78,16 @@ if (containersPreviewEnabled) {
       });
       $('frame-private-enemy').disabled = false;
       enemyStatus.textContent = enemySummary();
-      frameLocalEnemy();
+      if (containersPreviewEnabled) frameLocalEnemy();
+      return true;
     } catch (error) {
       if (generation === nativeEnemyGeneration) {
         enemyStatus.textContent = `Échec du modèle : ${error.message} ${enemySummary()}`;
       }
     }
-  });
+    return false;
+  }
+  enemyInput.addEventListener('change', () => loadEnemyFile(enemyInput.files?.[0], $('private-enemy-variant').value));
   $('frame-private-enemy').addEventListener('click', frameLocalEnemy);
   $('frame-containers').addEventListener('click', () => {
     state.camera = { ...CONTAINERS_BUILD28_DEMO_CAMERA };
@@ -99,9 +99,8 @@ if (containersPreviewEnabled) {
   const textureSummary = () => localPrivateTexture
     ? `Texture PNG locale chargée · ${localPrivateTexture.width} × ${localPrivateTexture.height} · meshes locaux uniquement ; shader et éclairage Web générés, sans parité native.`
     : 'Aucune texture locale chargée ; matériaux Web générés.';
-  textureInput.addEventListener('change', async () => {
+  async function loadTextureFile(file) {
     const generation = ++privateTextureGeneration;
-    const file = textureInput.files?.[0];
     if (!file) {
       textureStatus.textContent = textureSummary();
       return;
@@ -121,6 +120,7 @@ if (containersPreviewEnabled) {
       if (generation !== privateTextureGeneration) return;
       localPrivateTexture = Object.freeze(renderer.replacePrivateTexture(bitmap));
       textureStatus.textContent = textureSummary();
+      return true;
     } catch (error) {
       if (generation === privateTextureGeneration) {
         textureStatus.textContent = `Échec de la texture : ${error.message} ${textureSummary()}`;
@@ -128,11 +128,11 @@ if (containersPreviewEnabled) {
     } finally {
       bitmap?.close();
     }
-  });
-  for (const spec of localMeshPreviewSpec) {
-    $(spec.inputId).addEventListener('change', async () => {
-      const file = $(spec.inputId).files?.[0];
-      if (!file) return;
+    return false;
+  }
+  textureInput.addEventListener('change', () => loadTextureFile(textureInput.files?.[0]));
+  async function loadMeshFile(spec, file) {
+      if (!file) return false;
       const status = $('private-mesh-status');
       status.textContent = 'Chargement local et vérification du groupe ' + spec.groupIndex + '…';
       try {
@@ -145,14 +145,82 @@ if (containersPreviewEnabled) {
         status.textContent = localNativeMeshes.size + '/2 meshes locaux · '
           + mesh.triangleCount + ' triangles sur le groupe ' + spec.groupIndex
           + ' · shader et éclairage Web générés · pas de comparaison native';
+        return true;
       } catch (error) {
         status.textContent = 'Échec ' + spec.slot + ' : ' + error.message;
       }
-    });
+      return false;
   }
+  for (const spec of localMeshPreviewSpec) {
+    $(spec.inputId).addEventListener('change', () => loadMeshFile(spec, $(spec.inputId).files?.[0]));
+  }
+  let localAssetManifest = null;
+  async function localAssetFile(id) {
+    const descriptor = localAssetManifest?.assets?.[id];
+    if (!descriptor) throw new Error('Export local non configuré.');
+    const response = await fetch(`/local-assets/${id}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error('Export local indisponible.');
+    return new File([await response.blob()], descriptor.name, { type: descriptor.type });
+  }
+  $('private-enemy-variant').addEventListener('change', async () => {
+    if (!localAssetManifest) return;
+    const variant = $('private-enemy-variant').value;
+    const generation = ++nativeEnemyGeneration;
+    try {
+      const file = await localAssetFile(variant === 'merged' ? 'enemyMerged' : 'enemyHeadless');
+      if (generation === nativeEnemyGeneration) await loadEnemyFile(file, variant);
+    } catch (error) {
+      if (generation === nativeEnemyGeneration) enemyStatus.textContent = `${error.message} ${enemySummary()}`;
+    }
+  });
+  async function loadLocalAssets() {
+    const status = $('local-assets-status');
+    try {
+      const response = await fetch('/local-assets/manifest', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Serveur d’originaux locaux indisponible.');
+      localAssetManifest = await response.json();
+      if (!Object.keys(localAssetManifest.assets ?? {}).length) {
+        status.textContent = 'Aucun original configuré sur ce serveur. Les sélecteurs manuels restent disponibles.';
+        return;
+      }
+      const results = await Promise.all([
+        ...localMeshPreviewSpec.map(async spec => {
+          const file = await localAssetFile(spec.slot);
+          return localNativeMeshes.has(spec.slot) || loadMeshFile(spec, file);
+        }),
+        localAssetFile('texture').then(file => privateTextureGeneration ? true : loadTextureFile(file)),
+        localAssetFile('enemyMerged').then(file => nativeEnemyGeneration ? true : loadEnemyFile(file, 'merged')),
+      ]);
+      status.textContent = results.every(Boolean)
+        ? 'Originaux locaux chargés automatiquement. Aucun envoi externe.'
+        : 'Chargement local incomplet : consulter les statuts ci-dessous.';
+    } catch (error) {
+      status.textContent = `${error.message} Les sélecteurs manuels restent disponibles.`;
+    }
+  }
+  void loadLocalAssets();
 }
-if (syntheticManifestEnabled) document.title += ' — SYNTHETIC SCENE (NOT MCD)';
-if (containersPreviewEnabled) document.title += ' — CONTAINERS COLLIDER PROXY (NOT MCD GAMEPLAY)';
+document.title = 'FRAME//BREAK — Modèles originaux locaux';
+$('scene-mode').addEventListener('change', () => {
+  const mode = $('scene-mode').value;
+  containersPreviewEnabled = mode === 'original';
+  syntheticManifestEnabled = mode === 'synthetic';
+  syntheticManifest = syntheticManifestEnabled ? buildSyntheticManifest() : null;
+  visualPreviewEnabled = containersPreviewEnabled || syntheticManifestEnabled;
+  $('private-mesh-controls').hidden = !containersPreviewEnabled;
+  manifestStats = null;
+  measuredFrameMs.length = 0;
+  metricsNextAt = 0;
+  delete window.__superhotSceneMetrics;
+  document.exitPointerLock();
+  loadLevel(0);
+  setScreen(containersPreviewEnabled ? 'playing' : 'menu');
+});
+let renderedFrameId = 0;
+let renderedFrameSnapshot = null;
+window.__superhotGetRenderedFrameSnapshot = () => renderedFrameSnapshot && ({
+  ...renderedFrameSnapshot, camera: { ...renderedFrameSnapshot.camera },
+});
 let manifestStats = null;
 const measuredFrameMs = [];
 let metricsNextAt = 0;
@@ -208,15 +276,15 @@ function loadLevel(index) {
   }
   state.bullets = []; state.fragments = []; state.drops = [];
   state.speed = .04; state.shotPulse = 0; state.lookActivity = 0;
-  state.waveClock = 0; state.stageBanner = 2.2; state.transition = 0;
+  state.waveClock = 0; state.stageBanner = containersPreviewEnabled ? 0 : 2.2; state.transition = 0;
   state.ammo = 6; state.weapon = true; state.reload = 0; state.fireDelay = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   $('room-name').textContent = containersPreviewEnabled
-    ? 'CONTAINERS BUILD28 · COLLIDER PROXY'
+    ? 'CONTAINERS · MODÈLES ORIGINAUX LOCAUX'
     : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
   $('stage-banner').textContent = containersPreviewEnabled
-    ? 'CONTAINERS BUILD28 · GENERATED PROXY ONLY · NOT MCD GAMEPLAY'
+    ? 'CONTAINERS · VISITE DES MODÈLES · PAS DE GAMEPLAY NATIF'
     : `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
       (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
 }
@@ -661,11 +729,14 @@ function render() {
     for(const p of state.fragments) renderer.shard(p.x,p.y,p.z,p.sx,p.sy,p.sz,p.color,p.rx,p.ry,p.rz,clamp(p.life/.6,0,1));
     if(state.screen==='playing') drawViewModel(cam);
   }
+  renderedFrameSnapshot = {
+    frameId: ++renderedFrameId, activeScreen: state.screen, camera: { ...cam },
+  };
 }
 
-// Keep the world visible under the landing screen without advancing gameplay.
+// Open the local-model view immediately, without audio or pointer-lock activation.
 loadLevel(0);
-setScreen('menu');
+setScreen('playing');
 let last=performance.now();
 function frame(now) {
   const frameMs = Math.max(0, now - last);

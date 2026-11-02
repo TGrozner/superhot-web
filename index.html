@@ -66,36 +66,47 @@
         <p class="description" id="win-stats"></p>
         <button type="button" id="again-button" class="primary">REJOUER <span>↗</span></button>
       </div>
-      <div class="menu-bottom">UNE EXPÉRIENCE ORIGINALE INSPIRÉE DES FPS À MANIPULATION TEMPORELLE. AUCUN ASSET COMMERCIAL UTILISÉ.</div>
+      <div class="menu-bottom">PROTOTYPE WEB · AUCUN ASSET COMMERCIAL DISTRIBUÉ AVEC CE DÉPÔT.</div>
     </div>
-    <aside id="private-mesh-controls" hidden style="position:absolute;top:12px;right:12px;z-index:5;max-width:min(350px,90vw);max-height:calc(100% - 24px);overflow:auto;padding:12px;background:rgba(242,247,250,.95);border:1px solid #9aabb4;font:12px/1.5 ui-monospace,monospace;color:#23313a;">
-      <strong>CONTAINERS · LOCAL OBJ + PNG PREVIEW</strong>
-      <p style="margin:6px 0">Choisis tes exports OBJ ou OBJ.gz locaux et, facultativement, leur texture PNG. Sans upload ni sauvegarde. Shader et éclairage Web générés ; aucune parité graphique revendiquée. Échap libère la souris pendant la visite.</p>
-      <label style="display:block">Mesh level28:6 — groupe 47
-        <input id="private-mesh6" type="file" accept=".obj,.gz,.obj.gz" style="display:block;max-width:100%" />
-      </label>
-      <label style="display:block;margin-top:5px">Mesh level28:7 — groupe 48
-        <input id="private-mesh7" type="file" accept=".obj,.gz,.obj.gz" style="display:block;max-width:100%" />
-      </label>
-      <output id="private-mesh-status" aria-live="polite" style="display:block;margin-top:6px">Aucun mesh local chargé ; affichage des proxies.</output>
-      <label for="private-texture" style="display:block;margin-top:5px">Texture PNG locale facultative — béton des meshes
-        <input id="private-texture" type="file" accept=".png,image/png" aria-describedby="private-texture-help private-texture-status" style="display:block;max-width:100%" />
-      </label>
-      <p id="private-texture-help" style="margin:6px 0">16 Mio maximum. Appliquée aux meshes locaux seulement, avec UV × 0,1 ; les proxies restent générés. Une erreur conserve la texture précédente.</p>
-      <output id="private-texture-status" for="private-texture" role="status" aria-live="polite" aria-atomic="true" style="display:block;margin-top:6px">Aucune texture locale chargée ; matériaux Web générés.</output>
-      <hr />
-      <label for="private-enemy-variant">Modèle ennemi original</label>
-      <select id="private-enemy-variant">
-        <option value="merged">EnemyMerged — complet</option>
-        <option value="headless">EnemyMergedHeadless — sans tête</option>
+    <aside id="scene-controls" style="position:absolute;top:12px;right:12px;z-index:5;max-width:min(350px,90vw);max-height:calc(100% - 24px);overflow:auto;padding:12px;background:rgba(242,247,250,.95);border:1px solid #9aabb4;font:12px/1.5 ui-monospace,monospace;color:#23313a;">
+      <label for="scene-mode">Vue</label>
+      <select id="scene-mode">
+        <option value="original">Modèles originaux locaux</option>
+        <option value="prototype">Prototype jouable</option>
+        <option value="synthetic">Scène de contrôle générée</option>
       </select>
-      <label for="private-enemy" style="display:block;margin-top:5px">Export OBJ ou OBJ.gz correspondant
-        <input id="private-enemy" type="file" accept=".obj,.obj.gz" aria-describedby="private-enemy-status" style="display:block;max-width:100%" />
-      </label>
-      <output id="private-enemy-status" role="status" aria-live="polite" style="display:block;margin-top:6px">Aucun modèle ennemi local chargé.</output>
-      <p style="margin:6px 0">Géométrie originale vérifiée, sans animation. Position de visite, pas une apparition native. Le béton ne s’applique pas au personnage.</p>
-      <button id="frame-private-enemy" type="button" disabled>Cadrer le modèle</button>
-      <button id="frame-containers" type="button">Vue des conteneurs</button>
+      <div id="private-mesh-controls" hidden>
+        <strong style="display:block;margin-top:10px">CONTAINERS · MODÈLES ORIGINAUX</strong>
+        <output id="local-assets-status" role="status" style="display:block;margin:6px 0">Chargement automatique des originaux locaux…</output>
+        <label for="private-enemy-variant">Personnage</label>
+        <select id="private-enemy-variant">
+          <option value="merged">EnemyMerged — complet</option>
+          <option value="headless">EnemyMergedHeadless — sans tête</option>
+        </select>
+        <output id="private-enemy-status" role="status" aria-live="polite" style="display:block;margin-top:6px">Aucun modèle ennemi local chargé.</output>
+        <p style="margin:6px 0">Géométrie originale, pose statique. Placement de visite et éclairage Web ; animations et fidélité 1:1 non validées. Échap libère la souris.</p>
+        <button id="frame-private-enemy" type="button" disabled>Cadrer le modèle</button>
+        <button id="frame-containers" type="button">Vue des conteneurs</button>
+        <details style="margin-top:10px">
+          <summary>Remplacer les fichiers locaux</summary>
+          <p>Aucun envoi externe. Ces sélecteurs sont facultatifs lorsque le serveur local fournit les originaux.</p>
+          <label style="display:block">Mesh level28:6 — groupe 47
+            <input id="private-mesh6" type="file" accept=".obj,.gz,.obj.gz" style="display:block;max-width:100%" />
+          </label>
+          <label style="display:block;margin-top:5px">Mesh level28:7 — groupe 48
+            <input id="private-mesh7" type="file" accept=".obj,.gz,.obj.gz" style="display:block;max-width:100%" />
+          </label>
+          <output id="private-mesh-status" aria-live="polite" style="display:block;margin-top:6px">Aucun mesh local chargé ; affichage des proxies.</output>
+          <label for="private-texture" style="display:block;margin-top:5px">Texture PNG locale — béton des conteneurs
+            <input id="private-texture" type="file" accept=".png,image/png" aria-describedby="private-texture-help private-texture-status" style="display:block;max-width:100%" />
+          </label>
+          <p id="private-texture-help" style="margin:6px 0">16 Mio maximum. Conteneurs uniquement, UV × 0,1. Une erreur conserve la texture précédente.</p>
+          <output id="private-texture-status" for="private-texture" role="status" aria-live="polite" aria-atomic="true" style="display:block;margin-top:6px">Aucune texture locale chargée.</output>
+          <label for="private-enemy" style="display:block;margin-top:5px">Export OBJ/OBJ.gz du personnage sélectionné
+            <input id="private-enemy" type="file" accept=".obj,.obj.gz" aria-describedby="private-enemy-status" style="display:block;max-width:100%" />
+          </label>
+        </details>
+      </div>
     </aside>
     <div id="error" role="alert" hidden></div>
   </main>

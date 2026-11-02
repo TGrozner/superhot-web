@@ -77,10 +77,10 @@ seulement ensuite proposer des métriques supplémentaires de parité mesurable.
 
 ## Intégration verticale WebGL2 — fixture **SYNTHETIC / NOT MCD**
 
-Le rendu expérimental est activé **uniquement** par `?scene=synthetic`
-(exemple en local : `http://localhost:4173/?scene=synthetic`, adapter le port du
-serveur). Sans ce paramètre, la progression, la géométrie et les draw calls
-hérités restent inchangés.
+La fixture générée s'ouvre depuis **Vue → Scène de contrôle générée** sur
+`http://localhost:4173/`. Aucun paramètre d'URL n'active les fonctionnalités.
+La page d'accueil montre par défaut les modèles originaux disponibles localement ;
+le prototype jouable reste accessible dans le même menu.
 
 Chemin d'exécution réellement raccordé :
 
@@ -112,7 +112,7 @@ sans recourir au runner natif. Ils n'ont pas encore de valeur mesurée ni de
 capture réelle attachée à cette documentation. Pour relever une mesure :
 démarrer une session jouable, parcourir la fixture, noter résolution et GPU,
 capturer l'écran et copier les métriques après plusieurs secondes. Comparer
-également sans `?scene=synthetic`. Ne pas annoncer de FPS, de réduction de
+également avec **Vue → Prototype jouable**. Ne pas annoncer de FPS, de réduction de
 draw calls ou de fidélité visuelle sans cette mesure.
 
 Cette préparation est un **contrat de rendu autonome** ; les données réelles de
@@ -122,9 +122,9 @@ avec les 354+ tests Node Web verts restent strictement côté prototype.
 
 ## Containers/build28 — preview WebGL2 de volumes dérivés (SH-04 → SH-05)
 
-Nouvelle URL **opt-in** : `http://localhost:4173/?scene=containers`.
-Le serveur reste `npm start`. L'ancien mode sans querystring demeure
-inchangé et `?scene=synthetic` reste disponible indépendamment.
+Ouvrir `http://localhost:4173/` après `npm start`. La visite des modèles locaux
+est la vue par défaut. Le menu **Vue** donne accès au prototype jouable et à la
+scène de contrôle générée, sans commutateurs cachés dans l'URL.
 
 **PROUVÉ en statique, pas en exécution native :** SH-04 a relié cinq objets
 cargo `level28` avec MeshRenderer/BoxCollider activés et leurs
@@ -171,11 +171,10 @@ Cela établit un état **sérialisé** de la scène, pas une capture du rendu
 natif ni l'absence de modifications en jeu. La valeur `ambientIntensity=0`
 ne suffit **pas** à reconstruire les éclairages indirects, lightmaps et shaders.
 
-Dans l'URL opt-in `?scene=containers`, le shader WebGL2 applique désormais
-`uFogStrength=0` à la preview **des 46 volumes de collision synthétisés**.
-Le mode sans paramètre et `?scene=synthetic` préservent l'ancien brouillard
-Web généré de force `0.72`, issu de `src/render/lighting-model.js`.
-Aucun maillage, son, texture ni shader commercial n'a été importé.
+Dans la vue par défaut **Modèles originaux locaux**, le shader WebGL2 applique
+`uFogStrength=0`. Le prototype jouable et la scène de contrôle générée préservent
+le brouillard Web de force `0.72`, issu de `src/render/lighting-model.js`.
+Les géométries et textures originales restent privées et ne sont pas distribuées.
 
 Contrôle ciblé : `node --test tests/parity-containers-fog.test.mjs`
 vérifie les valeurs envoyées à l'uniform dans un **WebGL2 simulé** et
@@ -186,16 +185,16 @@ une capture MCD native privée avec paramètres contrôlés. p95 FPS, décompte
 des appels WebGL2 et correspondance pixel native ne sont pas encore mesurés.
 
 
-## Opt-in local OBJ group inspection (SH-05, 2026-11-02)
+## Chargement des groupes OBJ locaux (SH-05, 2026-11-02)
 
-Open `/?scene=containers`. The **LOCAL OBJ + PNG PREVIEW** panel accepts a local `.obj` or `.obj.gz` for each of the two independently verified Combined Mesh groups:
+Open `/`. Configured private files load automatically. **Remplacer les fichiers locaux** also accepts a personal `.obj` or `.obj.gz` for each verified Combined Mesh group:
 
 - `Mesh level28:6`, OBJ group suffix `_47`, expected **1546** triangles / cargo center `[17.45,2.575,13.975]` in the *Web* preview coordinate convention.
 - `Mesh level28:7`, OBJ group suffix `_48`, expected **1546** triangles / cargo center `[17.475,5.725,15.8]`.
 
-Selecting either file decompresses/parses it in the browser, converts the OBJ's mirrored-X exported coordinates to the Web preview convention by reflecting X and Z, and validates triangle count and world bounds *before* WebGL2 upload. The matching generated hull **and its artificial ribs** disappear only after the genuine local group is successfully accepted. The other generated proxies remain. This is opt-in; ordinary modes and users without local files are unaffected.
+Loading either file decompresses/parses it in the browser, converts the OBJ's mirrored-X exported coordinates to the Web preview convention by reflecting X and Z, and validates triangle count and world bounds before WebGL2 upload. The matching generated hull and artificial ribs disappear only after successful upload. Other generated proxies remain.
 
-**Privacy / rights:** the local inputs use the user's File objects directly; no network request, upload, source-file path, storage, or repository asset is involved. No OBJ, source texture, or original MCD material is bundled in `superhot-web`. Use only legitimately obtained personal source files. The imported groups use **synthetic Web colors/lighting** unless a local PNG is selected; that optional texture does not replace the generated Web shader or lighting. Native runtime visibility, material binding, camera/FOV, shadows, actual running gameplay and pixel-level 1:1 fidelity remain **UNVERIFIED**. The preview is deliberately *not* playable native Containers gameplay; neither the original collision nor enemies are attached. The `window.__superhotSceneMetrics` report distinguishes locally loaded groups and texture state from generated proxies.
+**Privacy / rights:** original bytes are loaded from the same-origin loopback allowlist or personal File inputs; nothing is uploaded externally or persisted by the browser. No original asset is bundled in Git. The Node server exposes only configured files, not the private directory or its paths. Geometry and texture presence do not establish native shaders, lighting, runtime visibility, gameplay or pixel-level 1:1 fidelity. The metrics distinguish local originals from generated proxies.
 
 **Private evidence (do not publish original resources):** `superhot-research#42/#43/#45/#47/#55/#60/#63` establishes the Unity indices, converted OBJ existence, first container submesh47 (4638 indices, 1546 triangles), and X-mirrored OBJ AABB matching its serialized source. Group48 has source-reported 4638 indices and corresponding collider envelope. This UI provides a real GPU rendering path but does not validate native material/shader/animation parity. Screenshots and performance should be assessed directly in a browser before claiming visible fidelity.
 
@@ -204,16 +203,16 @@ Run `npm run check` for syntax and regression tests; perform a real WebGL2 brows
 
 ## SH-05 — un seul OBJ6 privé, trois placements Containers source-qualifiés
 
-**Tranche Web opt-in, aucune ressource originale publique.** Dans
-`/?scene=containers`, choisir son **propre** export local `.obj` ou
-`.obj.gz` Mesh6 contenant le groupe `_47` (1 546 triangles). Le navigateur
+**Aucune ressource originale publique.** Sur `/`, le serveur local fournit
+l'export personnel Mesh6 configuré, ou l'utilisateur le sélectionne sous
+**Remplacer les fichiers locaux** : groupe `_47` (1 546 triangles). Le navigateur
 valide ce groupe par nombre de triangles et AABB, puis téléverse ses buffers
 **uniquement vers le GPU du navigateur**, pas vers un serveur. Le programme
 réutilise son unique VAO/VBO/EBO pour trois drawElements avec matrices
 affines : GO336/mesh6:g47 (identity), GO839/mesh6:g24
 (-7.35,0,+4.5), GO1003/mesh6:g32 (-1.4,-0.05,-25.2). Le mesh7:g48
 demeure un second fichier local facultatif et une seule instance distincte.
-Le preview par défaut (sans File sélectionné) reste entièrement généré.
+Sans originaux configurés ni fichiers sélectionnés, la page indique leur absence et conserve les volumes générés.
 
 **PROUVÉ par les données statiques** : jointures Unity des trois GOs/
 MeshRenderers/submeshes dans `superhot-research#68` (artifact
@@ -249,8 +248,8 @@ l'éclairage Web restent générés, et **aucun 1:1 n'est validé**.
 
 ## Texture PNG locale facultative — Containers
 
-Dans `/?scene=containers`, charger ses exports OBJ comme ci-dessus puis choisir
-son PNG dans **Texture PNG locale facultative — béton des meshes**. La texture
+Sur `/`, la texture configurée est chargée automatiquement. On peut aussi choisir
+un PNG sous **Remplacer les fichiers locaux → Texture PNG locale — béton des conteneurs**. La texture
 peut aussi être sélectionnée avant les OBJ : elle ne devient visible que sur
 les meshes locaux chargés. Pendant la visite, **Échap** libère la souris pour
 accéder aux sélecteurs. Le statut des meshes reste indépendant de celui de la
@@ -266,8 +265,8 @@ invalides ou supérieures au `MAX_TEXTURE_SIZE` de la session WebGL2. Un échec 
 décodage ou de transfert GPU conserve la dernière texture valide ; le statut
 accessible annonce l'échec et l'état conservé. Une sélection plus récente
 invalide les décodages en attente, et chaque bitmap décodé est fermé après
-utilisation, y compris lorsqu'il est devenu obsolète. Recharger la page revient
-aux matériaux générés : aucune sélection n'est persistée.
+utilisation, y compris lorsqu'il est devenu obsolète. Recharger la page recharge
+les originaux configurés sur le serveur ; les sélections manuelles ne sont pas persistées.
 
 La texture utilise les UV présents dans l'OBJ, une échelle `(0.1, 0.1)` et un
 offset `(0, 0)`, avec répétition, mipmaps et filtrage linéaire. L'échantillon
@@ -294,12 +293,12 @@ séparément.
 
 ## Modèles ennemis originaux — import local raccordé
 
-La PR SH-14 #114 est raccordée au même aperçu `/?scene=containers` :
-choisir **EnemyMerged — complet** ou **EnemyMergedHeadless — sans tête**, puis
-l'export personnel OBJ/OBJ.gz correspondant. Le chargeur de l'agent vérifie
-l'identité du fichier, son empreinte SHA-256, ses bornes et ses triangles avant
-le transfert GPU. Une erreur conserve le modèle déjà affiché. Rien n'est envoyé
-au serveur ou stocké entre deux visites.
+La PR SH-14 #114 est raccordée à la page d'accueil `/`, sans flag ni bouton
+d'activation. Le serveur local charge automatiquement EnemyMerged et les cargos.
+Le sélecteur **Personnage** permet de charger aussi la variante sans tête.
+Les sélecteurs de fichiers restent disponibles pour remplacer les originaux.
+Le chargeur vérifie l'identité, le SHA-256, les bornes et les triangles avant le
+transfert GPU ; une erreur conserve le modèle précédent. Aucun envoi externe.
 
 Le modèle complet contient **2254 triangles**, la variante sans tête **2132**.
 Ce sont les véritables exports de `sharedassets0.assets:284/285`, pas le
