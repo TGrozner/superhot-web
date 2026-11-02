@@ -125,5 +125,98 @@
       "question": "Which input actions (move, look, attack, reload, jump, pause) accelerate world time, by how much and with what interpolation?",
       "requiredSource": "time shifter implementations, input pipeline, fixed-step and native trace"
     }
-  ]
+  ],
+  "secondaryReport": {
+    "source": {
+      "repository": "TGrozner/superhot-research",
+      "visibility": "private",
+      "repositoryCommit": "be6d535e608f66c93db3acc422385035d1281063",
+      "workflowRun": 41368361512,
+      "artifactId": 13108420851,
+      "path": "HANDOFF.md",
+      "readStartLine": 1,
+      "readLineCount": 100,
+      "sourceFileBytes": 12577,
+      "retrievedTextSha256": "408cec616a4e1399120a72df8014e237073b649ab781da688b304df3b7e060a7",
+      "edition": "SUPERHOT: MIND CONTROL DELETE",
+      "steamBuild": "20299547",
+      "engine": "Unity 2018.4.14f1",
+      "assemblyCSharpSha256": "ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257",
+      "provenanceClass": "secondary-private-research-handoff; primary method/scene/runtime not examined in this agent cycle"
+    },
+    "findings": [
+      {
+        "id": "TC-R01",
+        "classification": "INCONNU",
+        "sourceLines": [
+          69,
+          71
+        ],
+        "reportedClaim": "TimeControl agrège les contributions des shifters par maximum, borne le résultat, puis applique forcedTimeScale après les bornes; pause zéro n'est pas un minimum positif.",
+        "scope": "reported-native-algorithm-not-directly-reviewed",
+        "requiredPrimaryEvidence": "TimeControl Update/FixedUpdate and shifter reducer CIL, writes to Time.timeScale, pause branch, line and token references.",
+        "falsifier": "Une branche source montrant une agrégation différente, un forced override avant clamp, ou une pause convertie en minTimescale."
+      },
+      {
+        "id": "TC-R02",
+        "classification": "INCONNU",
+        "sourceLines": [
+          72,
+          72
+        ],
+        "reportedClaim": "Le déplacement du joueur utilise Time.deltaTime et le shifter actif de mouvement est AsymmetricSmoothLinearInstantTimeShifter, pas WalkingTimeShifter.",
+        "scope": "reported-player-movement-and-component-wiring-not-directly-reviewed",
+        "requiredPrimaryEvidence": "Method body of active player movement, bound component identity in the Containers scene, Unity Update order and measured movement trace.",
+        "falsifier": "La méthode de mouvement active utilise deltaTime non-scalé ou le binding effectif pointe vers WalkingTimeShifter."
+      },
+      {
+        "id": "TC-R03",
+        "classification": "INCONNU",
+        "sourceLines": [
+          73,
+          73
+        ],
+        "reportedClaim": "Chaîne Containers RUN_LEVEL_6C -> SHRL_ContainerPort -> scène build 28; instance TimeControl de cette scène liée à un dénominateur de pas physique 120, différent du défaut de classe 60.",
+        "scope": "reported-serialized-scene-connection-not-directly-reviewed",
+        "requiredPrimaryEvidence": "Active scene/prefab (owner,path_id) and serialized TimeControl.fixedTimestepDenominator=120 plus actual scene loading and assignments.",
+        "falsifier": "Instance sélectionnée différente, champ sérialisé différent de 120, ou écriture runtime qui neutralise ce paramètre."
+      },
+      {
+        "id": "TC-R04",
+        "classification": "INCONNU",
+        "sourceLines": [
+          74,
+          74
+        ],
+        "reportedClaim": "Profil clavier/souris relevé: touche R -> Replay, pas rechargement; KillReloadMod réinitialise délais/animations et non munitions.",
+        "scope": "reported-input-binding-and-combat-side-effect-not-directly-reviewed",
+        "requiredPrimaryEvidence": "Actual Input Manager/user binding profile, input dispatch branch and KillReloadMod IL with active config.",
+        "falsifier": "Profil actif lie R au rechargement, ou KillReloadMod écrit dans le stock de munitions."
+      },
+      {
+        "id": "TC-R05",
+        "classification": "INCONNU",
+        "sourceLines": [
+          46,
+          46
+        ],
+        "reportedClaim": "Le rapport désigne spec/player-camera-bindings.json comme source de 467 composants managés et 269 objets natifs/réglages liés aux scènes.",
+        "scope": "reported-inventory-counts-not-camera-runtime-contract",
+        "requiredPrimaryEvidence": "Read spec/player-camera-bindings.json, select active binding via scene owner/path_id, inspect camera method CIL and runtime transform samples.",
+        "falsifier": "Le fichier de référence manque, les comptes diffèrent, ou le contrôleur actif n'est pas inclus."
+      },
+      {
+        "id": "TC-R06",
+        "classification": "INCONNU",
+        "sourceLines": [
+          55,
+          55
+        ],
+        "reportedClaim": "Le corpus annonce cinq captures/observations de menu, run Containers, déplacement et pause, sans mesure numérique de physique ni comparaison Web.",
+        "scope": "reported-observation-index-not-measured-timescale-or-camera",
+        "requiredPrimaryEvidence": "Read runtime/observations.json and inspect timestamped native traces/capture provenance for time and camera.",
+        "falsifier": "Les observations contiennent des valeurs temporelles quantitatives ou des comparaisons Web mesurées."
+      }
+    ]
+  }
 }
