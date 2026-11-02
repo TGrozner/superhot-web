@@ -64,6 +64,35 @@ void main() {
   // Native compiled forward-base materials are opaque; serialized _Alpha\n  // is a shader parameter, not framebuffer blending opacity.\n  outColor = vec4(rgb, uMode == 2 ? 1.0 : uColor.a * albedo.a);
 }`;
 
+/**
+ * Apply the recovered compiled FORWARDBASE state only for identified,
+ * source-qualified opaque material packets. The shared Web renderer enables
+ * SRC_ALPHA blending and uses default LESS; neither matches these pass
+ * candidates. Culling is deliberately left to SH-12/SH-05 until source OBJ
+ * winding and reflection matrices have been verified in a real browser draw.
+ * This is compiled-pass evidence, NOT proof of the variant used by native MCD.
+ */
+export function applyNativeWorldBaseState(gl, pass, inherited) {
+  const base = pass?.base;
+  const sourceOpaque = pass?.alphaMode === 'opaque'
+    && base?.lightMode === 'forward-base'
+    && base.sourceBlend === 'one'
+    && base.destinationBlend === 'zero'
+    && base.depthWrite === true
+    && base.depthTest === 'less-equal';
+  if (sourceOpaque) {
+    gl.disable(gl.BLEND);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(true);
+  } else {
+    if (inherited.blend) gl.enable(gl.BLEND);
+    else gl.disable(gl.BLEND);
+    gl.depthFunc(inherited.depthFunc);
+    gl.depthMask(inherited.depthMask);
+  }
+  return sourceOpaque;
+}
+
 function shader(gl, type, source) {
   const s = gl.createShader(type);
   gl.shaderSource(s, source); gl.compileShader(s);
@@ -167,6 +196,11 @@ export function createNativeWorldPass(gl, scene, images) {
     const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM), previousVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE);
     const previousColorMask = gl.getParameter(gl.COLOR_WRITEMASK);
+    const inheritedState = {
+      blend: gl.isEnabled(gl.BLEND),
+      depthFunc: gl.getParameter(gl.DEPTH_FUNC),
+      depthMask: gl.getParameter(gl.DEPTH_WRITEMASK),
+    };
     gl.activeTexture(gl.TEXTURE0);
     const previousTexture = gl.getParameter(gl.TEXTURE_BINDING_2D);
     let drawCalls = 0, triangles = 0;
@@ -184,6 +218,7 @@ export function createNativeWorldPass(gl, scene, images) {
         gl.uniform1i(uniforms.uHasNormals, scene.meshes.get(instance.meshId).hasNormals ? 1 : 0);
         for (const draw of instance.draws) {
           const material = packets.get(draw);
+          applyNativeWorldBaseState(gl, material.packet.pass, inheritedState);
           gl.uniform4fv(uniforms.uColor, material.color);
           gl.uniform4fv(uniforms.uST, material.st);
           gl.uniform1i(uniforms.uMode, material.reflection ? 1 : material.concrete ? 2 : 0);
@@ -200,6 +235,10 @@ export function createNativeWorldPass(gl, scene, images) {
       gl.bindTexture(gl.TEXTURE_2D, previousTexture);
       gl.activeTexture(previousActive);
       gl.colorMask(...previousColorMask);
+      if (inheritedState.blend) gl.enable(gl.BLEND);
+      else gl.disable(gl.BLEND);
+      gl.depthFunc(inheritedState.depthFunc);
+      gl.depthMask(inheritedState.depthMask);
       gl.bindVertexArray(previousVao); gl.useProgram(previousProgram);
     }
     return { drawCalls, triangles, nativeGeometry: true, nativeMaterialParity: false };
