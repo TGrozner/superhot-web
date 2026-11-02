@@ -214,16 +214,45 @@ Run the **existing** `node server.mjs` and open
 starting the encounter, in DevTools (the recorder is opt-in):
 
 ```js
-const { startDojoCapture } = await import('/scripts/acceptance-dojo-browser.mjs');
-window.dojoRun = startDojoCapture({ intervalMs: 100 });
+const { inspectDojoCaptureReadiness, startDojoCapture } =
+  await import('/scripts/acceptance-dojo-browser.mjs');
+inspectDojoCaptureReadiness();  // ready:true is prerequisites only, NOT a passed run
+window.dojoRun = startDojoCapture({ intervalMs: 50, maxFrames: 30000 });
 ```
 
 The recorder is a **read-only browser timer**, using the already exposed
 `__superhotGetRenderedFrameSnapshot()`; it does not automate the original
-game, move characters or create fake kills. Start the Dojo encounter, use the
-pistol, take and throw a real in-scene item, traverse the door threshold and
-stairs and walk against a blocked wall. For each physical location, call
-`dojoRun.mark(...)` **while performing that step**:
+game, move characters or create fake kills. **If readiness is false, do not
+record a false run:** check the returned reason codes (missing/wrong Dojo
+scene/build10, missing encounter, source items, feet or ambience telemetry)
+and ensure the private Dojo scene is loaded. No private files are uploaded.
+
+Start the actual Dojo encounter; shoot once to observe ammo consumption, then
+**press F to throw the equipped pistol** (the current main's `nearbyPickup()`
+refuses all pickups while `state.weapon` is true), face a source item and
+press **E** to pick it up, then **F** again to throw that same item. Continue
+through 6–7 actual kills, victory and restart. This is a Web reproduction
+sequence, not a native/MCD behavior claim.
+
+**Do not repeatedly open DevTools mid-game:** leaving the pointer-locked canvas
+can pause the game and contaminate collision measurements. Instead keep focus
+on the game and press the following physical number-row keys (one press per
+endpoint) **while the Web screen is playing**:
+
+| Key | Route marker |
+| --- | --- |
+| 1 | `door-before` |
+| 2 | `door-after` |
+| 3 | `stairs-bottom` |
+| 4 | `stairs-top` |
+| 5 | `wall-press-start` |
+| 6 | `wall-press-end` |
+
+Mark door/stair endpoints while moving at their true locations. For the wall,
+hold forward into the blocked wall during the 5→6 segment. These are local
+operator labels, not authenticated native geometry. The alternate manual
+`dojoRun.mark(...)` calls remain supported **only if they don't interrupt
+live gameplay**:
 
 ```js
 dojoRun.mark('door-before');      // on the approach
@@ -246,8 +275,10 @@ samples, the gate can report *INCOMPLETE* even for a successful game session;
 it never fills missing frames with invented evidence.
 
 After all **6–7** kills, observe the victory screen, restart, allow audio
-and scene initialization to settle, and capture the reset screen. Save the
-trace to a **private local file** with:
+and scene initialization to settle, and capture the reset screen. Before
+saving, inspect `dojoRun.markers` (6 distinct points) and
+`dojoRun.markerWarnings` (ideally empty); repeated number-row keys do not
+overwrite earlier evidence. Save the trace to a **private local file** with:
 
 ```js
 dojoRun.save('dojo-full-run.json');
