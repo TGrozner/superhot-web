@@ -16,7 +16,7 @@
 
 ## Historique Containers — intégration Web documentée (non preuve Dojo)
 
-L'ancien mode Containers utilisé dans cette baseline utilise `createMcdGameplayClock` et
+Le profil Web historiquement conçu pour Containers utilise `createMcdGameplayClock` et
 `stepMcdGameplayClock`, avec les règles récupérées de `TimeControl`,
 `PlayerController`, `CameraLookTimeControl` et `SimplifiedTimeShifter` :
 maximum des contributions positives, minimum `0.005`, maximum `1`, montée et
