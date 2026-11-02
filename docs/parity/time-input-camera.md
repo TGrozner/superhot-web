@@ -85,3 +85,19 @@ et
 ```
 
 **Gate SH-02 / SH-05 :** les tests `tests/time-contract-evidence.test.mjs` vérifient seulement la traçabilité du registre, **pas** la fidélité gameplay. Parité recevable uniquement avec branche native identifiée, instance active, échantillon original mesuré, API Web testable et comparaison différentielle. Réservation exclusive SH-01 : ce document, son registre et le fichier de tests cité. `src/main.js` reste réservé à l'intégrateur.
+
+
+## Tests de frontière Web ↔ MCD (SH-01, 2026-11-02)
+
+Le fichier [`tests/time-contract-web-gaps.test.mjs`](../../tests/time-contract-web-gaps.test.mjs) exécute **cinq canaris Web** contre les fonctions publiques de SH-02, puis vérifie que l'affirmation native correspondante **n'a pas été promue** de son niveau de preuve. Il ne contient aucune donnée brute du jeu, ne lance aucun original, n'infère aucune équation native. Ces tests doivent être remplacés/ajustés lorsque SH-01 aura une preuve primaire et que SH-05 approuvera le raccord ; leur succès ne vaut **jamais** certificat de parité.
+
+| Cas | Ce que le test prouve sur notre Web actuel | Pointeur MCD, classification et scénario de réfutation |
+| --- | --- | --- |
+| **TC-G01** | `src/time.js:getTargetTimeScale` utilise actuellement `minimumScale=0.035` au repos. | **PROUVÉ, déclaration uniquement** : `decompiled/TimeControl.decompiled.cs:10`, TC-001, initialise `minTimescale=0.01` (artifact `13108091209`). **INCONNU runtime** : `HANDOFF.md:69–71`, TC-R01. Réfuter toute assimilation des planchers en identifiant l'instance active puis la branche et la valeur effectivement écrite dans `Time.timeScale`. |
+| **TC-G02** | `src/time.js:stepTime` produit une horloge réelle et monde distinctes ; `paused` gèle les deux dans le prototype. | **INCONNU** : TC-R01, `HANDOFF.md:69–71`, pause native et ordre max/clamp/override non contre-lus. Réfuter l'équivalence avec une trace native horodatée repos→action→pause→reprise et les méthodes `TimeControl`. |
+| **TC-G03** | `src/input.js:keydownAction` conserve `KeyR → reload` dans le prototype. | **INCONNU** : TC-R04, `HANDOFF.md:74` rapporte `R → Replay`. Lire profil actif + dispatcher + `KillReloadMod` ; réfuter par un binding actif ou un effet munition opposé au rapport. **Ne pas changer le contrôle Web en se fondant sur ce seul handoff.** |
+| **TC-G04** | `src/input.js:movementStep` est linéaire en `dt` fourni et n'accepte aucun facteur temps monde. | **INCONNU** : TC-R02, `HANDOFF.md:72` rapporte `Time.deltaTime` et `AsymmetricSmoothLinearInstantTimeShifter`. Identifier la méthode et le composant actifs par scène, puis comparer déplacements à 60/120 Hz ; réfuter si le temps non-scalé ou un autre shifter est réellement utilisé. |
+| **TC-G05** | `src/input.js:applyMouseLook` utilise le coefficient et le clamp du prototype. | **INCONNU** : TC-R05, `HANDOFF.md:46` renvoie à `spec/player-camera-bindings.json`. Identifier `(owner,path_id)`, scène et contrôleur actifs, puis mesurer angle/delta souris aux pitches extrêmes ; réfuter toute constante supposée par ces traces. |
+
+**Provenance native inchangée** : MCD build `20299547`, Unity `2018.4.14f1`, assembly SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`, corpus privé commit `be6d535e608f66c93db3acc422385035d1281063`. Les références primaires et secondaires exactes (runs, artifact IDs, SHA-256 des textes) figurent plus haut et dans `time-input-camera.evidence.json`. **OBSERVÉ natif : aucun élément quantitatif supplémentaire.** Ce cycle ne déclenche pas `workflow_dispatch` ni le runner ; les quatre requêtes privées bornées décrites dans l'issue #1 restent nécessaires.
+
