@@ -403,3 +403,41 @@ after independent native palette, inverse binds, and posed-bone matrices are
 verified in the same mesh-local coordinate frame. SH-03 owns hitboxes and
 SH-06 the timeline. This module is **not** a runnable native animation or
 Dojo visual-parity measurement; do not replace the current direct GPU skin pass.
+
+## SH-14 — recovered Dojo scene playerAnimation packet GPU adapter
+
+The owner-supplied `superhot-recovery.zip` was inspected privately, including
+both the checkpoint and subsequent backup of `native-player-animation.js`
+(14,505 and 16,253 bytes). **Neither contains native mesh/clip buffers**.
+The archived source extractor emits `playerAnimation:{skin,states,parameters,
+profiles,weaponBone,material}`; crucially `skin.weaponAttachment` is absent.
+The earlier #172 Web GPU pass expected the EnemyMerged attachment schema,
+so it could not consume this genuine Dojo player packet unchanged.
+
+`createDojoPlayerAnimationPass(gl,{playerPacket,rig,clips,lighting})` now
+accepts that scene packet directly, verifies the known Dojo rig identity and
+weaponBone index/name, samples existing GPU skin poses in the **actual hands
+indexed draw**, and derives the weapon-bone matrix from its composed global
+bone transform without fabricating an inverse-bind or attachment offset.
+The legacy `sourcePackage` entry point still works unchanged. Optional
+`draw({descriptor})` accepts an explicit source-controller clip/time/playback
+and recovered transition, forwarding it to the existing GPU LBS pass.
+`katanaMeshLocalMatrix` remains a separate, **caller-proven** offset; this
+module does not infer `profile.itemFromBone` or synthesize a swing.
+No new source assets/shaders/sounds or local runner operations were used.
+
+**SH-05 exclusive wiring:** `prepareNativeScenePackage` already forwards
+`scenePackage.playerAnimation`. After validating the privately restored
+non-null packet, create this GPU pass once with `playerPacket`, Dojo rig IDs
+(Animator 6333, HandManager 6545, Renderer 6378, weapon Transform 2896),
+`weaponBoneName=playerPacket.skin.bones[playerPacket.weaponBone].name`, and
+explicit held/swing clip identities from the source controller. In the
+first-person render stage, only draw when a real katana is held; pass the
+camera-relative authored hands model matrix, actual camera/projection and
+source clock. When a recovered controller supplies a pose descriptor, pass
+`descriptor` rather than forcing the two-clip preview. Draw the original
+katana at the returned `katanaModelMatrix` **only** when the source-verified
+local offset is known and suppress its previous static held draw to avoid
+duplicates. Otherwise preserve the stable source-held placement. The original
+pistol must remain hands-free. SH-03 owns hits and SH-06 owns effects.
+A native Dojo/Web camera- and phase-matched comparison is still outstanding.

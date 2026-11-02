@@ -199,3 +199,78 @@ test('caller controls real clip seconds and the source katana offset; invalid po
   assert.equal(calls.filter(call => call[0] === 'draw').length, 0);
   pass.dispose();
 });
+
+test('archived Dojo scene playerAnimation packet renders its true weaponBone without invented weaponAttachment', () => {
+  const sourceSkin = { ...pkg(), weaponAttachment: undefined };
+  const playerPacket = {
+    schemaVersion: 1, skin: sourceSkin, weaponBone: 1,
+    states: [{ name: 'Hands.Idle' }], profiles: { katana: { source: 'authored-fixture' } },
+  };
+  const { gl, calls } = mockGl();
+  const pass = createDojoPlayerAnimationPass(gl, {
+    playerPacket, rig: rig(), clips: clipBindings,
+  });
+  const held = pass.draw(frame('held', .5));
+  const swung = pass.draw(frame('swing', .5));
+  assert.equal(held.weaponBoneWorldMatrix[12], 1);
+  assert.equal(swung.weaponBoneWorldMatrix[12], 1.5);
+  assert.equal(swung.katanaModelMatrix[12], 1.75);
+  assert.equal(swung.nativePlayerControllerTransitionVerified, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 2);
+  pass.dispose();
+});
+
+test('source-controller descriptor uses the sampled source transition in actual hands GPU draw', () => {
+  const sourceSkin = { ...pkg(), weaponAttachment: undefined, transitions: {
+    'heldSource->swingSource': {
+      from: 'heldSource', to: 'swingSource', duration: .5,
+      source: { identity: 'authored-fixture-transition' },
+    },
+  } };
+  const packet = {
+    schemaVersion: 1, skin: sourceSkin, weaponBone: 1,
+    states: [{ name: 'Hands.Idle' }], profiles: { katana: { source: 'authored-fixture' } },
+  };
+  const { gl, calls } = mockGl();
+  const pass = createDojoPlayerAnimationPass(gl, {
+    playerPacket: packet, rig: rig(), clips: clipBindings,
+  });
+  const result = pass.draw({
+    ...frame('held', 0),
+    descriptor: {
+      clip: 'swingSource', playback: 'clamp', time: .5,
+      transition: {
+        fromClip: 'heldSource', fromTime: .5,
+        fromPlayback: 'loop', elapsed: .25,
+      },
+    },
+  });
+  assert.ok(Math.abs(result.weaponBoneWorldMatrix[12] - 1.25) < 1e-5);
+  assert.ok(Math.abs(result.katanaModelMatrix[12] - 1.5) < 1e-5);
+  assert.equal(result.sampledClip, 'swingSource');
+  assert.equal(result.sourcePoseSampled, true);
+  assert.equal(result.nativePlayerControllerTransitionVerified, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 1);
+  assert.throws(() => pass.draw({ ...frame('swing', 0),
+    descriptor: { clip: 'missing', playback: 'clamp', time: 0 },
+  }), /clip unavailable/);
+  pass.dispose();
+});
+
+test('archived packet identity is explicit and cannot silently mix two skins', () => {
+  const { gl } = mockGl();
+  const skin = { ...pkg(), weaponAttachment: null };
+  const packet = { schemaVersion: 1, skin, weaponBone: 1,
+    states: [], profiles: { katana: {} } };
+  assert.throws(() => createDojoPlayerAnimationPass(gl, {
+    sourcePackage: pkg(), playerPacket: packet, rig: rig(), clips: clipBindings,
+  }), /package mismatch/);
+  assert.throws(() => createDojoPlayerAnimationPass(gl, {
+    playerPacket: { ...packet, weaponBone: 99 },
+    rig: rig(), clips: clipBindings,
+  }), /socket must match/);
+  assert.throws(() => createDojoPlayerAnimationPass(gl, {
+    playerPacket: { ...packet, states: null },
+    rig: rig(), clips: clipBindings,
+  }), /packet required/);
+});
