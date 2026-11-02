@@ -162,3 +162,25 @@ containers, ni la silhouette mesh, ni l'échelle de la caméra native**, ni
 l'exécution en jeu de l'instance sérialisée. La suite exige une comparaison
 visuelle avec caméra native réellement observée et, séparément, une
 reconstruction physique autorisée/sourcée.
+
+## SH-05 — brouillard Containers dérivé du sérialisé (2 novembre 2026)
+
+Preuve statique primaire **privée** : `TGrozner/superhot-research#41`,
+artifact `13134492119`, champ Unity build28 RenderSettings `m_Fog=false`.
+Cela établit un état **sérialisé** de la scène, pas une capture du rendu
+natif ni l'absence de modifications en jeu. La valeur `ambientIntensity=0`
+ne suffit **pas** à reconstruire les éclairages indirects, lightmaps et shaders.
+
+Dans l'URL opt-in `?scene=containers`, le shader WebGL2 applique désormais
+`uFogStrength=0` à la preview **des 46 volumes de collision synthétisés**.
+Le mode sans paramètre et `?scene=synthetic` préservent l'ancien brouillard
+Web généré de force `0.72`, issu de `src/render/lighting-model.js`.
+Aucun maillage, son, texture ni shader commercial n'a été importé.
+
+Contrôle ciblé : `node --test tests/parity-containers-fog.test.mjs`
+vérifie les valeurs envoyées à l'uniform dans un **WebGL2 simulé** et
+l'activation exclusivement Containers. Ce n'est **pas** une capture GPU.
+Pour juger le changement visuel, une personne doit comparer des captures
+du même angle/résolution avant/après sur navigateur réel, puis associer
+une capture MCD native privée avec paramètres contrôlés. p95 FPS, décompte
+des appels WebGL2 et correspondance pixel native ne sont pas encore mesurés.
