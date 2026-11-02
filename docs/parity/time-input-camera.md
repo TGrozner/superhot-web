@@ -22,6 +22,25 @@
 
 Les lignes 5–6 déclarent un composant Unity `TimeControl` (`MonoBehaviour`). Les lignes 8, 18 et 20 exposent un champ d'instance statique, un champ d'override du timestep fixe et un registre statique de `ITimeShifter`. **Aucun parcours effectif du registre, aucun tick et aucune unité de mesure n'est établi** par ces seules lignes.
 
+## Relève privée consultée — éléments **rapportés**, pas encore preuves primaires SH-01
+
+Un second artifact privé a été effectivement lu : `HANDOFF.md` **lignes 1–100**, [run #41368361512](https://github.com/TGrozner/superhot-research/actions/runs/41368361512), artifact `13108420851`, SHA-256 du texte UTF-8 `408cec616a4e1399120a72df8014e237073b649ab781da688b304df3b7e060a7`. Le rapport cible MCD **build 20299547**, Unity **2018.4.14f1**, Assembly-CSharp SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`. C'est un **rapport de transmission secondaire** : SH-01 n'a pas encore relu les méthodes CIL, l'instance de scène ni les captures associées. La classification native des six hypothèses reste donc **INCONNU**, même si leur *présence dans le rapport* est vérifiée.
+
+| ID | Information rapportée (à contre-lire) | Rapport privé | Preuve native minimale / réfutation |
+| --- | --- | --- | --- |
+| TC-R01 | Agrégation des shifters par maximum, clamp, puis override forcé ; pause zéro distincte du ralentissement minimal | `HANDOFF.md:69–71` | Branches de `TimeControl`, ordre des écritures de `Time.timeScale` ; réfuter si override appliqué avant clamp. |
+| TC-R02 | Mouvement joueur en `Time.deltaTime` ; composant actif `AsymmetricSmoothLinearInstantTimeShifter`, pas `WalkingTimeShifter` | `HANDOFF.md:72` | Méthode active et binding de scène ; réfuter si mouvement en temps non scalé ou autre shifter réellement lié. |
+| TC-R03 | Containers : `RUN_LEVEL_6C → SHRL_ContainerPort → build 28` ; dénominateur physique d'instance **120**, contre **60** comme initialiseur | `HANDOFF.md:73` | `(owner,path_id)` de la scène active + champ sérialisé + éventuels overrides ; réfuter si instance ou valeur différente. |
+| TC-R04 | Profil clavier/souris : **R → Replay**, pas rechargement ; `KillReloadMod` affecte délais/animations | `HANDOFF.md:74` | Profil et dispatcher effectifs + écritures du mod ; réfuter si R recharge ou si le mod remplit les munitions. |
+| TC-R05 | Index caméra/joueur : 467 composants managés et 269 objets natifs dans `spec/player-camera-bindings.json` | `HANDOFF.md:46` | Lire l'index, identifier caméra active et méthode+paramètres ; les nombres seuls ne prouvent aucune cinématique. |
+| TC-R06 | Cinq observations/captures, **pas de mesure numérique** du pas ou de la caméra | `HANDOFF.md:55` | Lire `runtime/observations.json` ; réfuter cette absence si des mesures horodatées y figurent. |
+
+Ces points ne sont **ni OBSERVÉ** (exécution quantitative contrôlée) ni **PROUVÉ par SH-01** (corps de méthode/valeur sérialisée contre-lus). Ils ne doivent **pas** entrer comme paramètres de gameplay avant les lectures primaires. Les métadonnées, identifiants de source, critères de réfutation et niveaux de preuve sont dans `time-input-camera.evidence.json`.
+
+### Demandes complémentaires minimales
+
+Le workflow privé `corpus-query.yml` reste déclenchable via `workflow_dispatch` pour une session disposant des droits, **mais ce connecteur n'expose que la lecture** des runs/artifacts. Aucune nouvelle interrogation n'a été lancée dans ce cycle. Priorité aux lectures déjà demandées ci-dessous, puis `{"operation":"read","path":"spec/player-camera-bindings.json","start":1,"count":250}` pour établir la sélection de la caméra. Les éventuelles lignes dépassant la limite retournée doivent être paginées ; ne jamais publier ces sources originales dans le repo Web.
+
 ## OBSERVÉ — exécution native
 
 **Aucune observation quantitative du contrôle temporel, des entrées ou de la caméra n'est encore disponible dans les artifacts lus par SH-01.** L'inventaire d'objets Unity et les captures d'autres sujets ne sont pas des mesures de vitesse du monde. Le fichier `runtime/observations.json` est à consulter avant toute conclusion.
