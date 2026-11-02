@@ -141,3 +141,36 @@ and combat as private issue #8. SH-10 will **not duplicate** either while
 pending. New data must be read via the private gateway, not copied into this
 public repository. The SH-10 owner reports prioritized deltas on public issue
 #73 and forwards a brief integration handoff to public issue #5.
+
+## Dojo/build10 full-run gate — user-controlled, Web-only
+
+A separate **Web trace protocol** now verifies the observable sequence start → at least one living spawn → recorded kill → victory with the six/seven-kill target → restart with cleared kill count and enemy list. It does **not** certify MCD native parity, AI correctness, or that a browser run was executed.
+
+SH-10 owns three files:
+- `scripts/acceptance-dojo-playthrough.mjs`: pure trace validator plus `--trace` local JSON command. Fails closed on wrong source scene (`SHRL_Dojo2`, `sceneBuildIndex:10`), missing stages, changing kill target or kill counter reset.
+- `scripts/acceptance-dojo-browser.mjs`: explicitly imported browser-only sampler that serializes *only* screen, native scene identity, kill target, kills and enemy id/alive fields. No pixels, matrices, user paths, audio or original assets.
+- `tests/acceptance-dojo-playthrough.test.mjs`: synthetic positive and negative fixtures, never a browser success claim.
+
+At the user's final localhost test, open DevTools on `http://localhost:4173/` BEFORE starting the Dojo encounter:
+
+```js
+const { startDojoCapture } = await import('/scripts/acceptance-dojo-browser.mjs');
+window.dojoRun = startDojoCapture();
+```
+
+Play normally to victory and then restart. Once the fresh game has rendered, save to a local file:
+
+```js
+window.dojoRun.save('dojo-full-run.json');
+```
+
+The save call merely requests a browser download; independently verify that the file exists. The trace must stay on the owner's machine.
+
+```bash
+node scripts/acceptance-dojo-playthrough.mjs --trace private/dojo-full-run.json
+node --test tests/acceptance-dojo-playthrough.test.mjs
+```
+
+Successful validation only means supplied sampled frames cover the five milestones in order, and the validator has no way to authenticate the source of an arbitrary JSON trace. Sampling can miss very brief states; it cannot infer missing events. This is *not* a test of movement, collision, visual fidelity, or an original-native comparison. Ordinary CI runs only authored tests, not the private full-run gate.
+
+**Status at submission:** no owner browser full run, no measured native/Web gameplay pair. SH-05 alone owns the shared gameplay fixes and final integration.
