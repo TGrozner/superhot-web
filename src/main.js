@@ -299,7 +299,15 @@ if (containersPreviewEnabled) {
         const localMatrix = packet.handsCameraLocalMatrix ?? profile?.handsCameraLocalMatrix;
         const boneName = packet.skin?.bones?.[packet.weaponBone]?.name;
         if (localMatrix?.length === 16
-          && Array.from(localMatrix).every(Number.isFinite)
+          && Array.from(localMatrix).every(x => Number.isFinite(x) && Number.isFinite(Math.fround(x)))
+          && Number.isFinite(
+            localMatrix[0]*(localMatrix[5]*localMatrix[10]-localMatrix[6]*localMatrix[9])
+            -localMatrix[4]*(localMatrix[1]*localMatrix[10]-localMatrix[2]*localMatrix[9])
+            +localMatrix[8]*(localMatrix[1]*localMatrix[6]-localMatrix[2]*localMatrix[5]))
+          && Math.abs(
+            localMatrix[0]*(localMatrix[5]*localMatrix[10]-localMatrix[6]*localMatrix[9])
+            -localMatrix[4]*(localMatrix[1]*localMatrix[10]-localMatrix[2]*localMatrix[9])
+            +localMatrix[8]*(localMatrix[1]*localMatrix[6]-localMatrix[2]*localMatrix[5])) > 1e-12
           && localMatrix[3] === 0 && localMatrix[7] === 0
           && localMatrix[11] === 0 && localMatrix[15] === 1
           && typeof boneName === 'string' && boneName.length
@@ -1312,15 +1320,23 @@ function drawViewModel(camera) {
       const modelMatrix = multiplyMatrices(basis, nativeHandsCameraLocal);
       // The held loop is a Web-preview sample, NOT a reconstructed player
       // Animator clock or a verified native swing event.
-      const receipt = renderer.drawDojoPlayerHands({
-        heldItem:nativeItems.held, phase:'held',
-        sourceClipTime:state.worldClock, modelMatrix,
-      });
-      if (receipt) nativeHandsStats = {
-        handsDrawCalls:receipt.handsDrawCalls,
-        handsTriangles:receipt.handsTriangles,
-        sourcePoseSampled:receipt.sourcePoseSampled,
-      };
+      try {
+        const receipt = renderer.drawDojoPlayerHands({
+          heldItem:nativeItems.held, phase:'held',
+          sourceClipTime:state.worldClock, modelMatrix,
+        });
+        if (receipt) nativeHandsStats = {
+          handsDrawCalls:receipt.handsDrawCalls,
+          handsTriangles:receipt.handsTriangles,
+          sourcePoseSampled:receipt.sourcePoseSampled,
+        };
+      } catch {
+        // Reject malformed local clip/transform without breaking the existing
+        // playable Dojo or removing the owner's static held-katana model.
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsCameraLocal = null;
+        nativeHandsStatus = 'DOJO_HANDS_WEB_DRAW_REJECTED_FALLBACK';
+      }
     }
     // Source blade geometry keeps its already-proven held transform; the
     // camera-child katana socket offset is not yet proven.
