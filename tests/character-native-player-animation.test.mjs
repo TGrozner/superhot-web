@@ -193,8 +193,9 @@ test('caller controls real clip seconds and the source katana offset; invalid po
   assert.throws(() => pass.draw(frame('swing', -1)), /clip time/);
   assert.throws(() => pass.draw({ ...frame('swing', .5), modelMatrix: translate(NaN) }),
     /modelMatrix/);
-  assert.throws(() => pass.draw(frame('swing', .5, new Array(16).fill(0))),
-    /invertible/);
+  const singular = identity();
+  singular[0] = 0;
+  assert.throws(() => pass.draw(frame('swing', .5, singular)), /invertible/);
   assert.equal(calls.filter(call => call[0] === 'draw').length, 0);
   pass.dispose();
 });
