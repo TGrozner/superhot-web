@@ -743,3 +743,19 @@ reserved `src/audio.js`/`src/main.js`. The browser acceptance gate is:
 confirmed Stun invocation → chosen prefab with body-position offset →
 pool/asset readiness → nonzero Web Audio graph trace and (separately) a
 native run comparison. Never substitute a generic `killEnemy` callback.
+
+
+**NEW PRIVATE INVENTORY CHECK (2026-11-02):** bounded [research #141](https://github.com/TGrozner/superhot-research/issues/141)
+SUCCESS, run `41507466400`, artifact `13171486453`; read
+`spec/world/browser-audio/manifest.json:1–82`, complete result
+(`next_start=null`, text SHA-256
+`e19d4893ecb3e61c8bd46d5de2814cb5667a6b615856a5ab387a88ca`,
+result.json SHA-256
+`dd31714e2cd86515b70ec096a2dacf61ed4de9043c34547eadaf4105e158b657`).
+The **existing selected browser-audio binding manifest** describes pistol,
+enemy fire, player hit and EnemyShatter but has **no** EnemyStun or
+EnemyStunConcrete mapping. This is proof of a **manifest gap only**, not
+proof that native sound assets or serialized prefab objects do not exist.
+Do not reuse the EnemyShatter WAV for either Stun cue or infer an original
+sample from an AudioPrefab field name. A future **index-backed, bounded**
+Unity owner/path_id mapping is required before local original-clip playback.
