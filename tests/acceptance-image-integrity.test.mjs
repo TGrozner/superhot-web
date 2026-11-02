@@ -49,6 +49,7 @@ function syntheticPng(shift){
 const limits={
   positionPx:0,shapeEdgeF1:1,chromaL1:0,luminanceDelta:0,temporalLuma:0,
   timingMs:0,cameraPosition:0,cameraAngle:0,cameraFov:0,
+  projectionNear:0,projectionFar:0,projectionAspect:0,
 };
 function fixture(){
   const dir=mkdtempSync(join(tmpdir(),'sh10-paired-png-'));
@@ -68,13 +69,21 @@ function fixture(){
     stimulusId:'IDLE_THEN_KEYW_300MS',timeScale:0.5,
     viewport:{width:16,height:16,dpr:1},
   };
+  // SYNTHETIC runtime-labeled camera metadata solely for testing the
+  // validator; real MCD frame-specific observations remain unavailable.
+  const camera={x:1,y:2,z:3,yaw:0,pitch:0};
+  const projection={verticalScale:Math.sqrt(3),near:.1,far:100,aspect:1};
   const web={...base,captureKind:'ACTUAL_BROWSER_CDP_PNG',
     webRenderedFrameBracketsObserved:true,
     frames:frames.map((f,i)=>({...f,renderFrameIdBefore:i?24:10,
-      renderFrameIdAfter:i?25:11}))};
+      renderFrameIdAfter:i?25:11,renderedCameraBefore:{...camera},
+      renderedCameraAfter:{...camera},renderedProjectionBefore:{...projection},
+      renderedProjectionAfter:{...projection}}))};
   const native={...base,captureKind:'OPERATOR_ATTESTED_NATIVE_MCD_PNG',
     game:'SUPERHOT: MIND CONTROL DELETE',build:'20299547',
-    observationId:'SYNTHETIC_UNIT_FIXTURE_NOT_NATIVE',frames,
+    observationId:'SYNTHETIC_UNIT_FIXTURE_NOT_NATIVE',
+    frames:frames.map(f=>({...f,camera:{...camera,source:'RUNTIME_OBSERVED'},
+      projection:{...projection,source:'RUNTIME_OBSERVED'}})),
     regions:[{id:'visible-object',rect:[0,0,1,1]}]};
   const webPath=join(webDir,'web-capture.json'),nativePath=join(nativeDir,'native-capture.json');
   writeFileSync(webPath,JSON.stringify(web));writeFileSync(nativePath,JSON.stringify(native));
@@ -130,5 +139,28 @@ test('unobserved PNG and unverified rendered-frame brackets remain INCONNU',()=>
     missing.frames[0].file='unavailable.png';
     assert.ok(compare(f.web,missing,{webPath:f.webPath,nativePath:f.nativePath,
       thresholds:limits}).reasons.includes('PNG_FILE_MISSING'));
+  }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
+
+test('second-frame native camera mismatch cannot become a renderer pixel delta',()=>{
+  const f=fixture();
+  try{
+    const altered={...f.native,frames:f.native.frames.map(x=>({...x,camera:{...x.camera}}))};
+    altered.frames[1].camera.x+=0.2;
+    const result=compare(f.web,altered,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(result.status,'NON_COMPARABLE_CAMERA_POSE');
+    assert.equal(result.regions.length,0);
+    assert.ok(result.frameAlignment.exceeded.includes('FRAME_1_CAMERAPOSITION_OUT_OF_TOLERANCE'));
+  }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
+test('native serialized camera projection is not a frame observation',()=>{
+  const f=fixture();
+  try{
+    const altered={...f.native,frames:f.native.frames.map(x=>({...x,projection:{...x.projection}}))};
+    altered.frames[0].projection.source='SERIALIZED_ONLY';
+    const result=compare(f.web,altered,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(result.status,'INCONNU');
+    assert.ok(result.reasons.includes('NATIVE_FRAME_0_PROJECTION_UNOBSERVED'));
+    assert.equal(result.regions.length,0);
   }finally{rmSync(f.dir,{recursive:true,force:true});}
 });
