@@ -275,3 +275,59 @@ needs a resumed browser AudioContext after user gesture. No changes to
 browser-side connection, explicit speaker test and resulting waveform check.
 The current Web prototype reloads magazines and does not yet model native
 weapon states, so wiring on matching labels alone would be a false parity claim.
+
+## SH-07 — source-bounded movement-dependent slow/fast audio layers
+
+**PROUVÉ (native managed code, static only):** private corpus issue #19 /
+run `41430135614` / artifact `13133617525` read
+`managed/Assembly-CSharp/AudioClipChangerGroupPlay.cs:1-70` (UTF-8 excerpt
+SHA-256 `9ad76fa465849c52ab78a1536a1600519da3739a58291802767ed6fa543f17aa`).
+Private #28 / artifact `13133373200` read
+`AudioClipChanger.cs:1-41` (excerpt SHA-256
+`5cc071c17f4ac855ee6d4dd6417e19c761ca7a0c17c1a62dbbb374d0465c4c04`).
+Original Assembly-CSharp SHA-256 is at the top of this ledger. Original
+methods, not their proprietary implementation text, are the evidence.
+
+`AudioClipChangerGroupPlay.Awake` chooses the slow AudioSource of the first
+changer as master and requests `Play` on both sources of every changer.
+Its `Update` decreases progress toward 0 only while `timeScale < 0.1`
+and progress > 0. It increases toward 1 only while `timeScale > 0.1`,
+player velocity magnitude > 0 and progress < 1. At exactly 0.1 neither
+branch advances; at a larger timescale with a stationary player progress
+holds. Both ramps use `Time.unscaledDeltaTime`, with different durations.
+The volume writes run only if progress differs from the previous progress;
+the field initializer `lastProgress=-1` means the first Update writes
+even when progress remains zero.
+
+`AudioClipChanger.UpdateVolume` maps progress linearly to the fast
+AudioSource and (1-progress) to the slow AudioSource using EACH changer's
+min/max volume fields. The group periodically copies the master playhead
+position into both sources for each changer, with `WaitForSecondsRealtime`
+**between changer iterations**, rather than a single simultaneous sync
+of the whole group. C# field initializers are slow-duration 1s,
+fast-duration 0.5s, sync-frequency 0.1s, slow-max 0.8, fast-max 0.6 and
+volume minimums 0. These are **not verified scene-serialized overrides**.
+
+**PROUVÉ (WEB calculation only):** the new pure
+`src/sound/mcd-movement-crossfade.js` translates the two source predicates,
+MoveTowards progress and per-changer volume formulas, with explicit caller
+durations, input timescale, player-speed magnitude and volume parameters.
+`tests/sound-mcd-movement-crossfade.test.mjs` exercises initial Update,
+both thresholds, stationary behavior, unscaled ramp, bounds and separate
+volumes. No AudioContext is opened or clip played by these functions.
+
+**INCONNU:** whether a specific `AudioClipChangerGroupPlay` and its
+`AudioClipChanger` pair are active in Containers/build28, actual scene
+overrides, linked clips `(owner,path_id)`, mixer output, runtime scheduling
+of the coroutine, and any heard waveform. JS double calculations are not
+bit-exact Unity float simulations. There is **no native playback trace**.
+
+**SH-05 hookup request (not performed):** first verify actual scene
+instance and its serialized fields, then feed measured timeScale, player
+velocity magnitude and unscaledDeltaTime into `stepMcdMovementLayer`
+and apply `computeMcdMovementLayerVolumes` to generated (legally
+authored) slow/fast layers only when `updateVolumes=true`.
+The Web prototype's existing oscillator sounds are SYNTHETIC and
+must not be relabeled as native MCD clips. Browser audible testing
+requires a resumed user-gesture AudioContext and a captured, monitored
+output; method invocation alone does not prove it.
