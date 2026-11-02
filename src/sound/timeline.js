@@ -17,7 +17,7 @@ export const SOUND_EVIDENCE = Object.freeze({
 
 const CLOCKS = new Set(Object.values(SOUND_CLOCKS));
 const EVIDENCE = new Set(Object.values(SOUND_EVIDENCE));
-const EPSILON = 1e-9;
+// Tolerance tracks machine rounding, never a fixed 1 ns early-playback window.
 
 function nonnegativeSeconds(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
@@ -54,6 +54,7 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
   let cancelled = 0;
   let enqueued = 0;
   const failures = [];
+  const enqueuedAt = new WeakMap();
 
   const nowFor = (clock) => (clock === SOUND_CLOCKS.REAL ? real : world);
   const now = () => Object.freeze({ real, world });
@@ -74,14 +75,19 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
     if (pending.length >= maxPending) throw new RangeError('sound event queue capacity exceeded');
     if (!Number.isSafeInteger(nextId)) throw new RangeError('sound event ID space exhausted');
 
-    const dueSeconds = nowFor(clock) + delaySeconds;
+    const enqueueSeconds = nowFor(clock);
+    const dueSeconds = enqueueSeconds + delaySeconds;
     if (!Number.isFinite(dueSeconds)) throw new RangeError('sound event due time overflowed');
+    if (delaySeconds > 0 && dueSeconds <= enqueueSeconds) {
+      throw new RangeError('sound event delay lost clock precision');
+    }
     // Validate and snapshot before consuming an ID: invalid data is atomic.
     const immutableParams = snapshotSoundParams(params);
     const event = Object.freeze({
       id: nextId++, name, clock, dueSeconds, evidence,
       params: immutableParams,
     });
+    enqueuedAt.set(event, enqueueSeconds);
     pending.push(event);
     enqueued++;
     return event.id;
@@ -106,6 +112,18 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
     }
   }
 
+  // Compensate at most one relative machine epsilon after this clock has
+  // advanced. Neither a fixed 1 ns grace period nor rounding alone may
+  // dispatch an event at its enqueue timestamp before a positive delay.
+  // This remains a Web-only scheduling choice, NOT a native audio contract.
+  function isDue(event) {
+    const current = nowFor(event.clock);
+    if (event.dueSeconds <= current) return true;
+    if (current <= enqueuedAt.get(event)) return false;
+    return event.dueSeconds - current <=
+      Number.EPSILON * Math.max(Math.abs(event.dueSeconds), Math.abs(current));
+  }
+
   // Nested flushing is deferred to the next explicit call. This prevents
   // dispatch callbacks from recursively draining the current batch.
   let flushing = false;
@@ -119,7 +137,7 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
       // dispatch must still be able to invalidate another already-due event.
       // Across clocks there is no shared timestamp; enqueue order is WEB policy.
       const dueIds = pending
-        .filter((event) => event.dueSeconds <= nowFor(event.clock) + EPSILON)
+        .filter(isDue)
         .map((event) => event.id);
       let delivered = 0;
       for (const id of dueIds) {
@@ -144,11 +162,16 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
     nonnegativeSeconds(worldSeconds, 'worldSeconds');
     if (typeof paused !== 'boolean') throw new TypeError('paused must be boolean');
     if (paused) return 0;
-    if (!Number.isFinite(real + realSeconds) || !Number.isFinite(world + worldSeconds)) {
+    const nextReal = real + realSeconds;
+    const nextWorld = world + worldSeconds;
+    if (!Number.isFinite(nextReal) || !Number.isFinite(nextWorld)) {
       throw new RangeError('sound timeline clock overflowed');
     }
-    real += realSeconds;
-    world += worldSeconds;
+    if ((realSeconds > 0 && nextReal <= real) || (worldSeconds > 0 && nextWorld <= world)) {
+      throw new RangeError('sound timeline clock advance lost precision');
+    }
+    real = nextReal;
+    world = nextWorld;
     return flushDue();
   }
 
