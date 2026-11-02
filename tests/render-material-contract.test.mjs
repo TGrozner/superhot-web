@@ -7,6 +7,7 @@ import {
 import {
   createUnresolvedNativeLighting,createGeneratedLighting,lightingUniformPacket,
   sampleGeneratedLighting,srgbToLinear,linearToSrgb,
+  createSerializedRenderSettings,generatedUniformsWithSerializedFogOff,
 } from '../src/render/lighting-model.js';
 
 // Intentional SYNTHETIC fixture, not an extracted MCD asset or property record.
@@ -128,4 +129,35 @@ test('bad fog, exposure, zero vector and color-space fail closed',()=>{
   assert.throws(()=>createGeneratedLighting({fogEnd:14}),/fogEnd/);
   assert.throws(()=>createGeneratedLighting({exposure:0}),/exposure/);
   assert.throws(()=>createGeneratedLighting({colorSpace:'unknown'}),/Unsupported/);
+});
+
+
+test('source-qualified serialized fog OFF suppresses only Web generated fog',()=>{
+  const settings=createSerializedRenderSettings({
+    scene:'fixture',owner:'test-fixture',pathId:999,
+    fogEnabled:false,ambientIntensity:0,evidence:'private:synthetic-fixture',
+  });
+  const generated=lightingUniformPacket(createGeneratedLighting());
+  const derived=generatedUniformsWithSerializedFogOff(createGeneratedLighting(),settings);
+  assert.equal(generated.fogStrength,.72);
+  assert.equal(derived.fogStrength,0);
+  assert.equal(derived.ambient,.64); // NOT reinterpreted from Unity ambientIntensity=0.
+  assert.equal(derived.diffuse,.36);
+  assert.equal(derived.source,'generated-web-plus-serialized-fog-off');
+  assert.equal(derived.fogEvidence,'private:synthetic-fixture');
+  assert.equal(settings.runtimeActivationVerified,false);
+});
+
+test('fog-off policy needs source-verified false flag and rejects guesses',()=>{
+  const generated=createGeneratedLighting();
+  const fogOn=createSerializedRenderSettings({
+    scene:'fixture',owner:'fixture',pathId:1,fogEnabled:true,
+    ambientIntensity:0,evidence:'private:fixture',
+  });
+  assert.throws(()=>generatedUniformsWithSerializedFogOff(generated,fogOn),/fog-off proof/);
+  assert.throws(()=>generatedUniformsWithSerializedFogOff(generated,{}),/fog-off proof/);
+  assert.throws(()=>createSerializedRenderSettings({
+    scene:'fixture',owner:'fixture',pathId:1,fogEnabled:0,
+    ambientIntensity:0,evidence:'private:fixture',
+  }),/must be boolean/);
 });

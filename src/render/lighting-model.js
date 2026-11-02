@@ -100,3 +100,44 @@ export function sampleGeneratedLighting(lighting,{color,normal,position,cameraPo
   });
   return Object.freeze([...rgb,rgba[3]]);
 }
+
+
+/**
+ * Bounded Unity RenderSettings fields from a serialized SCENE, not a
+ * runtime rendering capture. Never treats ambientIntensity alone as full
+ * ambient luminance (environment probes, skybox and bake are separate).
+ */
+export function createSerializedRenderSettings({
+  scene,owner,pathId,fogEnabled,ambientIntensity,evidence,
+}={}){
+  if(typeof scene!=='string'||!scene) throw new TypeError('scene required');
+  if(typeof owner!=='string'||!owner) throw new TypeError('owner required');
+  if(!Number.isSafeInteger(pathId)||pathId<1) throw new TypeError('pathId required');
+  if(typeof fogEnabled!=='boolean') throw new TypeError('fogEnabled must be boolean');
+  finite(ambientIntensity,'ambientIntensity');
+  if(ambientIntensity<0) throw new RangeError('ambientIntensity must be nonnegative');
+  if(typeof evidence!=='string'||!evidence) throw new TypeError('private evidence locator required');
+  return Object.freeze({
+    provenance:'unity-serialized',scene,owner,pathId,
+    fogEnabled,ambientIntensity,evidence,
+    runtimeActivationVerified:false,
+  });
+}
+
+/**
+ * For an explicitly opted-in serialized scene, source-derived fog=OFF is
+ * a stronger statement than the generated prototype's hardcoded fog=ON.
+ * Only fogStrength changes; direction, RGB, exposure, bake remain generated.
+ * Caller must label the result a mixed-source approximation, NOT MCD parity.
+ */
+export function generatedUniformsWithSerializedFogOff(generatedLighting,settings){
+  const u=lightingUniformPacket(generatedLighting);
+  if(settings?.provenance!=='unity-serialized'||settings.fogEnabled!==false){
+    throw new Error('Serialized fog-off proof required');
+  }
+  return Object.freeze({
+    ...u,fogStrength:0,
+    source:'generated-web-plus-serialized-fog-off',
+    fogEvidence:settings.evidence,
+  });
+}
