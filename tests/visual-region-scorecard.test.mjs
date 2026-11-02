@@ -177,6 +177,77 @@ test('duplicate zones or ownerless foreground masks are rejected',()=>{
   }finally{f.remove();}
 });
 
+test('region impact ranks absolute erroneous screen area separately from normalized IoU/MAE',()=>{
+  const f=setup();
+  try{
+    const output=scoreVisualRegions(f.nativePath,f.webPath,f.regionsPath);
+    const actor=output.regions.find(region=>region.kind==='actor');
+    assert.equal(actor.symmetricDifferencePixels,8);
+    assert.equal(actor.sharedFractionOfSmallerMask,0.8);
+    assert.equal(actor.materialMeasurementStatus,'COMPARABLE_INTERSECTION_RGB');
+    assert.ok(Math.abs(actor.screenWeightedUnionRgbMae01-
+      actor.silhouetteUnion.rgbMae01*actor.unionPixels/(WIDTH*HEIGHT))<1e-12);
+    assert.equal(output.topAbsoluteSilhouetteDifferences[0].kind,'actor');
+    assert.equal(output.topScreenWeightedUnionColorDifferences.length,3);
+    assert.ok(output.topScreenWeightedUnionColorDifferences.every(rank=>
+      rank.value>=0&&rank.value<=1));
+    assert.equal(output.sourcePoseMismatchCount,0);
+  }finally{f.remove();}
+});
+
+test('source pose translation mismatch blocks material color attribution, not silhouette evidence',()=>{
+  const f=setup();
+  try{
+    f.web.objects[0].worldMatrix[12]=0.1;
+    f.save();
+    const report=scoreVisualRegions(f.nativePath,f.webPath,f.regionsPath);
+    const actor=report.regions.find(region=>region.kind==='actor');
+    assert.equal(report.status,'PAIRED_REGIONS_NOT_PARITY_VERIFIED');
+    assert.equal(report.sourcePoseMismatchCount,1);
+    assert.equal(actor.sourcePoseAligned,false);
+    assert.equal(actor.sourceTranslationDeltaWorldUnits,0.1);
+    assert.equal(actor.materialMeasurementStatus,'BLOCKED_SOURCE_POSE_MISMATCH');
+    assert.equal(actor.materialIntersection,null);
+    assert.ok(actor.silhouetteIou>0);
+    assert.ok(actor.silhouetteUnion.rgbMae01>0);
+    assert.ok(report.topMaterialColorDifferences.every(region=>region.kind!=='actor'));
+    assert.equal(report.topAbsoluteSilhouetteDifferences[0].kind,'actor');
+  }finally{f.remove();}
+});
+
+test('source world matrix basis mismatch blocks material attribution independently of translation',()=>{
+  const f=setup();
+  try{
+    f.web.objects[0].worldMatrix[0]=0.9;
+    f.save();
+    const report=scoreVisualRegions(f.nativePath,f.webPath,f.regionsPath);
+    const actor=report.regions[0];
+    assert.equal(actor.sourceTranslationDeltaWorldUnits,0);
+    assert.ok(Math.abs(actor.sourceMaxNonTranslationCoefficientDelta-0.1)<1e-12);
+    assert.equal(actor.sourcePoseAligned,false);
+    assert.equal(actor.materialMeasurementStatus,'BLOCKED_SOURCE_POSE_MISMATCH');
+    assert.equal(report.sourcePoseMismatchCount,1);
+  }finally{f.remove();}
+});
+
+test('low overlap cannot masquerade as reliable material color, but remains visible shape error',()=>{
+  const f=setup();
+  try{
+    const shifted=(x,y)=>x>=5&&x<=9&&y>=2&&y<=5;
+    writeFileSync(join(f.dir,'actor-shifted.png'),png(WIDTH,HEIGHT,mask(shifted).rgb));
+    f.regions.regions[0].webMask='actor-shifted.png';
+    f.save();
+    const report=scoreVisualRegions(f.nativePath,f.webPath,f.regionsPath);
+    const actor=report.regions[0];
+    assert.equal(actor.intersectionPixels,4);
+    assert.equal(actor.sharedFractionOfSmallerMask,0.2);
+    assert.equal(actor.materialMeasurementStatus,'BLOCKED_LOW_SHARED_SILHOUETTE_COVERAGE');
+    assert.equal(actor.materialIntersection,null);
+    assert.equal(actor.symmetricDifferencePixels,32);
+    assert.equal(report.topAbsoluteSilhouetteDifferences[0].kind,'actor');
+  }finally{f.remove();}
+});
+
 test('CLI prints only aggregated JSON, never native images/source keys/paths',()=>{
   const f=setup();
   try{
