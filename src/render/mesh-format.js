@@ -668,3 +668,146 @@ export function parseObjGroupsIntoIndexedMesh(objText, groupNames, options = {})
     materialBindingsResolved: false,
   };
 }
+
+
+/**
+ * Decode a complete locally provided OBJ without requiring named `g` records.
+ *
+ * Intended for single-Mesh UnityPy exports (for example a static, UNRIGGED
+ * enemy diagnostic), not for assigning native game-object identities.
+ * All faces are included. Encountered `g` labels only subdivide contiguous
+ * GPU index ranges; no OBJ group, usemtl or material order is trusted as an
+ * original Material/Shader binding.
+ *
+ * The caller explicitly chooses OBJ->Web axes/winding; source mesh vertices,
+ * active pose, world transform, materials, UV2 and skin weights are NOT inferred.
+ * Input text is provided by the caller; this module has no file/network I/O.
+ */
+export function parseEntireObjIntoIndexedMesh(objText, options = {}) {
+  if (typeof objText !== 'string' || !objText.length || objText.length > 32 * 1024 * 1024) {
+    throw new TypeError('OBJ must be decoded text of 1..33554432 characters');
+  }
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('Whole OBJ options must be an object');
+  }
+  const axisSigns = options.axisSigns ?? [1, 1, 1];
+  if (!Array.isArray(axisSigns) || axisSigns.length !== 3 ||
+      !axisSigns.every((sign) => sign === 1 || sign === -1)) {
+    throw new TypeError('Whole OBJ axisSigns must be exactly three +1/-1 components');
+  }
+  const hasAxisConversion = axisSigns.some((sign) => sign !== 1);
+  if (hasAxisConversion && options.winding === undefined) {
+    throw new TypeError('Whole OBJ axis conversion requires explicit winding keep/flip');
+  }
+  const winding = options.winding ?? 'keep';
+  if (winding !== 'keep' && winding !== 'flip') {
+    throw new TypeError('Whole OBJ winding must be keep or flip');
+  }
+
+  const srcPositions = [], srcNormals = [], srcUVs = [];
+  const positions = [], normals = [], uvs = [], indices = [];
+  const vertexByCorner = new Map(), referencedPositions = new Set();
+  const drawRanges = [];
+  let groupName = null;
+  let activeRange = null;
+  let triangleCount = 0;
+  for (const [lineIndex, rawLine] of objText.split(/\r?\n/).entries()) {
+    const line = rawLine.split('#', 1)[0].trim();
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    const op = parts[0];
+    const label = 'Whole OBJ line ' + (lineIndex + 1);
+    if (op === 'v' || op === 'vn' || op === 'vt') {
+      const count = op === 'vt' ? 2 : 3;
+      if (parts.length !== count + 1 &&
+          !(op === 'v' && parts.length === 5) &&
+          !(op === 'vt' && parts.length === 4)) {
+        throw new TypeError(label + ': invalid ' + op + ' components');
+      }
+      const values = parts.slice(1, count + 1).map((n, i) => objFloat(n, label + '[' + i + ']'));
+      if (parts.length === count + 2) {
+        const extra = objFloat(parts[count + 1], label + ' extra component');
+        if ((op === 'v' && extra !== 1) || (op === 'vt' && extra !== 0)) {
+          throw new TypeError(label + ': non-default OBJ homogeneous/UV component');
+        }
+      }
+      const table = op === 'v' ? srcPositions : op === 'vn' ? srcNormals : srcUVs;
+      if (table.length >= MAX_VERTICES) throw new RangeError('Whole OBJ attribute table too large');
+      table.push(values);
+    } else if (op === 'g') {
+      if (parts.length < 2) throw new TypeError(label + ': empty group label');
+      // UnityPy exporter labels may contain spaces: keep the entire line.
+      groupName = parts.slice(1).join(' ');
+      activeRange = null; // A later identical label starts a distinct run.
+    } else if (op === 'f') {
+      if (parts.length !== 4) throw new TypeError(label + ': triangular v/vt/vn faces required');
+      if (++triangleCount > 2_000_000) throw new RangeError('Whole OBJ has too many faces');
+      if (!activeRange) {
+        activeRange = { firstIndex: indices.length, indexCount: 0, groupName };
+        drawRanges.push(activeRange);
+      }
+      const face = parts.slice(1).map((corner) => {
+        const fields = corner.split('/');
+        if (fields.length !== 3 || fields.some((field) => !field)) {
+          throw new TypeError(label + ': each corner requires v/vt/vn');
+        }
+        return [
+          objIndex(fields[0], srcPositions.length, label + ' position'),
+          objIndex(fields[1], srcUVs.length, label + ' UV'),
+          objIndex(fields[2], srcNormals.length, label + ' normal'),
+        ];
+      });
+      for (const [pi, ti, ni] of winding === 'flip' ?
+        [face[0], face[2], face[1]] : face) {
+        referencedPositions.add(pi);
+        const key = pi + '/' + ti + '/' + ni;
+        let gpuIndex = vertexByCorner.get(key);
+        if (gpuIndex === undefined) {
+          gpuIndex = positions.length / 3;
+          if (gpuIndex >= MAX_VERTICES) throw new RangeError('Whole OBJ has too many GPU seam vertices');
+          const p = srcPositions[pi], n = srcNormals[ni], uv = srcUVs[ti];
+          for (let i = 0; i < 3; i++) {
+            positions.push(p[i] * axisSigns[i]);
+            normals.push(n[i] * axisSigns[i]);
+          }
+          uvs.push(uv[0], uv[1]);
+          vertexByCorner.set(key, gpuIndex);
+        }
+        indices.push(gpuIndex);
+      }
+      activeRange.indexCount += 3;
+      if (indices.length > 6_000_000) throw new RangeError('Whole OBJ index buffer too large');
+    } else if (!['o', 's', 'usemtl', 'mtllib'].includes(op)) {
+      throw new TypeError(label + ': unsupported OBJ record ' + op);
+    }
+  }
+  if (triangleCount === 0) throw new RangeError('Whole OBJ contains no triangular faces');
+  if (options.expectedSourcePositionCount !== undefined &&
+      (requireSourceInteger(options.expectedSourcePositionCount,
+        'expectedSourcePositionCount', 3, MAX_VERTICES) !== srcPositions.length)) {
+    throw new RangeError('Whole OBJ position table differs from independent source count');
+  }
+  if (options.expectedTriangles !== undefined &&
+      requireSourceInteger(options.expectedTriangles, 'expectedTriangles', 1, 2_000_000) !== triangleCount) {
+    throw new RangeError('Whole OBJ triangles differ from independent source count');
+  }
+  if (options.expectedPositionRefs !== undefined &&
+      requireSourceInteger(options.expectedPositionRefs, 'expectedPositionRefs', 3, MAX_VERTICES) !==
+        referencedPositions.size) {
+    throw new RangeError('Whole OBJ position refs differ from independent source count');
+  }
+  const mesh = defineIndexedMesh({ positions, normals, uvs, indices });
+  assertObjBounds(mesh.bounds, options.expectedBounds, 'Whole OBJ');
+  return {
+    mesh, drawRanges,
+    sourcePositionCount: srcPositions.length,
+    sourcePositionRefs: referencedPositions.size,
+    sourceTriangleCount: triangleCount,
+    groupRunCount: drawRanges.length,
+    windingFlipped: winding === 'flip',
+    world: options.worldMatrix === undefined ? null : meshModelMatrices(options.worldMatrix),
+    geometryProvenance: 'locally-provided-entire-obj-not-native-runtime-proof',
+    materialBindingsResolved: false,
+    skinningAvailable: false, // OBJ does not transport Unity bind poses, bone weights or clips.
+  };
+}
