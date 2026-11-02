@@ -184,3 +184,19 @@ Pour juger le changement visuel, une personne doit comparer des captures
 du même angle/résolution avant/après sur navigateur réel, puis associer
 une capture MCD native privée avec paramètres contrôlés. p95 FPS, décompte
 des appels WebGL2 et correspondance pixel native ne sont pas encore mesurés.
+
+
+## Opt-in local OBJ group inspection (SH-05, 2026-11-02)
+
+Open `/?scene=containers`. The **LOCAL OBJ PREVIEW** panel accepts a local `.obj` or `.obj.gz` for each of the two independently verified Combined Mesh groups:
+
+- `Mesh level28:6`, OBJ group suffix `_47`, expected **1546** triangles / cargo center `[17.45,2.575,13.975]` in the *Web* preview coordinate convention.
+- `Mesh level28:7`, OBJ group suffix `_48`, expected **1546** triangles / cargo center `[17.475,5.725,15.8]`.
+
+Selecting either file decompresses/parses it in the browser, converts the OBJ's mirrored-X exported coordinates to the Web preview convention by reflecting X and Z, and validates triangle count and world bounds *before* WebGL2 upload. The matching generated hull **and its artificial ribs** disappear only after the genuine local group is successfully accepted. The other generated proxies remain. This is opt-in; ordinary modes and users without local files are unaffected.
+
+**Privacy / rights:** the local input uses the user's File object directly; no network request, upload, source-file path, storage, or repository asset is involved. No OBJ, source texture, or original MCD material is bundled in `superhot-web`. Use only legitimately obtained personal source files. The imported groups are shown with **synthetic Web colors/lighting**. Native runtime visibility, material binding, camera/FOV, shadows, actual running gameplay and pixel-level 1:1 fidelity remain **UNVERIFIED**. The preview is deliberately *not* playable native Containers gameplay; neither the original collision nor enemies are attached. The `window.__superhotSceneMetrics` report distinguishes locally loaded groups from generated proxies.
+
+**Private evidence (do not publish original resources):** `superhot-research#42/#43/#45/#47/#55/#60/#63` establishes the Unity indices, converted OBJ existence, first container submesh47 (4638 indices, 1546 triangles), and X-mirrored OBJ AABB matching its serialized source. Group48 has source-reported 4638 indices and corresponding collider envelope. This UI provides a real GPU rendering path but does not validate native material/shader/animation parity. Screenshots and performance should be assessed directly in a browser before claiming visible fidelity.
+
+Run `npm run check` for syntax and regression tests; perform a real WebGL2 browser smoke test with user-selected files separately. The tests use synthetic miniature OBJ fixtures only.
