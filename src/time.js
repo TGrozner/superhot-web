@@ -480,3 +480,120 @@ export function mcdSourcePlayerPreConstraintMove({
   }
   return { x, y, z };
 }
+
+/**
+ * Opt-in pure model of MCD CameraLookTimeControl's look-time shifter.
+ * PROUVÉ in delivered source, NOT observed in a Containers native frame:
+ * private research #148, artifact 13175262864, MCD build 20299547,
+ * managed/Assembly-CSharp/CameraLookTimeControl.cs:13,20-21,29-34,41-79,
+ * source SHA256 7e3d0bc64fc111a11b46643e2773c213051bd0c9a6fb4f71f85da42a170067d1.
+ * CameraAngle is a WORLD-space Transform quaternion, not DOM mouse pixels or
+ * necessarily yaw/pitch. Binding in CameraManager.Awake is source-qualified
+ * (#142) but execution and actual guards are UNKNOWN in Containers.
+ * No Unity lifecycle, input device, world timing or actor is invented here.
+ */
+const MCD_SOURCE_LOOK_SENSITIVITY = Math.fround(0.03);
+const MCD_SOURCE_LOOK_CAP = Math.fround(0.3);
+const MCD_SOURCE_LOOK_MEASURE_INTERVAL = Math.fround(1 / 60);
+
+const sourceWorldQuaternion = (rotation) => {
+  if (!rotation || ![rotation.x, rotation.y, rotation.z, rotation.w].every(Number.isFinite)) {
+    throw new TypeError('explicit finite world quaternion required');
+  }
+  return { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w };
+};
+
+/** Starting this model means CameraLookTimeControl.Start has been invoked. */
+export function createMcdSourceLookTimeshiftState({ cameraWorldRotation, currentTimeModifier } = {}) {
+  // Start receives a shifter from TimeControl; its initial modifier is NOT
+  // established by CameraLookTimeControl.cs, so the caller must supply it.
+  if (!Number.isFinite(currentTimeModifier)) {
+    throw new TypeError('initial shifter modifier must be explicitly supplied');
+  }
+  return {
+    previousWorldRotation: sourceWorldQuaternion(cameraWorldRotation),
+    warmupUpdatesRemaining: 10,
+    lastTimeMeasuredDeltaA: 0,
+    rotationAccumulated: 0,
+    timeShiftBuffer: 0,
+    currentTimeModifier,
+  };
+}
+
+/** Source ResetRotationAccumulated only resets the sum and previous angle. */
+export function resetMcdSourceLookRotationAccumulated(state, cameraWorldRotation) {
+  if (!state || typeof state !== 'object') throw new TypeError('look state required');
+  return {
+    ...state,
+    previousWorldRotation: sourceWorldQuaternion(cameraWorldRotation),
+    rotationAccumulated: 0,
+  };
+}
+
+const sourceQuaternionAngleDegrees = (a, b) => {
+  const dot = Math.abs(
+    Math.fround(Math.fround(a.x * b.x) + Math.fround(a.y * b.y)
+      + Math.fround(a.z * b.z) + Math.fround(a.w * b.w)),
+  );
+  return Math.fround(Math.acos(Math.min(1, dot)) * (360 / Math.PI));
+};
+
+/**
+ * One source Update, not one requestAnimationFrame or input tick. The explicit
+ * Wydmuszka, weapon and debug gates are inputs, not guessed Web defaults.
+ * A successful measurement with lock=true still adds to the buffer but does
+ * not update CurrentTimeModifier. A later zero-angle measurement may drain it.
+ * Float32 arithmetic is approximated; exact Unity rounding remains UNKNOWN.
+ */
+export function advanceMcdSourceLookTimeshift(state, {
+  unscaledTime,
+  cameraWorldRotation,
+  wydmuszkaMode,
+  activeWeaponIsTakedown,
+  takedownCanUseTimeshifts,
+  lockLookShifter,
+} = {}) {
+  if (!state || typeof state !== 'object' || !Number.isInteger(state.warmupUpdatesRemaining)
+      || state.warmupUpdatesRemaining < 0 || ![state.lastTimeMeasuredDeltaA,
+        state.rotationAccumulated, state.timeShiftBuffer, state.currentTimeModifier].every(Number.isFinite)) {
+    throw new TypeError('valid source look state required');
+  }
+  sourceWorldQuaternion(state.previousWorldRotation);
+  if (!Number.isFinite(unscaledTime) || unscaledTime < 0) {
+    throw new RangeError('unscaledTime must be finite nonnegative seconds');
+  }
+  for (const [name, value] of Object.entries({ wydmuszkaMode,
+    activeWeaponIsTakedown, takedownCanUseTimeshifts, lockLookShifter })) {
+    if (typeof value !== 'boolean') throw new TypeError(`${name} must be explicit boolean`);
+  }
+  const rotation = sourceWorldQuaternion(cameraWorldRotation);
+  if (wydmuszkaMode) {
+    return { state: { ...state, previousWorldRotation: { ...state.previousWorldRotation } },
+      measured: false, wroteModifier: false, deltaAngleDegrees: null };
+  }
+  const next = { ...state, previousWorldRotation: { ...state.previousWorldRotation } };
+  if (next.warmupUpdatesRemaining > 0) {
+    next.previousWorldRotation = rotation;
+    next.warmupUpdatesRemaining--;
+  }
+  // Source uses strict > on Time.unscaledTime, independent of Time.timeScale.
+  if (!(Math.fround(unscaledTime) > Math.fround(
+    Math.fround(next.lastTimeMeasuredDeltaA) + MCD_SOURCE_LOOK_MEASURE_INTERVAL))) {
+    return { state: next, measured: false, wroteModifier: false, deltaAngleDegrees: null };
+  }
+  let delta = sourceQuaternionAngleDegrees(rotation, next.previousWorldRotation);
+  if (activeWeaponIsTakedown && !takedownCanUseTimeshifts) delta = 0;
+  next.previousWorldRotation = rotation;
+  next.rotationAccumulated = Math.fround(next.rotationAccumulated + delta);
+  next.lastTimeMeasuredDeltaA = Math.fround(unscaledTime);
+  next.timeShiftBuffer = Math.fround(next.timeShiftBuffer
+    + Math.fround(delta * MCD_SOURCE_LOOK_SENSITIVITY));
+  if (lockLookShifter) {
+    return { state: next, measured: true, wroteModifier: false, deltaAngleDegrees: delta };
+  }
+  const amount = Math.min(MCD_SOURCE_LOOK_CAP, Math.max(0, next.timeShiftBuffer));
+  next.timeShiftBuffer = Math.fround(next.timeShiftBuffer - amount);
+  if (next.timeShiftBuffer < 0) next.timeShiftBuffer = 0;
+  next.currentTimeModifier = amount;
+  return { state: next, measured: true, wroteModifier: true, deltaAngleDegrees: delta };
+}
