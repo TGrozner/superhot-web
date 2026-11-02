@@ -141,3 +141,90 @@ and combat as private issue #8. SH-10 will **not duplicate** either while
 pending. New data must be read via the private gateway, not copied into this
 public repository. The SH-10 owner reports prioritized deltas on public issue
 #73 and forwards a brief integration handoff to public issue #5.
+
+## P0 visual gate — actual browser vs private native capture
+
+**Priority change, 2026-11-02:** this section supersedes Web-only
+getter/immutability work as the fidelity acceptance target. PR #74's five Node
+scenarios remain **PROVISIONAL**: their successful tests do not launch a
+browser or confront any original-game frames.
+
+The target is one *actually loaded* MCD Containers / build28 subsection,
+then the same subsection **actually drawn by the Web runtime**. Both
+observations must share a reproducible stimulus, initial state, semantic
+frame/phase, scene identity, camera pose, FOV, viewport and time sampling
+schedule. Native screenshots, decompiled text, meshes/materials and reports
+remain exclusively in private local storage. Never commit private frames,
+scene payloads, captured originals, or derived proprietary imagery.
+
+**Three first visible SH-05 integration criteria (strict order):**
+
+1. **Scene + camera binding:** SH-04 provides an active instance hierarchy
+   with (owner,path_id) and runtime loading evidence, not a serialized asset
+   inventory alone. SH-05 renders *one identifiable subsection* and exposes
+   **read-only** browser telemetry for exact active scene, camera position,
+   orientation, FOV, viewport and frame phase. Require explicit same-scene
+   identity and coordinates before comparing pixels. The current Web scenes
+   THE ATRIUM / THE CROSSING / THE GALLERY are not Containers.
+2. **Position + silhouette:** capture a **real browser WebGL2 canvas
+   screenshot** at a fixed stimulus and its matched private original-game
+   reference, at identical resolution and aligned angle. Measure per-object
+   or per-semantic-region center offset in pixels, edge/silhouette F1, number
+   of mapped/visible/unmapped objects and draw calls. Report substituted,
+   missing and unknown primitives separately. Edge F1 is a visual proxy, not
+   proof that mesh topology is identical.
+3. **Color + lighting + temporal change:** for the same region and matching
+   native/Web capture pair, measure normalized chroma error, luminance
+   error, and *change between two displayed frames*, with explicit
+   time-scale, input and sampling phase. Record WebGL renderer, frame
+   duration p95/FPS and whether software rendering was used; no guessed
+   numeric tolerances or native timing values. A still image cannot certify
+   TimeControl, projectiles or animation phase.
+
+### Comparison protocol, fail-closed
+
+The **manual/off-CI** gate must produce two Web PNG frames through a real
+browser (idle then a controlled KeyW movement window), and accept a private
+reference manifest only via local file paths outside the repository. The
+reference needs native build/version, runtime observation ID, active scene
+binding, camera telemetry, FOV, viewport, stimulus timestamps/phases and
+semantic ROIs; the browser evidence needs a real WebGL2 render and observed
+scene/camera telemetry (not a source-file regex). Output should be numerical
+**only after** scene, pose, viewport and sampling context are matched.
+Metrics are *position pixel error, shape edge F1, chroma L1, luminance delta,
+temporal variation delta, camera translation/angle/FOV and frame timing
+drift*. Tolerances are versioned locally and chosen after inspection of
+original captures; never substitute arbitrary pass thresholds.
+
+Missing native reference, unbound Web scene, absent runtime camera, invalid
+provenance, mismatched phases or missing thresholds => **INCONNU /
+NON-COMPARABLE**, and a strict gate exits nonzero. A measured mismatch
+against a confirmed corresponding capture => **MEASURED_VISIBLE_GAP**;
+it does not refute the native source. Even a measurement below operator
+thresholds is **NOT an official 1:1 certification**. Synthetic PNGs are
+allowed for parser/math unit tests only and can never satisfy the gate.
+Do not add a deliberately red native-comparison gate to GitHub CI.
+
+### Present observed blockers (not conjectural MCD gaps)
+
+- `src/renderer.js` builds only cube and octahedron meshes and draws through
+  `box`/`shard`; its shader uses scale + Euler rotation, hard-coded directional
+  illumination/fog, and has no actual native mesh/material/skin/shadow pipeline.
+  `src/visual/scene-plan.js` can produce affine packets but
+  `src/main.js` does not import it. SH-05 alone owns renderer/level/browser
+  integration; SH-04 alone owns scene-graph/visual producers.
+- No browser screenshot or WebGL2 FPS/p95 from the actual public prototype
+  has been validated in this lane. A sandbox Chromium attempt was
+  **blocked by environment policy** (`net::ERR_BLOCKED_BY_ADMINISTRATOR`
+  on localhost); this is **not** an application rendering failure.
+- The private corpus gateway issued a `SUCCESS` for SH-04's schema query
+  #10 (run 41426522641, artifact 13133542861), but **artifact contents,
+  native scene binding and any actual MCD PNG are unreviewed by SH-10**.
+  Reuse #10/SH-04 rather than duplicating a private query. SH-01/02/03's
+  existing requests remain with their owners.
+
+SH-10 owns this document and isolated visual-acceptance scripts/tests only.
+SH-05 issue #5 must coordinate the render hookup and the private scene
+handoff before anyone promotes a pixel delta from NON-COMPARABLE to
+measured native-vs-Web evidence. No runtime source or original asset may be
+changed as part of this gate.
