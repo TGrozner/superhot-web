@@ -89,6 +89,13 @@ function explicitMetadata(value, label) {
   throw new TypeError(label + ' must explicitly identify the source/coordinate convention');
 }
 
+function explicitMetadataList(value, label) {
+  if (!Array.isArray(value) || !value.length) {
+    throw new TypeError(label + ' must contain explicit metadata entries');
+  }
+  return Object.freeze(value.map((entry, index) => explicitMetadata(entry, label + '[' + index + ']')));
+}
+
 function coordinateMetadata(value) {
   const coordinates = explicitMetadata(value, 'coordinates');
   if (typeof coordinates === 'string') {
@@ -150,6 +157,256 @@ function compileClip(name, clip, boneCount) {
     name, duration: clip.duration, sampleRate: clip.sampleRate,
     frameCount: clip.frames.length, positions, rotations, scales,
   });
+}
+
+function compileClipAliases(rawAliases, clips) {
+  if (rawAliases == null) return;
+  if (typeof rawAliases !== 'object' || Array.isArray(rawAliases)) {
+    throw new TypeError('clipAliases must be an object');
+  }
+  for (const [alias, target] of Object.entries(rawAliases)) {
+    if (!alias.length || typeof target !== 'string' || !target.length || clips[alias] || !clips[target]) {
+      throw new TypeError('Invalid native clip alias ' + alias + ' -> ' + String(target));
+    }
+    clips[alias] = clips[target];
+  }
+}
+
+function compileStates(rawStates, clips) {
+  if (rawStates == null) return Object.freeze(Object.create(null));
+  if (typeof rawStates !== 'object' || Array.isArray(rawStates)) {
+    throw new TypeError('states must be an object');
+  }
+  const states = Object.create(null);
+  for (const [name, state] of Object.entries(rawStates)) {
+    if (!name.length || !state || typeof state !== 'object' || Array.isArray(state) ||
+        typeof state.clip !== 'string' || !clips[state.clip] ||
+        (state.playback !== 'loop' && state.playback !== 'clamp') ||
+        typeof state.speed !== 'number' || !Number.isFinite(state.speed) || state.speed <= 0) {
+      throw new TypeError('Invalid native animation state ' + name);
+    }
+    states[name] = Object.freeze({
+      name, clip: state.clip, playback: state.playback, speed: state.speed,
+    });
+  }
+  return Object.freeze(states);
+}
+
+function compileTransitions(rawTransitions, clips) {
+  if (rawTransitions == null) return Object.freeze(Object.create(null));
+  if (typeof rawTransitions !== 'object' || Array.isArray(rawTransitions)) {
+    throw new TypeError('transitions must be an object');
+  }
+  const transitions = Object.create(null);
+  for (const [key, transition] of Object.entries(rawTransitions)) {
+    if (!transition || typeof transition !== 'object' || Array.isArray(transition) ||
+        key !== transition.from + '->' + transition.to ||
+        !clips[transition.from] || !clips[transition.to] ||
+        typeof transition.duration !== 'number' || !Number.isFinite(transition.duration) ||
+        transition.duration <= 0) {
+      throw new TypeError('Invalid native animation transition ' + key);
+    }
+    transitions[key] = Object.freeze({
+      from: transition.from, to: transition.to, duration: transition.duration,
+      source: explicitMetadata(transition.source, 'transitions.' + key + '.source'),
+    });
+  }
+  return Object.freeze(transitions);
+}
+
+function compileActionTiming(rawActionTiming, states) {
+  if (rawActionTiming == null) return Object.freeze(Object.create(null));
+  if (typeof rawActionTiming !== 'object' || Array.isArray(rawActionTiming)) {
+    throw new TypeError('actionTiming must be an object');
+  }
+  const numericFields = new Set([
+    'entryDuration', 'exitDuration', 'exitTime', 'normalExitDuration', 'normalExitTime',
+  ]);
+  const compiled = Object.create(null);
+  for (const [stateName, timing] of Object.entries(rawActionTiming)) {
+    if (!states[stateName] || !timing || typeof timing !== 'object' || Array.isArray(timing)) {
+      throw new TypeError('Invalid native action timing ' + stateName);
+    }
+    const entry = {};
+    for (const [name, value] of Object.entries(timing)) {
+      if (numericFields.has(name)) {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+          throw new TypeError('Invalid native action timing ' + stateName + '.' + name);
+        }
+        entry[name] = value;
+      } else if (name === 'hasFixedDuration' && typeof value === 'boolean') {
+        entry[name] = value;
+      } else {
+        throw new TypeError('Unknown native action timing field ' + stateName + '.' + name);
+      }
+    }
+    if (!Object.keys(entry).length) throw new TypeError('Native action timing cannot be empty');
+    compiled[stateName] = Object.freeze(entry);
+  }
+  return Object.freeze(compiled);
+}
+
+function compileActionLayers(rawLayers, states, boneCount) {
+  if (rawLayers == null) return Object.freeze(Object.create(null));
+  if (typeof rawLayers !== 'object' || Array.isArray(rawLayers)) {
+    throw new TypeError('actionLayers must be an object');
+  }
+  const layers = Object.create(null);
+  for (const [name, layer] of Object.entries(rawLayers)) {
+    if (!states[name] || !layer || typeof layer !== 'object' || Array.isArray(layer) ||
+        layer.clip !== states[name].clip ||
+        (layer.mode !== 'additive' && layer.mode !== 'override') ||
+        typeof layer.defaultWeight !== 'number' || !Number.isFinite(layer.defaultWeight) ||
+        layer.defaultWeight < 0 || layer.defaultWeight > 1 ||
+        typeof layer.webComposable !== 'boolean') {
+      throw new TypeError('Invalid native action layer ' + name);
+    }
+    numericArray(layer.mask, boneCount, 'actionLayers.' + name + '.mask');
+    const mask = new Float32Array(layer.mask);
+    for (let bone = 0; bone < mask.length; bone++) {
+      if (mask[bone] < 0 || mask[bone] > 1) {
+        throw new RangeError('Action mask weights must be in [0,1]');
+      }
+    }
+    if (!layer.webComposable && (typeof layer.blocker !== 'string' || !layer.blocker.length)) {
+      throw new TypeError('Unavailable native action layer needs an exact blocker');
+    }
+    layers[name] = Object.freeze({
+      name, clip: layer.clip, mode: layer.mode, defaultWeight: layer.defaultWeight,
+      mask, source: explicitMetadata(layer.source, 'actionLayers.' + name + '.source'),
+      reference: layer.reference == null ? null :
+        explicitMetadata(layer.reference, 'actionLayers.' + name + '.reference'),
+      webComposable: layer.webComposable,
+      blocker: layer.webComposable ? null : layer.blocker,
+    });
+  }
+  return Object.freeze(layers);
+}
+
+function compileActionPrecompositions(rawPrecompositions, actionLayers, clips, boneCount) {
+  if (rawPrecompositions == null) return Object.freeze(Object.create(null));
+  if (typeof rawPrecompositions !== 'object' || Array.isArray(rawPrecompositions)) {
+    throw new TypeError('actionPrecompositions must be an object');
+  }
+  const compiled = Object.create(null);
+  for (const [name, raw] of Object.entries(rawPrecompositions)) {
+    const layer = actionLayers[name];
+    if (!layer || layer.mode !== 'additive' || !raw || typeof raw !== 'object' ||
+        Array.isArray(raw) || raw.action !== name ||
+        raw.composition !== 'nativeHumanoidAdditivePrecomposedGrid' ||
+        typeof raw.actionStart !== 'number' || !Number.isFinite(raw.actionStart) ||
+        typeof raw.actionStep !== 'number' || !Number.isFinite(raw.actionStep) || raw.actionStep <= 0 ||
+        !Number.isSafeInteger(raw.actionCount) || raw.actionCount < 2 ||
+        typeof raw.actionDuration !== 'number' || !Number.isFinite(raw.actionDuration) ||
+        raw.actionDuration < raw.actionStart ||
+        !Array.isArray(raw.layerWeights) || !raw.layerWeights.length ||
+        raw.implicitZeroWeight !== true ||
+        !Array.isArray(raw.bones) || !raw.bones.length ||
+        !raw.baseClips || typeof raw.baseClips !== 'object' || Array.isArray(raw.baseClips)) {
+      throw new TypeError('Invalid native action precomposition ' + name);
+    }
+    const seenBones = new Set();
+    const bones = new Uint16Array(raw.bones.length);
+    raw.bones.forEach((bone, index) => {
+      if (!Number.isSafeInteger(bone) || bone < 0 || bone >= boneCount ||
+          seenBones.has(bone) || layer.mask[bone] !== 1) {
+        throw new RangeError('Invalid precomposed bone for native action ' + name);
+      }
+      seenBones.add(bone);
+      bones[index] = bone;
+    });
+    for (let bone = 0; bone < boneCount; bone++) {
+      if (layer.mask[bone] === 1 && !seenBones.has(bone)) {
+        throw new RangeError('Native action precomposition omits masked bone ' + bone);
+      }
+    }
+    let previousLayerWeight = 0;
+    for (const weight of raw.layerWeights) {
+      if (typeof weight !== 'number' || !Number.isFinite(weight) ||
+          weight <= previousLayerWeight || weight > 1) {
+        throw new RangeError('Invalid precomposed native layer-weight knot for ' + name);
+      }
+      previousLayerWeight = weight;
+    }
+    if (previousLayerWeight !== 1) {
+      throw new RangeError('Native action precomposition must terminate at layer weight 1');
+    }
+    const baseClips = Object.create(null);
+    const aliases = [];
+    for (const [clipName, rawBase] of Object.entries(raw.baseClips)) {
+      if (!clips[clipName] || !rawBase || typeof rawBase !== 'object' || Array.isArray(rawBase)) {
+        throw new TypeError('Invalid precomposed base clip ' + clipName);
+      }
+      if (rawBase.alias != null) {
+        if (typeof rawBase.alias !== 'string' || !rawBase.alias.length) {
+          throw new TypeError('Invalid precomposed base alias ' + clipName);
+        }
+        aliases.push([clipName, rawBase.alias]);
+        continue;
+      }
+      if (!Number.isSafeInteger(rawBase.phaseCount) || rawBase.phaseCount < 1) {
+        throw new RangeError('Invalid precomposed phase count for ' + clipName);
+      }
+      const sampleCount = raw.layerWeights.length * rawBase.phaseCount *
+        raw.actionCount * bones.length;
+      numericArray(rawBase.positions, sampleCount * 3,
+        'actionPrecompositions.' + name + '.baseClips.' + clipName + '.positions');
+      numericArray(rawBase.rotations, sampleCount * 4,
+        'actionPrecompositions.' + name + '.baseClips.' + clipName + '.rotations');
+      numericArray(rawBase.scales, sampleCount * 3,
+        'actionPrecompositions.' + name + '.baseClips.' + clipName + '.scales');
+      const rotations = new Float32Array(sampleCount * 4);
+      for (let sample = 0; sample < sampleCount; sample++) {
+        normalizedQuaternionInto(rawBase.rotations, sample * 4, rotations, sample * 4,
+          'actionPrecompositions.' + name + '.baseClips.' + clipName + '.rotations');
+      }
+      baseClips[clipName] = Object.freeze({
+        phaseCount: rawBase.phaseCount,
+        positions: new Float32Array(rawBase.positions),
+        rotations,
+        scales: new Float32Array(rawBase.scales),
+      });
+    }
+    for (const [clipName, target] of aliases) {
+      if (!baseClips[target]) {
+        throw new Error('Native action precomposition alias unavailable: ' + clipName + ' -> ' + target);
+      }
+      baseClips[clipName] = baseClips[target];
+    }
+    compiled[name] = Object.freeze({
+      name, composition: raw.composition, bones,
+      actionStart: raw.actionStart, actionStep: raw.actionStep,
+      actionCount: raw.actionCount, actionDuration: raw.actionDuration,
+      layerWeights: Object.freeze(raw.layerWeights.slice()),
+      baseClips: Object.freeze(baseClips),
+      interpolation: explicitMetadata(raw.interpolation,
+        'actionPrecompositions.' + name + '.interpolation'),
+      timeDomain: explicitMetadata(raw.timeDomain,
+        'actionPrecompositions.' + name + '.timeDomain'),
+      evidence: explicitMetadata(raw.evidence,
+        'actionPrecompositions.' + name + '.evidence'),
+      heldOut: explicitMetadata(raw.heldOut,
+        'actionPrecompositions.' + name + '.heldOut'),
+      transitionHeldOut: explicitMetadata(raw.transitionHeldOut,
+        'actionPrecompositions.' + name + '.transitionHeldOut'),
+      activation: explicitMetadata(raw.activation,
+        'actionPrecompositions.' + name + '.activation'),
+      shootingIdleReference: explicitMetadata(raw.shootingIdleReference,
+        'actionPrecompositions.' + name + '.shootingIdleReference'),
+      shootingTransitionHeldOut: explicitMetadata(raw.shootingTransitionHeldOut,
+        'actionPrecompositions.' + name + '.shootingTransitionHeldOut'),
+      controllerTimeline: explicitMetadataList(raw.controllerTimeline,
+        'actionPrecompositions.' + name + '.controllerTimeline'),
+      limits: explicitMetadataList(raw.limits,
+        'actionPrecompositions.' + name + '.limits'),
+    });
+  }
+  for (const layer of Object.values(actionLayers)) {
+    if (layer.webComposable && layer.mode === 'additive' && !compiled[layer.name]) {
+      throw new Error('Composable additive action needs native precomposition: ' + layer.name);
+    }
+  }
+  return Object.freeze(compiled);
 }
 
 /**
@@ -281,16 +538,27 @@ export function loadNativeSkinPackage(sourcePackage) {
     if (!name.length) throw new TypeError('Clip names cannot be empty');
     clips[name] = compileClip(name, clip, bones.length);
   }
+  compileClipAliases(sourcePackage.clipAliases, clips);
   Object.freeze(clips);
-
+  const states = compileStates(sourcePackage.states, clips);
+  const transitions = compileTransitions(sourcePackage.transitions, clips);
+  const actionTiming = compileActionTiming(sourcePackage.actionTiming, states);
+  const actionLayers = compileActionLayers(sourcePackage.actionLayers, states, bones.length);
+  const actionPrecompositions = compileActionPrecompositions(
+    sourcePackage.actionPrecompositions, actionLayers, clips, bones.length);
+  const clipDurations = Object.freeze(Object.fromEntries(
+    Object.entries(clips).map(([name, clip]) => [name, clip.duration])));
   const loaded = Object.freeze({
     schemaVersion: 1, source, coordinates,
     mesh: Object.freeze({
       positions, normals, indices, jointIndices, weights, inverseBindMatrices,
       gpuJointIndices, vertexCount, indexCount: indices.length,
     }),
-    bones: Object.freeze(checkedBones), clips,
+    bones: Object.freeze(checkedBones), clips, states, transitions, actionTiming,
+    actionLayers, actionPrecompositions, clipDurations,
     availableClips: Object.freeze(Object.keys(clips)),
+    availableTransitions: Object.freeze(Object.keys(transitions)),
+    availableActions: Object.freeze(Object.keys(actionLayers).filter(name => actionLayers[name].webComposable)),
     weightedBoneIndices,
     jointCount: bones.length,
     weightedJointCount: weightedBoneIndices.length,
@@ -327,11 +595,11 @@ function composeInto(position, rotation, scale, output) {
   output[12] = position[0]; output[13] = position[1]; output[14] = position[2]; output[15] = 1;
 }
 
-function slerpInto(values, firstOffset, secondOffset, t, output) {
-  let ax = values[firstOffset], ay = values[firstOffset + 1];
-  let az = values[firstOffset + 2], aw = values[firstOffset + 3];
-  let bx = values[secondOffset], by = values[secondOffset + 1];
-  let bz = values[secondOffset + 2], bw = values[secondOffset + 3];
+function slerpInto(firstValues, firstOffset, secondValues, secondOffset, t, output, outputOffset = 0) {
+  let ax = firstValues[firstOffset], ay = firstValues[firstOffset + 1];
+  let az = firstValues[firstOffset + 2], aw = firstValues[firstOffset + 3];
+  let bx = secondValues[secondOffset], by = secondValues[secondOffset + 1];
+  let bz = secondValues[secondOffset + 2], bw = secondValues[secondOffset + 3];
   let dot = ax*bx + ay*by + az*bz + aw*bw;
   if (dot < 0) { dot = -dot; bx = -bx; by = -by; bz = -bz; bw = -bw; }
   let firstWeight = 1 - t, secondWeight = t;
@@ -346,10 +614,11 @@ function slerpInto(values, firstOffset, secondOffset, t, output) {
   const z = firstWeight*az + secondWeight*bz;
   const w = firstWeight*aw + secondWeight*bw;
   const length = Math.hypot(x, y, z, w);
-  output[0] = x/length; output[1] = y/length; output[2] = z/length; output[3] = w/length;
+  output[outputOffset] = x/length; output[outputOffset + 1] = y/length;
+  output[outputOffset + 2] = z/length; output[outputOffset + 3] = w/length;
 }
 
-function evaluatePalette(sourcePackage, clip, time, playback, scratch) {
+function sampleLocalPose(sourcePackage, clip, time, playback, pose) {
   if (typeof time !== 'number' || !Number.isFinite(time)) throw new TypeError('Animation time must be finite');
   if (playback !== 'loop' && playback !== 'clamp') {
     throw new TypeError('Playback must explicitly be loop or clamp');
@@ -368,44 +637,359 @@ function evaluatePalette(sourcePackage, clip, time, playback, scratch) {
   const positionWidth = boneCount * 3;
   const rotationWidth = boneCount * 4;
   const scaleWidth = boneCount * 3;
-  const { local, globals, position, rotation, scale, palette } = scratch;
   for (let bone = 0; bone < boneCount; bone++) {
-    const p0 = firstFrame * positionWidth + bone * 3;
-    const p1 = secondFrame * positionWidth + bone * 3;
-    const s0 = firstFrame * scaleWidth + bone * 3;
-    const s1 = secondFrame * scaleWidth + bone * 3;
+    const posePosition = bone * 3;
+    const poseRotation = bone * 4;
+    const p0 = firstFrame * positionWidth + posePosition;
+    const p1 = secondFrame * positionWidth + posePosition;
+    const s0 = firstFrame * scaleWidth + posePosition;
+    const s1 = secondFrame * scaleWidth + posePosition;
     for (let component = 0; component < 3; component++) {
-      position[component] = clip.positions[p0 + component] * (1 - blend) + clip.positions[p1 + component] * blend;
-      scale[component] = clip.scales[s0 + component] * (1 - blend) + clip.scales[s1 + component] * blend;
+      pose.positions[posePosition + component] =
+        clip.positions[p0 + component] * (1 - blend) + clip.positions[p1 + component] * blend;
+      pose.scales[posePosition + component] =
+        clip.scales[s0 + component] * (1 - blend) + clip.scales[s1 + component] * blend;
     }
-    slerpInto(clip.rotations, firstFrame * rotationWidth + bone * 4,
-      secondFrame * rotationWidth + bone * 4, blend, rotation);
+    slerpInto(clip.rotations, firstFrame * rotationWidth + poseRotation,
+      clip.rotations, secondFrame * rotationWidth + poseRotation, blend,
+      pose.rotations, poseRotation);
+  }
+}
+
+function precompositionSampleIndex(precomposition, base, weightIndex, phase, action, slot) {
+  return (((weightIndex * base.phaseCount + phase) * precomposition.actionCount + action) *
+    precomposition.bones.length) + slot;
+}
+
+function precompositionComponent(precomposition, base, values, weightIndex, slot, component,
+                                 firstPhase, secondPhase, phaseBlend,
+                                 firstAction, secondAction, actionBlend) {
+  const firstPhaseFirstAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, firstPhase, firstAction, slot) * 3 + component;
+  const secondPhaseFirstAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, secondPhase, firstAction, slot) * 3 + component;
+  const firstPhaseSecondAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, firstPhase, secondAction, slot) * 3 + component;
+  const secondPhaseSecondAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, secondPhase, secondAction, slot) * 3 + component;
+  const atFirstAction = values[firstPhaseFirstAction] * (1 - phaseBlend) +
+    values[secondPhaseFirstAction] * phaseBlend;
+  const atSecondAction = values[firstPhaseSecondAction] * (1 - phaseBlend) +
+    values[secondPhaseSecondAction] * phaseBlend;
+  return atFirstAction * (1 - actionBlend) + atSecondAction * actionBlend;
+}
+
+function precompositionRotation(precomposition, base, weightIndex, slot,
+                                firstPhase, secondPhase, phaseBlend,
+                                firstAction, secondAction, actionBlend,
+                                scratch, output) {
+  const firstPhaseFirstAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, firstPhase, firstAction, slot) * 4;
+  const secondPhaseFirstAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, secondPhase, firstAction, slot) * 4;
+  const firstPhaseSecondAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, firstPhase, secondAction, slot) * 4;
+  const secondPhaseSecondAction = precompositionSampleIndex(
+    precomposition, base, weightIndex, secondPhase, secondAction, slot) * 4;
+  slerpInto(base.rotations, firstPhaseFirstAction,
+    base.rotations, secondPhaseFirstAction, phaseBlend,
+    scratch.precompositionRotationC);
+  slerpInto(base.rotations, firstPhaseSecondAction,
+    base.rotations, secondPhaseSecondAction, phaseBlend,
+    scratch.precompositionRotationD);
+  slerpInto(scratch.precompositionRotationC, 0,
+    scratch.precompositionRotationD, 0, actionBlend, output);
+}
+
+function sampleActionPrecomposition(sourcePackage, precomposition, baseClipName,
+                                    baseClip, baseTime, basePlayback, actionTime,
+                                    layerWeight, pose, scratch) {
+  const base = precomposition.baseClips[baseClipName];
+  if (!base) {
+    throw new Error('Native fire precomposition unavailable for base clip ' + baseClipName);
+  }
+  sampleLocalPose(sourcePackage, baseClip, baseTime, basePlayback, pose);
+  if (layerWeight === 0) return pose;
+  const localBaseTime = basePlayback === 'loop'
+    ? ((baseTime % baseClip.duration) + baseClip.duration) % baseClip.duration
+    : Math.max(0, Math.min(baseTime, baseClip.duration));
+  const phasePosition = base.phaseCount === 1 ? 0 :
+    localBaseTime / baseClip.duration * base.phaseCount;
+  const firstPhase = Math.floor(phasePosition) % base.phaseCount;
+  const secondPhase = (firstPhase + 1) % base.phaseCount;
+  const phaseBlend = base.phaseCount === 1 ? 0 : phasePosition - Math.floor(phasePosition);
+  const actionPosition = Math.max(0, Math.min(
+    (actionTime - precomposition.actionStart) / precomposition.actionStep,
+    precomposition.actionCount - 1));
+  const firstAction = Math.floor(actionPosition);
+  const secondAction = Math.min(firstAction + 1, precomposition.actionCount - 1);
+  const actionBlend = actionPosition - firstAction;
+  let upperWeightIndex = 0;
+  while (layerWeight > precomposition.layerWeights[upperWeightIndex] &&
+         upperWeightIndex + 1 < precomposition.layerWeights.length) {
+    upperWeightIndex++;
+  }
+  const lowerWeightIndex = upperWeightIndex - 1;
+  const lowerWeight = lowerWeightIndex < 0 ? 0 : precomposition.layerWeights[lowerWeightIndex];
+  const upperWeight = precomposition.layerWeights[upperWeightIndex];
+  const weightBlend = (layerWeight - lowerWeight) / (upperWeight - lowerWeight);
+  const boneCount = precomposition.bones.length;
+  for (let slot = 0; slot < boneCount; slot++) {
+    const bone = precomposition.bones[slot];
+    const posePosition = bone * 3;
+    const poseRotation = bone * 4;
+    for (let component = 0; component < 3; component++) {
+      const lowerPosition = lowerWeightIndex < 0
+        ? pose.positions[posePosition + component]
+        : precompositionComponent(precomposition, base, base.positions,
+          lowerWeightIndex, slot, component, firstPhase, secondPhase, phaseBlend,
+          firstAction, secondAction, actionBlend);
+      const upperPosition = precompositionComponent(precomposition, base, base.positions,
+        upperWeightIndex, slot, component, firstPhase, secondPhase, phaseBlend,
+        firstAction, secondAction, actionBlend);
+      pose.positions[posePosition + component] =
+        lowerPosition * (1 - weightBlend) + upperPosition * weightBlend;
+      const lowerScale = lowerWeightIndex < 0
+        ? pose.scales[posePosition + component]
+        : precompositionComponent(precomposition, base, base.scales,
+          lowerWeightIndex, slot, component, firstPhase, secondPhase, phaseBlend,
+          firstAction, secondAction, actionBlend);
+      const upperScale = precompositionComponent(precomposition, base, base.scales,
+        upperWeightIndex, slot, component, firstPhase, secondPhase, phaseBlend,
+        firstAction, secondAction, actionBlend);
+      pose.scales[posePosition + component] =
+        lowerScale * (1 - weightBlend) + upperScale * weightBlend;
+    }
+    if (lowerWeightIndex < 0) {
+      for (let component = 0; component < 4; component++) {
+        scratch.precompositionRotationA[component] = pose.rotations[poseRotation + component];
+      }
+    } else {
+      precompositionRotation(precomposition, base, lowerWeightIndex, slot,
+        firstPhase, secondPhase, phaseBlend, firstAction, secondAction, actionBlend,
+        scratch, scratch.precompositionRotationA);
+    }
+    precompositionRotation(precomposition, base, upperWeightIndex, slot,
+      firstPhase, secondPhase, phaseBlend, firstAction, secondAction, actionBlend,
+      scratch, scratch.precompositionRotationB);
+    slerpInto(scratch.precompositionRotationA, 0,
+      scratch.precompositionRotationB, 0, weightBlend,
+      pose.rotations, poseRotation);
+  }
+  return pose;
+}
+
+function composePalette(sourcePackage, targetPose, scratch, fromPose = null, blend = 1,
+                        actionPose = null, actionMask = null, actionWeight = 0) {
+  const { local, globals, position, rotation, scale, palette } = scratch;
+  for (let bone = 0; bone < sourcePackage.jointCount; bone++) {
+    const positionOffset = bone * 3;
+    const rotationOffset = bone * 4;
+    if (fromPose) {
+      for (let component = 0; component < 3; component++) {
+        position[component] = fromPose.positions[positionOffset + component] * (1 - blend) +
+          targetPose.positions[positionOffset + component] * blend;
+        scale[component] = fromPose.scales[positionOffset + component] * (1 - blend) +
+          targetPose.scales[positionOffset + component] * blend;
+      }
+      slerpInto(fromPose.rotations, rotationOffset, targetPose.rotations, rotationOffset,
+        blend, rotation);
+    } else {
+      for (let component = 0; component < 3; component++) {
+        position[component] = targetPose.positions[positionOffset + component];
+        scale[component] = targetPose.scales[positionOffset + component];
+      }
+      for (let component = 0; component < 4; component++) {
+        rotation[component] = targetPose.rotations[rotationOffset + component];
+      }
+    }
+    const layerWeight = actionPose ? actionMask[bone] * actionWeight : 0;
+    if (layerWeight > 0) {
+      for (let component = 0; component < 3; component++) {
+        position[component] = position[component] * (1 - layerWeight) +
+          actionPose.positions[positionOffset + component] * layerWeight;
+        scale[component] = scale[component] * (1 - layerWeight) +
+          actionPose.scales[positionOffset + component] * layerWeight;
+      }
+      slerpInto(rotation, 0, actionPose.rotations, rotationOffset, layerWeight, rotation);
+    }
     composeInto(position, rotation, scale, local);
     const parent = sourcePackage.bones[bone].parent;
     if (parent < 0) globals.set(local, bone * 16);
     else multiplyInto(globals, parent * 16, local, 0, globals, bone * 16);
   }
-  sourcePackage.weightedBoneIndices.forEach((bone, paletteIndex) => {
+  for (let paletteIndex = 0; paletteIndex < sourcePackage.weightedBoneIndices.length; paletteIndex++) {
+    const bone = sourcePackage.weightedBoneIndices[paletteIndex];
     multiplyInto(globals, bone * 16, sourcePackage.mesh.inverseBindMatrices, bone * 16,
       palette, paletteIndex * 16);
-  });
+  }
   return palette;
+}
+
+function makePoseScratch(sourcePackage) {
+  return {
+    positions: new Float32Array(sourcePackage.jointCount * 3),
+    rotations: new Float32Array(sourcePackage.jointCount * 4),
+    scales: new Float32Array(sourcePackage.jointCount * 3),
+  };
 }
 
 function makeScratch(sourcePackage) {
   return {
+    pose: makePoseScratch(sourcePackage),
     local: new Float32Array(16), globals: new Float32Array(sourcePackage.jointCount * 16),
     position: new Float32Array(3), rotation: new Float32Array(4), scale: new Float32Array(3),
+    precompositionRotationA: new Float32Array(4),
+    precompositionRotationB: new Float32Array(4),
+    precompositionRotationC: new Float32Array(4),
+    precompositionRotationD: new Float32Array(4),
     palette: new Float32Array(sourcePackage.weightedJointCount * 16),
   };
 }
 
-/** Deterministically sample a native local-TRS clip into mesh-local skin matrices. */
-export function sampleNativeSkinPalette(sourcePackage, { clip: clipName, time, playback } = {}) {
+function evaluatePalette(sourcePackage, clip, time, playback, scratch,
+                         actionPose = null, actionMask = null, actionWeight = 0) {
+  sampleLocalPose(sourcePackage, clip, time, playback, scratch.pose);
+  return composePalette(sourcePackage, scratch.pose, scratch, null, 1,
+    actionPose, actionMask, actionWeight);
+}
+
+function resolveTransition(sourcePackage, toClip, transition) {
+  if (!transition || typeof transition !== 'object' || Array.isArray(transition) ||
+      typeof transition.fromClip !== 'string' || !sourcePackage.clips[transition.fromClip] ||
+      typeof transition.fromTime !== 'number' || !Number.isFinite(transition.fromTime) ||
+      (transition.fromPlayback !== 'loop' && transition.fromPlayback !== 'clamp') ||
+      typeof transition.elapsed !== 'number' || !Number.isFinite(transition.elapsed) ||
+      transition.elapsed < 0) {
+    throw new TypeError('transition requires a sampled fromClip/fromTime/fromPlayback and nonnegative elapsed');
+  }
+  const key = transition.fromClip + '->' + toClip;
+  const contract = sourcePackage.transitions[key];
+  if (!contract) throw new Error('Native transition unavailable: ' + key);
+  return contract;
+}
+
+function resolveActionLayer(sourcePackage, action) {
+  if (!action || typeof action !== 'object' || Array.isArray(action) ||
+      typeof action.state !== 'string' ||
+      typeof action.time !== 'number' || !Number.isFinite(action.time) ||
+      typeof action.weight !== 'number' || !Number.isFinite(action.weight)) {
+    throw new TypeError('action requires state, finite raw source-clip time and finite weight');
+  }
+  if (action.blend != null && (typeof action.blend !== 'number' ||
+      !Number.isFinite(action.blend) || action.blend < 0 || action.blend > 1)) {
+    throw new RangeError('action blend must be finite and in [0,1]');
+  }
+  const layer = sourcePackage.actionLayers[action.state];
+  if (!layer) throw new Error('Native action layer unavailable: ' + action.state);
+  if (!layer.webComposable) {
+    throw new Error('Native action layer unavailable: ' + action.state + '; ' + layer.blocker);
+  }
+  const precomposition = sourcePackage.actionPrecompositions[action.state];
+  if (precomposition) {
+    if (action.weight < 0 || action.weight > 1) {
+      throw new RangeError('Precomposed native action weight must be in [0,1]');
+    }
+  } else if (action.weight !== 1 || (action.blend != null && action.blend !== 1)) {
+    throw new TypeError('Masked override action requires exactly evidenced weight and blend 1');
+  }
+  if (layer.mode !== 'override' && !precomposition) {
+    throw new Error('Unsupported native action composition mode: ' + layer.mode);
+  }
+  return layer;
+}
+
+function evaluateTransitionPalette(sourcePackage, toClipName, toClip, time, playback, transition,
+                                   scratch, fromPose, result,
+                                   actionPose = null, actionMask = null, actionWeight = 0) {
+  const contract = resolveTransition(sourcePackage, toClipName, transition);
+  result.key = transition.fromClip + '->' + toClipName;
+  result.duration = contract.duration;
+  if (transition.elapsed <= 0) {
+    result.weight = 0;
+    return evaluatePalette(sourcePackage, sourcePackage.clips[transition.fromClip],
+      transition.fromTime, transition.fromPlayback, scratch,
+      actionPose, actionMask, actionWeight);
+  }
+  if (transition.elapsed >= contract.duration) {
+    result.weight = 1;
+    return evaluatePalette(sourcePackage, toClip, time, playback, scratch,
+      actionPose, actionMask, actionWeight);
+  }
+  sampleLocalPose(sourcePackage, sourcePackage.clips[transition.fromClip],
+    transition.fromTime, transition.fromPlayback, fromPose);
+  sampleLocalPose(sourcePackage, toClip, time, playback, scratch.pose);
+  result.weight = transition.elapsed / contract.duration;
+  return composePalette(sourcePackage, scratch.pose, scratch, fromPose, result.weight,
+    actionPose, actionMask, actionWeight);
+}
+
+function evaluatePrecomposedActionPalette(sourcePackage, precomposition,
+                                          toClipName, toClip, time, playback,
+                                          actionTime, actionWeight, transition, scratch,
+                                          targetPose, fromPose, result) {
+  if (transition === null) {
+    sampleActionPrecomposition(sourcePackage, precomposition, toClipName,
+      toClip, time, playback, actionTime, actionWeight, targetPose, scratch);
+    return composePalette(sourcePackage, targetPose, scratch);
+  }
+  const contract = resolveTransition(sourcePackage, toClipName, transition);
+  result.key = transition.fromClip + '->' + toClipName;
+  result.duration = contract.duration;
+  if (transition.elapsed <= 0) {
+    result.weight = 0;
+    sampleActionPrecomposition(sourcePackage, precomposition, transition.fromClip,
+      sourcePackage.clips[transition.fromClip], transition.fromTime,
+      transition.fromPlayback, actionTime, actionWeight, targetPose, scratch);
+    return composePalette(sourcePackage, targetPose, scratch);
+  }
+  if (transition.elapsed >= contract.duration) {
+    result.weight = 1;
+    sampleActionPrecomposition(sourcePackage, precomposition, toClipName,
+      toClip, time, playback, actionTime, actionWeight, targetPose, scratch);
+    return composePalette(sourcePackage, targetPose, scratch);
+  }
+  sampleActionPrecomposition(sourcePackage, precomposition, transition.fromClip,
+    sourcePackage.clips[transition.fromClip], transition.fromTime,
+    transition.fromPlayback, actionTime, actionWeight, fromPose, scratch);
+  sampleActionPrecomposition(sourcePackage, precomposition, toClipName,
+    toClip, time, playback, actionTime, actionWeight, targetPose, scratch);
+  result.weight = transition.elapsed / contract.duration;
+  return composePalette(sourcePackage, targetPose, scratch, fromPose, result.weight);
+}
+
+/** Deterministically sample a native base clip with optional evidenced transition/action layer. */
+export function sampleNativeSkinPalette(sourcePackage, {
+  clip: clipName, time, playback, transition = null, action = null,
+} = {}) {
   const loaded = loadNativeSkinPackage(sourcePackage);
   const clip = loaded.clips[clipName];
   if (!clip) throw new Error('Native sampled clip unavailable: ' + String(clipName));
-  return new Float32Array(evaluatePalette(loaded, clip, time, playback, makeScratch(loaded)));
+  const scratch = makeScratch(loaded);
+  const actionPose = action ? makePoseScratch(loaded) : null;
+  const actionFromPose = action ? makePoseScratch(loaded) : null;
+  const layer = action ? resolveActionLayer(loaded, action) : null;
+  const precomposition = action ? loaded.actionPrecompositions[action.state] : null;
+  if (layer && !precomposition) {
+    const state = loaded.states[action.state];
+    sampleLocalPose(loaded, loaded.clips[state.clip], action.time, state.playback, actionPose);
+  }
+  const transitionResult = {};
+  let palette;
+  if (precomposition) {
+    palette = evaluatePrecomposedActionPalette(loaded, precomposition,
+      clipName, clip, time, playback, action.time, action.weight * (action.blend ?? 1),
+      transition, scratch,
+      actionPose, actionFromPose, transitionResult);
+  } else {
+    palette = transition
+      ? evaluateTransitionPalette(loaded, clipName, clip, time, playback, transition,
+        scratch, makePoseScratch(loaded), transitionResult,
+        actionPose, layer?.mask, action?.weight ?? 0)
+      : evaluatePalette(loaded, clip, time, playback, scratch,
+        actionPose, layer?.mask, action?.weight ?? 0);
+  }
+  return new Float32Array(palette);
 }
 
 function compileShader(gl, kind, source) {
@@ -525,6 +1109,11 @@ export function createNativeSkinPass(gl, sourcePackage, {
   }
 
   const scratch = makeScratch(loaded);
+  const transitionPose = makePoseScratch(loaded);
+  const actionPose = makePoseScratch(loaded);
+  const actionFromPose = makePoseScratch(loaded);
+  const transitionInput = { fromClip: '', fromTime: 0, fromPlayback: 'clamp', elapsed: 0 };
+  const transitionResult = { key: null, duration: 0, weight: 1 };
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -541,8 +1130,17 @@ export function createNativeSkinPass(gl, sourcePackage, {
     return instance;
   }
   const createInstance = loadInstance;
+  function createStateInstance(stateName) {
+    const state = loaded.states[stateName];
+    if (!state) throw new Error('Native animation state unavailable: ' + String(stateName));
+    return loadInstance({
+      clip: loaded.clips[stateName] ? stateName : state.clip,
+      playback: state.playback,
+    });
+  }
 
-  function draw({ instance, modelMatrix, viewProjection, time, color } = {}) {
+  function draw({ instance, modelMatrix, viewProjection, time, color,
+                  transition = null, action = null } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -558,7 +1156,45 @@ export function createNativeSkinPass(gl, sourcePackage, {
         throw new RangeError('color components must be in [0,1]');
       }
     }
-    const palette = evaluatePalette(loaded, loaded.clips[instance.clip], time, instance.playback, scratch);
+    let palette;
+    let actionLayer = null;
+    let actionPrecomposition = null;
+    let actionWeight = 0;
+    if (action !== null) {
+      actionLayer = resolveActionLayer(loaded, action);
+      actionPrecomposition = loaded.actionPrecompositions[action.state] ?? null;
+      actionWeight = action.weight;
+      if (!actionPrecomposition) {
+        const actionState = loaded.states[action.state];
+        sampleLocalPose(loaded, loaded.clips[actionState.clip],
+          action.time, actionState.playback, actionPose);
+      }
+    }
+    transitionResult.key = null;
+    if (transition !== null) {
+      if (!transition || typeof transition !== 'object' || Array.isArray(transition) ||
+          !instances.has(transition.from)) {
+        throw new TypeError('draw transition.from must be an instance created by this pass');
+      }
+      transitionInput.fromClip = transition.from.clip;
+      transitionInput.fromTime = transition.fromTime;
+      transitionInput.fromPlayback = transition.from.playback;
+      transitionInput.elapsed = transition.elapsed;
+    }
+    if (actionPrecomposition) {
+      palette = evaluatePrecomposedActionPalette(loaded, actionPrecomposition,
+        instance.clip, loaded.clips[instance.clip], time, instance.playback,
+        action.time, action.weight * (action.blend ?? 1),
+        transition === null ? null : transitionInput, scratch,
+        actionPose, actionFromPose, transitionResult);
+    } else if (transition !== null) {
+      palette = evaluateTransitionPalette(loaded, instance.clip, loaded.clips[instance.clip],
+        time, instance.playback, transitionInput, scratch, transitionPose, transitionResult,
+        actionLayer ? actionPose : null, actionLayer?.mask, actionWeight);
+    } else {
+      palette = evaluatePalette(loaded, loaded.clips[instance.clip], time, instance.playback, scratch,
+        actionLayer ? actionPose : null, actionLayer?.mask, actionWeight);
+    }
     const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM);
     const previousVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     const culling = gl.isEnabled(gl.CULL_FACE);
@@ -580,13 +1216,31 @@ export function createNativeSkinPass(gl, sourcePackage, {
       gl.bindVertexArray(previousVao);
       gl.useProgram(previousProgram);
     }
-    return Object.freeze({
+    const report = {
       drawCalls: 1, triangles: loaded.mesh.indexCount / 3,
       clip: instance.clip, sampledTime: time, skinned: true,
       nativeClipSampled: true, runtimeEnemyInstanceVerified: false,
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
-    });
+    };
+    if (transitionResult.key !== null) {
+      report.transition = transitionResult.key;
+      report.transitionDuration = transitionResult.duration;
+      report.transitionWeight = transitionResult.weight;
+    }
+    if (actionLayer) {
+      report.action = actionLayer.name;
+      report.actionMode = actionLayer.mode;
+      report.actionTime = action.time;
+      report.actionWeight = actionWeight;
+      report.actionBlend = action.blend ?? 1;
+      report.actionEffectiveWeight = actionWeight * report.actionBlend;
+      if (actionPrecomposition) {
+        report.actionComposition = actionPrecomposition.composition;
+        report.actionApproximation = true;
+      }
+    }
+    return Object.freeze(report);
   }
 
   function dispose() {
@@ -600,7 +1254,11 @@ export function createNativeSkinPass(gl, sourcePackage, {
   return Object.freeze({
     source: loaded.source, coordinates: loaded.coordinates,
     jointCount: loaded.jointCount, weightedJointCount: loaded.weightedJointCount,
-    availableClips: loaded.availableClips,
-    createInstance, loadInstance, draw, dispose,
+    availableClips: loaded.availableClips, clipDurations: loaded.clipDurations,
+    states: loaded.states, actionTiming: loaded.actionTiming,
+    actionLayers: loaded.actionLayers, actionPrecompositions: loaded.actionPrecompositions,
+    availableActions: loaded.availableActions,
+    availableTransitions: loaded.availableTransitions,
+    createInstance, createStateInstance, loadInstance, draw, dispose,
   });
 }

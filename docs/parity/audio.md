@@ -1,8 +1,10 @@
 # SH-07 sound evidence ledger
 
-> Current status (2026-11-02): the issue-triggered private corpus bridge is
-> functional; legacy access-blocked notes below are historical. Newly verified
-> source-level Gun branches and their limits appear at the end of this ledger.
+> Current status (2026-11-02): exact Containers pistol, enemy-shot,
+> player-hit, enemy-shatter and ready-cue bindings now drive a private local
+> `AudioBufferSourceNode` path. Earlier synthetic-only/access-blocked passages
+> below are retained as historical evidence and are superseded by the final
+> integration section.
 
 Scope: SUPERHOT: MIND CONTROL DELETE, Steam app 690040,
 build 20299547, Unity 2018.4.14f1 (Mono Windows x86).
@@ -390,3 +392,96 @@ Do not treat the prototype's magazine reload or \`R\` key as the native
 ready-to-shoot callback. Explicit browser AudioContext-resume + output
 measurement and native paired observation are the acceptance gate for
 \`audible\`; \`src/main.js\` and \`src/audio.js\` remain SH-05-owned.
+
+## SH-07 — original local browser playback integration
+
+**PROUVÉ (static producer → serialized binding → converted media identity):**
+Containers build 28 contains `level28:18701` (`GunPickup`, GameObject 167,
+`PistolGunPickup`). Its `gunPrefab` resolves through file ID 4 to
+`sharedassets0.assets:711`, whose `PistolGun` component is
+`sharedassets0.assets:4849`. The component carries five rounds
+(`ammoMin=ammoMax=5`), base `attackDelay=0.6000000238418579`, and these exact
+clip pointers:
+
+| Web event | Serialized source | Clip owner/path_id | Local manifest ID | Native request parameters |
+| --- | --- | --- | --- | --- |
+| pistol primary shot | `PistolGun:4849.SFXAttack` | `sharedassets0.assets:604` | `audioPistolFirePrimary` | gain .6, relative pitch ±.15, volume ±.15, Gunshots |
+| pistol alternate shot | `PistolGun:4849.SFXAttack2` | `sharedassets0.assets:623` | `audioPistolFireAlternate` | selected only for `Random.value > .6`; same parameters |
+| pistol empty | `PistolGun:4849.SFXNoAmmo` | `sharedassets0.assets:605` | `audioPistolEmpty` | gain .4, Env SFX |
+| pistol pickup | `PistolGun:4849.SFXPickup` | `sharedassets0.assets:606` | `audioPistolPickup` | Containers pickup fields are null, so `Weapon.Pickup` reaches the weapon fallback; gain .9, pitch/volume ±.15 |
+| empty/reloaded pickup | `PistolGun:4849.SFXPickupReloaded` | `sharedassets0.assets:621` | `audioPistolPickupReloaded` | gain .9, pitch/volume ±.15; not the default five-round pickup branch |
+| ready tick | `PistolGun:4849.SFXReadyToShoot` | `sharedassets0.assets:626` | `audioPistolReady` | gain 1, Env SFX, requested after actual `GetAttackDelay` |
+| pistol throw | `PistolGun:4849.SFXThrow`, throwaway pickup4858 has no override | `sharedassets0.assets:600` | `audioPistolThrow` | gain .8, initial pitch1.5 with additive ±.2, volume multiplier ±.2, Env SFX |
+| enemy pistol fire | `AudioGameObjectResources.EnemyGunShot` → prefab `resources.assets:1853` → AudioSource `:27508` | `sharedassets0.assets:604` | `audioEnemyFire` | prefab volume .8, additive pitch ±.4, spatial, max distance 300 |
+| player hit | `AudioResources.Player.Hit` in `resources.assets:29456` | `resources.assets:1720` | `audioPlayerHit` | volume .7, pitch 1, nonspatial |
+| enemy shatter | `AudioGameObjectResources.EnemyShatter` → prefab `resources.assets:1898` → AudioSource `:27523` | `resources.assets:1579` | `audioEnemyShatter` | volume 1, pitch 1, spatial, max distance 30 |
+
+The ignored private
+`spec/world/browser-audio/manifest.json` records the source owner/path IDs,
+producer/prefab chains, parameters and SHA-256 of each unpacked WAV. The WAV
+bytes live only in `private/analysis/2026-11-02-mcd/spec/world/browser-audio/`;
+neither bytes nor base64 are committed to the public source.
+
+**PROUVÉ (public Web implementation; graph execution observed below):**
+`src/audio.js` exports `MCD_AUDIO_ASSET_KEYS` and keeps
+the existing `createAudio()` methods. `init()` is the only operation that
+creates/resumes `AudioContext`, so the caller must invoke it from a user
+gesture. `loadLocalAssets(manifest)` fetches and decodes the local manifest
+URLs once per URL. `setOriginalMode(true)` makes recovered events create a
+real `AudioBufferSourceNode`, gain node, and (when a position is supplied) a
+bounded HRTF panner. This mode fails closed: no procedural waveform substitutes
+for a known native binding when its local file is absent or fails to decode.
+`setOriginalMode(false)` is the explicit default for the independent public
+demo and preserves its existing oscillator/noise feedback, reported as
+`procedural-fallback` with reason `original-mode-disabled`. `win()` remains
+procedural in either mode because this integration did not establish its
+native clip chain.
+
+Each successful call returns source metrics: event and clip identity,
+owner/path ID, decoded duration/sample rate/channel/frame counts, requested
+native mixer group/priority, requested and bounded gain,
+native/world/effective pitch, spatial bounds and actual AudioContext start
+time. `getMetrics()` also exposes the selected original/demo mode, observed
+fetched-WAV byte length and SHA-256 (when browser SubtleCrypto is available),
+loaded-decoder facts, active source count, pending ready cues and the last
+playback result. These are browser-graph observations, not proof that a
+speaker or human listener heard the sound.
+
+**Ready cue and source clock:** `scheduleReady({delaySeconds,
+isWeaponThrown})` queues against the caller-fed WORLD clock;
+`advanceWorldTime(worldDeltaSeconds)` advances it. The guard is called only
+when due, reproducing the callback-time `Thrown` check rather than capturing
+state at fire time. There is deliberately no `setTimeout` and no implicit
+schedule inside `shoot()`. The root gameplay owner must schedule only after
+the positive-ammo `Gun.Attack` fire branch using its actual delay, cancel on
+weapon destruction, and feed the same source-world delta used for gameplay.
+
+`updateWorldAudio({aggregateTargetTimescale, customAudioTimescale})` implements
+the recovered `AudioManager.CalculateSoundScale` step (custom scale when
+greater than -.5; otherwise .1 interpolation toward
+`clamp01(aggregate/.65)`, snapping above .99), then the recovered mixer Pitch
+mapping from `[.01,1]` to `[.3,1]`. It updates already-playing and subsequent
+native buffer sources. The caller still owns exact Update/LateUpdate ordering
+and the aggregate time-shifter calculation.
+
+**Limits:** Web Audio HRTF/inverse distance is not Unity's mixer or
+log-rolloff implementation; mixer group DSP, reverb and platform output are
+not reproduced. Gain is capped at 1 for browser safety, so the upper tail of
+the native pickup randomization (up to 1.035) is intentionally bounded and
+reported as requested versus applied gain. Exact RNG stream parity depends on
+the caller; a caller-resolved pistol variant can be passed explicitly.
+Node behavioral tests exercise decode caching, graph API calls through a fake
+AudioContext, metrics, panning, ready-cue world delay/callback guard and
+active-source pitch updates. They are not a substitute for native Web Audio.
+
+**OBSERVÉ in actual Chromium at `/`:** after clicking “Jouer dans Containers”,
+the context reached `running`, nine distinct WAVs decoded across ten bindings,
+and enemy/primary fire reused one URL. A player shot decremented5→4 and started
+`sharedassets0.assets:623` as an `AudioBufferSourceNode`; moving through the
+world-time cooldown started ready clip626 with no pending cue left.
+Throwing consumed the held weapon and played original clip600, decoded as
+48000Hz mono/27881 frames. An analyser connected before the action measured
+a nonzero peak of0.66750 in the actual browser audio graph. Its WAV SHA-256 was
+`8fab8e5d46cdbb9edd960634162e0898a8177e47f0375e386c1b71668c9dcb8e`.
+This replaces the incorrect gunshot formerly emitted on throwing and proves
+graph signal, not physical speaker audibility or native mixer parity.

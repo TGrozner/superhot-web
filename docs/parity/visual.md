@@ -1,10 +1,10 @@
 # SH-15 — Comparaison visuelle MCD ↔ Web (protocole, **pas** un certificat 1:1)
 
-**État au 2 novembre 2026 :** comparateur et tests sur PNG synthétiques, et audit analytique de projection ; **aucune paire native/Web réellement capturée**. La cible est SUPERHOT: MIND CONTROL DELETE (MCD), **Containers / buildIndex 28**, et non le SUPERHOT original. SH-15 ne touche qu'à `scripts/visual-*`, `tests/visual-*` et ce document. SH-05 conserve le raccord runtime partagé ; SH-10 conserve la validation gameplay.
+**État courant :** six paires native/Web de personnages isolés ont été capturées et comparées ; les résultats et leurs limites figurent dans « Vérifications effectivement observées ». Aucune paire complète de gameplay n'établit la fidélité1:1. La cible est SUPERHOT: MIND CONTROL DELETE (MCD), Containers/buildIndex28. Les sections d'audit initial ci-dessous sont historiques.
 
 ## Les trois priorités visuelles à SH-05 — mise à jour après #98
 
-**Aucune différence sur captures natives/Web n'a encore été mesurée.** Les écarts ci-dessous sont des différences de **code / paramètres / couverture** constatables sans image, pas un score de fidélité perceptuelle.
+**Audit historique, avant le raccord des originaux et les captures isolées ci-dessous.** Les écarts suivants décrivent les paramètres et la couverture à cette ancienne étape, pas l'état courant ni un score perceptuel.
 
 1. **P0 — pas de vue native/Web appariée.** `?scene=containers` existe sur main depuis #88 ; #98 (squash `b6d7ed8`) permet désormais de charger localement les groupes OBJ sourcés `mesh6:g47` / `mesh7:g48` via `File`. Mais la vue n'a ni même pose native vérifiée, ni capture GPU Web avec les fichiers privés, ni image MCD exécutée et appariée. Les volumes non remplacés restent générés, et ce mode n'est pas le gameplay MCD. **Prouver** : navigateur réel, `locallyLoadedSourceGroups=2`, `sourceQualifiedMesh6DrawPackets=3`, `privateIndexedDraws=4`, screenshot propre et camera/mode explicités.
 2. **P0 — perspective différente, écart **analytique** quantifiable.** Le shader Web actuel utilise `f=1.58`, soit **64.66037° vertical** ; la caméra Unity sérialisée de `level28` indiquée par le résultat privé #15 vaut **~60.00003° vertical**, `near=0.03`, `far=1000`. Web: `near=0.045`, `far=120`. À pose/viewport/profondeur identiques, un objet face caméra serait projeté **8.78 % plus petit en hauteur** côté Web. Ce n'est **pas** une mesure de capture, et la caméra Unity sérialisée n'est **pas confirmée active au moment d'une image native**. **Prouver** : caméra réellement active, poses/projections appariées, avant de lancer le comparateur PNG.
@@ -91,13 +91,24 @@ Containers utilise la projection sérialisée 60.0000267° / near0.03 / far1000.
 
 ## Vérifications effectivement observées
 
-La racine a été exercée dans Chromium/WebGL2 avec 360 instances de décor,185037 triangles,68 meshes,17 textures, personnage original skinné et pistolet original. Marche, pause et impact ont été exercés ; l'impact utilise une caméra de scénario contrôlée, pas une assertion sur un parcours natif. Aucune erreur GL n'a été observée.
+La racine a été exercée dans Chromium/WebGL2 avec360 instances de décor,185037 triangles,68 meshes,21 textures, personnage original skinné et pistolet original. Marche, pause, tir, lancer et impact ont été exercés ; les contrôles de scénario ne prouvent pas un parcours natif. Le décor compte121 compositions Concrete MAIN sourcées et239 draws génériques. Les chemins BC3 à12 mips et PNG de repli sans S3TC ont tous deux été observés sans erreur GL.
 
-Quatre références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75 et hit0.25, à960×540, caméra(0,1.15,4), orientation vers−Z et même projection. Leurs62 poses locales ont été revalidées contre l'échantillonnage natif (écart maximal observé0). La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux afin d'éviter le cache de skinning d'une capture immédiate. Le Web utilise son véritable pass de skinning GPU, sans redimensionnement des images.
+Six références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75, hit0.25, fire0.25 et punch0.5, à960×540, caméra(0,1.15,4), avec les mêmes matrices de vue/projection. La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux afin d'éviter le cache de skinning d'une capture immédiate. Le Web utilise son véritable pass de skinning GPU, sans redimensionnement, antialiasing désactivé pour cette comparaison v8. Les images et le rapport `native-web-pose-comparison-v8.json` restent privés.
 
-Les masques de silhouette, définis par un écart RGB maximal supérieur à32 par rapport au fond, donnent une intersection/union de **0.9554 à0.9615** ; les centres diffèrent de **0.63 à0.81 pixel**. La différence RGB moyenne normalisée sur l'union du personnage est **0.0940 à0.1022**. Ces nombres sont limités aux quatre vues isolées ; l'antialiasing diffère. **Ils ne sont pas un pourcentage de fidélité du jeu.**
+Les masques utilisent un écart RGB maximal supérieur à32 par rapport au fond de chaque image. L'intersection/union mesure la superposition des silhouettes, pas la fidélité globale du jeu.
 
-Écarts visibles restant établis : (1) matériau rouge cristallin natif contre lumière/couleur Web simplifiées ; (2) contours/antialiasing différents ; (3) absence du contexte de lumière, ombres et post-traitement d'une vraie frame de gameplay Containers. Aucun rendu complet1:1 n'est revendiqué.
+| Pose (secondes du clip) | Intersection/union | Écart des centres (pixels) | Écart RGB moyen normalisé |
+|---|---:|---:|---:|
+| idle0 |0.99815|0.00697|0.08007|
+| walk0.25 |0.99880|0.01500|0.07526|
+| walk0.75 |0.99866|0.00866|0.08584|
+| hit0.25 |0.99172|0.23010|0.08591|
+| fire0.25 |0.99403|0.12517|0.08270|
+| punch0.5 |0.99610|0.13933|0.08079|
+
+Ces six rendus n'ont produit aucune erreur GL. Ils remplacent la précédente mesure à quatre poses, dont l'antialiasing et l'alignement différaient : l'amélioration numérique ne doit donc pas être attribuée uniquement au modèle. Le tir additif pendant la marche a également été observé dans le navigateur, mais ne fait pas partie de ces six comparaisons isolées.
+
+Écarts visibles établis : matériau cristallin rouge/noir natif contre ombrage Web simplifié ; contexte de lumière, ombres et post-traitement d'une vraie frame de gameplay encore non apparié. Aucune fidélité complète1:1 n'est revendiquée.
 
 
 Les notes d'audit ci-dessous décrivent les constats antérieurs à ce raccord.

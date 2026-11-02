@@ -47,6 +47,13 @@ test('Concrete packet preserves point-mip sampler, sRGB intent, UV ST and opaque
   assert.equal(packet.texture.packageSampler.minFilter, 'NEAREST');
   assert.equal(packet.texture.colorTransfer, 'srgb');
   assert.equal(packet.texture.sample, true);
+  assert.equal(packet.shaderMathCoverage,
+    'compiled-directional-lightmap-forward-compositor-with-serialized-globals');
+  assert.match(NATIVE_MATERIAL_GLSL.concreteForwardBase,
+    /3\.0 \* lightLocalAmbient\.a \* ambientX/);
+  assert.match(NATIVE_MATERIAL_GLSL.concreteForwardBase,
+    /rgbm \* vec4\(encodedLightmap\.rgb, encodedLightmap\.r\)/);
+  assert.ok(packet.unresolved.some(value => value.includes('XulmFalseLight')));
 });
 
 test('UV0 absence suppresses concrete sampling but never reinterprets Black Crystal reflection as diffuse', () => {

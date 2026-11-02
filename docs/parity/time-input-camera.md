@@ -1,6 +1,37 @@
 # SH-01 — temps, entrées, caméra (MIND CONTROL DELETE)
 
-**État : inventaire de preuves partielles, pas un contrat de parité exécutable.** 2026-11-02. La cible est **SUPERHOT: MIND CONTROL DELETE** (Steam app 690040), pas le jeu SUPERHOT original. Les affirmations sont classées PROUVÉ (déclaration décompilée), OBSERVÉ (exécution native), INCONNU. Ce dépôt public ne reproduit pas le code décompilé ni les assets originaux.
+**État : preuves partielles et intégration Web bornée, pas de parité 1:1 démontrée.** 2026-11-02. La cible est **SUPERHOT: MIND CONTROL DELETE** (Steam app 690040), pas le jeu SUPERHOT original. Les affirmations sont classées PROUVÉ (déclaration décompilée), OBSERVÉ (exécution native ou Web, explicitement distinguées), INCONNU. Ce dépôt public ne reproduit pas le code décompilé ni les assets originaux.
+
+## Intégration courante sur localhost
+
+Le mode Containers chargé par défaut utilise `createMcdGameplayClock` et
+`stepMcdGameplayClock`, avec les règles récupérées de `TimeControl`,
+`PlayerController`, `CameraLookTimeControl` et `SimplifiedTimeShifter` :
+maximum des contributions positives, minimum `0.005`, maximum `1`, montée et
+descente linéaires des contributions mouvement/saut, tampon de rotation caméra,
+et impulsions de tir/lancer expirant en temps du monde. Le déplacement et le
+délai entre tirs utilisent maintenant ce temps du monde, au lieu du temps réel.
+La valeur appliquée au tick précédent détermine le delta simulé courant.
+
+Le déplacement au sol reprend `topSpeed=6` et `speedMultiplier=1.1`, sans sprint
+Shift inventé. Le saut reprend `jumpForce=5.75`, `gravityModifier=5`, le facteur
+d'impulsion `0.4` et les coefficients de contrôle aérien du corps source.
+La limite verticale de vue est `±80°`. Les salles de démonstration conservent
+leurs règles explicitement générées.
+
+**OBSERVÉ dans Chromium, pas une trace native appariée :** repos à
+`0.004999999888241291`, mouvement atteignant `1`, déplacement effectif pendant
+le délai d'arme, saut avec hauteur positive, tir faisant passer le chargeur de
+5 à 4, puis son original d'arme prête lorsque le délai mondial de `0.6 s` expire.
+`R` ne recharge plus dans Containers. **Replay n'est pas implémenté** :
+désactiver le rechargement fictif ne reproduit pas cette commande du jeu.
+
+**Limites :** le solveur de collisions et l'ordonnancement restent Web, pas
+PhysX ni les callbacks Unity à `1/120 s`. Le gain DOM de souris n'est pas
+calibré contre les axes InControl. POWER, les modificateurs spéciaux et les
+réglages/rebindings natifs ne sont pas reproduits par cette composition.
+Les constats de code Web datés ci-dessous décrivent leurs révisions historiques ;
+ils ne remplacent pas cet état d'intégration.
 
 
 > **Mise à jour P0 — 2 novembre 2026 :** les issues privées #6 (artifact `13134400167`), #13 (`13134370412`) et #15 (`13133497389`) ont maintenant réussi. Le corps `TimeControl.Awake/LateUpdate/GetAggregateTargetTimescale` est relu directement en #13 ; la scène `level28` et ses liens temps/caméra sont contre-lus par SQL indexé en #38 (`13134630168`) ; les méthodes caméra le sont en #40 (`13133293284`). **Le 60 de l'initialiseur n'est pas le 120 sérialisé de `TimeControl18679` dans Containers.** Aucun échantillonnage temporel ni test 1:1 natif n'est démontré. Le compte rendu dans [SH-01 #1](https://github.com/TGrozner/superhot-web/issues/1#issuecomment-6575143801) donne les méthodes, SHA, limites et réfutations. Les indications « en attente » ci-dessous décrivent des contrôles historiques, non le statut actuel.

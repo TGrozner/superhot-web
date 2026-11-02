@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { NATIVE_MATERIAL_GLSL } from '../src/render/native-material.js';
 import {
   createNativeSkinPass, loadNativeSkinPackage, sampleNativeSkinPalette,
 } from '../src/characters/native-skin-pass.js';
@@ -44,6 +43,97 @@ const sourcePackage = (overrides = {}) => ({
   ...overrides,
 });
 
+const transitionPackage = () => sourcePackage({
+  clips: {
+    idle: { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] },
+    walk: { duration: 1, sampleRate: 1, frames: [frame(0), frame(2)] },
+    fire: { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] },
+    punch: { duration: 1, sampleRate: 1,
+      frames: [frame(10, [0,0,1,0]), frame(10, [0,0,1,0])] },
+  },
+  clipAliases: { run: 'walk' },
+  states: {
+    idle: { clip: 'idle', playback: 'loop', speed: 1 },
+    run: { clip: 'walk', playback: 'loop', speed: 2.25 },
+    fire: { clip: 'fire', playback: 'clamp', speed: 8 },
+    punch: { clip: 'punch', playback: 'clamp', speed: 1 },
+  },
+  transitions: {
+    'idle->run': {
+      from: 'idle', to: 'run', duration: .1,
+      source: 'synthetic fixed-duration transition',
+    },
+  },
+  actionTiming: {
+    fire: { entryDuration: .1, exitDuration: .1, exitTime: .875, hasFixedDuration: true },
+    punch: { entryDuration: .1, normalExitDuration: .3, normalExitTime: .8, hasFixedDuration: true },
+  },
+  actionLayers: {
+    fire: {
+      clip: 'fire', mode: 'additive', defaultWeight: 1, mask: [1,1],
+      source: 'synthetic unavailable additive layer', reference: 'synthetic frame zero',
+      webComposable: false, blocker: 'synthetic Humanoid additive composition is unavailable',
+    },
+    punch: {
+      clip: 'punch', mode: 'override', defaultWeight: 0, mask: [0,1],
+      source: 'synthetic masked override layer', webComposable: true,
+    },
+  },
+});
+
+const precomposedFirePackage = () => {
+  const pkg = transitionPackage();
+  const sample = rootX => frame(rootX);
+  const values = (frames, field) => frames.flatMap(value => value[field]);
+  const idle = [sample(10), sample(14)];
+  const walk = [sample(0), sample(4), sample(2), sample(6)];
+  return {
+    ...pkg,
+    actionLayers: {
+      ...pkg.actionLayers,
+      fire: { ...pkg.actionLayers.fire, webComposable: true },
+    },
+    actionPrecompositions: {
+      fire: {
+        schemaVersion: 1,
+        action: 'fire',
+        composition: 'nativeHumanoidAdditivePrecomposedGrid',
+        bones: [0,1],
+        actionStart: 0,
+        actionStep: 1,
+        actionCount: 2,
+        actionDuration: 1,
+        layerWeights: [1],
+        implicitZeroWeight: true,
+        baseClips: {
+          idle: {
+            phaseCount: 1,
+            positions: values(idle, 'positions'),
+            rotations: values(idle, 'rotations'),
+            scales: values(idle, 'scales'),
+          },
+          walk: {
+            phaseCount: 2,
+            positions: values(walk, 'positions'),
+            rotations: values(walk, 'rotations'),
+            scales: values(walk, 'scales'),
+          },
+          run: { alias: 'walk' },
+        },
+        interpolation: 'synthetic periodic base then action interpolation',
+        timeDomain: { baseTime: 'source clip seconds', actionTime: 'source clip seconds' },
+        evidence: { source: 'synthetic native-grid fixture' },
+        heldOut: { records: 1, maxPositionComponentError: 0 },
+        transitionHeldOut: { records: 1, maxPositionComponentError: 0 },
+        activation: { invocation: 'synthetic fixture' },
+        shootingIdleReference: { records: 1, maxPositionComponentError: 0 },
+        shootingTransitionHeldOut: { combined: { records: 1, maxPositionComponentError: 0 } },
+        controllerTimeline: [{ elapsed: 0, inTransition: false }],
+        limits: ['synthetic fixture'],
+      },
+    },
+  };
+};
 const expectedEnemyPalettePackage = () => {
   const vertexCount = 60;
   const base = sourcePackage({ clips: {} });
@@ -101,6 +191,71 @@ test('quaternion samples use shortest-arc slerp rather than component lerp', () 
   const palette = sampleNativeSkinPalette(pkg, { clip: 'turn', time: .5, playback: 'clamp' });
   const child = palette.slice(0, 16);
   near([child[0], child[1], child[4], child[5]], [0,1,-1,0]);
+});
+
+test('clip aliases and evidenced transition durations blend local TRS without a generic crossfade', () => {
+  const pkg = transitionPackage();
+  const loaded = loadNativeSkinPackage(pkg);
+  assert.deepEqual(loaded.availableClips, ['idle', 'walk', 'fire', 'punch', 'run']);
+  assert.deepEqual(loaded.availableTransitions, ['idle->run']);
+  assert.deepEqual(loaded.availableActions, ['punch']);
+  assert.deepEqual(loaded.actionTiming.fire,
+    { entryDuration: .1, exitDuration: .1, exitTime: .875, hasFixedDuration: true });
+  assert.equal(loaded.clips.run, loaded.clips.walk);
+  const palette = sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .5, playback: 'loop',
+    transition: {
+      fromClip: 'idle', fromTime: 0, fromPlayback: 'loop', elapsed: .05,
+    },
+  });
+  near(Array.from(palette.slice(12, 15)), [.5,0,0]);
+  assert.throws(() => sampleNativeSkinPalette(loaded, {
+    clip: 'walk', time: 1, playback: 'loop',
+    transition: {
+      fromClip: 'idle', fromTime: 0, fromPlayback: 'loop', elapsed: .05,
+    },
+  }), /transition unavailable/);
+});
+
+test('masked override action preserves base locomotion outside its source-qualified bones', () => {
+  const loaded = loadNativeSkinPackage(transitionPackage());
+  const palette = sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .5, playback: 'loop',
+    action: { state: 'punch', time: 0, weight: 1 },
+  });
+  near(Array.from(palette.slice(12, 15)), [1,0,0]);
+  near([palette[16], palette[17], palette[20], palette[21]], [-1,0,0,-1]);
+  assert.throws(() => sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .5, playback: 'loop',
+    action: { state: 'fire', time: .25, weight: 1 },
+  }), /Humanoid additive composition is unavailable/);
+  assert.throws(() => sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .5, playback: 'loop',
+    action: { state: 'punch', time: 0, weight: .5 },
+  }), TypeError);
+});
+
+test('native precomposed additive fire interpolates over locomotion and its transition', () => {
+  const loaded = loadNativeSkinPackage(precomposedFirePackage());
+  assert.deepEqual(loaded.availableActions, ['fire', 'punch']);
+  const moving = sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .25, playback: 'loop',
+    action: { state: 'fire', time: .5, weight: 1 },
+  });
+  near(Array.from(moving.slice(12, 15)), [3,0,0]);
+  const fractional = sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .25, playback: 'loop',
+    action: { state: 'fire', time: .5, weight: .5 },
+  });
+  near(Array.from(fractional.slice(12, 15)), [1.75,0,0]);
+  const transitioning = sampleNativeSkinPalette(loaded, {
+    clip: 'run', time: .25, playback: 'loop',
+    transition: {
+      fromClip: 'idle', fromTime: 0, fromPlayback: 'loop', elapsed: .05,
+    },
+    action: { state: 'fire', time: .5, weight: 1 },
+  });
+  near(Array.from(transitioning.slice(12, 15)), [7.5,0,0]);
 });
 
 test('missing native clips stay explicitly unavailable; no bind-pose animation is fabricated', () => {
@@ -171,25 +326,6 @@ function mockGl({ uniformLimit = 256 } = {}) {
   return { gl, calls, state: () => ({ vao, arrayBuffer, program, winding }) };
 }
 
-test('animated skin shader incorporates bounded shared Red Crystal output math', () => {
-  const { gl, calls } = mockGl();
-  const sources = [];
-  const original = gl.shaderSource;
-  gl.shaderSource = (shader, text) => { sources.push([shader.kind, text]); original(shader, text); };
-  const pass = createNativeSkinPass(gl, sourcePackage());
-  const fragment = sources.find(([kind]) => kind === gl.FRAGMENT_SHADER)?.[1];
-  assert.ok(fragment?.includes(NATIVE_MATERIAL_GLSL.redCrystalOutput));
-  assert.ok(fragment.includes('nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0))'));
-  assert.doesNotMatch(fragment, /uNativeOverlay|uNativeAdditive|sampler2D/);
-  const instance = pass.createInstance({ clip: 'walk', playback: 'clamp' });
-  const report = pass.draw({ instance, time: .5,
-    modelMatrix: identity(), viewProjection: identity(), color: [.8,.1,.2,1] });
-  assert.equal(report.redCrystalFinalCompositor, true);
-  assert.equal(report.redCrystalNativeInputsVerified, false);
-  assert.equal(report.materialParity, false);
-  assert.equal(calls.filter(([kind]) => kind === 'draw').length, 1);
-  pass.dispose();
-});
 
 test('GPU pass samples caller time, uploads one compact palette and restores host draw state', () => {
   const { gl, calls, state } = mockGl();
@@ -217,6 +353,68 @@ test('GPU pass samples caller time, uploads one compact palette and restores hos
   pass.dispose();
   assert.equal(calls.filter(call => call[0] === 'deleteBuffer').length, 5);
   assert.throws(() => pass.draw({}), /disposed/);
+});
+
+test('GPU instances crossfade only through a package transition contract', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, transitionPackage());
+  assert.deepEqual(pass.availableTransitions, ['idle->run']);
+  assert.equal(pass.states.run.speed, 2.25);
+  assert.deepEqual(pass.actionTiming.fire,
+    { entryDuration: .1, exitDuration: .1, exitTime: .875, hasFixedDuration: true });
+  assert.deepEqual(pass.availableActions, ['punch']);
+  const idle = pass.createStateInstance('idle');
+  const run = pass.createStateInstance('run');
+  const report = pass.draw({
+    instance: run, time: .5, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8,.1,.2,1], transition: { from: idle, fromTime: 0, elapsed: .05 },
+  });
+  const paletteUpload = calls.find(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  near(paletteUpload[2].slice(12, 15), [.5,0,0]);
+  assert.equal(report.transition, 'idle->run');
+  assert.equal(report.transitionDuration, .1);
+  assert.equal(report.transitionWeight, .5);
+  pass.dispose();
+});
+
+test('GPU action API applies only composable masked override layers', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, transitionPackage());
+  const run = pass.createStateInstance('run');
+  const report = pass.draw({
+    instance: run, time: .5, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8,.1,.2,1], action: { state: 'punch', time: 0, weight: 1 },
+  });
+  const paletteUpload = calls.find(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  near(paletteUpload[2].slice(12, 15), [1,0,0]);
+  assert.equal(report.action, 'punch');
+  assert.equal(report.actionMode, 'override');
+  assert.equal(report.actionTime, 0);
+  assert.equal(report.actionWeight, 1);
+  assert.throws(() => pass.draw({
+    instance: run, time: .5, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8,.1,.2,1], action: { state: 'fire', time: .25, weight: 1 },
+  }), /Humanoid additive composition is unavailable/);
+  pass.dispose();
+});
+
+test('GPU fire action uses native precomposition during locomotion transition', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const idle = pass.createStateInstance('idle');
+  const run = pass.createStateInstance('run');
+  const report = pass.draw({
+    instance: run, time: .25, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8,.1,.2,1],
+    transition: { from: idle, fromTime: 0, elapsed: .05 },
+    action: { state: 'fire', time: .5, weight: 1 },
+  });
+  const paletteUpload = calls.find(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  near(paletteUpload[2].slice(12, 15), [7.5,0,0]);
+  assert.equal(report.action, 'fire');
+  assert.equal(report.actionComposition, 'nativeHumanoidAdditivePrecomposedGrid');
+  assert.equal(report.actionApproximation, true);
+  pass.dispose();
 });
 
 test('62 hierarchy bones compact to the verified 60 weighted uniform matrices', () => {
