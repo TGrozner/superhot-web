@@ -73,3 +73,48 @@ natifs peuvent être nécessaires pour distinguer les chemins d'exécution.
 
 Le prochain raccord doit suivre les contrats issus des lanes SH-01/SH-03 et
 seulement ensuite proposer des métriques supplémentaires de parité mesurable.
+
+
+## Intégration verticale WebGL2 — fixture **SYNTHETIC / NOT MCD**
+
+Le rendu expérimental est activé **uniquement** par `?scene=synthetic`
+(exemple en local : `http://localhost:3013/?scene=synthetic`, adapter le port du
+serveur). Sans ce paramètre, la progression, la géométrie et les draw calls
+hérités restent inchangés.
+
+Chemin d'exécution réellement raccordé :
+
+`src/main.js → buildSyntheticManifest() → buildSceneGraph() → planSceneDraws() → drawGeneratedManifest() → renderer.box()/renderer.affineBox()`.
+
+Cette fixture est **100 % générée**, n'est ni Containers ni une scène d'origine.
+Elle contient des volumes imbriqués et une composition TRS (translation,
+quaternion, scale) produisant des transformations non diagonales et du shear
+avec un parent non uniforme. Le shader WebGL2 reçoit la matrice affine complète
+et une inverse-transposée 3×3 pour les normales (y compris les réflexions) ;
+aucune rotation/shear n'est réduite à une boîte AABB. Les paquets purement
+axis-alignés continuent par l'ancien moteur. Les matériaux utilisent
+`GENERATED_PALETTE`, pas des textures ou shaders commerciaux.
+
+Les objets supplémentaires sont **visuels uniquement** : ils ne participent
+pas encore aux obstacles, contacts, tirs ni occlusions du gameplay. Un décor
+rendu sans collision n'est pas une scène MCD jouable. L'intégration d'une vraie
+géométrie Containers build28 dépend des jointures Unity vérifiées par SH-04,
+avec identité `(owner,path_id)`, TRS, mesh assigné, matérialisation autorisée,
+et ensuite une politique collision explicite.
+
+Tests Node : `node --test tests/parity-scene-manifest.test.mjs`.
+Ces tests vérifient la composition/dispatch et les normales numériques,
+**pas** la compilation du shader sur GPU ni une capture native. En navigateur,
+la session opt-in expose `window.__superhotSceneMetrics` (objet et draw-call
+counts, échantillons rAF, `p95FrameMs`, `fpsAtP95FrameMs`, `p95Fps`).
+Les compteurs sont mesurés **dans cette session Web** et actualisés à ~1 Hz,
+sans recourir au runner natif. Ils n'ont pas encore de valeur mesurée ni de
+capture réelle attachée à cette documentation. Pour relever une mesure :
+démarrer une session jouable, parcourir la fixture, noter résolution et GPU,
+capturer l'écran et copier les métriques après plusieurs secondes. Comparer
+également sans `?scene=synthetic`. Ne pas annoncer de FPS, de réduction de
+draw calls ou de fidélité visuelle sans cette mesure.
+
+Cette préparation est un **contrat de rendu autonome** ; les données réelles de
+scène et les mesures natives sont toujours `INCONNUES`. Les comparaisons
+avec les 354+ tests Node Web verts restent strictement côté prototype.
