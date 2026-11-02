@@ -331,3 +331,62 @@ The Web prototype's existing oscillator sounds are SYNTHETIC and
 must not be relabeled as native MCD clips. Browser audible testing
 requires a resumed user-gesture AudioContext and a captured, monitored
 output; method invocation alone does not prove it.
+
+
+## SH-07 — delayed \`Gun.PlayReadyToShootSound\` (native source; no audible claim)
+
+**PROUVÉ — static source methods, not a recorded execution.** Steam MCD build
+\`20299547\`, Unity \`2018.4.14f1\`; installed \`Assembly-CSharp\` SHA-256
+\`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257\`.
+The PRIVATE bounded corpus read [research #34](https://github.com/TGrozner/superhot-research/issues/34)
+(run \`41430553462\`, artifact \`13134122741\`; UTF-8 excerpt SHA-256
+\`ae7d70585e54e8c7887357a49aa2b86e384001c89ebdba6b36021bf605b1fdbf\`)
+establishes \`Gun.Attack:99–127\`: after the ready/thrown/optional-check
+guards, on **positive-ammo** and **NoShooting inactive** it invokes virtual
+\`Fire\`, decrements ammo, and only when \`SFXReadyToShoot != null\` requests
+\`Invoke("PlayReadyToShootSound", GetAttackDelay())\`.
+It is *not* a sound at the moment of shooting, nor a reload command.
+
+**NEW PROUVÉ — separate callback-time guard.** PRIVATE [research #108](https://github.com/TGrozner/superhot-research/issues/108),
+run \`41451009752\`, artifact \`13143868556\`,
+\`managed/Assembly-CSharp/Gun.cs:356–365\`, excerpt UTF-8 SHA-256
+\`a14cf65d953dfd5219ee07173e968cec0ac596b0fbe83c7dd9d2c432a5857c29\`.
+At callback invocation, \`PlayReadyToShootSound\` **returns without requesting
+audio when the weapon state is \`Thrown\`**. Otherwise it requests
+\`AudioManager.PlayClip(SFXReadyToShoot, null, volume=1,
+mixerSfxEnvironment)\`. The callback itself does not repeat the non-null clip
+test. A gun thrown *after* firing but *before* callback must therefore not
+request the ready cue via this method. The callback's exact fire time and
+whether a particular Unity instance invokes it remain unobserved.
+
+**PROUVÉ — isolated Web translation, not playback:** \`src/sound/mcd-gun-ready-cue.js\`
+exposes \`planMcdGunReadyInvoke\` for the scheduling guard and
+\`resolveMcdGunReadyCallback\` for the later thrown-state guard. It passes
+through the explicit \`GetAttackDelay\` result **without choosing a duration,
+clock domain, or automatic JavaScript timer**; even a zero delay remains only
+a request to Unity's \`Invoke\`, not a claim of synchronous execution.
+\`tests/sound-mcd-gun-ready-cue.test.mjs\` exercises the positive path,
+counterfactual blocked/NoShooting/zero-ammo paths, clip-absent scheduling,
+and throwing the gun between request and callback.
+
+**OBSERVÉ:** no recorded native scene event, browser speaker output, waveform,
+or paired timing measurement for this cue. Green Node tests would establish
+only branching of the pure JS request adapter.
+
+**INCONNU:** the active Containers weapon class and its \`SFXReadyToShoot\`
+binding (asset owner/path_id), effective \`GetAttackDelay\` value, Unity
+\`Invoke\` delivery/suppression/cancellation semantics under timescale and
+pooling, clip identity, mixer gain/routing, attenuation and audibility.
+A callback \`PlayClip\` request is **not** evidence that sound was heard.
+No native clip, commercial asset, raw source excerpt or output bytes are
+published.
+
+**SH-05 integration handoff (not performed here):** verify a real weapon
+instance and source path first; feed the already classified \`Gun.Attack\`
+outcome and the actual ready-clip presence to the planner. Only after the
+corresponding callback actually executes, check \`Thrown\` at **callback time**
+and route a returned intent to an explicitly labeled **generated Web** cue.
+Do not treat the prototype's magazine reload or \`R\` key as the native
+ready-to-shoot callback. Explicit browser AudioContext-resume + output
+measurement and native paired observation are the acceptance gate for
+\`audible\`; \`src/main.js\` and \`src/audio.js\` remain SH-05-owned.
