@@ -16,6 +16,21 @@ const localAssetTypes = {
   enemyRig: ['enemy-merged-animated.json', 'application/json'],
   enemyHeadlessRig: ['enemy-merged-headless-animated.json', 'application/json'],
   scenePackage: ['containers-scene.json.gz', 'application/gzip'],
+  sceneLightmap_000: ['sceneLightmap_000.png', 'image/png'],
+  sceneLightmapBc3: ['sceneLightmap_000.bc3', 'application/octet-stream'],
+  sceneConcreteMicroseam: ['sceneConcreteMicroseam.png', 'image/png'],
+  sceneConcretePore: ['sceneConcretePore.png', 'image/png'],
+  sceneConcreteFogGradient: ['sceneConcreteFogGradient.png', 'image/png'],
+  audioPistolFirePrimary: ['pistol-fire-primary.wav', 'audio/wav'],
+  audioPistolFireAlternate: ['pistol-fire-alternate.wav', 'audio/wav'],
+  audioPistolEmpty: ['pistol-empty.wav', 'audio/wav'],
+  audioPistolPickup: ['pistol-pickup.wav', 'audio/wav'],
+  audioPistolPickupReloaded: ['pistol-pickup-reloaded.wav', 'audio/wav'],
+  audioPistolReady: ['pistol-ready.wav', 'audio/wav'],
+  audioPistolThrow: ['pistol-throw.wav', 'audio/wav'],
+  audioEnemyFire: ['enemy-fire.wav', 'audio/wav'],
+  audioPlayerHit: ['player-hit.wav', 'audio/wav'],
+  audioEnemyShatter: ['enemy-shatter.wav', 'audio/wav'],
 };
 const localAssets = new Map();
 const inside = (file, directory) => file.toLowerCase().startsWith((directory.endsWith(sep) ? directory : directory + sep).toLowerCase());

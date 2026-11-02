@@ -31,9 +31,9 @@
           <div class="time-hint">LE TEMPS AVANCE QUAND TU BOUGES</div>
         </div>
         <div class="health-wrap"><div class="eyebrow">INTÉGRITÉ</div><div id="health" aria-label="Vie restante">◆ ◆ ◆</div></div>
-        <div class="ammo-wrap"><div class="eyebrow">MUNITIONS <span class="subtle">/ R POUR RECHARGER</span></div><strong id="ammo">06<span>/06</span></strong></div>
+        <div class="ammo-wrap"><div class="eyebrow">MUNITIONS <span id="ammo-hint" class="subtle">/ CHANGER D’ARME UNE FOIS VIDE</span></div><strong id="ammo">05<span>/05</span></strong></div>
       </footer>
-      <div id="hint-bar">ZQSD / WASD · BOUGER <b>—</b> SOURIS · VISER <b>—</b> CLIC · TIRER <b>—</b> R · RECHARGER <b>—</b> F / CLIC DROIT · LANCER L'ARME <b>—</b> ESC · PAUSE</div>
+      <div id="hint-bar">ZQSD / WASD · BOUGER <b>—</b> SOURIS · VISER <b>—</b> CLIC · TIRER <b>—</b> ESPACE · SAUTER <b>—</b> F / CLIC DROIT · LANCER L'ARME <b>—</b> E · RAMASSER <b>—</b> ESC · PAUSE</div>
     </div>
     <div id="overlay" class="overlay">
       <div class="screen" id="menu-screen">
@@ -84,10 +84,19 @@
           <option value="headless">EnemyMergedHeadless — sans tête</option>
         </select>
         <output id="private-enemy-status" role="status" aria-live="polite" style="display:block;margin-top:6px">Aucun modèle ennemi local chargé.</output>
-        <p style="margin:6px 0">Géométrie et poses issues du jeu original. Combat, éclairage et débris Web : la physique de mort native et le rendu 1:1 ne sont pas reproduits. Échap libère la souris.</p>
+        <p style="margin:6px 0">Modèles, poses et sons issus du jeu original. Rendu, combats et débris encore en reconstruction ; fidélité 1:1 non validée. Échap libère la souris.</p>
         <button id="play-original" type="button">Jouer dans Containers</button>
         <button id="frame-private-enemy" type="button" disabled>Cadrer le modèle</button>
         <button id="frame-containers" type="button">Vue des conteneurs</button>
+        <label for="private-animation" style="display:block;margin-top:6px">Inspecter une animation originale</label>
+        <select id="private-animation" disabled>
+          <option value="idle">Repos</option>
+          <option value="walk">Marche</option>
+          <option value="run">Course</option>
+          <option value="fire">Tir — animation isolée</option>
+          <option value="punch">Coup de poing — animation isolée</option>
+          <option value="hit">Réaction à un impact — pas une mort</option>
+        </select>
         <details style="margin-top:10px">
           <summary>Remplacer les fichiers locaux</summary>
           <p>Aucun envoi externe. Ces sélecteurs sont facultatifs lorsque le serveur local fournit les originaux.</p>

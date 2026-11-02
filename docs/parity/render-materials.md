@@ -1,9 +1,6 @@
 # SH-13 — Materials and lighting: source-aware Web contracts
 
-**Status (2026-11-02):** owner-qualified source metadata for six genuine Containers renderers, plus pure contracts for generated Web material
-colors, lightmap UV2 transforms, directional/ambient shading, linear fog,
-exposure and color-space experiments. **The native material, shader and texture references are now owner-resolved (#75/#85); their executable shader/pixel payloads, runtime selection and resulting MCD surface appearance remain UNVERIFIED. No native material shading, lightmap image, exposure or postprocessing has been reproduced or visually validated.** New modules are not yet wired
-into the browser renderer. SH-05 owns that integration.
+**Status (2026-11-02):** owner-qualified source identities, compiled D3D11 programs and selected clean Web reconstructions are active for Containers Concrete MAIN and the EnemyMerged Red Crystal default-focus base pass. Authentic private texture/lightmap payloads remain local-only. Runtime variant selection, live shader globals, exposure/postprocessing and matched native framebuffer appearance remain incomplete; no whole-frame or 1:1 material parity is claimed.
 
 ## Evidence boundary: Containers build28
 
@@ -229,10 +226,12 @@ Use `containersBuild28CargoMaterialBinding(rendererPathId)` to log **source-reso
 | `sharedassets0.assets:SkinnedMeshRenderer4748` | enabled; mesh `sharedassets0.assets:284 EnemyMerged` (source OBJ `EnemyMerged_0`: 5237 `v`, 2254 triangles), one material slot `(fileID0,pathID13)`, root bone2257, 60 bones, lightmap index65535 |
 | `sharedassets0.assets:SkinnedMeshRenderer4749` | enabled; mesh `sharedassets0.assets:285 EnemyMergedHeadless` (4895 `v`, 2132 triangles), same material `(0,13)`, root bone2257, 59 bones, lightmap index65535 |
 | `sharedassets0.assets:Material13` | `MAIN RedCrystalNuEnemyMaterial`; shader pointer `(fileID1,pathID28)`, **no serialized `m_TexEnvs` entries**, keyword `_ALLOWLOCALFOG_ON` |
-| `globalgamemanagers.assets:Shader28` | pointer **resolved**, name **`XULM FULLFORWARD/Red Crystal`**; pixel/vertex program and selected keyword variant still unverified |
+| `globalgamemanagers.assets:Shader28` | pointer resolved, name **`XULM FULLFORWARD/Red Crystal`**; the selected pass-0 `DIRECTIONAL` program identities are now source-recovered and its default-focus static terms are active as documented below, while live globals and final output remain unverified |
 | Serialized material input properties | `_Color=(0.720588207244873,0,0,1)`, `_EmissionColor=(0.5220588445663452,0,0,1)`, `_FogColor=(0.6838235259056091,0,0,1)`; `_IsEnemy=1`, `_Alpha=0`, `_AllowLocalFog=1`, `_FogDistance=5`, `_FogLength=7` |
 
-**Important fog distinction:** `level28:RenderSettings18511.m_Fog=false` is source-serialized *scene-level Unity fog OFF*, already hooked by SH-05 #95. Enemy material keyword `_ALLOWLOCALFOG_ON` and `_AllowLocalFog=1` are independent custom XULM shader inputs and could drive **local** fog. It is unsound to conclude this enemy has zero fog just because the scene fog setting is OFF. Local fog appearance is UNKNOWN until the original shader variant and real frame are observed. Likewise, `_Alpha=0` is a custom shader property, **not** proof of zero raster alpha; setting Web alpha=0 would make a potentially visible enemy disappear. No assumption that `_EmissionColor` adds directly to `_Color`.
+**Important fog distinction:** `level28:RenderSettings18511.m_Fog=false` is source-serialized *scene-level Unity fog OFF*. Enemy material keyword `_ALLOWLOCALFOG_ON` and `_AllowLocalFog=1` are independent custom XULM shader inputs. The recovered pass proves a local-fog mix exists, but its per-vertex runtime inputs are not captured or bound in the active skin pass; scene fog OFF is not evidence that this custom term is zero. Likewise, `_Alpha=0` is a custom shader property, not proof of zero raster alpha: the compiled base pass writes opaque alpha. `_EmissionColor` is not assumed to add directly to `_Color`.
+
+**Historical note:** the diagnostic-only limitations in this section describe the earlier static-OBJ stage. The active skinned/default-focus implementation and its narrower remaining limits are documented at the end of this file.
 
 ### New SH-13 API / exact independent SH-12 + SH-05 handoff
 
@@ -415,6 +414,77 @@ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,diagnostic.maxLevel);
 // NO gl.generateMipmap(): original BC3 chain is already complete.
 ```
 
-**Visual P0 integration priority:** The preceding code allows SH-05 to display a **diagnostic local atlas** (e.g., opt-in 2D quad using 0–1 atlas UVs), compare with an sRGB-hypothesis atlas, then measure real browser pixel differences before claiming results. Do **NOT** apply atlas to cargo UV0 as if it were authored baked illumination. For GI on the original Containers geometry, **SH-12 must produce exact native UV2 channels** per Mesh6/7 submesh and **SH-13 needs the native XULM lightmap decode/color transfer**; `lightmapST` exists only for renderer7837 and7940 in the current contract, and missing ST for the other four must not be fabricated. The private DXT5 bytes are not the missing UV2; source metadata alone is not original GPU shading.
+**Superseded on 2026-11-02 by the source-backed active path below.** The diagnostic-only restriction was correct while UV2 and the compiled bake decode were unknown; it no longer describes the private browser package. The active browser scene now reuses the raw-BC3 helpers above to upload all 12 source mip levels where S3TC is supported, with a local UnityPy-decoded mip-0 PNG fallback otherwise.
 
-**SH-12 exact interface:** retain `{owner,meshPathId,staticSubmesh,drawRange}` and source-qualified UV0 for Concrete diffuse. Add a *separate* verified `uv2` stream and its coordinate convention (if/when source proof exists), preserving `rendererPathId`; no substitution by UV0. **SH-05 only:** optionally present the raw BC3 local atlas diagnostic and give SH-15 same-camera screenshots/real draw counters and p95; existing flat/trilinear Concrete PNG preview is **not** native Point shader rendering. The shipped original XULM program, exact bake encoding, GPU runtime activation and matched MCD-vs-Web frame remain **UNVERIFIED**. This new source-block capability has no demonstrated cargo frame delta until SH-05 wires it; Node unit tests only validate exact source-format memory boundaries.
+### Active Containers Concrete MAIN forward path — source composition, globals and textures (2026-11-02)
+
+The former bake-only implementation was incomplete. Both the source BC3 chain and its UnityPy PNG mip-0 fallback produced the same dark result because texture transfer was not the missing term: the compiled Concrete pass adds the decoded bake to a large local-ambient accumulator and then runs its pore/microseam, directional, stylized-color and local-fog compositor. Row orientation and the unresolved native resource-view transfer remain valid comparison questions, but neither explains a failure shared by raw BC3 and decoded PNG.
+
+The active path remains connected to the schema-1 private scene package:
+
+- `extract.py` retains exact source `TEXCOORD1`, renderer `m_LightmapTilingOffset`, COLOR0 and the full BC3 RGBM atlas contract described above. It now also recovers source TANGENT0 from Unity vertex data. Browser conversion is `(-x,y,z,-w)`: X follows the already-mirrored geometry and W flips the tangent-frame handedness. All 121 lightmapped `resources.assets::3` world draws have source UV0, UV2, normals and TANGENT0; 120 have source COLOR0, while the one source-absent COLOR0 uses the graphics API's `(0,0,0,1)` generic attribute rather than invented mesh data.
+- Three source global textures are package assets, still private: `sceneConcreteMicroseam` (`resources.assets::227`, PNG SHA-256 `cc7cee10a6b682c79194ab62863eb1fa7cfc21f7f8420ece018d751332fc309d`), `sceneConcretePore` (`resources.assets::185`, `9a7639a3b1e219a5f3d5a9cd43efb55252d4fd079ca000011a783cc741616136`) and `sceneConcreteFogGradient` (`sharedassets2.assets::8`, `ae93788dc13f6bfb46bbe07a585775caf6e7965d25f9a08b81f0ce8074fa004a`). The first two use Bilinear/Repeat; fog uses Bilinear/Clamp. These PNGs carry authentic mip 0; source mips for pore and microseam are not claimed.
+- The private browser asset map must expose those three IDs in addition to `scenePackage`, `sceneLightmapBc3`, `sceneLightmap_000` and the existing material textures. No public asset or original shader byte is embedded in the renderer.
+- The regenerated private package is `rendering/closure/browser-scene/package.json.gz`, SHA-256 `374673814c719e633d956ebfa640e5e22e9a21be340de9f1ec5f44c647b82463`; decompressed SHA-256 `74b581a9703925fe897f341573b9ef7ef21907a52926642f0e49276fd3a14fa0`. It contains 68 meshes, 382 instances, 21 textures and one source lightmap.
+
+Source authority is the exact `FORWARDBASE DIRECTIONAL LIGHTMAP_ON` fragment program `rendering/blobs/2a/2ab2b7c3fd426d7e063c40b0144bd75d4dd19175c1b2ad0ed51be7731e566d2b.dxbc.txt` and vertex program `rendering/blobs/24/2436a3f7c116ed34559b6c47aff415ccc5dcbb524b7725fabab3903372177bdc.dxbc.txt`. The clean Web formula reconstructs, in compiled order:
+
+1. `_MainTex` seam gating from UV0/world-XZ and COLOR0 magenta control.
+2. Microseam address/sample and distance-blended triplanar pore normal.
+3. `3 * (_LightLocalAmbient.a * _LightLocalAmbient.xyzx) * _LightLocalAmbientMultiplier - 3 * (_LightLocalMinusAmbient.a * _LightLocalMinusAmbient.xyzx)`, optional COLOR0-red dynamic ambient, and `lightmap.rgb * (lightmap.a * 5)`, followed by the compiled `vec4(0.2,0.2,0.2,0.25)` scale.
+4. The compiled pore power, directional normal response, cap/rim/microseam bands, screen-space stripe, COLOR0 blue controls and opaque output.
+5. The compiled local distance fog and source gradient lookup.
+
+The source `level28::18730` `SetLocalAmbient` component supplies `_LightLocalAmbient=(0.8602941036,0.8602941036,0.8602941036,1)`, multiplier `1.1000000238`, `_LocalDynamicConcreteAmbient=(0.2080811411,0.2437618971,0.2641509175,1)`, local fog `(0.7019608021,0.8549019694,0.9176470637,1)`, scale `35`, power `1`, secondary distance `25`, ground fog `0`, and attenuation-outside-shadow-distance `0`. `SetLocalAmbient.Start` sets `_LocalShowFog=1`. The recovered realtime directional transform gives browser direction-to-light `(-0.3516539250,0.8712174635,-0.3425195591)`. `_LightLocalMinusAmbient` remains the zero engine default: no writer occurs in the recovered managed corpus.
+
+`native-world-pass.js` selects this composition only for the exact Concrete MAIN source material plus authentic UV0, UV2, normals, tangent and lightmap. It reports `sourceConcreteLightmappedDrawCalls`; the expected Containers root count is 121. The two other lightmapped draws use distinct Cutoff/focusable shader families and remain explicitly outside this program rather than borrowing Concrete MAIN equations.
+
+**Exact remaining scope:** four serialized-active `XulmFalseLight` components compete for three runtime slots, so `_GlobalFalseLight0/1` slot order and current-frame values require a matched runtime capture and are omitted. Katana recall, void/glitch/screenshot/vertex deformation, the moving stripe's native clock phase, runtime material property blocks, non-Concrete lightmap variants, pore/microseam source mips beyond PNG mip 0, post-processing/exposure and final framebuffer transfer also remain outside this static initial composition. No matched native-camera pixel comparison has yet established whole-frame parity; `nativeLightingParity` therefore remains false.
+
+**Browser observation after integration:** the default root rendered360 world
+instances/185037 triangles, including121 source Concrete MAIN compositions,
+zero unsupported Concrete-composition draws and239 generic-lighting draws.
+The dark bake-only appearance was replaced by the source ambient/fog composition.
+The normal S3TC path uploaded all12 BC3 levels; an independently launched
+S3TC-disabled browser used the PNG mip-0 fallback (`s3tc-unavailable`).
+Both produced visible frames with WebGL error0 and no page errors. These checks
+do not establish native color-transfer, shadows or matched whole-frame parity.
+
+### Active EnemyMerged Red Crystal default-focus base pass (2026-11-02)
+
+The GPU-skinned character no longer feeds generated Web Lambert RGB only into the recovered final compositor. `native-skin-pass.js` now consumes the package's authentic `mesh.uv0` next to the unchanged positions, normals, weights, compact joint palette and v8 clip/action sampling. The new clean `red-crystal-pass.js` formula is called by the live skinned fragment shader; it is not a detached diagnostic helper.
+
+Private source authority is `globalgamemanagers.assets::28`, pass tag **FORWARDBASE**, keyword **DIRECTIONAL**: vertex program SHA-256 `71feb502061abdcf39ba56c30b3ceff9275cc15ec06dfe61f6df817add331614` and fragment program SHA-256 `6491cc828a2024182a3dc26d2d682c975ad5fefd47fd421d74916f0ee033f61d`. The clean public implementation does not contain the original DXBC or an authored/decompiled shader dump. Material authority is `sharedassets0.assets::13` (`MAIN RedCrystalNuEnemyMaterial`), whose serialized `_Focus`, `_HotswitchFocus` and `_BlackFocus` are all zero. The active reconstruction therefore follows that compiled default-focus branch:
+
+1. the source UV0 cell/gate equations and exact constants, including object-space camera-forward, world camera-forward and view-space normal seeds derived from the active model/view-projection matrices;
+2. compiled view-reflection and reflected-light highlight powers from skinned world normal, skinned world position, caller camera position and the source directional vector;
+3. the moving screen-space fifth-power band using `_GlobalUnscaledTime × 3`;
+4. the compiled world-phase/directional gate using the recovered Containers direction-to-light `(-0.3516539250, 0.8712174635, -0.3425195591)`;
+5. the compiled distance blend toward `(0.77, 0.05, 0.12)`, polynomial RGB remap, conditional green-channel term and opaque alpha.
+
+Material13 serializes `_HDRPhase=0` and `_HDRPhaseB=0`. The remaining COLOR0 threshold `(r−b>0.7 && r>0.7 && g>0.7)` was checked directly against the original Mesh284/285 using UnityPy MeshHandler:5237/4895 RGBA values, channel3 dimension4 format2 stream1, UNorm8 divided by255,30 distinct colors in each mesh. **Zero vertices match the threshold in either mesh.** Thus this additive term is source-proven zero for these two original meshes and the serialized default HDR state; omitting its GPU attribute does not discard a nonzero contribution here. This does not generalize to other meshes or runtime HDR changes.
+
+`shaderTime` and `cameraPosition` are explicit draw inputs. Existing callers remain valid: absent `shaderTime` uses animation sample time and absent camera uses the world origin, with both fallbacks reported as unmatched. Default gameplay now supplies the Web unscaled run clock and current Web camera, but the v5 six-pose native manifest contains no shader-global/time capture. Consequently the moving band phase is still not matched to the original six images even when geometry/pose is.
+
+The compiled default branch needs no material texture: Material13 has zero `m_TexEnvs`; `_GlobalGlitchMap` belongs to the inactive focus path. A package without source UV0 retains the previous generated-lit fallback and its legacy report shape; the real merged/headless animated-v8 packages contain source UV0, enter the recovered path and report `redCrystalSourceDefaultForward=true`.
+
+**Per-term remaining boundaries:** `_GlobalFalseCrystalLight0..5`, local-fog varying production, focus/hotswitch/black-focus transitions and `_GlobalGlitchMap` are omitted without invented values. Forward-add lights, shadow caster output, runtime material property blocks, void/glitch/screenshot deformation, local fog gradient binding, post-processing/exposure and final framebuffer transfer remain outside this pass. The static Containers directional vector is source-recovered but its applicability to every native reference pose is not runtime-proved. Generic package diagnostics conservatively retain COLOR0 among unbound inputs; its default contribution has now been independently proved zero specifically for original Mesh284/285.
+
+The v5 reference manifest establishes original-engine BakeMesh, Gamma color space, Direct3D11, ARGB32 and AA1, and identifies this exact material/shader, but records no shader clock or globals. Existing six-pose silhouette IoU remains geometry evidence only; future RGB comparisons must label clock/global phase unmatched unless a corresponding native capture supplies them. `materialParity` and `redCrystalNativeInputsVerified` therefore remain false.
+
+**Observed after integration:** actual Chromium/WebGL2 compiled and drew the
+recovered path at the root and in the character inspection view, with visible
+red/black striations and GL error0. All six960×540 pose draws used the original
+view/projection, explicit Web shader time0 and source UV0; silhouette metrics
+were unchanged from the v8 comparison. Foreground RGB MAE spans0.07162–0.08074,
+but the native shader-global phase and light state are unmatched. One pose's
+RGB difference increased despite better material structure; these metrics are
+not a monotonic fidelity score. Exact per-pose values are in `visual.md`;
+images and the `native-web-red-crystal-comparison-v1.json` report remain private.
+
+The later PR142 normal fix is retained in this full composition: only the
+reflection normal is flipped toward the camera. Concrete seam/diffuse inputs
+retain their geometric normal, including the recovered unnormalized Concrete
+varying. The merged root again rendered360 world draws/121 Concrete draws with
+Red Crystal active and GL error0. Source-text regex checks of old GLSL variable
+names were removed rather than repinned to the reconstructed shader.

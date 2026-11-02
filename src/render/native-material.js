@@ -46,13 +46,10 @@ const SOURCE_CONTRACTS = Object.freeze({
       '_SeamHorizontalDistance', '_SeamVerticalDistance',
     ]),
     unresolved: Object.freeze([
-      'selected FORWARDBASE compiled variant and live global shader keywords',
-      'UnityLighting spherical harmonics, _WorldSpaceLightPos0 and optional shadow/lightmap bindings',
-      'mesh COLOR0 and TANGENT0 omitted by browser-scene package; seam override requires native COLOR0',
-      '_GlobalConcreteMicroseamTexture and _GlobalConcretePoreBumpTexture from GlobalShaderValueControl',
-      '_LightLocalAmbient, _LightLocalMinusAmbient, _LightLocalAmbientMultiplier and _LocalDynamicConcreteAmbient',
-      '_LocalAttenuationOusideShadowDistance, _GlobalFogGradientTexture and local fog controls',
+      'runtime slot ordering/current-frame values for four active XulmFalseLight components',
+      'dynamic katana-recall, void/glitch, screenshot and vertex-deformation globals',
       'runtime material property-block writes and native GPU resource-view transfer',
+      'source mip levels beyond finalized PNG mip 0 for global pore/microseam/fog textures',
       'post-processing, exposure and final framebuffer transfer',
     ]),
   }),
@@ -328,7 +325,7 @@ export function createNativeSceneMaterialPacket(material, {
     shaderMathCoverage: contract.family === 'black-crystal'
       ? 'reflection-lookup-address-and-fourth-power-only'
       : contract.family === 'concrete-2019-main'
-        ? 'main-texture-uv-and-seam-gated-rgb-modulation'
+        ? 'compiled-directional-lightmap-forward-compositor-with-serialized-globals'
         : 'final-rgb-compositor-and-opaque-output-alpha-only',
     unresolved: contract.unresolved,
   });
@@ -371,8 +368,8 @@ export function blackCrystalReflectionUv(direction) {
 }
 
 /**
- * Independently written GLSL helpers for the bounded math above. This is not
- * original shader source and deliberately omits unrecovered globals/passes.
+ * Independently written GLSL helpers for the bounded recovered math. No source
+ * shader text or private texture payload is embedded here.
  */
 export const NATIVE_MATERIAL_GLSL = Object.freeze({
   // Compiled Concrete base: vertex 2436a3f7... lines 222, 224-230,
@@ -410,6 +407,51 @@ vec3 nativeConcreteMainTextureFactor(
     seamVarying, seamOverride, worldNormalY, mainTexIsZacieki
   );
   return mix(vec3(1.0), sampleRgb, weight);
+}`.trim(),
+  // Compiled DIRECTIONAL LIGHTMAP_ON fragment 2ab2b7c3... lines 68-87,
+  // 134-152 and 212-240. Inputs are source varyings/globals, not tuned lights.
+  concreteForwardBase: `
+vec2 nativeConcreteMicroseamUv(
+  vec2 seamCoord, vec2 seamDistance, vec2 tangentView
+) {
+  vec2 enabled = mix(vec2(0.0), vec2(1.0), greaterThan(seamDistance, vec2(0.0)));
+  vec2 safeDistance = mix(vec2(1.0), seamDistance, enabled);
+  vec2 cell = (seamCoord - safeDistance * 0.5) / safeDistance;
+  vec2 whole = floor(cell);
+  vec2 local = (fract(cell) - 0.5) * safeDistance / 0.2;
+  vec2 drift = min(tangentView, vec2(0.2)) * 0.7;
+  vec2 negative = local * (1.0 - drift);
+  vec2 positive = local * (1.0 + drift);
+  vec2 warped = mix(negative, positive, step(vec2(0.0), local)) + 0.5;
+  return (whole + clamp(warped, 0.0, 1.0)) * enabled;
+}
+vec4 nativeConcreteAccumulatedLight(
+  vec4 lightLocalAmbient, vec4 lightLocalMinusAmbient,
+  float ambientMultiplier, vec4 dynamicAmbient, float redVertexFlag,
+  vec4 encodedLightmap, float lightmapMultiplier
+) {
+  vec4 ambientX = vec4(lightLocalAmbient.rgb, lightLocalAmbient.r);
+  vec4 minusX = vec4(lightLocalMinusAmbient.rgb, lightLocalMinusAmbient.r);
+  vec4 dynamicX = vec4(dynamicAmbient.rgb, dynamicAmbient.r);
+  vec4 light = 3.0 * lightLocalAmbient.a * ambientX;
+  light *= ambientMultiplier;
+  light -= 3.0 * lightLocalMinusAmbient.a * minusX;
+  light += (dynamicAmbient.a * dynamicX - 0.5) * redVertexFlag;
+  float rgbm = encodedLightmap.a * lightmapMultiplier;
+  light += rgbm * vec4(encodedLightmap.rgb, encodedLightmap.r);
+  return light * vec4(0.2, 0.2, 0.2, 0.25);
+}
+vec3 nativeConcreteLocalFog(
+  vec3 rgb, sampler2D fogGradient, vec3 worldPosition, vec3 cameraPosition,
+  vec3 fogColor, float fogScale, float fogPower, float secondaryDistance
+) {
+  float distanceToCamera = length(cameraPosition - worldPosition);
+  float primary = clamp(distanceToCamera / fogScale, 0.0, 1.0);
+  float secondary = min(clamp((distanceToCamera - secondaryDistance) * 0.01, 0.0, 1.0), 0.8);
+  secondary += clamp(abs(worldPosition.y - cameraPosition.y) - 2.0, 0.0, 1.0) * 0.03;
+  vec3 distanceFog = mix(fogColor, vec3(1.0), secondary);
+  float gradient = textureLod(fogGradient, vec2(primary, 0.5), 0.0).r * fogPower;
+  return mix(rgb, distanceFog, clamp(secondary + gradient, 0.0, 1.0));
 }`.trim(),
   blackCrystalReflection: `
 vec2 nativeBlackCrystalReflectionUv(vec3 direction) {

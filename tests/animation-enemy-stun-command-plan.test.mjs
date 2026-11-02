@@ -42,6 +42,18 @@ test('Kamikaze below threshold cancels previous animation state before new Stun'
   ]);
 });
 
+test('Kamikaze cancellation resets an existing stun before setting concrete state', () => {
+  const c = commands({
+    kamikazeAnimFired: true, kamikazeStunCurrentTime: 0.999,
+    alreadyStunned: true, isConcrete: true,
+  });
+  assert.deepEqual(op(c, 'set-stuned-concrete-part'), {
+    op: 'set-stuned-concrete-part', value: true,
+  });
+  assert.ok(c.findIndex(e => e.op === 'controller-end-stun')
+    < c.findIndex(e => e.op === 'set-stuned-concrete-part'));
+});
+
 test('Native strict audio cooldown: equality and future rest do not request SFX', () => {
   for (const stunSoundRest of [11,12]) {
     const c = commands({stunSoundRest});
