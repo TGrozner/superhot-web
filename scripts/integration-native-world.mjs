@@ -343,6 +343,141 @@ export function assessPreparedColliderActivation({
   });
 }
 
+/**
+ * A fail-closed, entirely OFFLINE vertical sequence gate for the current
+ * Containers browser API. It observes only exposed app state. In particular:
+ * - __superhotSceneMetrics.enemies is updated ~once per second, so its alive
+ *   transition is NOT a contact event and cannot be assigned a frame/actor.
+ * - frame.gameplay.ammo can decrease for reasons OTHER than a projectile hit;
+ *   it is an ammunition-change CANDIDATE, not a Bullet.FixedUpdate receipt.
+ * - frame.nativeEnemy describes only the LAST skinned actor drawn.
+ *
+ * SH-05 retains ownership of runtime instrumentation and source binding.
+ * SH-15 retains the paired GPU/native PNG scorecard and cannot be replaced
+ * by this app-reported sequence. No original game data is required.
+ */
+export function assessNativeWorldEncounterTrace({ samples, sourceBudget } = {}) {
+  const unproved = {
+    nativeParityVerdict: 'UNASSESSED',
+    matchedNativeGameplayPixels: false,
+    originalPhysXContactObserved: false,
+    sourceQualifiedBodyPartContactObserved: false,
+  };
+  if (!sourceBudget ||
+      sourceBudget.kind !== 'PREPARED_OWNER_LOCAL_SOURCE_WEB_BUDGET_NOT_NATIVE_RUNTIME_DRAW') {
+    return { status: 'EXACT_OWNER_LOCAL_SOURCE_BUDGET_REQUIRED', ...unproved };
+  }
+  if (!Array.isArray(samples) || samples.length < 2 || samples.length > 64) {
+    return { status: 'REQUIRE_TWO_TO_64_CONSECUTIVE_BROWSER_SAMPLES', ...unproved };
+  }
+  const reports = samples.map(s => assessNativeWorldBrowserFrame({
+    metrics: s?.metrics, frame: s?.frame, sourceBudget,
+  }));
+  const invalid = reports.findIndex(r =>
+    r.status !== 'APP_REPORTED_NATIVE_SOURCE_WEB_WORLD_SUBMISSION_NO_PIXEL_PARITY');
+  if (invalid >= 0) {
+    return {
+      status: 'SOURCE_WORLD_FRAME_GATE_FAILED',
+      failingSample: invalid,
+      failingGate: reports[invalid].status,
+      ...unproved,
+    };
+  }
+  const first = samples[0].frame;
+  const sceneKeys = ['meshes', 'instances', 'textures'];
+  for (let i = 0; i < samples.length; i++) {
+    const frame = samples[i].frame;
+    if (frame.activeScreen !== 'playing' ||
+        frame.gameplay?.nativeClock !== true ||
+        !Number.isSafeInteger(frame.gameplay?.ammo) ||
+        typeof frame.gameplay?.weapon !== 'boolean') {
+      return {
+        status: 'PLAYING_NATIVE_CLOCK_AND_WEAPON_STATE_REQUIRED',
+        failingSample: i, ...unproved,
+      };
+    }
+    if (i === 0) continue;
+    const prev = samples[i - 1].frame;
+    if (frame.frameId <= prev.frameId ||
+        !Number.isFinite(frame.worldClock) || !Number.isFinite(prev.worldClock) ||
+        frame.worldClock <= prev.worldClock) {
+      return { status: 'NON_MONOTONIC_FRAME_OR_WORLD_CLOCK', failingSample: i, ...unproved };
+    }
+    if (sceneKeys.some(k => frame.nativeScene[k] !== first.nativeScene[k]) ||
+        frame.generatedManifest.drawCalls !== first.generatedManifest.drawCalls ||
+        frame.generatedManifest.triangles !== first.generatedManifest.triangles) {
+      return { status: 'WORLD_SOURCE_OR_SUBMISSION_BUDGET_CHANGED', failingSample: i, ...unproved };
+    }
+  }
+
+  const skinnedActorSamples = [];
+  const ammunitionDecreaseCandidates = [];
+  const asyncEnemyDefeatCandidates = [];
+  for (let i = 0; i < samples.length; i++) {
+    if (reports[i].lastDrawnCharacter.status === 'LAST_ACTOR_SKINNED_GPU_SUBMISSION') {
+      skinnedActorSamples.push(i);
+    }
+    if (i === 0) continue;
+    const previous = samples[i - 1];
+    const current = samples[i];
+    const a = previous.frame.gameplay, b = current.frame.gameplay;
+    if (a.weapon && b.weapon && a.ammo > 0 && b.ammo === a.ammo - 1) {
+      ammunitionDecreaseCandidates.push(i);
+    }
+    const before = previous.metrics.enemies;
+    const after = current.metrics.enemies;
+    if (Array.isArray(before) && before.length && Array.isArray(after) &&
+        after.length === before.length &&
+        before.every(enemy => typeof enemy?.alive === 'boolean') &&
+        after.every(enemy => typeof enemy?.alive === 'boolean')) {
+      for (let enemyIndex = 0; enemyIndex < before.length; enemyIndex++) {
+        if (before[enemyIndex].alive === true && after[enemyIndex].alive === false) {
+          asyncEnemyDefeatCandidates.push({ sample: i, enemyIndex });
+        }
+      }
+    }
+  }
+  const orderedCandidate = ammunitionDecreaseCandidates.some(shot =>
+    asyncEnemyDefeatCandidates.some(hit => hit.sample >= shot));
+  const status = skinnedActorSamples.length === 0
+    ? 'NO_SKINNED_ACTOR_SUBMITTED_IN_WORLD_TRACE'
+    : ammunitionDecreaseCandidates.length === 0
+      ? 'NO_AMMO_DECREASE_CANDIDATE'
+      : asyncEnemyDefeatCandidates.length === 0
+        ? 'NO_ASYNC_WEB_ENEMY_DEFEAT_TRANSITION'
+        : orderedCandidate
+          ? 'WEB_WORLD_ACTOR_AMMO_AND_ASYNC_DEFEAT_SEQUENCE_ONLY'
+          : 'ASYNC_WEB_DEFEAT_PRECEDES_AMMO_CANDIDATE';
+  return {
+    status,
+    sourceWorld: {
+      scene: first.nativeScene,
+      drawCallsPerFrame: first.generatedManifest.drawCalls,
+      trianglesPerFrame: first.generatedManifest.triangles,
+      samples: samples.length,
+      frameIdStart: first.frameId,
+      frameIdEnd: samples.at(-1).frame.frameId,
+    },
+    actor: {
+      lastActorSkinnedSubmissionSamples: skinnedActorSamples,
+      identityOfDamagedBodyPartKnown: false,
+    },
+    webCombat: {
+      ammoDecreaseCandidateSamples: ammunitionDecreaseCandidates,
+      asyncAliveToDeadCandidates: asyncEnemyDefeatCandidates,
+      sameProjectileToBodyPartCausalityProven: false,
+      originalMcdDamageAndArmorGuardsApplied: false,
+    },
+    nextRuntimeEvidenceNeeded: [
+      'SH-05: source-qualified instance/bodypart collider mapping and player-shot ID',
+      'SH-05: ordered hit target, impact time, controller/armor/bulletproof/boss flags and post-handler state',
+      'SH-05: event-tied actor animation/pose instead of last-drawn actor sample',
+      'SH-15: executed native Containers and Web GPU frames at matching camera/state',
+    ],
+    ...unproved,
+  };
+}
+
 /** Bounded code-read contract audit. Strings prove references, NOT execution. */
 export function auditNativeWorldStaticWiring(root = ROOT) {
   const read = path => {
