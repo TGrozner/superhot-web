@@ -153,6 +153,16 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     uvChannel:'uv0',uvScale:Object.freeze([0.10000000149011612,0.10000000149011612]),
     uvOffset:Object.freeze([0,0]),imagePixelsDecoded:false,
     imageEncodingKnown:false,
+    // Private #100 / 13141079714: stream metadata ONLY, no texels in Git/Web.
+    nativeStream:Object.freeze({
+      owner:'resources.assets',pathId:248,
+      width:128,height:128,unityFormatId:3,unityFormatName:'RGB24',
+      serializedColorSpace:1,mipCount:8,
+      sourceResource:'resources.assets.resS',
+      sourceByteOffset:59500780,sourceByteCount:65535,
+      inlineBytes:0,payloadAvailableInWeb:false,
+      evidence:'private research #100 artifact 13141079714',
+    }),
   }),
   lightmapTexture:Object.freeze({
     sourceSceneOwner:'level28',sourceSettingsPathId:18622,
@@ -160,6 +170,16 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     targetOwner:'sharedassets28.assets',targetPathId:2,
     name:'Lightmap-0_comp_light',
     imagePixelsDecoded:false,uv2StreamDecoded:false,
+    // Private #100 / 13141079714: BC3/DXT5 atlas descriptor, NOT pixels.
+    nativeStream:Object.freeze({
+      owner:'sharedassets28.assets',pathId:2,
+      width:2048,height:2048,unityFormatId:12,unityFormatName:'DXT5',
+      serializedColorSpace:1,mipCount:12,
+      sourceResource:'sharedassets28.assets.resS',
+      sourceByteOffset:0,sourceByteCount:5592432,
+      inlineBytes:0,payloadAvailableInWeb:false,
+      evidence:'private research #100 artifact 13141079714',
+    }),
   }),
   shaderProperties:Object.freeze({
     // Do not translate these into Web uniforms before the shipped custom
