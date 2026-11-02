@@ -1,5 +1,56 @@
 # SH-10 — MCD acceptance matrix (source-qualified, not 1:1)
 
+## P0 (2 Nov 2026) — disambiguate **Containers/build28** from **Dojo/build10**
+
+A concrete false-positive was possible in the visual capture preflight: the
+historical `CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY` mode label and budget
+counts (68 meshes / 360 instances / 17 textures) were treated as evidence of
+Containers. Current `main@163afeaa` instead reports the **generic**
+`NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY` for ANY loaded local original scene;
+the owner-local homepage has been reported with **Dojo/build10**, not
+Containers. A count-compatible Dojo package must not silently become a
+Containers native/Web image pair.
+
+SH-10 `originalSceneDrawEvidence()` and `renderedOriginalSceneEvidence()`
+now require the independently source-qualified serialized tuple
+`(sceneBuildIndex:28,
+scenePath:Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity,
+serializedOwner:level28)`. The source is the **existing** private
+`superhot-research#16` result, artifact `13132978778`, independently
+rechecked by SH-04 and SH-16; this is *source metadata*, not executed native
+gameplay. The gate checks the live asynchronous metrics and BOTH rendered-frame
+brackets. Missing/mismatching tuple means
+`CONTAINERS_BUILD28_SOURCE_IDENTITY_UNVERIFIED` or
+`RENDERED_CONTAINERS_BUILD28_IDENTITY_UNVERIFIED`, with **no qualifying capture**.
+The old, Containers-specific mode label no longer substitutes for this
+identity. No asset or native code is embedded.
+
+The `--require-original-scene` command now means **actual local Containers
+build28 source identity plus GPU submission reported by the browser**, not
+merely original source-looking geometry. When the owner has only Dojo loaded,
+failure is **expected**; do not change the expected tuple, spoof a label, or
+fall back to a six-cargo proxy to make it green. Operator must first select
+Containers/build28 via the existing owner-local private package, then inspect
+both `window.__superhotSceneMetrics.nativeScene.source` and
+`window.__superhotGetRenderedFrameSnapshot().nativeScene.source` on actual
+playing frames.
+
+**Acceptance hierarchy:** source tuple/counters → actual Chromium capture
+(surface isolated, SHA-256, frame camera/projection brackets) → PRIVATE
+**executed** original Containers same-state active-camera PNGs → ROI metrics,
+position/silhouette, color/luminance and temporal delta with explicit
+operator tolerances. The first two levels alone remain **WEB ONLY**;
+native paired pixel parity **INCONNU**, not refuted. There is still no
+`__sh10AcceptanceSnapshot()` on current main to prove initial state,
+coordinate frame, timeScale or stimulus pairing. SH-05 owns that read-only
+runtime adapter; SH-04/15 own source/native camera and evidence matching.
+Do not put an intentionally red native gate into CI.
+
+The scene-identity regression is a **synthetic Node fixture** that deliberately
+gives Dojo the SAME world draw budget as Containers. This does not represent a
+real Chromium capture or a measured original game mismatch.
+
+
 ## P0 — per-frame camera/projection gate, before claiming a visible delta (2 Nov 2026)
 
 The comparison previously checked **only top-level** camera, scene and FOV.
