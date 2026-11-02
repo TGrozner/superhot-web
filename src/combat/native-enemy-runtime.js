@@ -1,4 +1,5 @@
 import { planPejAiPlayerSight } from './ai-visibility.js';
+import { planEnemyShotgunLateVolley } from './enemy-shotgun.js';
 
 // Behavioral reconstruction, MCD build 20299547: PejAiController GunAttack,
 // UpdateSpeed/UpdateTargetReroll; PejAiWeapon readiness; GunPejAiWeapon deferred
@@ -33,9 +34,21 @@ export function createNativeEnemyState(settings) {
     'difficultyWeaponSpeedMultiplier','walkingSpeed','runningSpeed','acceleration',
     'afterglowDuration','stopAimingTime']) nonnegative(settings[name],name);
   flag(settings.alwaysAlert,'alwaysAlert');
+  if (settings.family==='MachineGun' || settings.family==='SniperRifle') {
+    nonnegative(settings.longAttackDelay,'longAttackDelay');
+    if (!Number.isInteger(settings.seriesLength)||settings.seriesLength<0) {
+      throw new TypeError('source seriesLength required');
+    }
+  }
+  if (settings.family==='SniperRifle') nonnegative(settings.firstShotDelay,'firstShotDelay');
+  if (settings.family==='Shotgun' &&
+      (!Number.isInteger(settings.pelletCount)||settings.pelletCount<0)) {
+    throw new TypeError('source pelletCount required');
+  }
   return { speed:0, attackDelayRemaining:settings.attackDelay, alertness:-settings.alertDelay,
     afterglowRemaining:-1000.5, targetNeedsReroll:false, targetRerollWait:0,
-    reloaded:false, firstShotWarningSoundPlayed:false, haveBeenSeen:false, pendingShot:null };
+    reloaded:false, firstShotWarningSoundPlayed:false, haveBeenSeen:false, pendingShot:null,
+    seriesRemaining:settings.seriesLength, sniperDelay:0, sniperCanShot:false };
 }
 
 /** Source scalar acceleration; route/collision adapter supplies direction. */
@@ -53,6 +66,12 @@ export function advanceNativeEnemySpeed(state,settings,movement,scaledDeltaTime)
 export function advanceNativeEnemyWeapon(state,settings,scaledDeltaTime) {
   nonnegative(scaledDeltaTime,'scaledDeltaTime');
   state.attackDelayRemaining-=scaledDeltaTime*settings.weaponSpeedMultiplier*settings.difficultyWeaponSpeedMultiplier;
+  if (settings.family==='SniperRifle') {
+    if (state.alertness>settings.alertDelay) {
+      state.sniperDelay+=scaledDeltaTime;
+      if (state.sniperDelay>=settings.firstShotDelay) state.sniperCanShot=true;
+    } else { state.sniperDelay=0; state.sniperCanShot=false; }
+  }
 }
 
 /** One selected GunAttack behavior tick, not a fabricated whole behavior tree.
@@ -88,14 +107,25 @@ export function runNativeEnemyGunAttack(state,settings,{
       actions.aim=true;
       actions.refreshAimTarget=state.attackDelayRemaining>settings.stopAimingTime || weaponInRightPosition!==true;
       if (weaponInRightPosition===false) state.afterglowRemaining=-1;
-      const ready=state.attackDelayRemaining<0 && state.alertness>settings.alertDelay*1.05 && allowAttacking && canShot;
+      const ready=state.attackDelayRemaining<0 && state.alertness>settings.alertDelay*1.05 &&
+        allowAttacking && canShot && (settings.family!=='SniperRifle' || state.sniperCanShot);
       if (ready && weaponInRightPosition===true) {
-        if (aimReady===true) {
+        const middleOfSeries=(settings.family==='MachineGun' || settings.family==='SniperRifle') &&
+          state.seriesRemaining!==settings.seriesLength && state.seriesRemaining!==0;
+        if (middleOfSeries || aimReady===true) {
           point(animationTarget,'animationTarget');
-          state.pendingShot={target:{...animationTarget},speed:settings.projectileSpeed,shooterHaveBeenSeen:state.haveBeenSeen};
-          state.haveBeenSeen=true;
-          state.reloaded=false;
-          state.attackDelayRemaining=settings.attackDelay*(1+sample(random)/10);
+          state.pendingShot={target:{...animationTarget},speed:settings.projectileSpeed,
+            family:settings.family,shooterHaveBeenSeen:state.haveBeenSeen};
+          let delay=settings.attackDelay;
+          let completed=true;
+          if (settings.family==='MachineGun' || settings.family==='SniperRifle') {
+            state.seriesRemaining--;
+            completed=state.seriesRemaining<=0;
+            if (completed) { delay=settings.longAttackDelay; state.seriesRemaining=settings.seriesLength; }
+          }
+          if (completed) state.reloaded=false;
+          if (settings.family!=='SniperRifle' && (settings.family!=='MachineGun' || completed)) state.haveBeenSeen=true;
+          state.attackDelayRemaining=delay+sample(random)*settings.attackDelay/10;
           state.targetNeedsReroll=true; state.targetRerollWait=.05;
           actions.shot=true;
         }
@@ -125,6 +155,72 @@ export function consumeNativeEnemyShot(state,muzzlePosition) {
   const direction=normalized(subtract(pending.target,muzzlePosition));
   return {position:{...muzzlePosition},direction,velocity:addScaled({x:0,y:0,z:0},direction,pending.speed),
     target:pending.target,speed:pending.speed,shooterHaveBeenSeen:pending.shooterHaveBeenSeen};
+}
+
+/** LateUpdate after native animation/IK. Shotgun uses the current weapon
+ * forward; other guns use the Attack target and current muzzle position.
+ * Produces Web bullet requests, not a proof of successful native pooling.
+ */
+export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponForward,random=Math.random) {
+  if (!state.pendingShot) return [];
+  if (settings.family!=='Shotgun') {
+    const shot=consumeNativeEnemyShot(state,muzzlePosition);
+    return [{...shot,sniper:settings.family==='SniperRifle',
+      goThroughGlass:settings.family==='SniperRifle',muzzleFlash:true}];
+  }
+  const insideSphere=()=>{
+    const radius=Math.cbrt(sample(random));
+    const z=sample(random)*2-1,theta=sample(random)*Math.PI*2;
+    const horizontal=radius*Math.sqrt(1-z*z);
+    return {x:horizontal*Math.cos(theta),y:horizontal*Math.sin(theta),z:radius*z};
+  };
+  const count=Math.max(1,settings.pelletCount);
+  const spreadSamples=Array.from({length:count},insideSphere);
+  const extraSpeedFactors=Array.from({length:count-1},()=>sample(random)*2-1);
+  const volley=planEnemyShotgunLateVolley({
+    deferredBulletSpawn:true,pelletCount:settings.pelletCount,muzzlePosition,weaponForward,
+    projectileSpeed:settings.projectileSpeed,spreadSamples,extraSpeedFactors
+  });
+  const seen=state.pendingShot.shooterHaveBeenSeen;
+  state.pendingShot=null;
+  return volley.requests.map(request=>({
+    ...request,position:request.origin,
+    target:addScaled(request.origin,request.direction,settings.projectileSpeed),
+    shooterHaveBeenSeen:seen,sniper:false,goThroughGlass:false
+  }));
+}
+
+/** Native MeleeAttack/MeleeWeaponAttack gates; damage is driven by source
+ * animation event flags, not by a fabricated arbitrary cooldown window.
+ */
+export function runNativeEnemyMeleeAttack(settings,{
+  active,playerAlive,inFront,enemyPosition,playerPosition,weaponPosition,
+  inPunchAnimation,inHitAnimation,inWeaponAttackAnimation,meleeDamage,meleeWeaponDamage,katanaHit,
+}) {
+  for(const [name,value] of Object.entries({active,playerAlive,inFront,inPunchAnimation,
+    inHitAnimation,inWeaponAttackAnimation,meleeDamage,meleeWeaponDamage})) flag(value,name);
+  for(const [name,value] of Object.entries({enemyPosition,playerPosition,weaponPosition})) point(value,name);
+  const result={attack:false,kill:false,chase:false,status:'not-attacking'};
+  if(!active || !playerAlive)return result;
+  if(settings.family==='Katana') {
+    nonnegative(settings.AttackDistance,'AttackDistance');
+    const feet={...playerPosition,y:playerPosition.y-1.6};
+    if(!inFront || magnitude(subtract(enemyPosition,feet))>settings.AttackDistance)return result;
+    result.attack=!inHitAnimation && !inWeaponAttackAnimation;
+    result.kill=meleeWeaponDamage && katanaHit===true;
+  } else {
+    if(settings.family!=='Melee')throw new TypeError('explicit melee family required');
+    nonnegative(settings.meleeAttackDistance,'meleeAttackDistance');
+    const a={...weaponPosition},b={...playerPosition};
+    if(Math.abs(a.y-b.y)<1){a.y=0;b.y=0;}
+    const range=magnitude(subtract(a,b));
+    if((range>settings.meleeAttackDistance || !inFront) && !inPunchAnimation)return result;
+    result.attack=!inPunchAnimation;
+    result.kill=meleeDamage && range<.75;
+  }
+  result.chase=!result.kill;
+  result.status=result.kill?'success':'running';
+  return result;
 }
 
 /** Source AimTarget smoothing/readiness in native-handed coordinates. Supply
