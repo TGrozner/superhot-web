@@ -97,8 +97,19 @@ export function stepTime(state, {
   const blend = 1 - Math.exp(-rules.smoothingRate * dt);
   const nextScale = requireFinite(timeScale + (targetScale - timeScale) * blend, 'next timeScale');
   const worldDelta = requireFinite(dt * nextScale, 'worldDelta');
+  // A nonzero mathematical step must not silently round to zero. These are
+  // numeric integrity guards for the WEB prototype, not native MCD rules.
+  if (dt > 0 && nextScale !== 0 && worldDelta === 0) {
+    throw new RangeError('worldDelta cannot represent this step');
+  }
   const nextRealClock = requireFinite(realClock + dt, 'next realClock');
   const nextWorldClock = requireFinite(worldClock + worldDelta, 'next worldClock');
+  if (dt > 0 && nextRealClock === realClock) {
+    throw new RangeError('realClock cannot represent this step');
+  }
+  if (worldDelta !== 0 && nextWorldClock === worldClock) {
+    throw new RangeError('worldClock cannot represent this step');
+  }
   return {
     ...state,
     timeScale: nextScale,
