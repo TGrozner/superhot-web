@@ -264,9 +264,12 @@ changed as part of this gate.
   rechecked a **locally served synthetic WebGL2 fixture**, HTTP 200,
   then CDP navigation failed with \`net::ERR_BLOCKED_BY_ADMINISTRATOR\`.
   This is a browser-environment block, **not a crash/render verdict for
-  superhot-web**. The standalone (not committed) PNG/diff prototype's
-  four Node synthetic tests pass; no actual superhot-web screenshot and
-  **no native MCD PNG** were acquired or manufactured.
+  superhot-web**. A standalone PNG/diff prototype passed four synthetic
+  tests; a reduced SH-10 harness is now committed on this branch in
+  `scripts/acceptance-live-capture.mjs` and
+  `tests/acceptance-live-capture.test.mjs` (three local synthetic tests
+  passed). No actual superhot-web screenshot and **no native MCD PNG**
+  were acquired or manufactured.
 
 **Visual acceptance matrix, pending native frame pairing:**
 
@@ -298,3 +301,33 @@ Existing source-only R/reload, Containers denominator 120 vs initializer
 remain **PROVISIONAL**. SH-10 will not duplicate other agents'
 private corpus requests or edit any shared runtime module. No new failing
 gate is added to GitHub Actions.
+
+
+### SH-10 isolated implementation (branch only; manual browser gate)
+
+A read-only Chromium CDP capture records two actual **Web** canvas PNGs
+(idle then KeyW 300 ms), a JSON manifest, SHA-256, the opt-in
+\`window.__superhotSceneMetrics\` when present, and optional SH-05-owned
+read-only \`window.__sh10AcceptanceSnapshot()\` metadata.
+
+    node --test tests/acceptance-live-capture.test.mjs
+    node scripts/acceptance-live-capture.mjs --capture-web \
+      --url 'http://127.0.0.1:3000/?scene=containers' --out /tmp/sh10-web
+    node scripts/acceptance-live-capture.mjs \
+      --web /tmp/sh10-web/web-capture.json \
+      --native /private/native-mcd-capture.json \
+      --thresholds /private/native-thresholds.json --gate
+
+The native manifest and PNG frames must stay private, outside the public
+repository. A normal run of these Node tests checks only synthetic pixels,
+metadata rejection and the parser; **it does not run Chromium or MCD**.
+The strict comparator rejects unmatched scene, missing runtime camera,
+initial state, stimulus, timeScale, viewport, frame phases or tolerances
+as \`INCONNU\`. It reports camera pose errors, ROI center/edge/color/luma,
+timing and temporal change **only after** operator-provided context pairing.
+Any reported score is *operator-attested, not independent certification*;
+\`nativeParityCertified\` is always false.
+
+The new files live on the SH-10 branch only. They have not been merged,
+there is no completed browser capture and no native reference paired.
+Do **not** run the strict native gate as part of CI.
