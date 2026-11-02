@@ -18,6 +18,8 @@ import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemySh
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
 import { createNativeHud } from './render/native-hud.js';
 import { multiplyMatrices } from './scenes/graph.js';
+import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
+import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -829,7 +831,19 @@ function killEnemy(enemy) {
   state.shotPulse = Math.max(.65, state.shotPulse);
   audio.shatter({ position: vec(enemy.x, enemy.y + 1.12, enemy.z) });
   if(nativeGameplay()) {
-    if(readyForVictory(nativeEncounter,state.enemies))state.transition=1;
+    if (isDojoBuild10Source(nativeScene.source)) {
+      // Actual Web combat owner registers each dead actor once. The Dojo flow
+      // gate consumes this receipt only when not already awaiting victory.
+      const result = resolveDojoKillCompletion({
+        source:nativeScene.source, encounter:nativeEncounter,
+        enemies:state.enemies, activeScreen:state.screen,
+        playerAlive:state.health > 0, transitionPending:state.transition > 0,
+      });
+      if(result.intent?.type === 'request-web-win-transition') state.transition = 1;
+    } else if (state.transition <= 0 && readyForVictory(nativeEncounter,state.enemies)) {
+      // Non-Dojo scenes retain their pre-existing provisional Web finale.
+      state.transition = 1;
+    }
   } else if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
 }
 function damagePlayer() {
