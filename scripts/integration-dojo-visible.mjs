@@ -8,7 +8,7 @@
  */
 const isDojo = source => source &&
   source.sceneBuildIndex === 10 && source.serializedOwner === 'level10' &&
-  /(?:^|[\\/])SHRL_Dojo2(?:\\.unity)?$/i.test(source.scenePath ?? '');
+  String(source.scenePath ?? '').replaceAll(String.fromCharCode(92), '/').endsWith('/SHRL_Dojo2.unity');
 
 const unproved = Object.freeze({
   browserExecutionIndependentlyVerified: false,
@@ -66,7 +66,7 @@ export function assessDojoVisibleComposition({ frame, dom } = {}) {
   if (base.activeScreen !== 'playing') return result('DOJO_NOT_PLAYING');
   if (!base.hud.overlayVisible || !base.hud.sourceClassesActive ||
       !base.hud.crosshairElementVisible) return result('SOURCE_HUD_DOM_NOT_ACTIVE');
-  if (!/^sceneHud_\\d{3}$/.test(base.hud.sourceCrosshairMaskId ?? '') ||
+  if (!/^sceneHud_[0-9]{3}$/.test(base.hud.sourceCrosshairMaskId ?? '') ||
       base.hud.heartElements === null) return result('SOURCE_HUD_MASK_OR_HEART_DOM_MISSING');
   if (base.hands.appReportedIndexedDrawCalls > 0 &&
       base.hands.appReportedSourcePoseSampled &&
@@ -89,7 +89,7 @@ export function collectDojoVisibleComposition(win = globalThis.window) {
   const health = doc?.getElementById?.('health');
   const canvas = doc?.getElementById?.('scene');
   const mask = cssValue(crosshair, 'maskImage');
-  const match = /\\/local-assets\\/(sceneHud_\\d{3})(?![\\dA-Za-z_-])/.exec(mask);
+  const match = mask.includes('/local-assets/') ? mask.match(/sceneHud_[0-9]{3}/) : null;
   const getStyle = win?.getComputedStyle?.bind(win);
   return assessDojoVisibleComposition({
     frame,
@@ -98,7 +98,7 @@ export function collectDojoVisibleComposition(win = globalThis.window) {
       nativeCrosshair: Boolean(crosshair?.classList?.contains('native-crosshair')),
       overlayVisible: isVisible(hud, getStyle),
       crosshairElementVisible: isVisible(crosshair, getStyle),
-      maskId: match?.[1] ?? null,
+      maskId: match?.[0] ?? null,
       heartElements: health?.querySelectorAll?.('i')?.length ?? null,
       canvasWidth: canvas?.width,
       canvasHeight: canvas?.height,
