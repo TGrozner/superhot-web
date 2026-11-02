@@ -702,6 +702,25 @@ lieu d'inventer une mort. Les tests purement Node injectent phases
 d'émission, déplacements, contacts classés et destruction après handler;
 une demande `player-kill-request` ne prouve **pas** une mort jouée.
 
+**PROUVÉ statiquement — deux producteurs d'identité réutilisant des
+artifacts existants (aucune nouvelle requête) :** `Gun.SpawnPooledBullet:
+228–257` renseigne le `parentWeaponId` du projectile à partir du
+`GameObject` de l'arme du joueur, avant de le marquer
+`firedByPlayer`, de le lancer et d'affecter séparément son `ShotId`.
+Source privée [research #91](https://github.com/TGrozner/superhot-research/issues/91),
+run `41442386881`, artifact `13141281736`, texte SHA-256
+`e983e18faa3eba6b96581b4e22a12085ebb61ea62dd62b5ccc8f35c93b572fe3`.
+De même, `GunPejAiWeapon.SpawnBulletLate:74–117` renseigne l'ID parent
+avec son propre `GameObject` **après** obtention réussie d'une balle
+dans le pool et avant activation. Source privée
+[research #71](https://github.com/TGrozner/superhot-research/issues/71),
+run `41439732334`, artifact `13138660437`, texte SHA-256
+`2b8166a7ce25e3e93ad163c96326690853cc8244a937b4e5d3166f0ca3754989`.
+Ce sont deux chemins distincts arme joueur / arme IA, et non une
+valeur de `parentWeaponId` démontrée pour une instance Containers.
+L'absence de balle disponible dans le pool IA signifie **pas de
+renseignement ni de spawn réussi par ce chemin**.
+
 **INCONNU, important pour la scène Containers :** quel objet appelle
 `SetParentWeaponId`, la valeur runtime des deux IDs des vraies balles,
 le résultat du pool, l'ordre des contacts PhysX, l'état `destroyed`
