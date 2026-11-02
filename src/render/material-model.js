@@ -40,7 +40,7 @@ export function createGeneratedMaterial({id,color,alpha=1}={}){
 export function createSerializedMaterialSlot({
   id,owner,rendererPathId,materialReference,slot=0,
   rendererEnabled,receiveShadows,castShadows,
-  lightmapIndex=null,lightmapTilingOffset=null,evidence,
+  lightmapIndex=null,lightmapTilingOffset=null,evidence,resolvedAsset=null,
 }={}){
   if(typeof id!=='string'||!id.trim()) throw new TypeError('Material id required');
   if(typeof owner!=='string'||!owner.trim()) throw new TypeError('Serialized owner required');
@@ -52,14 +52,29 @@ export function createSerializedMaterialSlot({
   if((lightmapIndex===null)!==(lightmapTilingOffset===null)){
     throw new TypeError('Lightmap index and tiling offset must be provided together');
   }
+  const materialAsset=resolvedAsset===null?null:(()=>{
+    if(typeof resolvedAsset.owner!=='string'||!resolvedAsset.owner.trim()||
+       typeof resolvedAsset.name!=='string'||!resolvedAsset.name.trim()||
+       typeof resolvedAsset.evidence!=='string'||!resolvedAsset.evidence.trim()){
+      throw new TypeError('Resolved material requires exact owner, name and evidence');
+    }
+    const targetPathId=int(resolvedAsset.pathId,'resolvedAsset.pathId',1);
+    if(targetPathId!==pathId) throw new RangeError('Resolved material pathId differs from source renderer pointer');
+    return Object.freeze({
+      owner:resolvedAsset.owner,pathId:targetPathId,
+      name:resolvedAsset.name,evidence:resolvedAsset.evidence,
+      qualification:'owner-qualified-pointers-result',renderPayloadResolved:false,
+    });
+  })();
   const lightmap=lightmapIndex===null?null:Object.freeze({
     index:int(lightmapIndex,'lightmapIndex'),
     tilingOffset:vec(lightmapTilingOffset,4,'lightmapTilingOffset'),
     textureResolved:false,
   });
   return Object.freeze({
-    id,provenance:'unity-serialized',status:'material-reference-unresolved',
-    rgba:null,shader:null,textures:null,
+    id,provenance:'unity-serialized',
+    status:materialAsset?'material-identity-resolved-payload-unavailable':'material-reference-unresolved',
+    rgba:null,shader:null,textures:null,materialAsset,
     materialReference:Object.freeze({fileId,pathId}),
     lightmap,
     serializedRenderer:Object.freeze({
@@ -82,7 +97,8 @@ export function materialDrawPacket(material,{fallback=null}={}){
       serializedRenderer:null,lightmap:null,lightmapSamplingEnabled:false,
     });
   }
-  if(material.provenance!=='unity-serialized'||material.status!=='material-reference-unresolved'){
+  if(material.provenance!=='unity-serialized'||
+     !['material-reference-unresolved','material-identity-resolved-payload-unavailable'].includes(material.status)){
     throw new TypeError('Unrecognized material state');
   }
   if(!fallback) throw new Error('Unresolved MCD material '+material.id+': explicit generated fallback required');
@@ -93,7 +109,8 @@ export function materialDrawPacket(material,{fallback=null}={}){
     color:fallback.rgba,colorEncoding:'srgb',materialId:material.id,
     colorProvenance:'generated-fallback-not-mcd',fallbackUsed:true,
     serializedRenderer:material.serializedRenderer,lightmap:material.lightmap,
-    lightmapSamplingEnabled:false, // UV2 ST/index alone cannot provide baked texels.
+    materialAsset:material.materialAsset??null,
+    lightmapSamplingEnabled:false, // Source metadata does not provide shader, UV2 or baked texels.
   });
 }
 
@@ -107,7 +124,72 @@ export function transformLightmapUV(uv2,lightmap){
 
 
 /**
- * P0 Containers/build28 exact serialized bindings for the two meshes currently
+ * Exact, owner-qualified material/texture/shader metadata from two PRIVATE
+ * bounded corpus queries. These are Unity serialized records, NOT a pixel
+ * shader, texture pixels or a material that can be drawn without fallback.
+ *
+ * #75 artifact 13137203925 maps all six level28 renderer material pointers
+ * (fileID5:pathID3) -> resources.assets:3. #85 artifact 13140636598
+ * inspects resources.assets:3 and its outgoing pointer joins, including
+ * shader globalgamemanagers.assets:25, Texture2D resources.assets:248, and
+ * level28:18622 lightmap (fileID9:pathID2) -> sharedassets28.assets:2.
+ * Names, serialized uniforms, and pointers are metadata, not copied assets.
+ */
+const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
+  material:Object.freeze({
+    owner:'resources.assets',pathId:3,
+    name:'CONCRETE MAIN 0.2 doublebeton porowaty 0.2',
+    evidence:'private research #75 artifact 13137203925, #85 artifact 13140636598',
+  }),
+  shader:Object.freeze({
+    owner:'globalgamemanagers.assets',pathId:25,
+    name:'XULM FULLFORWARD/Concrete 2019 MAIN',
+    serializedKeyword:'_STRIPESONOFF_ON',
+    nativeShaderProgramDecoded:false,
+  }),
+  mainTexture:Object.freeze({
+    property:'_MainTex',owner:'resources.assets',pathId:248,
+    name:'doublebeton_diffuse-barcodezacieki',
+    uvChannel:'uv0',uvScale:Object.freeze([0.10000000149011612,0.10000000149011612]),
+    uvOffset:Object.freeze([0,0]),imagePixelsDecoded:false,
+    imageEncodingKnown:false,
+  }),
+  lightmapTexture:Object.freeze({
+    sourceSceneOwner:'level28',sourceSettingsPathId:18622,
+    slotIndex:0,sourceFileId:9,sourcePathId:2,
+    targetOwner:'sharedassets28.assets',targetPathId:2,
+    name:'Lightmap-0_comp_light',
+    imagePixelsDecoded:false,uv2StreamDecoded:false,
+  }),
+  shaderProperties:Object.freeze({
+    // Do not translate these into Web uniforms before the shipped custom
+    // shader's stage logic and texture sampling/color-space are recovered.
+    _Color:Object.freeze([1,1,1,1]),
+    _HighlightColor:Object.freeze([0.15916955471038818,0.3011871874332428,0.3382353186607361,0]),
+    _ShadowColor:Object.freeze([0.06617646664381027,0.11257605254650116,0.1764705777168274,0]),
+    _LocalAmbient:Object.freeze([0.20000000298023224,0.20000000298023224,0.20000000298023224,1]),
+    _TINT:Object.freeze([1,0.8068963885307312,0,1]),
+    _Alpha:0.25,_DIFFUSE:0.5,_Emmisive:0.5,
+    _RAMP_POWER:0.7200000286102295,
+    _RAMP_SIZE:4.159999847412109,
+    _StripesOnOff:1,
+    _SPEC_INTENSITY:0,
+  }),
+  unityMetadata:Object.freeze({
+    lightmapFlags:5,enableInstancingVariants:true,
+    doubleSidedGI:false,customRenderQueue:-1,
+  }),
+  status:'serialized-shader-and-texture-references-resolved-payload-unavailable',
+  runtimeDrawMatched:false,webShadingReady:false,
+});
+
+export function containersBuild28ConcreteMaterialSource(){
+  return CONTAINERS_CONCRETE_SOURCE;
+}
+
+/**
+ * P0 Containers/build28 exact serialized bindings for all six source
+ * renderers, including the two meshes currently
  * selectable through the local-only OBJ browser preview. These are reference
  * and atlas-placement records, NOT decoded game colors, textures or shaders.
  *
@@ -133,11 +215,27 @@ const CONTAINERS_BUILD28_CARGO_BINDINGS = Object.freeze([
       -0.00025011622346937656,0.6481873989105225,
     ]),
   }),
+  Object.freeze({
+    gameObjectPathId:461,rendererPathId:7941,
+    meshPathId:7,staticSubmesh:46,indexCount:4638,lightmapST:null,
+  }),
+  Object.freeze({
+    gameObjectPathId:673,rendererPathId:8123,
+    meshPathId:7,staticSubmesh:77,indexCount:4638,lightmapST:null,
+  }),
+  Object.freeze({
+    gameObjectPathId:839,rendererPathId:8272,
+    meshPathId:6,staticSubmesh:24,indexCount:4638,lightmapST:null,
+  }),
+  Object.freeze({
+    gameObjectPathId:1003,rendererPathId:8417,
+    meshPathId:6,staticSubmesh:32,indexCount:4638,lightmapST:null,
+  }),
 ]);
 
 /**
  * Returns a source-addressable join key and exact serialized UV2 atlas ST
- * for ONE of the two currently previewable cargo MeshRenderers.
+ * for ONE of the six source-bound cargo MeshRenderers (the first two also have verified UV2 atlas ST).
  *
  * The Web OBJ adapter currently exposes uv0, not the native baked UV2 data.
  * The atlas ref (level28 LightmapSettings index 0 -> fileID9:pathID2) does
@@ -155,8 +253,10 @@ export function containersBuild28CargoMaterialBinding(rendererPathId) {
     owner:'level28',rendererPathId:row.rendererPathId,slot:0,
     materialReference:{fileId:5,pathId:3},
     rendererEnabled:true,receiveShadows:true,castShadows:1,
-    lightmapIndex:0,lightmapTilingOffset:[...row.lightmapST],
-    evidence:'private #32 artifact 13134550402, #41 artifact 13134492119, #68 artifact 13136407658',
+    lightmapIndex:row.lightmapST?0:null,
+    lightmapTilingOffset:row.lightmapST?[...row.lightmapST]:null,
+    resolvedAsset:CONTAINERS_CONCRETE_SOURCE.material,
+    evidence:'private #32 13134550402, #41 13134492119, #68 13136407658, #75 13137203925, #85 13140636598',
   });
   return Object.freeze({
     scene:'Containers/build28',sourceOwner:'level28',
@@ -168,14 +268,16 @@ export function containersBuild28CargoMaterialBinding(rendererPathId) {
       indexCount:row.indexCount,triangleCount:row.indexCount/3,
     }),
     material,
-    nativeMaterialOwner:null,
-    bakedLightmap:Object.freeze({
+    nativeMaterialOwner:'resources.assets',
+    nativeMaterialMetadata:CONTAINERS_CONCRETE_SOURCE,
+    bakedLightmap:row.lightmapST?Object.freeze({
       index:0,sceneSettingsPathId:18622,
       atlasReference:Object.freeze({fileId:9,pathId:2}),
+      target:Object.freeze({owner:'sharedassets28.assets',pathId:2,name:'Lightmap-0_comp_light'}),
       atlasTextureResolved:false,
       webObjUv2Ready:false,
       samplingAuthorized:false,
       provenance:'unity-serialized-reference-only',
-    }),
+    }):null,
   });
 }
