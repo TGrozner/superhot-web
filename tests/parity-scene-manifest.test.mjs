@@ -69,10 +69,9 @@ test('SH05 normal transform respects reflections, not an incorrect legacy normal
 test('SH05 affine GPU rejects singular geometry instead of misrendering normals', () => {
   const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   assert.throws(() => boxModelMatrix(identity, { x: 1, y: 0, z: 1 }), /positive/);
-  assert.throws(() => boxModelMatrix([...identity.slice(0, 8), 0, 0, 0, 0, ...identity.slice(12)] ,
-    { x: 1, y: 1, z: 1 }) && normalMatrixFromAffine([
-      1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-    ]), /Singular/);
+  const singular = identity.slice();
+  singular[10] = 0;
+  assert.throws(() => normalMatrixFromAffine(singular), /Singular/);
 });
 
 test('SH05 actual render adapter dispatches affine and legacy box paths', () => {
