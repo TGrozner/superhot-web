@@ -581,3 +581,101 @@ evidence above predates this planner integration.
 platform output and human audibility are not reproduced. A successful request
 or nonzero graph signal remains weaker than physical speaker audibility or
 synchronized native/Web parity.
+
+## SH-07 P0 — EnemyShatter is a pooled AudioPrefab request, not PlayClip
+
+**PROUVÉ (managed static path; source request, not audible output).** MCD Steam
+build `20299547`, Unity `2018.4.14f1`; Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+The original body-kill producer and two complementary manager/type definitions
+were read privately in bounded excerpts, with content SHA-256 recorded here:
+
+- Private research [#89](https://github.com/TGrozner/superhot-research/issues/89)
+  (run `41442138603`, artifact `13139513152`),
+  `PejAiBody.cs:565–602`, excerpt SHA-256
+  `2f938d5c65af66128acd324d52b6fb542c2ca369bf2e6f1bb298227c5e913c60`.
+- Private research [#113](https://github.com/TGrozner/superhot-research/issues/113)
+  (run `41463176601`, artifact `13148839109`),
+  `AudioManager.cs:579–612`, excerpt SHA-256
+  `0f5ace43712f182a9961ce6088bfc50f03580d7c433a28bae5a9f189b7be0b89`.
+- Private research [#120](https://github.com/TGrozner/superhot-research/issues/120)
+  (run `41470731503`, artifact `13154468332`),
+  `AudioGameObjectResources.cs:1–46`, excerpt SHA-256
+  `2c5a4f14fe7747063cd86b4a402d19550d5a7cf81f8cdd471794753046255ef5`.
+- Private research [#121](https://github.com/TGrozner/superhot-research/issues/121)
+  (run `41470858938`, artifact `13154858152`),
+  `AudioPrefab.cs:1–6`, excerpt SHA-256
+  `783adfce973e033b8c22b27a82eae8112080d023277423d1289c76444fbd5112`.
+
+**Native order/guards:** `PejAiBody.Kill` exits when the controller was already
+dead; otherwise after the controller kill it asks `PlayPrefabSound` for
+`AudioGameObjectResources.EnemyShatter` at enemy position + (0,1.5,0).
+The static initializer declares `AudioPrefab("EnemyShatter", 5)`; the 5
+is a *declared pool size*, not an observed available pool. The prefab overload
+returns empty when its named pool is missing; on reuse it pauses the existing
+source before `Play`, otherwise registers a new active source. The request
+is spatial, unmuted, and (only for positive randomization) adjusts its
+preexisting pitch additively. The unrelated `PlayClip` null-channel/clip
+cooldown guards must **not** be applied to this overload.
+
+**PROUVÉ (serialized binding, separate evidence):** the owner's privately
+verified `spec/world/browser-audio/manifest.json` connects
+`AudioGameObjectResources.EnemyShatter` to
+`resources.assets:1898` → AudioSource `:27523` → commercial
+`AC_Enemy_Death` clip `resources.assets:1579`; the public inventory above
+records the binding, never the original bytes. This resolves the serialized
+clip identity but still does not prove that the runtime pool was initialized.
+
+**OBSERVÉ (Web, not native parity):** SH-05's current
+`src/audio.js` can play this locally supplied original WAV via
+`audio.shatter()` as an `AudioBufferSourceNode` after a browser user gesture.
+That implementation does **not** execute the Unity prefab pool guard; the
+mainline Chromium analyser result documented above concerns a *weapon throw*,
+not a measured enemy-death event. No speaker audibility, identical Unity
+mixer effects, or native paired timing is claimed.
+
+**INCONNU / acceptance gate:** runtime pool membership and activation; the
+actual Containers enemy's native `PejAiBody.Kill` dispatch; native/Unity clip
+start and audible output under a paired encounter. The pure
+`src/sound/mcd-prefab-sound-intent.js` requires the pool state explicitly and
+never guesses it. SH-05 alone may wire the native death-event policy to the
+existing local-only playback, after qualifying the enemy path and performing
+a real browser capture. No shared integration file or original media is
+altered by this PR.
+
+### SH-07 pool registration source — private research #124
+
+**NEW PROUVÉ (static source, build `20299547`):** bounded read
+[research #124](https://github.com/TGrozner/superhot-research/issues/124),
+run `41477755387`, artifact `13156944529`,
+`managed/Assembly-CSharp/AudioManager.cs:1–178`.
+The private `result.json` SHA-256 is
+`e27e22ca999d554ed87f055fe163d71f7b39047df84b1f5859aa8d78f6c8dadf`;
+the UTF-8 extracted source segment SHA-256 is
+`17669c58516f42155a59c1cbfc3972c4f39cae2880a6c9f2a7a7bd5ef0cc2b1d`.
+No source text is published.
+
+`AudioManager.Instance` lazily creates a persistent manager and calls
+`Initialize`; **pool initialization comes before mixer lookup**.
+`InitializeAudioObjectsPools` reflects `AudioGameObjectResources` fields.
+For each distinct prefab name it tries the exact resource path
+`Sounds/GameObjects/<Name>`; when `Resources.Load<GameObject>` returns
+null it logs an error **without registering a pool**, otherwise creates
+`ObjectPool(prefab, AudioPrefab.PoolSize, parent)`. An already-registered
+name skips resource lookup. The separate generic `AudioClip` pool has declared
+size 25; do not apply that capacity to `EnemyShatter`. Source locations:
+`AudioManager.cs:96–115,137–168`.
+
+**PROUVÉ composition:** the static `EnemyShatter` field name and declared
+size 5 from #120/#121, together with #124, establish a conditional
+registration attempt for `Sounds/GameObjects/EnemyShatter`. This is a
+stronger, testable gate than "all AudioPrefab fields are registered."
+
+**INCONNU:** whether the resource was successfully loaded in the actual
+Containers run, whether Unity created/reused this particular pool instance,
+and whether this enemy-death event produced audible output. Serialized
+asset presence does not substitute for observing `Resources.Load`.
+`planMcdAudioPrefabPoolInitialization` mirrors only the source decision
+with **explicit** runtime inputs; it never assumes pool presence. SH-05 may
+use this gate at the native/Web join, but no native runtime pool, AudioContext
+trace for enemy-death, or sampled speaker output is established here.
