@@ -2,6 +2,9 @@ import {
   MCD_PLAYCLIP_RESULT,
   planMcdPlayClip,
 } from './sound/mcd-playclip-intent.js';
+import {planMcdAudioPrefabPlay} from './sound/mcd-prefab-sound-intent.js';
+import {planMcdStunAudioFromCommands} from './sound/mcd-enemy-stun-prefab.js';
+import {sampleMcdCurve} from './sound/mcd-curve.js';
 
 /**
  * Browser playback for locally served, owner/path_id-verified MCD clips.
@@ -22,7 +25,7 @@ export const MCD_AUDIO_ASSET_KEYS = Object.freeze({
   ENEMY_SHATTER: 'audioEnemyShatter',
 });
 
-const CLIPS = Object.freeze({
+const DEFAULT_CLIPS = Object.freeze({
   pistolFirePrimary: Object.freeze({
     manifestKey: MCD_AUDIO_ASSET_KEYS.PISTOL_FIRE_PRIMARY,
     owner: 'sharedassets0.assets', pathId: 604, name: 'AC_Gun_Pistol_Fire',
@@ -65,7 +68,6 @@ const CLIPS = Object.freeze({
   }),
 });
 
-const CLIP_ENTRIES = Object.entries(CLIPS);
 const PISTOL_VARIANTS = new Set(['primary', 'alternate']);
 const MAX_READY_REQUESTS = 8;
 
@@ -111,6 +113,14 @@ export function createAudio(options = {}) {
   const fetchAudio = options.fetch ?? globalThis.fetch?.bind(globalThis);
   const random = options.random ?? Math.random;
   const cryptoApi = options.crypto ?? globalThis.crypto;
+  const CLIPS = {...DEFAULT_CLIPS};
+  let CLIP_ENTRIES = Object.entries(CLIPS);
+  let sceneAudio = null;
+  let listenerPosition = null;
+  const prefabPools = new Map();
+  const stunRest = new Map();
+  const sliceRest = new Map();
+  const ambienceSources = new Set();
 
   let ctx = null;
   let originalMode = false;
@@ -235,7 +245,7 @@ export function createAudio(options = {}) {
     });
   }
 
-  function addPanner(gain, position, maxDistance) {
+  function addPanner(gain, position, maxDistance, customRolloff = false) {
     if (!position || typeof ctx.createPanner !== 'function') {
       gain.connect(ctx.destination);
       return false;
@@ -245,7 +255,7 @@ export function createAudio(options = {}) {
     panner.distanceModel = 'inverse';
     panner.refDistance = 1;
     panner.maxDistance = maxDistance;
-    panner.rolloffFactor = 1;
+    panner.rolloffFactor = customRolloff ? 0 : 1;
     setParam(panner.positionX, position.x, ctx.currentTime);
     setParam(panner.positionY, position.y, ctx.currentTime);
     setParam(panner.positionZ, position.z, ctx.currentTime);
@@ -260,7 +270,8 @@ export function createAudio(options = {}) {
   function playNative(event, clipId, {
     gain: requestedGain, pitch = 1, position = null, maxDistance = 300,
     mixerGroup, priority = 128, loop = false, delaySeconds = 0,
-    zeroPitchWarning = false,
+    zeroPitchWarning = false, rolloffCurve = null, distanceGate = false,
+    onSource = null, onEnded = null,
   }) {
     if (!ctx) return blockedNative(event, clipId, 'audio-context-not-initialized');
     const buffer = buffers.get(clipId);
@@ -274,7 +285,9 @@ export function createAudio(options = {}) {
     const gainNode = ctx.createGain();
     const gain = Math.max(0, Math.min(1, finite(requestedGain, 'gain')));
     const nativePitch = finite(pitch, 'pitch');
-    const playbackRate = nativePitch * worldPitch;
+    // Only Gunshots and Env SFX descend from SHMixer's pitch-controlled Scaler.
+    const scaled = mixerGroup === 'Gunshots' || mixerGroup === 'Env SFX';
+    const playbackRate = nativePitch * (scaled ? worldPitch : 1);
     if (playbackRate < 0) throw new RangeError('effective playback rate must be nonnegative');
 
     source.buffer = buffer;
@@ -282,14 +295,23 @@ export function createAudio(options = {}) {
     setParam(source.playbackRate, playbackRate, ctx.currentTime);
     setParam(gainNode.gain, gain, ctx.currentTime);
     source.connect(gainNode);
-    const spatial = addPanner(gainNode, position, maxDistance);
-    activeSources.set(source, {nativePitch});
-    source.onended = () => activeSources.delete(source);
+    const spatial = addPanner(gainNode, position, maxDistance, Boolean(rolloffCurve));
+    activeSources.set(source, {nativePitch, scaled, gain, gainNode, position,
+      maxDistance, rolloffCurve, distanceGate, gate: 1, gateTarget: 1,
+      gateFrom: 1, gateTime: ctx.currentTime, paused: false});
+    source.onended = () => {
+      activeSources.delete(source);
+      ambienceSources.delete(source);
+      onEnded?.(source);
+    };
+    onSource?.(source);
+    updateSpatialSource(source, activeSources.get(source));
     const startedAt = ctx.currentTime + delaySeconds;
     if (delaySeconds > 0) source.start(startedAt);
     else source.start();
     playbackCount++;
-    return report('started', event, {
+    return report(ctx.state === 'running' ? 'started' : 'scheduled', event, {
+      contextState: ctx.state,
       source: 'native-audio-buffer',
       node: 'AudioBufferSourceNode',
       clipId,
@@ -314,8 +336,188 @@ export function createAudio(options = {}) {
       zeroPitchWarning,
       position,
       maxDistance: spatial ? maxDistance : null,
+      customRolloff: Boolean(rolloffCurve),
+      timeScaled: scaled,
       startedAt,
     });
+  }
+
+  function updateSpatialSource(source, state) {
+    let attenuation = 1;
+    if (state.position && listenerPosition) {
+      const distance = Math.hypot(state.position.x - listenerPosition.x,
+        state.position.y - listenerPosition.y, state.position.z - listenerPosition.z);
+      if (state.rolloffCurve) {
+        attenuation = Math.max(0, sampleMcdCurve(state.rolloffCurve, distance / state.maxDistance));
+      }
+      if (state.distanceGate) {
+        const target = distance <= state.maxDistance ? 1 : 0;
+        if (target !== state.gateTarget) {
+          state.gateFrom = state.gate;
+          state.gateTime = ctx.currentTime;
+          state.gateTarget = target;
+        }
+        const step = Math.min(Math.abs(target - state.gateFrom), ctx.currentTime - state.gateTime);
+        state.gate = state.gateFrom + Math.sign(target - state.gateFrom) * step;
+        state.paused = state.gate === 0 && target === 0;
+      }
+    }
+    setParam(state.gainNode.gain, state.gain * attenuation * state.gate, ctx.currentTime);
+    setParam(source.playbackRate, state.paused ? 0 :
+      state.nativePitch * (state.scaled ? worldPitch : 1), ctx.currentTime);
+  }
+
+  function stopSceneAmbience() {
+    for (const source of ambienceSources) {
+      source.stop();
+      activeSources.delete(source);
+    }
+    ambienceSources.clear();
+  }
+
+  function configureSceneAudio(descriptors) {
+    stopSceneAmbience();
+    for (const pool of prefabPools.values()) {
+      for (const slot of pool.used) {
+        if (slot.source) {
+          slot.source.onended = null;
+          slot.source.stop();
+          activeSources.delete(slot.source);
+        }
+      }
+    }
+    prefabPools.clear();
+    stunRest.clear();
+    sliceRest.clear();
+    sceneAudio = descriptors ?? null;
+    for (const id of Object.keys(CLIPS)) {
+      if (Object.hasOwn(DEFAULT_CLIPS, id)) continue;
+      delete CLIPS[id];
+      buffers.delete(id);
+      assetUrls.delete(id);
+      sourceMetrics.delete(id);
+      loadErrors.delete(id);
+    }
+    for (const [id, binding] of Object.entries(descriptors?.clips ?? {})) {
+      if (!/^audioNative_(?:resources_assets|sharedassets0_assets)_\d+$/.test(id) ||
+          binding.manifestKey !== id || !Number.isInteger(binding.pathId) ||
+          !['resources.assets', 'sharedassets0.assets'].includes(binding.owner)) {
+        throw new TypeError('invalid private scene audio binding');
+      }
+      CLIPS[id] = Object.freeze({...binding});
+    }
+    CLIP_ENTRIES = Object.entries(CLIPS);
+    assetsSnapshot = null;
+    for (const [name, descriptor] of Object.entries(descriptors?.prefabs ?? {})) {
+      if (!Number.isInteger(descriptor.poolSize) || descriptor.poolSize < 1 ||
+          !descriptor.clips?.length) throw new TypeError('invalid recovered audio pool');
+      // SoundClipRandomizer runs at instantiation, NOT every pool checkout.
+      const free = Array.from({length: descriptor.poolSize}, () => ({
+        clipId: descriptor.clips.length === 1 ? descriptor.clips[0] :
+          descriptor.clips[Math.min(descriptor.clips.length - 1,
+            Math.floor(randomUnit() * descriptor.clips.length))],
+        pitch: descriptor.pitch, source: null,
+      }));
+      prefabPools.set(name, {descriptor, free, used: []});
+    }
+    return Object.freeze({clips: CLIP_ENTRIES.length, prefabs: prefabPools.size});
+  }
+
+  function startSceneAmbience() {
+    if (!originalMode) return [];
+    if (ambienceSources.size) return [];
+    return (sceneAudio?.ambience ?? []).map((cue) => playNative('door-ambience', cue.clipId, {
+      ...cue, position: vector3(cue.position, 'position'),
+      onSource: source => ambienceSources.add(source),
+    }));
+  }
+
+  function playScenePrefab(name, position, commands = null) {
+    const pool = prefabPools.get(name);
+    if (!pool) return report('blocked', name, {reason: 'native-prefab-not-configured'});
+    const reused = pool.free.length === 0;
+    const slot = reused ? pool.used[0] : pool.free[pool.free.length - 1];
+    const state = {poolExists: true, reused, pitchBeforeRequest: slot.pitch};
+    const intent = commands ? planMcdStunAudioFromCommands(commands, state).playback :
+      planMcdAudioPrefabPlay({prefabName: name, position, ...state});
+    if (!ctx || !buffers.has(slot.clipId)) {
+      return blockedNative(name, slot.clipId, !ctx ? 'audio-context-not-initialized' : 'native-clip-not-loaded');
+    }
+    if (reused) {
+      pool.used.shift();
+      slot.source.onended = null;
+      slot.source.stop();
+      activeSources.delete(slot.source);
+    } else pool.free.pop();
+    pool.used.push(slot);
+    return playNative(name, slot.clipId, {
+      ...pool.descriptor, position: intent.position, pitch: intent.pitch,
+      onSource: source => { slot.source = source; },
+      onEnded: source => {
+        if (slot.source !== source) return;
+        const index = pool.used.indexOf(slot);
+        if (index < 0) return;
+        const last = pool.used.pop();
+        if (index < pool.used.length) pool.used[index] = last;
+        slot.source = null;
+        pool.free.push(slot);
+      },
+    });
+  }
+
+  function stun({bodyId, position, concrete = false, realtimeSeconds} = {}) {
+    if (!originalMode) return report('suppressed', 'stun', {reason: 'original-mode-disabled'});
+    finite(realtimeSeconds, 'realtimeSeconds');
+    if (bodyId === undefined) throw new TypeError('bodyId is required for the native per-body sound rest');
+    boolean(concrete, 'concrete');
+    if (realtimeSeconds <= (stunRest.get(bodyId) ?? 0)) {
+      return report('suppressed', 'stun', {reason: 'native-stun-sound-rest'});
+    }
+    const origin = vector3(position, 'position');
+    if (!origin) throw new TypeError('body position is required');
+    const resource = concrete ? 'EnemyStunConcrete' : 'EnemyStun';
+    const soundPosition = {...origin, y: origin.y + 1.5};
+    const until = realtimeSeconds + .25;
+    const commands = [
+      {op: 'request-stun-prefab-sound', resource, position: soundPosition},
+      {op: 'set-stun-sound-rest', realtimeSeconds: until},
+    ];
+    const result = playScenePrefab(resource, soundPosition, commands);
+    // Source advances the cooldown even when the pool/clip could not play.
+    stunRest.set(bodyId, until);
+    return result;
+  }
+
+  function itemCue(action, {itemId, position, realtimeSeconds} = {}) {
+    if (!originalMode) return report('suppressed', action, {reason: 'original-mode-disabled'});
+    let cue = sceneAudio?.items?.[itemId]?.[action];
+    if (!cue) return report('blocked', action, {reason: 'native-item-cue-not-configured', itemId});
+    if (cue.alsoThrow) itemCue('throw', {itemId, position, realtimeSeconds});
+    if (cue.prefab) {
+      const origin = vector3(position, 'position');
+      if (!origin) throw new TypeError('prefab position is required');
+      return playScenePrefab(cue.prefab, origin);
+    }
+    if (cue.choices) {
+      const selection = randomUnit();
+      const index = cue.selectionThreshold !== undefined
+        ? (selection > cue.selectionThreshold && cue.choices[1]?.clipId ? 1 : 0)
+        : Math.min(cue.choices.length - 1, Math.floor(selection * cue.choices.length));
+      cue = cue.choices[index];
+    }
+    if (!cue?.clipId) return report('suppressed', action, {reason: 'source-null-clip', itemId});
+    if (cue.realtimeCooldown) {
+      finite(realtimeSeconds, 'realtimeSeconds');
+      if (realtimeSeconds <= (sliceRest.get(itemId) ?? 0) + cue.realtimeCooldown) {
+        return report('suppressed', action, {reason: 'native-slice-sound-rest', itemId});
+      }
+      sliceRest.set(itemId, realtimeSeconds);
+    }
+    const pitch = cue.pitchRandomization ? (cue.relativePitch
+      ? cue.pitch * randomizedMultiplier(cue.pitchRandomization)
+      : cue.pitch + randomUnit() * cue.pitchRandomization * 2 - cue.pitchRandomization) : cue.pitch;
+    const gain = cue.gainRandomization ? cue.gain * randomizedMultiplier(cue.gainRandomization) : cue.gain;
+    return playMcdClip(action, cue.clipId, {...cue, gain, pitch});
   }
 
   function playMcdClip(event, clipId, {
@@ -367,9 +569,17 @@ export function createAudio(options = {}) {
     if (!originalMode) {
       readyRequests.clear();
       for (const source of activeSources.keys()) {
+        source.onended = null;
         try { source.stop(); } catch {}
       }
       activeSources.clear();
+      ambienceSources.clear();
+      stunRest.clear();
+      sliceRest.clear();
+      for (const pool of prefabPools.values()) {
+        for (const slot of pool.used) { slot.source = null; pool.free.push(slot); }
+        pool.used.length = 0;
+      }
     }
     return originalMode;
   }
@@ -534,7 +744,7 @@ export function createAudio(options = {}) {
     if (!(worldPitch > 0)) throw new RangeError('mapped native mixer pitch is not playable');
     if (ctx) {
       for (const [source, state] of activeSources) {
-        setParam(source.playbackRate, state.nativePitch * worldPitch, ctx.currentTime);
+        updateSpatialSource(source, state);
       }
     }
     return Object.freeze({soundScale, worldPitch});
@@ -564,6 +774,8 @@ export function createAudio(options = {}) {
     if (!listener.forwardX && typeof listener.setOrientation === 'function') {
       listener.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z);
     }
+    listenerPosition = p;
+    for (const [source, state] of activeSources) updateSpatialSource(source, state);
     return true;
   }
 
@@ -690,6 +902,8 @@ export function createAudio(options = {}) {
       playbackCount,
       originalMode,
       activeNativeSources: activeSources.size,
+      sceneAmbienceSources: ambienceSources.size,
+      nativeSceneAudioLimitations: sceneAudio?.limitations ?? [],
       pendingReadyCues: readyRequests.size,
       soundScale,
       worldPitch,
@@ -702,6 +916,11 @@ export function createAudio(options = {}) {
     init,
     setOriginalMode,
     loadLocalAssets,
+    configureSceneAudio,
+    startSceneAmbience,
+    stopSceneAmbience,
+    itemCue,
+    stun,
     shoot,
     throwWeapon,
     enemyShoot,

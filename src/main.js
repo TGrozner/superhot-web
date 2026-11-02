@@ -251,6 +251,7 @@ if (containersPreviewEnabled) {
       }
       renderer.replaceNativeWorld(prepared, images);
       nativeScene = prepared;
+      if (prepared.gameplay?.audio) audio.configureSceneAudio(prepared.gameplay.audio);
       nativeInspection = false;
       const name = nativeSceneName();
       $('scene-mode').querySelector('[value="original"]').textContent = `${name} · originaux locaux`;
@@ -357,7 +358,9 @@ function initializeAudio() {
     .map(id => [id, `/local-assets/${id}`]));
   // Both verified event bindings point at sharedassets0.assets:604.
   if (assets.audioPistolFirePrimary) assets.audioEnemyFire = assets.audioPistolFirePrimary;
-  void audio.init().then(() => audio.loadLocalAssets(assets)).catch(error => {
+  void audio.init().then(() => audio.loadLocalAssets(assets)).then(() => {
+    if (nativeGameplay() && nativeCombatStarted) audio.startSceneAmbience();
+  }).catch(error => {
     $('local-assets-status').textContent = `Audio local indisponible : ${error.message}`;
   });
 }
@@ -404,6 +407,7 @@ function loadLevel(index) {
     fireTimer: rand(1.6, 2.7) + e.delay, strafe: rand(-1, 1), phase: rand(0, Math.PI * 2),
   }));
   nativeCollision=null;nativeEncounter=null;nativeItems=null;
+  audio.setOriginalMode(false);
   nativePlayerCollision=null;nativeEnemyCollision=null;nativeShotCollision=null;
   nativeSightCollision=null;nativeItemCollision=null;
   if (containersPreviewEnabled) {
@@ -562,11 +566,15 @@ function shoot() {
   if (state.fireDelay > 0 || state.reload > 0) return;
   if (nativeGameplay() && nativeItems?.held) {
     if (nativeItems.held.isKatana) {
+      audio.itemCue('swing',{itemId:nativeItems.held.id,position:state.camera,realtimeSeconds:state.runClock});
       const hit=findMeleeTarget();
-      if(hit)killEnemy(hit);
+      if(hit) {
+        killEnemy(hit);
+        audio.itemCue('slice',{itemId:nativeItems.held.id,position:hit,realtimeSeconds:state.runClock});
+      }
       state.fireDelay=.5;state.recoil=1;
       addMcdGameplayPulse(nativeClock,.05,.2);
-    } else throwWeapon();
+    } else throwWeapon(true);
     return;
   }
   state.fireDelay = state.weapon ? (nativeGameplay() ? nativePistol.attackDelay : .19) : .36;
@@ -607,11 +615,14 @@ function shoot() {
       isWeaponThrown: () => !state.weapon || weaponGeneration !== generation });
   }
 }
-function throwWeapon() {
+function throwWeapon(attack = false) {
   if (nativeGameplay() && nativeItems?.held) {
+    const itemId=nativeItems.held.id;
     throwNativeItem(nativeItems,state.camera,cameraAxes(state.camera.yaw,state.camera.pitch).forward);
     state.shotPulse=1;state.recoil=1;state.fireDelay=.38;
-    addMcdGameplayPulse(nativeClock,.05,.5);audio.throwWeapon();return;
+    addMcdGameplayPulse(nativeClock,.05,.5);
+    audio.itemCue(attack?'attackThrow':'throw',{itemId,position:state.camera,realtimeSeconds:state.runClock});
+    return;
   }
   if (!state.weapon || state.reload > 0) return;
   const { forward, right } = cameraAxes(state.camera.yaw, state.camera.pitch);
@@ -650,7 +661,10 @@ function pickup() {
   const drop = nearbyPickup();
   if (!drop) return;
   if(nativeGameplay() && nativeItems.items.includes(drop)) {
-    if(pickupNativeItem(nativeItems,drop)) {state.shotPulse=.5;audio.pickup();} return;
+    if(pickupNativeItem(nativeItems,drop)) {
+      state.shotPulse=.5;
+      audio.itemCue('pickup',{itemId:drop.id,position:state.camera,realtimeSeconds:state.runClock});
+    } return;
   }
   state.drops.splice(state.drops.indexOf(drop), 1);
   state.weapon = true; state.ammo = drop.ammo ?? (nativeGameplay() ? nativePistol.ammo : 6);
@@ -708,6 +722,7 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
     if(action.type==='drop-weapon')dropNativeEnemyWeapon(enemy);
     if(action.type==='stun') {
       enemy.stunnedAt=state.worldClock;enemy.runtime.pendingShot=null;enemy.attackIntentAt=null;
+      audio.stun({bodyId:enemy.id,position:enemy,realtimeSeconds:state.runClock});
     }
     if(action.type==='kill')killEnemy(enemy);
   }
@@ -961,7 +976,7 @@ function update(dt) {
     }
   }
 
-  if(native)advanceNativeItems(nativeItems,worldDt,{
+  const itemEvents=native?advanceNativeItems(nativeItems,worldDt,{
     hitEnemy:(item,start,end)=>{
       let best=null;
       for(const enemy of state.enemies)if(enemy.alive) {
@@ -975,7 +990,9 @@ function update(dt) {
       const result=applyNativeEnemyContact(hit.enemy,item,hit,item.velocity);
       return result.shatter?'shatter':result.attach?'attach':'stop';
     },
-  });
+  }):[];
+  for(const event of itemEvents) if(event.type==='shatter')
+    audio.itemCue('break',{itemId:event.itemId,position:event.contact.point,realtimeSeconds:state.runClock});
   for (let i=state.bullets.length-1;i>=0;i--) {
     const bullet=state.bullets[i];
     if (bullet.expiresAt <= state.worldClock) {

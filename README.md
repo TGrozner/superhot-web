@@ -58,7 +58,11 @@ The configured Dojo encounter uses the source navigation polygons and connected 
 
 Source-authored bowls, cups, bottles, bonsai, fans, shurikens and katanas can be picked up and thrown. Picking up an object removes its original world draw and colliders rather than duplicating it. Ordinary blunt hits stun and disarm; sharp objects can kill and remain recoverable after sticking. Breakable objects use their authored fragments, not random substitute debris. Enemy weapons drop from their current animated socket. Death freezes the sampled enemy pose; native ragdolls are not reproduced.
 
-The encounter currently equips enemies with pistols rather than reproducing the complete weighted native weapon selection. The original red-light/audio doorway warning is not rendered, although its source delay is retained. Katana held placement uses its original sampled idle weapon-bone pose; animated player hands and katana swings are not reproduced. Stuck-object attachment does not follow a native ragdoll, and fragment motion is ballistic rather than a full fragment-to-world rigid-body simulation.
+The encounter currently equips enemies with pistols rather than reproducing the complete weighted native weapon selection. The original red-light doorway warning is not rendered, although its source delay is retained. Katana held placement uses its original sampled idle weapon-bone pose; animated player hands and katana swings are not reproduced. Stuck-object attachment does not follow a native ragdoll, and fragment motion is ballistic rather than a full fragment-to-world rigid-body simulation.
+
+When the private scene package supplies recovered audio descriptors, object pickup/throw/break, enemy stun and katana contact use their original local clips. The three doorway sounds are continuous distance-gated ambience, not spawn-warning one-shots. Source mixer groups determine which sounds follow the world clock; Unity reverb, mixer DSP and spatial spread are not reproduced. Missing source clips are not replaced with invented sounds.
+
+**Reprise du travail : [état vérifié, sauvegarde des travaux incomplets et prochaines étapes](docs/dojo-reprise.md).** This is a stabilized Web adaptation, not a completed 1:1 vertical slice.
 
 ## Files
 
@@ -68,7 +72,7 @@ The encounter currently equips enemies with pistols rather than reproducing the 
 - `src/main.js` — simulation, player controls, enemies, hit detection, levels
 - `src/levels.js` — original level layouts and procedural architecture
 - `src/math.js` — camera, collision and vector math
-- `src/audio.js` — generated Web Audio sound effects
+- `src/audio.js` — local source-backed native audio and separate procedural prototype effects
 - `server.mjs` — zero-dependency local HTTP server
 - `tests/` — Node native unit tests
 - `.github/workflows/verify.yml` — lightweight CI

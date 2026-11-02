@@ -23,6 +23,7 @@ class Source extends Node {
     this.onended = null;
   }
   start(when) { this.started = true; this.startedAt = when ?? null; }
+  stop() { this.stopped = true; }
 }
 
 class Gain extends Node {
@@ -226,4 +227,132 @@ test('matching active PlayClip sources do not invent a weapon cooldown', async (
   assert.equal(audio.shoot({variant: 'primary'}).status, 'started');
   assert.equal(FakeAudioContext.last.sources.length, 2);
   assert.ok(FakeAudioContext.last.sources.every((source) => source.started));
+});
+
+// Synthetic descriptors exercise the public adapter, not native media playback.
+function sceneAudioFixture() {
+  const id = 'audioNative_resources_assets_999';
+  const curve = [
+    {time: 0, value: 1, inSlope: -1, outSlope: -1},
+    {time: 1, value: 0, inSlope: -1, outSlope: -1},
+  ];
+  const cue = {clipId: id, gain: .6, pitch: 1, mixerGroup: 'Env SFX'};
+  return {
+    id,
+    descriptors: {
+      clips: {[id]: {manifestKey: id, owner: 'resources.assets', pathId: 999, name: 'synthetic-test'}},
+      prefabs: {EnemyStun: {...cue, clips: [id], poolSize: 1, priority: 30,
+        maxDistance: 30, rolloffCurve: curve}},
+      items: {item: {
+        pickup: {...cue, mixerGroup: 'Unscaled SFX'},
+        throw: {...cue, pitch: 1.5, pitchRandomization: .2, gainRandomization: .2, relativePitch: false},
+        attackThrow: {alsoThrow: true, selectionThreshold: .5,
+          choices: [{...cue, gain: .4, priority: 1}, {...cue, gain: .6, priority: 1}]},
+        break: {prefab: 'EnemyStun'},
+        swing: {choices: [{clipId: null}]},
+        slice: {...cue, realtimeCooldown: .1},
+      }},
+      ambience: [{...cue, mixerGroup: 'BG Object', loop: true, distanceGate: true,
+        position: [0, 0, 0], maxDistance: 5, rolloffCurve: curve}],
+    },
+  };
+}
+
+test('scene action clips use original mixer ancestry and preserve source-null swing', async () => {
+  const {audio} = makeAudio();
+  const {id, descriptors} = sceneAudioFixture();
+  audio.configureSceneAudio(descriptors);
+  await audio.init();
+  await audio.loadLocalAssets({[id]: '/scene-test.wav'});
+  audio.updateWorldAudio({aggregateTargetTimescale: 0, customAudioTimescale: 0});
+  const pickup = audio.itemCue('pickup', {itemId: 'item'});
+  assert.equal(pickup.timeScaled, false);
+  assert.equal(pickup.playbackRate, 1);
+  const thrown = audio.itemCue('throw', {itemId: 'item'});
+  assert.equal(thrown.timeScaled, true);
+  assert.equal(thrown.nativePitch, 1.5);
+  const before = audio.getMetrics().playbackCount;
+  assert.equal(audio.itemCue('swing', {itemId: 'item'}).reason, 'source-null-clip');
+  assert.equal(audio.getMetrics().playbackCount, before);
+});
+
+test('stun uses real-time per-body rest, pool reuse and native vertical offset', async () => {
+  const {audio} = makeAudio();
+  const {id, descriptors} = sceneAudioFixture();
+  audio.configureSceneAudio(descriptors);
+  await audio.init();
+  await audio.loadLocalAssets({[id]: '/scene-test.wav'});
+  const hit = audio.stun({bodyId: 1, position: [2, 3, 4], realtimeSeconds: 1});
+  assert.deepEqual(hit.position, {x: 2, y: 4.5, z: 4});
+  assert.equal(hit.status, 'started');
+  assert.equal(audio.stun({bodyId: 1, position: [2, 3, 4], realtimeSeconds: 1.25}).reason,
+    'native-stun-sound-rest');
+  const first = FakeAudioContext.last.sources[0];
+  audio.stun({bodyId: 2, position: [0, 0, 0], realtimeSeconds: 1.1});
+  assert.equal(first.stopped, true);
+  assert.equal(audio.getMetrics().activeNativeSources, 1);
+  FakeAudioContext.last.sources.at(-1).onended();
+  assert.equal(audio.getMetrics().activeNativeSources, 0);
+});
+
+test('missing clip still advances source stun rest without pretending playback', async () => {
+  const {audio} = makeAudio();
+  const {descriptors} = sceneAudioFixture();
+  audio.configureSceneAudio(descriptors);
+  const first = audio.stun({bodyId: 1, position: [0, 0, 0], realtimeSeconds: 1});
+  assert.equal(first.status, 'blocked');
+  assert.equal(audio.getMetrics().playbackCount, 0);
+  assert.equal(audio.stun({bodyId: 1, position: [0, 0, 0], realtimeSeconds: 1.1}).status, 'suppressed');
+});
+
+test('door ambience is a persistent distance-gated unscaled loop, not a warning one-shot', async () => {
+  const {audio} = makeAudio();
+  const {id, descriptors} = sceneAudioFixture();
+  audio.configureSceneAudio(descriptors);
+  await audio.init();
+  await audio.loadLocalAssets({[id]: '/scene-test.wav'});
+  audio.setListener({position: [0, 0, 0]});
+  assert.equal(audio.startSceneAmbience()[0].status, 'started');
+  assert.deepEqual(audio.startSceneAmbience(), []);
+  const context = FakeAudioContext.last;
+  const source = context.sources[0];
+  assert.equal(source.loop, true);
+  assert.equal(context.panners[0].rolloffFactor, 0);
+  audio.setListener({position: [10, 0, 0]});
+  context.currentTime += 1;
+  audio.updateWorldAudio({aggregateTargetTimescale: 0, customAudioTimescale: 0});
+  assert.equal(source.playbackRate.value, 0);
+  audio.setListener({position: [0, 0, 0]});
+  context.currentTime += .5;
+  audio.updateWorldAudio({aggregateTargetTimescale: 0, customAudioTimescale: 0});
+  assert.equal(source.playbackRate.value, 1);
+  assert.equal(context.gains[0].gain.value, .3);
+  audio.stopSceneAmbience();
+  assert.equal(source.stopped, true);
+  assert.equal(audio.getMetrics().sceneAmbienceSources, 0);
+});
+
+test('katana slice cooldown uses strict real-time gate and no extra source', async () => {
+  const {audio} = makeAudio();
+  const {id, descriptors} = sceneAudioFixture();
+  audio.configureSceneAudio(descriptors);
+  await audio.init();
+  await audio.loadLocalAssets({[id]: '/scene-test.wav'});
+  assert.equal(audio.itemCue('slice', {itemId: 'item', realtimeSeconds: 1}).status, 'started');
+  assert.equal(audio.itemCue('slice', {itemId: 'item', realtimeSeconds: 1.1}).status, 'suppressed');
+  assert.equal(audio.itemCue('slice', {itemId: 'item', realtimeSeconds: 1.101}).status, 'started');
+  assert.equal(audio.getMetrics().playbackCount, 2);
+});
+
+test('throwable primary attack plays base throw then source extra attack clip', async () => {
+  const {audio} = makeAudio([.5]);
+  const {id, descriptors} = sceneAudioFixture();
+  audio.configureSceneAudio(descriptors);
+  await audio.init();
+  await audio.loadLocalAssets({[id]: '/scene-test.wav'});
+  const result = audio.itemCue('attackThrow', {itemId: 'item'});
+  assert.equal(audio.getMetrics().playbackCount, 2);
+  assert.equal(result.gain, .4); // Native chooses alternate only strictly above .5.
+  assert.equal(result.priority, 1);
+  assert.equal(FakeAudioContext.last.sources[0].playbackRate.value, 1.5);
 });
