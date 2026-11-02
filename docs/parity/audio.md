@@ -122,3 +122,37 @@ proves this Web policy. Primary bounded read still needed via private
 `corpus-query`: `operation=read, path=spec/world/audio-vfx-deep.md,
 start=1, count=200` (private result only). No proprietary asset or PCM
 is included in this repository.
+
+## SH-07: synthetic sound provenance gate (Web-only)
+
+**PROUVÉ — WEB UNIQUEMENT:** before this change, `src/sound/prototype-sink.js`
+selected methods by `event.name` alone. An event labeled `unverified` or
+`native-proven` but named `shoot` invoked the synthetic `audio.shoot()`
+callback. It could therefore appear in timeline diagnostics as *accepted* even
+though its declared origin was not prototype. The baseline behavior is directly
+visible in the former method dispatch condition, public blob
+`3ad2d91f94877f22c6fedfc18af5bddb14f18a7e`.
+
+The adapter now invokes a synthetic effect only if
+`event.evidence === SOUND_EVIDENCE.PROTOTYPE` **and** the name is on the
+existing seven-name allowlist **and** the method exists. Other classifications
+are rejected explicitly by the timeline. `tests/sound-evidence-gate.test.mjs`
+covers the same-name mismatch, an explicit prototype event, direct adapter
+invocation and accepted-versus-rejected queue diagnostics. Reproduced locally
+against a minimal module fixture: baseline 2 failing tests out of 3; corrected
+adapter 3/3 passing. CI on the actual repository is the integration verdict.
+
+**PROUVÉ (meaning limited):** “accepted” only means the JavaScript callback
+returned without throwing or returning `false`. This is *not* an audible output
+test; even the explicit prototype event may be silent (e.g. browser audio
+context suspended or not initialized). The adapter does not synthesize or
+claim a replacement for unknown native clips.
+
+**INCONNU — MCD:** no conclusion about Unity method identity, serialized clip,
+guard, timestamp, audio engine output or perception follows from this defensive
+Web classification. `SOUND_EVIDENCE` is caller-supplied metadata, not a proof
+certificate. The bounded private read remains
+`{"operation":"read","path":"spec/world/audio-vfx-deep.md","start":1,"count":200}`,
+with follow-up assembly methods / Unity `(owner,path_id)` only if the report
+identifies them. Source build and Assembly SHA are recorded above. No native
+payload, recording or extracted method body is published.
