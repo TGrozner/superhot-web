@@ -271,7 +271,7 @@ export function renderedOriginalSceneEvidence(frame, { requireSkin = false } = {
  */
 const sha256OK = value => typeof value==='string' && /^[0-9a-f]{64}$/.test(value);
 const pngBasenameOK = value => typeof value==='string' &&
-  /^[a-z0-9][a-z0-9._-]*\\.png$/i.test(value) && !value.includes('..');
+  /^[a-z0-9][a-z0-9._-]*\.png$/i.test(value) && !value.includes('..');
 const captureFramesOK = capture => Array.isArray(capture?.frames) &&
   capture.frames.length===2 &&
   capture.frames.every(f=>pngBasenameOK(f?.file) && sha256OK(f?.sha256) &&
