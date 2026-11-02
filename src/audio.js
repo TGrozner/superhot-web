@@ -1,3 +1,8 @@
+import {
+  MCD_PLAYCLIP_RESULT,
+  planMcdPlayClip,
+} from './sound/mcd-playclip-intent.js';
+
 /**
  * Browser playback for locally served, owner/path_id-verified MCD clips.
  * The commercial WAV files stay under ignored private/. Public builds are
@@ -254,7 +259,8 @@ export function createAudio(options = {}) {
 
   function playNative(event, clipId, {
     gain: requestedGain, pitch = 1, position = null, maxDistance = 300,
-    mixerGroup, priority = 128,
+    mixerGroup, priority = 128, loop = false, delaySeconds = 0,
+    zeroPitchWarning = false,
   }) {
     if (!ctx) return blockedNative(event, clipId, 'audio-context-not-initialized');
     const buffer = buffers.get(clipId);
@@ -269,17 +275,19 @@ export function createAudio(options = {}) {
     const gain = Math.max(0, Math.min(1, finite(requestedGain, 'gain')));
     const nativePitch = finite(pitch, 'pitch');
     const playbackRate = nativePitch * worldPitch;
-    if (!(playbackRate > 0)) throw new RangeError('effective playback rate must be positive');
+    if (playbackRate < 0) throw new RangeError('effective playback rate must be nonnegative');
 
     source.buffer = buffer;
+    source.loop = loop;
     setParam(source.playbackRate, playbackRate, ctx.currentTime);
     setParam(gainNode.gain, gain, ctx.currentTime);
     source.connect(gainNode);
     const spatial = addPanner(gainNode, position, maxDistance);
     activeSources.set(source, {nativePitch});
     source.onended = () => activeSources.delete(source);
-    const startedAt = ctx.currentTime;
-    source.start();
+    const startedAt = ctx.currentTime + delaySeconds;
+    if (delaySeconds > 0) source.start(startedAt);
+    else source.start();
     playbackCount++;
     return report('started', event, {
       source: 'native-audio-buffer',
@@ -303,9 +311,54 @@ export function createAudio(options = {}) {
       worldPitch,
       playbackRate,
       spatial,
+      zeroPitchWarning,
       position,
       maxDistance: spatial ? maxDistance : null,
       startedAt,
+    });
+  }
+
+  function playMcdClip(event, clipId, {
+    gain, pitch = 1, position = null, maxDistance = 300,
+    mixerGroup, priority = 128,
+  }) {
+    const intent = planMcdPlayClip({
+      clipPresent: Boolean(CLIPS[clipId]),
+      channelPresent: typeof mixerGroup === 'string' && mixerGroup.length > 0,
+      // None of these six recovered producer calls chains SetCooldown.
+      // A matching active source alone is not a native cooldown.
+      cooldownActive: false,
+      channelIsInterfaceSfx: mixerGroup === 'Interface SFX',
+      bypassEffects: false,
+      positionProvided: position !== null,
+      isLooped: false,
+      playDelaySeconds: 0,
+      volume: gain,
+      pitch,
+      priority,
+    });
+    if (intent.status === MCD_PLAYCLIP_RESULT.EMPTY_EFFECT) {
+      return blockedNative(event, clipId, intent.reason);
+    }
+    if (intent.status !== MCD_PLAYCLIP_RESULT.REQUEST) {
+      throw new TypeError('PlayClip planner returned an unknown status');
+    }
+    const source = intent.audioSource;
+    const delaySeconds = intent.request.operation === 'PlayDelayed'
+      ? intent.request.delaySeconds
+      : 0;
+    // The current Web graph has no DSP/reverb chain to bypass. Claiming Unity
+    // mixer bypass from these flags would be fake parity.
+    return playNative(event, clipId, {
+      gain: source.volume,
+      pitch: source.pitch,
+      position: source.spatialBlend === 1 ? position : null,
+      maxDistance,
+      mixerGroup,
+      priority: source.priority,
+      loop: source.loop,
+      delaySeconds,
+      zeroPitchWarning: intent.zeroPitchWarning,
     });
   }
 
@@ -330,7 +383,7 @@ export function createAudio(options = {}) {
     const selected = variant ?? (randomUnit() > 0.6 ? 'alternate' : 'primary');
     const pitch = randomizedMultiplier(0.15);
     const gain = 0.6 * randomizedMultiplier(0.15);
-    return playNative('shoot',
+    return playMcdClip('shoot',
       selected === 'alternate' ? 'pistolFireAlternate' : 'pistolFirePrimary', {
         gain,
         pitch,
@@ -346,7 +399,7 @@ export function createAudio(options = {}) {
     // pitch1.5, then adds (not multiplies) its absolute ±0.2 randomization.
     const pitch = 1.5 + randomUnit() * 0.4 - 0.2;
     const gain = 0.8 * randomizedMultiplier(0.2);
-    return playNative('throwWeapon', 'pistolThrow', {
+    return playMcdClip('throwWeapon', 'pistolThrow', {
       gain, pitch, mixerGroup: 'Env SFX',
     });
   }
@@ -379,7 +432,7 @@ export function createAudio(options = {}) {
     boolean(reloaded, 'reloaded');
     const pitch = randomizedMultiplier(0.15);
     const gain = 0.9 * randomizedMultiplier(0.15);
-    return playNative('pickup',
+    return playMcdClip('pickup',
       reloaded ? 'pistolPickupReloaded' : 'pistolPickup', {
         gain, pitch, mixerGroup: 'Env SFX',
       });
@@ -387,14 +440,14 @@ export function createAudio(options = {}) {
 
   function hit() {
     if (!originalMode) return proceduralHit();
-    return playNative('hit', 'playerHit', {
+    return playMcdClip('hit', 'playerHit', {
       gain: 0.699999988079071, mixerGroup: 'Interface SFX', priority: 128,
     });
   }
 
   function empty() {
     if (!originalMode) return proceduralEmpty();
-    return playNative('empty', 'pistolEmpty', {
+    return playMcdClip('empty', 'pistolEmpty', {
       gain: 0.4, mixerGroup: 'Env SFX', priority: 128,
     });
   }
@@ -415,7 +468,7 @@ export function createAudio(options = {}) {
         clipId: 'pistolReady',
       });
     }
-    return playNative('ready', 'pistolReady', {
+    return playMcdClip('ready', 'pistolReady', {
       gain: 1, mixerGroup: 'Env SFX', priority: 128,
     });
   }

@@ -19,6 +19,15 @@ d'impulsion `0.4` et les coefficients de contrôle aérien du corps source.
 La limite verticale de vue est `±80°`. Les salles de démonstration conservent
 leurs règles explicitement générées.
 
+Le calcul de déplacement avant collision réutilise désormais
+`mcdSourcePlayerPreConstraintMove` livré par la PR137 : rotation de la vitesse
+par quaternion, puis multiplication par le delta du monde déjà déterminé
+pour cette frame. La même sortie porte le déplacement vertical, sans seconde
+intégration du saut. Le signe Z est converti une seule fois vers le repère Web.
+Un maintien de W après fusion a déplacé la caméra de
+`(-20.6008,2.7000,-7.6492)` à `(-23.6699,2.7024,-4.4017)` pendant
+`0.7020 s` du monde ; l'échelle a atteint1 et aucune erreur GL n'a été observée.
+
 **OBSERVÉ dans Chromium, pas une trace native appariée :** repos à
 `0.004999999888241291`, mouvement atteignant `1`, déplacement effectif pendant
 le délai d'arme, saut avec hauteur positive, tir faisant passer le chargeur de

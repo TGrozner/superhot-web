@@ -404,7 +404,10 @@ export function createRenderer(canvas) {
       transitions: Object.fromEntries(nextSkin.availableTransitions.map(key =>
         [key, sourcePackage.transitions[key].duration])) } : null;
   }
-  function drawNativeSkin(modelMatrix, clip, time, { statePlayback = false, transition = null, action = null } = {}) {
+  function drawNativeSkin(modelMatrix, clip, time, {
+    statePlayback = false, transition = null, action = null, shaderTime = 0,
+    cameraPosition = currentCamera,
+  } = {}) {
     if (!skinnedEnemy) return null;
     const instance = (statePlayback ? skinStates : skinClips)[clip];
     if (!instance) throw new Error('Native animation unavailable: ' + clip);
@@ -413,7 +416,7 @@ export function createRenderer(canvas) {
       instance, modelMatrix, viewProjection, time: time * scale(clip),
       transition: transition ? { from: (statePlayback ? skinStates : skinClips)[transition.from],
         fromTime: transition.fromTime * scale(transition.from), elapsed: transition.elapsed } : null,
-      action,
+      action, shaderTime, cameraPosition,
       color: [0.720588207244873, 0, 0, 1],
     });
     drawCalls += report.drawCalls;

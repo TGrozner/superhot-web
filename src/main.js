@@ -8,7 +8,7 @@ import { parseObjGroupsIntoIndexedMesh } from './render/mesh-format.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { prepareNativeScene } from './scenes/native-scene-local.js';
-import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse } from './time.js';
+import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove } from './time.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -723,13 +723,18 @@ function update(dt) {
     }
     jumpRequested = false;
     const yaw = state.camera.yaw;
+    const displacement = mcdSourcePlayerPreConstraintMove({
+      velocity: { x: nativeVelocity.x, y: state.verticalSpeed, z: nativeVelocity.z },
+      directionRotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+      scaledDeltaTime: worldDt,
+    });
     const next = walkThroughScene({ ...state.camera,
-      x: state.camera.x + (Math.sin(yaw) * nativeVelocity.z + Math.cos(yaw) * nativeVelocity.x) * worldDt,
-      z: state.camera.z + (-Math.cos(yaw) * nativeVelocity.z + Math.sin(yaw) * nativeVelocity.x) * worldDt,
+      x: state.camera.x + displacement.x,
+      z: state.camera.z - displacement.z,
     }, state.camera.y - 1.6);
     state.camera.x = next.x; state.camera.z = next.z;
     state.walkCycle += worldDt * Math.hypot(nativeVelocity.x, nativeVelocity.z) * 1.4;
-    state.hop += state.verticalSpeed * worldDt;
+    state.hop += displacement.y;
     if (state.hop <= 0) { state.hop = 0; state.verticalSpeed = 0; }
   } else {
     if (moving) {
@@ -857,7 +862,9 @@ function drawInspectedEnemy() {
   const clip = $('private-animation').value;
   const statePlayback = Boolean(nativeSkinInfo?.states[clip]);
   nativeEnemyStats = renderer.drawNativeSkin(enemyInspectionMatrix, clip,
-    state.runClock - nativeInspectionAt, { statePlayback })
+    state.runClock - nativeInspectionAt, {
+      statePlayback, shaderTime: state.runClock, cameraPosition: state.camera,
+    })
     ?? renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
 }
 
@@ -903,6 +910,7 @@ function drawEnemy(enemy) {
     const time = animationClock - animation.startedAt;
     nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, animation.state, time, {
       statePlayback, transition, action: enemyFireAction(enemy, animationClock),
+      shaderTime: state.runClock, cameraPosition: state.camera,
     })
       ?? renderer.drawLocalEnemyDiagnostic(actorMatrix);
     return;

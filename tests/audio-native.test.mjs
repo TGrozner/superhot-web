@@ -19,9 +19,10 @@ class Source extends Node {
     this.playbackRate = new Param(1);
     this.buffer = null;
     this.started = false;
+    this.startedAt = null;
     this.onended = null;
   }
-  start() { this.started = true; }
+  start(when) { this.started = true; this.startedAt = when ?? null; }
 }
 
 class Gain extends Node {
@@ -214,4 +215,15 @@ test('concurrent preload requests share clips without merging distinct waveforms
   const [player, enemy, alternate] = FakeAudioContext.last.sources;
   assert.equal(player.buffer, enemy.buffer);
   assert.notEqual(player.buffer, alternate.buffer);
+});
+
+test('matching active PlayClip sources do not invent a weapon cooldown', async () => {
+  const {audio} = makeAudio([0.5]);
+  await audio.init();
+  await audio.loadLocalAssets(localManifest);
+
+  assert.equal(audio.shoot({variant: 'primary'}).status, 'started');
+  assert.equal(audio.shoot({variant: 'primary'}).status, 'started');
+  assert.equal(FakeAudioContext.last.sources.length, 2);
+  assert.ok(FakeAudioContext.last.sources.every((source) => source.started));
 });

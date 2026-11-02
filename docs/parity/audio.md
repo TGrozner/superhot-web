@@ -485,3 +485,99 @@ a nonzero peak of0.66750 in the actual browser audio graph. Its WAV SHA-256 was
 `8fab8e5d46cdbb9edd960634162e0898a8177e47f0375e386c1b71668c9dcb8e`.
 This replaces the incorrect gunshot formerly emitted on throwing and proves
 graph signal, not physical speaker audibility or native mixer parity.
+
+## SH-07 P0 — AudioManager.PlayClip: native request gate and mixer intent
+
+**PROUVÉ, managed source only** — SUPERHOT: MIND CONTROL DELETE Steam
+build 20299547, Unity 2018.4.14f1, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Three **private bounded reads**, SHA-256 independently checked:
+
+- Research [#111](https://github.com/TGrozner/superhot-research/issues/111):
+  `AudioManager.cs:179–358`, run 41462927229 / artifact 13150122330,
+  UTF-8 excerpt SHA-256 `99389e315cdcbbf5bbee01482f33df113ab05ba86158221bd716352986cb879d`.
+- Research [#112](https://github.com/TGrozner/superhot-research/issues/112):
+  `AudioManager.cs:359–533`, run 41463059993 / artifact 13149727115,
+  SHA-256 `f75f9293ead262b90f1ec9f65534cd15b503aee50d3d9f413c15f02d2125c6b4`.
+- Research [#113](https://github.com/TGrozner/superhot-research/issues/113):
+  `AudioManager.cs:534–643`, run 41463176601 / artifact 13148839109,
+  SHA-256 `0f5ace43712f182a9961ce6088bfc50f03580d7c433a28bae5a9f189b7be0b89`.
+
+`AudioManager.PlayClip(AudioClip,...)` at lines 499–573 returns its empty
+effect **in this order** if the clip is null, the mixer channel is null, or
+the clip is still on cooldown. `CheckCooldownActive` walks tracked instances
+whose clip instance ID matches and returns the result of the **first enabled**
+`SetCooldown`; matching instances with the effect disabled are skipped. Thus
+an already-playing match alone is not a cooldown, and these weapon producers
+must not acquire an invented overlap guard.
+Passing those checks requests a pooled AudioSource;
+if the pool reused an instance, it first pauses it. The source is configured
+with the requested volume, priority, loop flag, pitch and mixer channel,
+a 0-second clip playhead, logarithmic rolloff, and spatialBlend=1 **only**
+when a position was supplied (otherwise 0). Explicit bypass OR the interface
+SFX channel sets all three audio bypass switches. A **strictly positive**
+playDelay requests `AudioSource.PlayDelayed`; zero/negative requests
+`AudioSource.Play`. Pitch zero **warns**, but is not a blocking guard.
+`PlayClip(AudioResource,...)` forwards that resource's serialized fields;
+their presence alone does not prove a particular clip played.
+
+**PROUVÉ, additional native mixer request:** `AudioManager.Update` calls
+`CalculateSoundScale` before `UpdateMixers`. The former uses custom audio
+timescale when strictly greater than -0.5; otherwise each Update uses
+`Lerp(previous, Clamp01(aggregateTargetTimescale/0.65), 0.1)`, snapping
+values strictly above 0.99 to 1. Mixer writes are skipped when
+`Time.unscaledDeltaTime > 0.2`; otherwise `UpdateMixerScale` requests
+the Pitch/Reverb parameters via `ScaleMapping(soundScale)` at
+`AudioManager.cs:378–414`. This is **not** a measured audio pitch, and
+the 0.1 Lerp factor is per Update, not per second. Initial/scene
+overrides and actual mixer responses remain unverified.
+
+**PROUVÉ, Web integration:** `src/sound/mcd-playclip-intent.js` models the
+ordered early exits and AudioSource request. `src/audio.js` now invokes that
+planner in the real original-mode producers for player shot, dry fire, pickup,
+ready tick, throw and player hit. An `empty-effect` result returns before a Web
+`AudioBufferSourceNode` is created. Enemy fire and enemy shatter deliberately
+bypass this planner because their recovered native producers use
+`PlayPrefabSound`, not `PlayClip`.
+
+The accepted request supplies Web-applicable source volume, pitch, loop,
+spatial choice and immediate/delayed start. Web Audio has no per-source Unity
+priority equivalent, so priority remains diagnostic rather than a playback
+control. Pitch zero remains a valid request and produces a zero playback rate;
+it is not converted into a rejection.
+The browser graph has no Unity mixer DSP/reverb chain, so interface/explicit
+bypass flags have nothing real to disconnect and are not exposed as fake Web
+mixer parity. Ready timing remains the separately recovered caller-fed WORLD
+delay with its callback-time `Thrown` guard. Throw remains clip
+`sharedassets0.assets:600` with base pitch 1.5 plus absolute ±.2
+randomization.
+
+The concrete Containers pistol bindings are the owner/path IDs in the table
+above: primary/alternate/empty/pickup/reloaded-pickup/ready/throw are
+`sharedassets0.assets:604/623/605/606/621/626/600`; player hit is
+`resources.assets:1720`. Nine distinct private WAVs back ten bindings because
+enemy fire and the primary pistol shot share clip 604. No commercial audio,
+decompiled source, or captured output is committed.
+
+The integrated weapon producer calls do not chain `SetCooldown`, so their
+planner input is false even while another matching browser source is active.
+This follows the native first-enabled-effect lookup rather than treating
+“any matching clip is playing” as cooldown. Planner tests cover ordered guards
+and source settings independently; synthetic AudioContext behavior tests cover
+unloaded-file refusal, overlapping ordinary shots, shared waveform caching,
+throw randomization and callback-time ready guards. They do not establish
+speaker output or MCD runtime execution.
+
+**Observed after integration:** the actual root's keyboard throw removed the
+held weapon and started clip600 through the integrated planner. A separate
+browser scenario invoked the real production audio API and real AudioContext:
+primary shot604 produced a measured peak0.58589; advancing its explicitly fed
+world delay by0.6 seconds started ready626. This API scenario is not a
+pointer-lock gameplay shot: the current verification browser refused pointer
+lock, so the post-merge mouse-shot path was not replayed. Earlier root-shot
+evidence above predates this planner integration.
+
+**Remaining boundary:** Unity pool reuse/pause, actual mixer DSP and reverb,
+platform output and human audibility are not reproduced. A successful request
+or nonzero graph signal remains weaker than physical speaker audibility or
+synchronized native/Web parity.

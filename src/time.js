@@ -434,3 +434,49 @@ export function stepMcdGameplayClock(clock, {
   }
   return { worldDelta, timeScale: clock.timeScale, aggregate: clock.aggregate };
 }
+
+/**
+ * Source-qualified pre-constraint player displacement, not full movement or
+ * a claim that this PlayerController is active in Containers.
+ *
+ * PROUVÉ as delivered code (not observed gameplay): private research #101,
+ * artifact 13141298923, PlayerController.cs:452 (Steam MCD 20299547).
+ * Quaternion is the caller-supplied Unity direction.rotation (x,y,z,w),
+ * velocity is the caller-supplied pre-constraint velocity in Unity units,
+ * scaledDeltaTime is caller-supplied Unity Time.deltaTime in seconds.
+ * The native method later modifies this delta for optional lock/offset then
+ * calls CharacterController.Move; collisions and those guards are NOT here.
+ * No inference from TimeControl.LateUpdate's latest write to the dt of the
+ * same UpdateMovement invocation is allowed without an execution trace.
+ * The quaternion-vector operation is a mathematical JS approximation, not
+ * a bit-exact simulation of the original Unity float32 implementation.
+ */
+export function mcdSourcePlayerPreConstraintMove({
+  velocity,
+  directionRotation,
+  scaledDeltaTime,
+} = {}) {
+  if (!velocity || !directionRotation) {
+    throw new TypeError('explicit velocity and directionRotation required');
+  }
+  if (!Number.isFinite(scaledDeltaTime) || scaledDeltaTime < 0) {
+    throw new RangeError('scaledDeltaTime must be finite and nonnegative');
+  }
+  const { x: vx, y: vy, z: vz } = velocity;
+  const { x: qx, y: qy, z: qz, w: qw } = directionRotation;
+  if (![vx, vy, vz, qx, qy, qz, qw].every(Number.isFinite)) {
+    throw new RangeError('velocity and directionRotation components must be finite');
+  }
+  // For an authentic Unity rotation quaternion, q*v*q^-1 applies its
+  // pre-existing local-space direction without inventing a camera yaw.
+  const tx = 2 * (qy * vz - qz * vy);
+  const ty = 2 * (qz * vx - qx * vz);
+  const tz = 2 * (qx * vy - qy * vx);
+  const x = (vx + qw * tx + qy * tz - qz * ty) * scaledDeltaTime;
+  const y = (vy + qw * ty + qz * tx - qx * tz) * scaledDeltaTime;
+  const z = (vz + qw * tz + qx * ty - qy * tx) * scaledDeltaTime;
+  if (![x, y, z].every(Number.isFinite)) {
+    throw new RangeError('pre-constraint displacement must be finite');
+  }
+  return { x, y, z };
+}

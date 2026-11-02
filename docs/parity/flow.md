@@ -141,3 +141,12 @@ Les fonctions n'exécutent aucune intention, n'écrivent ni save, ni UI, ni scè
 **INCONNU — MCD Containers réellement chargé.** Instance active de `AppDefragmentationMenu`, provenance des flags `DontUpdateRun`/`defragSuperhot`, indices de disque et de run *après* `MoveToNextCell`, nombre et type de cellules, rendu et durée réelle des effets, persistance et transition vers un prochain `LevelInfo`. La lecture source statique n'établit pas que le joueur atteint cet écran. À réfuter par un run natif instrumenté du callback de sortie de Containers jusqu'à ce menu, puis par vérification de l'ordre, des cellules, indices, drapeaux et horloges.
 
 **Handoff SH-05 :** le prototype actuel passe automatiquement de salle en salle après deux secondes ; ne pas remplacer ce mécanisme sans signaux réels SH-03 (quota), SH-04 (instance/scene) et un chemin de fin SH-08 (#85, #96). Pour une tranche Web **explicitement substitutive**, SH-05 peut afficher un écran de défragmentation de sa propre création, alimenté par les intentions et les valeurs post-avancée, et mesurer le passage Level→UI→Shop/NextLevel ; cela ne prouve pas encore 1:1. Aucun code ou asset Unity privé dans ce dépôt.
+
+
+## SH-08 — UpdateTimeline native Level/Shop (2026-11-02)
+
+**PROUVÉ — source décompilée statique, non runtime MCD.** Lecture privée ciblée research #117, run `41465079445`, artifact `13149219697`, SHA-256 `result.json` `fcbfcb3bb81c41819a51cf15cff1fe3ecb72d846adfdcbe2bfa0910acac21704`, `AppDefragmentationMenu.UpdateTimeline:721–920`, build 20299547. Après la progression `MoveToNextCell` décrite plus haut, la branche *Level* demande `LevelLoad.StartLoading(LevelSetup.GetNextLevelInRun())` puis démarre le timer du niveau ; la branche *Shop* saute si `NoShopsMod` ou si `BlockHacks && !KillAllMod`, sinon programme une phase de sélection différée. La dernière cellule suit une voie distincte.
+
+**OBSERVÉ — tests Web locaux, non MCD.** Nouveau planificateur d'intentions `src/flow/defrag-timeline-intents.js` et `tests/flow-defrag-timeline-intents.test.mjs` : **11/11 tests Node 22.16.0 verts localement** ; CI sur HEAD à qualifier séparément. Aucune UI, sauvegarde, scène ni commande sonore réellement exécutée par ce module.
+
+**INCONNU.** Run/flags/LevelInfo réellement chargés dans Containers, horloge de `EndAfter(0.5f)`, callbacks et popup, capture native et progression persistante. Voir [contrat détaillé](flow-defrag-timeline.md). Aucun changement des fichiers d'intégration SH-05.

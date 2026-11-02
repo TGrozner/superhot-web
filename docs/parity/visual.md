@@ -93,22 +93,22 @@ Containers utilise la projection sérialisée 60.0000267° / near0.03 / far1000.
 
 La racine a été exercée dans Chromium/WebGL2 avec360 instances de décor,185037 triangles,68 meshes,21 textures, personnage original skinné et pistolet original. Marche, pause, tir, lancer et impact ont été exercés ; les contrôles de scénario ne prouvent pas un parcours natif. Le décor compte121 compositions Concrete MAIN sourcées et239 draws génériques. Les chemins BC3 à12 mips et PNG de repli sans S3TC ont tous deux été observés sans erreur GL.
 
-Six références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75, hit0.25, fire0.25 et punch0.5, à960×540, caméra(0,1.15,4), avec les mêmes matrices de vue/projection. La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux afin d'éviter le cache de skinning d'une capture immédiate. Le Web utilise son véritable pass de skinning GPU, sans redimensionnement, antialiasing désactivé pour cette comparaison v8. Les images et le rapport `native-web-pose-comparison-v8.json` restent privés.
+Six références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75, hit0.25, fire0.25 et punch0.5, à960×540, caméra(0,1.15,4), avec les mêmes matrices de vue/projection. La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux. Le Web utilise son véritable pass de skinning GPU et le shader Red Crystal reconstruit, sans redimensionnement, antialiasing désactivé. Le temps du shader Web est fixé à0 ; la phase globale native et son état lumineux ne sont pas enregistrés dans ces références. Les images et le rapport `native-web-red-crystal-comparison-v1.json` restent privés.
 
 Les masques utilisent un écart RGB maximal supérieur à32 par rapport au fond de chaque image. L'intersection/union mesure la superposition des silhouettes, pas la fidélité globale du jeu.
 
 | Pose (secondes du clip) | Intersection/union | Écart des centres (pixels) | Écart RGB moyen normalisé |
 |---|---:|---:|---:|
-| idle0 |0.99815|0.00697|0.08007|
-| walk0.25 |0.99880|0.01500|0.07526|
-| walk0.75 |0.99866|0.00866|0.08584|
-| hit0.25 |0.99172|0.23010|0.08591|
-| fire0.25 |0.99403|0.12517|0.08270|
-| punch0.5 |0.99610|0.13933|0.08079|
+| idle0 |0.99815|0.00697|0.07162|
+| walk0.25 |0.99880|0.01500|0.07776|
+| walk0.75 |0.99866|0.00866|0.07899|
+| hit0.25 |0.99172|0.23010|0.07611|
+| fire0.25 |0.99403|0.12517|0.08074|
+| punch0.5 |0.99610|0.13933|0.07470|
 
 Ces six rendus n'ont produit aucune erreur GL. Ils remplacent la précédente mesure à quatre poses, dont l'antialiasing et l'alignement différaient : l'amélioration numérique ne doit donc pas être attribuée uniquement au modèle. Le tir additif pendant la marche a également été observé dans le navigateur, mais ne fait pas partie de ces six comparaisons isolées.
 
-Écarts visibles établis : matériau cristallin rouge/noir natif contre ombrage Web simplifié ; contexte de lumière, ombres et post-traitement d'une vraie frame de gameplay encore non apparié. Aucune fidélité complète1:1 n'est revendiquée.
+Le matériau Web présente maintenant les stries rouges/noires récupérées, mais les lumières additionnelles, le brouillard local du personnage, les effets de focus, les ombres et le post-traitement restent incomplets. La différence RGB d'une pose a augmenté malgré cette amélioration structurelle : une phase non appariée empêche d'en faire un score global de fidélité. Aucune fidélité complète1:1 n'est revendiquée.
 
 
 Les notes d'audit ci-dessous décrivent les constats antérieurs à ce raccord.

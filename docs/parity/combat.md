@@ -632,3 +632,47 @@ revendication de parité.
 rapport initial ne prouve donc PAS une animation automatique après
 chaque balle. SH-05 décide seul du câblage dans `src/main.js`, après
 un contact browser vérifié et une preuve native d'instance/phase.
+
+## SH-03 — Ordered Bullet.FixedUpdate composition (2026-11-02)
+
+**PROUVÉ PAR SOURCE STATIQUE, PAS PAR EXÉCUTION NATIVE :** private research
+[#102](https://github.com/TGrozner/superhot-research/issues/102), run
+41444508326 / artifact 13141705847, MCD build 20299547, Assembly-CSharp
+SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`,
+`managed/Assembly-CSharp/Bullet.cs:184–215,231–317`, returned-text SHA-256
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`.
+FixedUpdate sweeps a radius-0.02 sphere through the displacement, sorts
+contacts with its native comparer, and stops on `(handled && !sniperBullet) ||
+destroyed`. The Bullets branch of HandleCollision returns **false** even
+when it requests two slices: later contacts cannot be suppressed solely
+because slicing was requested. Ignored colliders bypass the alert.
+
+**WEB IMPLEMENTED, NOT NATIVE PARITY:** `src/combat/bullet-fixed-contact-sequence.js`
+composes the existing bullet-pair and incoming-player planners on **caller
+supplied, already ordered** contacts. The caller must supply the *evaluated*
+`other.CanCollide(this)` and the post-handler `destroyed` state; unknown
+values stop inference. Enemies, Glass, Pickups and other native branches are
+**UNMODELED**, not silently skipped. The synthetic
+`tests/combat-bullet-fixed-contact-sequence.test.mjs` covers enemy shotgun
+request → Update displacement → two projectiles' contact requests → possible
+player-kill request, with explicit alive/destroyed alternatives and source
+phase separation. It exercises **pure plans**; no PhysX, audible hit, health
+change, enemy reaction, or renderer proof.
+
+**Correction de composition :** une demande de déplacement du projectile courant
+lors d'un contact Bullets devient la position utilisée pour les contacts suivants.
+Ainsi un sniper survivant transmet au hit joueur l'origine calculée depuis ce
+nouveau point, sans modifier les données d'entrée. L'index du contact est conservé.
+
+**Source complémentaire désormais disponible :** `Bullet.cs:524–527` définit
+`CanCollide` par l'identité de l'arme parente ; `SliceInHalf` appelle
+`DestroyBullet` (ligne510), qui marque `destroyed` (ligne471). L'environnement
+appelle également la destruction (ligne782). Il ne faut plus qualifier ces corps
+de méthodes d'inconnus. Le plan accepte toujours les résultats fournis par son
+appelant et n'exécute pas ces effets Unity.
+
+**UNKNOWN / REFUTATION:** concrete Containers projectile masks, PhysX contact
+ordering, live parent-weapon identities, active shotgun prefab and timing remain
+unverified. Enemies/Glass/Pickups are not yet composed into this bounded planner;
+it is not substituted for the complete live collision path. A matched native
+trace remains necessary for collision parity.

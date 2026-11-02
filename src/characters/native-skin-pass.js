@@ -1,5 +1,6 @@
 import { createGeneratedLighting, lightingUniformPacket } from '../render/lighting-model.js';
 import { NATIVE_MATERIAL_GLSL } from '../render/native-material.js';
+import { RED_CRYSTAL_GLSL, RED_CRYSTAL_SOURCE } from '../render/red-crystal-pass.js';
 
 const INFLUENCES_PER_VERTEX = 4;
 const MAX_VERTICES = 1_000_000;
@@ -11,6 +12,7 @@ const vertexShader = jointCount => `#version 300 es
 precision highp float;
 in vec3 aPosition;
 in vec3 aNormal;
+layout(location = 4) in vec2 aUV0;
 in uvec4 aJointIndices;
 in vec4 aWeights;
 uniform mat4 uModel;
@@ -19,6 +21,13 @@ uniform mat4 uJoints[${jointCount}];
 uniform vec3 uLightDirection;
 uniform vec2 uLightCoefficients;
 out float vLight;
+out vec2 vUV0;
+out vec3 vWorldNormal;
+out vec3 vWorldPosition;
+out vec4 vClipPosition;
+out vec3 vViewNormal;
+out vec3 vCameraForward;
+out vec3 vObjectCameraForward;
 void main() {
   mat4 skin = aWeights.x * uJoints[int(aJointIndices.x)]
     + aWeights.y * uJoints[int(aJointIndices.y)]
@@ -29,18 +38,50 @@ void main() {
   vec3 normal = normalize(transpose(inverse(worldLinear)) * aNormal);
   vLight = uLightCoefficients.x
     + uLightCoefficients.y * max(dot(normal, uLightDirection), 0.0);
-  gl_Position = uViewProjection * world;
+  vUV0 = aUV0;
+  vWorldNormal = normal;
+  vWorldPosition = world.xyz;
+  vec3 cameraRight = normalize(vec3(
+    uViewProjection[0].x, uViewProjection[1].x, uViewProjection[2].x));
+  vec3 cameraUp = normalize(vec3(
+    uViewProjection[0].y, uViewProjection[1].y, uViewProjection[2].y));
+  vec3 cameraForward = normalize(vec3(
+    uViewProjection[0].w, uViewProjection[1].w, uViewProjection[2].w));
+  vViewNormal = vec3(dot(cameraRight, normal), dot(cameraUp, normal),
+    -dot(cameraForward, normal));
+  vCameraForward = cameraForward;
+  vObjectCameraForward = inverse(mat3(uModel)) * cameraForward;
+  vClipPosition = uViewProjection * world;
+  gl_Position = vClipPosition;
 }`;
 
-// The recovered final compositor lacks native procedural/overlay/additive inputs.
-// Do not fabricate them: use the current Web-lit RGB and explicit zero signals.
 const fragmentShader = `#version 300 es
 precision highp float;
 in float vLight;
+in vec2 vUV0;
+in vec3 vWorldNormal;
+in vec3 vWorldPosition;
+in vec4 vClipPosition;
+in vec3 vViewNormal;
+in vec3 vCameraForward;
+in vec3 vObjectCameraForward;
 uniform vec4 uColor;
+uniform vec4 uRedCrystalControl;
+uniform vec3 uCameraPosition;
+uniform vec3 uSourceLightDirection;
 out vec4 fragColor;
 ${NATIVE_MATERIAL_GLSL.redCrystalOutput}
+${RED_CRYSTAL_GLSL}
 void main() {
+  if (uRedCrystalControl.x > 0.5) {
+    vec2 screenUv = vClipPosition.xy / vClipPosition.w * 0.5 + 0.5;
+    fragColor = nativeRedCrystalDefaultForward(
+      vUV0, vWorldNormal, vWorldPosition, vViewNormal, vCameraForward,
+      vObjectCameraForward, screenUv, uRedCrystalControl.z,
+      uRedCrystalControl.y, uCameraPosition, uSourceLightDirection
+    );
+    return;
+  }
   vec3 webProceduralRgb = uColor.rgb * vLight;
   fragColor = nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0));
 }`;
@@ -433,6 +474,8 @@ export function loadNativeSkinPackage(sourcePackage) {
   }
   numericArray(mesh.positions, vertexCount * 3, 'mesh.positions');
   numericArray(mesh.normals, vertexCount * 3, 'mesh.normals');
+  const hasSourceUV0 = mesh.uv0 != null;
+  if (hasSourceUV0) numericArray(mesh.uv0, vertexCount * 2, 'mesh.uv0');
   numericArray(mesh.jointIndices, vertexCount * INFLUENCES_PER_VERTEX, 'mesh.jointIndices');
   numericArray(mesh.weights, vertexCount * INFLUENCES_PER_VERTEX, 'mesh.weights');
   numericArray(mesh.inverseBindMatrices, bones.length * 16, 'mesh.inverseBindMatrices');
@@ -485,6 +528,7 @@ export function loadNativeSkinPackage(sourcePackage) {
 
   const positions = new Float32Array(mesh.positions);
   const normals = new Float32Array(mesh.normals);
+  const uv0 = hasSourceUV0 ? new Float32Array(mesh.uv0) : null;
   for (let vertex = 0; vertex < vertexCount; vertex++) {
     const normalLength = Math.hypot(normals[vertex * 3], normals[vertex * 3 + 1], normals[vertex * 3 + 2]);
     if (!Number.isFinite(normalLength) || normalLength < EPSILON) {
@@ -551,7 +595,7 @@ export function loadNativeSkinPackage(sourcePackage) {
   const loaded = Object.freeze({
     schemaVersion: 1, source, coordinates,
     mesh: Object.freeze({
-      positions, normals, indices, jointIndices, weights, inverseBindMatrices,
+      positions, normals, uv0, hasSourceUV0, indices, jointIndices, weights, inverseBindMatrices,
       gpuJointIndices, vertexCount, indexCount: indices.length,
     }),
     bones: Object.freeze(checkedBones), clips, states, transitions, actionTiming,
@@ -1045,9 +1089,10 @@ function uploadAttribute(gl, location, values, size, integer = false) {
 }
 
 /**
- * Direct WebGL2 indexed skin pass. It owns one generated shader program and GPU
- * mesh copy, samples only caller-selected native clips at caller time, and
- * restores program/VAO/front-face state after its single indexed draw.
+ * Direct WebGL2 indexed skin pass. It owns one clean source-reconstructed
+ * Red Crystal/default-focus shader with a generated-light fallback, preserves
+ * caller-selected native clip sampling, and restores program/VAO/front-face
+ * state after its single indexed draw.
  */
 export function createNativeSkinPass(gl, sourcePackage, {
   lighting = createGeneratedLighting(),
@@ -1071,7 +1116,10 @@ export function createNativeSkinPass(gl, sourcePackage, {
       throw new Error('Native skin shader is missing attribute ' + name);
     }
   }
-  for (const name of ['uModel', 'uViewProjection', 'uJoints[0]', 'uLightDirection', 'uLightCoefficients', 'uColor']) {
+  attributes.aUV0 = 4;
+  for (const name of ['uModel', 'uViewProjection', 'uJoints[0]', 'uLightDirection',
+    'uLightCoefficients', 'uColor', 'uRedCrystalControl', 'uCameraPosition',
+    'uSourceLightDirection']) {
     uniforms[name] = gl.getUniformLocation(program, name);
     if (uniforms[name] == null) {
       gl.deleteProgram(program);
@@ -1093,6 +1141,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
     buffers.push(uploadAttribute(gl, attributes.aNormal, loaded.mesh.normals, 3));
     buffers.push(uploadAttribute(gl, attributes.aJointIndices, loaded.mesh.gpuJointIndices, 4, true));
     buffers.push(uploadAttribute(gl, attributes.aWeights, loaded.mesh.weights, 4));
+    if (loaded.mesh.uv0) buffers.push(uploadAttribute(gl, attributes.aUV0, loaded.mesh.uv0, 2));
     const elementBuffer = gl.createBuffer();
     if (!elementBuffer) throw new Error('WebGL2 failed to allocate a native skin index buffer');
     buffers.push(elementBuffer);
@@ -1139,8 +1188,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
     });
   }
 
-  function draw({ instance, modelMatrix, viewProjection, time, color,
-                  transition = null, action = null } = {}) {
+  const camera = new Float32Array(3);
+  function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
+                  cameraPosition = null, color, transition = null, action = null } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1155,6 +1205,25 @@ export function createNativeSkinPass(gl, sourcePackage, {
       if (color[i] < 0 || color[i] > 1) {
         throw new RangeError('color components must be in [0,1]');
       }
+    }
+    const shaderTimeProvided = shaderTime !== undefined;
+    if (!shaderTimeProvided) shaderTime = time;
+    if (!Number.isFinite(shaderTime) || !Number.isFinite(Math.fround(shaderTime))) {
+      throw new TypeError('shaderTime must be a finite float32 source-clock sample');
+    }
+    const cameraProvided = cameraPosition != null;
+    const indexedCamera = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+    if (cameraProvided && !indexedCamera && typeof cameraPosition !== 'object') {
+      throw new TypeError('cameraPosition requires xyz components');
+    }
+    if (indexedCamera) numericArray(cameraPosition, 3, 'cameraPosition');
+    for (let component = 0; component < 3; component++) {
+      const sourceValue = !cameraProvided ? 0
+        : (indexedCamera ? cameraPosition[component]
+          : (component === 0 ? cameraPosition.x : component === 1 ? cameraPosition.y : cameraPosition.z));
+      const value = Math.fround(sourceValue);
+      if (!Number.isFinite(value)) throw new RangeError('cameraPosition requires finite float32 xyz');
+      camera[component] = value;
     }
     let palette;
     let actionLayer = null;
@@ -1208,6 +1277,14 @@ export function createNativeSkinPass(gl, sourcePackage, {
       gl.uniform3f(uniforms.uLightDirection, ...light.direction);
       gl.uniform2f(uniforms.uLightCoefficients, light.ambient, light.diffuse);
       gl.uniform4f(uniforms.uColor, color[0], color[1], color[2], color[3]);
+      const width = gl.drawingBufferWidth;
+      const height = gl.drawingBufferHeight;
+      const viewportAspect = Number.isFinite(width) && Number.isFinite(height) && height > 0
+        ? width / height : 1;
+      gl.uniform4f(uniforms.uRedCrystalControl,
+        loaded.mesh.hasSourceUV0 ? 1 : 0, shaderTime, viewportAspect, 0);
+      gl.uniform3f(uniforms.uCameraPosition, camera[0], camera[1], camera[2]);
+      gl.uniform3f(uniforms.uSourceLightDirection, ...RED_CRYSTAL_SOURCE.directionToLight);
       if (culling) gl.frontFace(mirrored ? gl.CW : gl.CCW);
       gl.drawElements(gl.TRIANGLES, loaded.mesh.indexCount,
         loaded.mesh.indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
@@ -1223,6 +1300,27 @@ export function createNativeSkinPass(gl, sourcePackage, {
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
     };
+    if (loaded.mesh.hasSourceUV0) {
+      report.redCrystalSourceDefaultForward = true;
+      report.lightingProvenance = 'compiled-red-crystal-default-forward-static-partial';
+      report.redCrystalShader = RED_CRYSTAL_SOURCE.shader;
+      report.redCrystalPass = RED_CRYSTAL_SOURCE.pass;
+      report.redCrystalVertexProgramSha256 = RED_CRYSTAL_SOURCE.vertexProgramSha256;
+      report.redCrystalFragmentProgramSha256 = RED_CRYSTAL_SOURCE.fragmentProgramSha256;
+      report.redCrystalUvProvenance = 'private-package-mesh-uv0';
+      report.redCrystalDirectionalProvenance = RED_CRYSTAL_SOURCE.directionProvenance;
+      report.redCrystalShaderTime = shaderTime;
+      report.redCrystalShaderTimeProvenance = shaderTimeProvided
+        ? 'caller-supplied-clock-unmatched-native-global-phase'
+        : 'animation-sample-time-fallback-unmatched-native-global-phase';
+      report.redCrystalCameraProvenance = cameraProvided
+        ? 'caller-world-camera-unmatched-native-capture'
+        : 'origin-fallback-unmatched-native-camera';
+      report.redCrystalRecoveredTerms =
+        'compiled-default-focus-uv-camera-seeds-procedural-reflection-highlight-directional-distance-color';
+      report.redCrystalRemainingInputs =
+        'source-color0-threshold,local-fog,false-crystal-lights,focus-glitch,forward-add,shadows,postprocess';
+    }
     if (transitionResult.key !== null) {
       report.transition = transitionResult.key;
       report.transitionDuration = transitionResult.duration;
