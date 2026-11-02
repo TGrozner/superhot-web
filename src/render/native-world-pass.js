@@ -754,6 +754,18 @@ export function createNativeWorldPass(gl, scene, images) {
     };
   }
   return {
+    // Source mesh-local bounds, not a guessed gameplay hitbox. The consumer
+    // converts these through the exact authored instance and shard matrices.
+    getInstanceBounds(id) {
+      const source = requireInstance(id);
+      const entry = scene.meshes.get(source.meshId);
+      const bounds = entry?.mesh?.bounds;
+      if (!bounds || !Array.isArray(bounds.center) || bounds.center.length !== 3 ||
+          !Number.isFinite(bounds.radius) || bounds.radius <= 0) {
+        throw new TypeError('Source mesh bounds unavailable for ' + id);
+      }
+      return {center:[...bounds.center],radius:bounds.radius};
+    },
     draw: (vp, camera, clock) => render(vp, camera, null, clock),
     // Visibility controls only the authored world placement, not explicit draws.
     setInstanceVisible(id, visible) {

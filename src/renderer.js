@@ -438,6 +438,10 @@ export function createRenderer(canvas) {
       directionProvenance: `${prepared.source.serializedOwner}-serialized-realtime-direction-web-space`,
     });
   }
+  function getNativeInstanceBounds(id) {
+    if (!nativeWorld) throw new Error('Native scene is not loaded');
+    return nativeWorld.getInstanceBounds(id);
+  }
   function drawNativeWorld() {
     if (!nativeWorld) return null;
     const report = nativeWorld.draw(viewProjection, currentCamera, currentSceneClock);
@@ -508,7 +512,7 @@ export function createRenderer(canvas) {
     begin,draw,affineBox,replacePrivateMesh,replacePrivateTexture,drawPrivateMesh,
     replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin,
     replaceNativeWorld, drawNativeWorld, drawNativeWeapon, drawFirstPersonWeapon,
-    setNativeInstanceVisible, drawNativeInstance,
+    setNativeInstanceVisible, drawNativeInstance, getNativeInstanceBounds,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,

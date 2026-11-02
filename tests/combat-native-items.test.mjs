@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem,
   advanceNativeItems, nativeItemDraws, getNativeItemPosition } from '../src/combat/native-items.js';
 import { prepareNativeCollision } from '../src/scenes/native-collision.js';
+import { advanceGunPickupShardRuntime } from '../src/vfx/gun-pickup-shatter.js';
 
 // Synthetic affine fixtures, not original game meshes, prefab data or exported scenes.
 const matrix = (x = 0, y = 0, z = 0) => [1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1];
@@ -347,4 +348,35 @@ test('spinning off-center meshes keep their swept bounds center rather than orbi
   const end = getNativeItemPosition(item);
   near(end.x, start.x); near(end.y, start.y); near(end.z, start.z-2.8);
   assert.ok(Math.abs(item.worldMatrix[2]) > 0);
+});
+
+
+test('Dojo shatter binds source mesh-local geometry to optional collision physics without changing fallback', () => {
+  const source=fixture('authored', {shards:[{instanceId:'shard-a',localMatrix:matrix(.1,0,0),originalScale:1}]});
+  const collision=prepareNativeCollision([box('floor',-1,[8,1,.4])]);
+  const material={bounciness:.2,dynamicFriction:1,bounceThreshold:2};
+  const scene={interactables:[source],gameplay:{deathPhysics:{fixedDelta:1/60,material}}};
+  const getBounds=id=>{
+    assert.equal(id,'shard-a');
+    return {center:[0,0,0],radius:.15};
+  };
+  const runtime=createNativeItems(scene,collision,{
+    setVisible:()=>{},getBounds,gravity:{x:0,y:-9.81,z:0},random:()=>.5,
+  });
+  const item=runtime.items[0];
+  launch(runtime,item);
+  const events=advanceNativeItems(runtime,.05,{
+    hitEnemy:()=>({t:.1,point:{x:0,y:1,z:-.8},enemyId:'target'}),
+    applyContact:()=> 'shatter',
+  });
+  assert.equal(events[0].type,'shatter');
+  assert.equal(runtime.fragments.length,1);
+  const group=runtime.fragments[0];
+  assert.equal(group.physics,'source-impulse-static-sphere-contacts-not-PhysX');
+  assert.ok(group.shards[0].collisionRadius>=.15);
+  const frame=advanceGunPickupShardRuntime(group,.05);
+  assert.ok(Array.isArray(frame[0].contacts));
+  assert.ok(frame[0].position && Number.isFinite(frame[0].position.y));
+  assert.throws(()=>createNativeItems(scene,collision,{setVisible:()=>{},gravity:zero}),
+    /geometry bounds provider/);
 });

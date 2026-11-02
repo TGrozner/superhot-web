@@ -92,7 +92,7 @@ function hideStatic(runtime, item) {
  * permanently on transfer; dynamic throws use sphere sweeps, not stale boxes.
  */
 export function createNativeItems(scene, collision, {
-  setVisible, gravity = scene.physics?.gravity ?? SOURCE_GRAVITY, random = Math.random,
+  setVisible, getBounds = null, gravity = scene.physics?.gravity ?? SOURCE_GRAVITY, random = Math.random,
 } = {}) {
   if (typeof setVisible !== 'function' || !collision?.boxes || typeof collision.setEnabled !== 'function')
     throw new TypeError('native items require visibility and prepared collision adapters');
@@ -126,7 +126,14 @@ export function createNativeItems(scene, collision, {
       queryCollision: { boxes: physical.boxes.filter(box => !colliderSet.has(box.collider.id)) },
       state: 'static', staticHidden: false, velocity: { ...ZERO }, attachment: null, pendingContact: null };
   });
-  return { items, held: null, collision, setVisible, gravity: point(gravity, 'gravity'), random, fragments: [] };
+  const physics = scene.gameplay?.deathPhysics ?? null;
+  if (physics && (!Number.isFinite(physics.fixedDelta) || physics.fixedDelta <= 0 ||
+      !physics.material || typeof getBounds !== 'function')) {
+    throw new TypeError('Source fragment physics requires fixed step, material and geometry bounds provider');
+  }
+  return { items, held: null, collision, setVisible, getBounds,
+    gravity: point(gravity, 'gravity'), random, fragments: [],
+    fragmentPhysics: physics ? {fixedDelta:physics.fixedDelta,material:physics.material} : null };
 }
 
 /** Current world-space bounds center, rather than a stale source location. */
@@ -191,11 +198,32 @@ function shatter(runtime, item, attachedToEnemy) {
   item.state = 'broken';
   if (!item.shards.length) return; // No invented fragments for an absent source shard instance.
   runtime.fragments.push(createGunPickupShardRuntime({
-    shards: item.shards.map(shard => ({ id: shard.instanceId, originalScale: shard.originalScale,
-      modelMatrix: multiplyMatrices(item.worldMatrix, shard.localMatrix) })),
+    shards: item.shards.map(shard => {
+      const modelMatrix = multiplyMatrices(item.worldMatrix, shard.localMatrix);
+      if (!runtime.fragmentPhysics) {
+        return {id:shard.instanceId,originalScale:shard.originalScale,modelMatrix};
+      }
+      const bounds = runtime.getBounds(shard.instanceId);
+      if (!bounds || !Number.isFinite(bounds.radius) || bounds.radius <= 0) {
+        throw new TypeError('Source shard geometry bounds required: ' + shard.instanceId);
+      }
+      const localCenter = vector(triple(bounds.center,'shard bounds center'));
+      // Conservative spectral-norm bound for the shader's transformed sphere.
+      const columns=[modelMatrix.slice(0,3),modelMatrix.slice(4,7),modelMatrix.slice(8,11)];
+      let normSquared=0;
+      for(let i=0;i<3;i++) {
+        let row=0;
+        for(let j=0;j<3;j++)row+=Math.abs(columns[i].reduce((sum,v,k)=>sum+v*columns[j][k],0));
+        normSquared=Math.max(normSquared,row);
+      }
+      return {id:shard.instanceId,originalScale:shard.originalScale,modelMatrix,
+        collisionCenter:transform(modelMatrix,localCenter),
+        collisionRadius:bounds.radius*Math.sqrt(normSquared)};
+    }),
     parentVelocity: item.velocity, attachedToEnemy,
     torqueSamples: item.shards.map(() => torque(runtime)), fadeDelays: item.shards.map(() => 2*roll(runtime)),
     gravity: runtime.gravity,
+    ...(runtime.fragmentPhysics ? {physics:{...runtime.fragmentPhysics,collisionScene:item.queryCollision}} : {}),
   }));
 }
 function contact(runtime, item, hit, applyContact, events) {
