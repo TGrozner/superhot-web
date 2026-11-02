@@ -821,3 +821,42 @@ A graph signal is weaker than physical speaker audibility. The active
 Containers scene, pool, native mixer output and paired runtime timing are still
 **INCONNU**. Do not use `audio.shatter()` or a synthetic pistol cue as a
 substitute for a Stun sound.
+
+## SH-07 — opt-in local browser Stun pool/clip preview (2026-11-02)
+
+**PROUVÉ (static source/serialized identities, not executed native audio):**
+private research #105, #113, #120, #124 and #144–#147, MCD build
+20299547, Assembly-CSharp SHA256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+The clip bindings above are `EnemyStun → resources.assets:1675` and
+`EnemyStunConcrete → resources.assets:1611`. The source declares pools
+of 3 and 2, but their **runtime Resources.Load success is unverified**.
+
+**WEB-ONLY, intentionally diagnostic:** `src/sound/mcd-stun-scene-plan.js`
+adapts these *existing* source IDs to the existing
+`createAudio().configureSceneAudio` contract, yielding the allowlisted local
+manifest keys `audioNative_resources_assets_1675` and
+`audioNative_resources_assets_1611`. It does NOT fetch/play audio or
+modify `src/main.js`/`src/audio.js`. Both named prefabs require an explicit
+`resourcePresent` decision from the owner: `false` or `'unknown'`
+does not install a Web pool; `true` authorizes a *local diagnostic pool
+assumption only*, NOT a claim about the actual MCD runtime. An explicit
+positive `diagnosticMaxDistance` is required for Web spatialization.
+Initial serialized source volume is used as a preview gain, not a verified
+final gain; the native mixer/effects, pitch-timescale route and attenuation
+remain unknown. Pre-existing private package bindings are never overwritten.
+
+**SH-05 integration handoff:** after `prepareNativeScene`, pass the
+owner-qualified `gameplay.audio` and resource decisions through
+`planMcdLocalStunSceneAudio` before
+`audio.configureSceneAudio(plan.sceneAudio)`; map the generated
+`localManifestKeys` to *owner-local*, ignored WAV paths in
+`private/browser-assets.json`, restart the local server, then use the
+existing user-gesture `audio.init() → loadLocalAssets()`. The current
+Containers gameplay already calls `audio.stun` on a Web reaction, but the
+source-qualified PejAiBodyPart contact from SH-03/06 remains a separate
+necessary gate. Test both guarded normal/concrete Stun and absent-pool/
+missing-WAV cases. Collect Chromium `AudioContext` state, actual decoded
+buffer identity, `lastPlayback`, a **nonzero analyser graph signal** and an
+actual audible output observation separately. Node tests are NOT an audio
+measurement. No native sample, bytes, game asset or mixer is published.
