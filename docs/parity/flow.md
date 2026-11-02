@@ -41,3 +41,19 @@ The research workflow is `TGrozner/superhot-research/.github/workflows/corpus-qu
 - **SH-08 owns** `docs/parity/flow.md`, `src/flow/**`, `tests/flow-*.test.mjs`.
 - **SH-05 owns** any changes to `src/main.js`, `index.html`, `style.css` and runtime integration. Suggested adapter: emit `START`, `RESTART`, `PAUSE`, `RESUME`, `DAMAGE`, `ROOM_CLEARED` at current game events, and `TICK` with **real seconds** from the existing simulation `update(dt)`. `WORLD_TICK`/time dilation remain under SH-02 ownership.
 - All flow transitions are pure values; DOM visibility, pointer lock, audio, save data and scene asset loading remain the caller's responsibility. Integration must not substitute a passing unit test for a native MCD parity verdict.
+
+## SH-08 — traçage Web et pistes natives ciblées (2026-11-02)
+
+**PROUVÉ (provenance uniquement).** L'artifact privé du workflow `corpus-query` (run `41368361512`, artifact `13108420851`, lecture `HANDOFF.md:1–100`, SHA-256 du `result.json` : `49db909ca1692e3b1e21a2e538b81a7bab11cbb01763f5977fcdb6f2fe832052`) identifie MCD build `20299547` et l'assembly `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`. Ce n'est **pas** un certificat de comportement.
+
+**OBSERVÉ DANS UN RAPPORT PRIVÉ (non contre-vérifié en exécution).** `HANDOFF.md:49` pointe `spec/world/README.md` comme index des contrats de niveaux, progression, sauvegardes, HUD, interfaces et **132 timelines**. `HANDOFF.md:55` indique cinq captures dans `runtime/observations.json` (menu, run Containers, déplacement, pause) ; les images/observations elles-mêmes n'ont pas été relues ici. `HANDOFF.md:67,77` identifie `spec/world/semantic-coverage-current.json` comme couverture actuelle et avertit qu'un graphe de progression ne se réduit pas à un menu.
+
+**INCONNU (MCD).** Les nœuds/runs actifs, gardes des transitions, checkpoints, sauvegardes, retour après mort, ordre des écrans, délais et conséquences persistantes restent sans méthodes/instances/observations primaires accessibles. Un dénombrement de timelines ne prouve pas la succession réellement empruntée.
+
+**Requête privée minimale non exécutée** (le connecteur permet de lire les artifacts mais n'expose pas `workflow_dispatch`) :
+
+1. `{"operation":"read","path":"spec/world/README.md","start":1,"count":180}` — identifier les rapports précis par famille avant toute lecture additionnelle.
+2. `{"operation":"read","path":"runtime/observations.json","start":1,"count":150}` — séparer les observations réellement effectuées des scénarios envisagés.
+3. `{"operation":"read","path":"spec/world/semantic-coverage-current.json","start":1,"count":120}` — sélectionner uniquement les méthodes, données sérialisées et trous de preuve du flux de progression.
+
+**PROUVÉ (Web uniquement).** Le nouveau `src/flow/scenario-trace.js` rejoue sans effets de bord des événements du reducer prototype et enregistre avant/après, champs modifiés et événements ignorés. `tests/flow-scenario-trace.test.mjs` couvre une boucle à trois salles, pause, événements dupliqués, mort/redémarrage, entrées mutées et erreurs. Test ciblé local Node 22.16.0 : **6/6 réussis**. Ce diagnostic n'est ni une sauvegarde, ni un checkpoint natif, ni une mesure de parité. Aucun raccord `src/main.js` (réservé SH-05).
