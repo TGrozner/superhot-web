@@ -1015,8 +1015,8 @@ function evaluatePrecomposedActionPalette(sourcePackage, precomposition,
   return composePalette(sourcePackage, targetPose, scratch, fromPose, result.weight);
 }
 
-/** Deterministically sample a native base clip with optional evidenced transition/action layer. */
-export function sampleNativeSkinPalette(sourcePackage, {
+/** Sample the current source pose for skinning, detachment and body-part placement. */
+export function sampleNativeSkinPose(sourcePackage, {
   clip: clipName, time, playback, transition = null, action = null,
 } = {}) {
   const loaded = loadNativeSkinPackage(sourcePackage);
@@ -1046,7 +1046,36 @@ export function sampleNativeSkinPalette(sourcePackage, {
       : evaluatePalette(loaded, clip, time, playback, scratch,
         actionPose, layer?.mask, action?.weight ?? 0);
   }
-  return new Float32Array(palette);
+  return {
+    palette: new Float32Array(palette),
+    boneModelMatrices: new Float32Array(scratch.globals),
+  };
+}
+
+/** Preserve the palette-only API for existing skinning clients. */
+export function sampleNativeSkinPalette(sourcePackage, sample) {
+  return sampleNativeSkinPose(sourcePackage, sample).palette;
+}
+
+/**
+ * Snapshot the current source weapon socket without waiting for a draw call.
+ * The caller supplies the SAME final pose/model used to render the enemy.
+ * Null means the package has no source attachment; no floor offset is invented.
+ */
+export function sampleNativeWeaponAttachment(sourcePackage, modelMatrix, boneModelMatrices) {
+  const loaded = loadNativeSkinPackage(sourcePackage);
+  affineDeterminant(modelMatrix, 'modelMatrix');
+  numericArray(boneModelMatrices, loaded.jointCount * 16, 'boneModelMatrices');
+  if (!loaded.weaponAttachment) return null;
+  const boneOffset = loaded.weaponAttachment.bone * 16;
+  const boneMatrix = Array.prototype.slice.call(boneModelMatrices, boneOffset, boneOffset + 16);
+  affineDeterminant(boneMatrix, 'attachment bone matrix');
+  const local = new Float32Array(16);
+  const world = new Float32Array(16);
+  multiplyInto(boneModelMatrices, boneOffset, loaded.weaponAttachment.localMatrix, 0, local, 0);
+  multiplyInto(modelMatrix, 0, local, 0, world, 0);
+  affineDeterminant(world, 'weapon attachment matrix');
+  return world;
 }
 
 function compileShader(gl, kind, source) {
@@ -1331,6 +1360,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
       weaponAttachmentMatrix,
+      // Borrowed until the next draw; gameplay consumes it immediately.
+      boneModelMatrices: scratch.globals,
     };
     if (loaded.mesh.hasSourceUV0) {
       report.redCrystalSourceDefaultForward = true;

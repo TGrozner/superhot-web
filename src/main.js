@@ -10,6 +10,12 @@ import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { prepareNativeScene } from './scenes/native-scene-local.js';
 import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove } from './time.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
+import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativeGroundAt, nativeSegmentHit, nativeSphereHit } from './scenes/native-collision.js';
+import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
+import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
+import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
+import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
+import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -52,6 +58,9 @@ let nativeInspection = false;
 let nativeInspectionAt = 0;
 let nativeCombatStarted = false;
 const nativeGameplay = () => containersPreviewEnabled && nativeScene && !nativeInspection;
+let nativeCollision = null, nativeEncounter = null, nativeItems = null;
+let nativePlayerCollision=null,nativeEnemyCollision=null,nativeShotCollision=null,nativeSightCollision=null,nativeItemCollision=null;
+let nativeFeet = { x:0, y:0, z:0 }, nativeGrounded = true, nativeEyeHeight = 1.61;
 const nativeSceneName = () => nativeScene
   ? nativeScene.source.scenePath.split('/').pop().replace(/\.unity$/i, '')
   : localAssetManifest?.assets?.scenePackage ? 'SCÈNE LOCALE' : 'CONTAINERS';
@@ -356,6 +365,7 @@ function initializeAudio() {
 function setScreen(name) {
   state.screen = name;
   const playing = name === 'playing';
+  $('scene-controls').hidden=playing&&nativeCombatStarted&&!nativeInspection;
   hud.hidden = !playing;
   overlay.hidden = playing;
   crosshair.style.opacity = playing ? '1' : '0';
@@ -393,8 +403,11 @@ function loadLevel(index) {
     ...e, y: 0, id: i, alive: true, active: false, clock: 0, face: 0,
     fireTimer: rand(1.6, 2.7) + e.delay, strafe: rand(-1, 1), phase: rand(0, Math.PI * 2),
   }));
+  nativeCollision=null;nativeEncounter=null;nativeItems=null;
+  nativePlayerCollision=null;nativeEnemyCollision=null;nativeShotCollision=null;
+  nativeSightCollision=null;nativeItemCollision=null;
   if (containersPreviewEnabled) {
-    // Source-derived bounds use provisional Web AABB contact, not Unity PhysX.
+    // Native affine boxes and source walkable polygons drive this local scene.
     state.objects = [];
     state.solids = [];
     state.enemies = [];
@@ -405,18 +418,26 @@ function loadLevel(index) {
         yaw: Math.atan2(camera[8], -camera[10]),
         pitch: Math.atan2(camera[9], Math.hypot(camera[8], camera[10])) };
       previewCameraY = state.camera.y;
-      state.solids = nativeScene.colliders.filter(c => !c.isTrigger &&
-        c.initial.enabled && c.initial.activeInHierarchy).map(c => {
-        const [x0, y0, z0] = c.worldAabb.min, [x1, y1, z1] = c.worldAabb.max;
-        return { x: (x0+x1)/2, y: (y0+y1)/2, z: (z0+z1)/2,
-          w: x1-x0, h: y1-y0, d: z1-z0, min: vec(x0,y0,z0), max: vec(x1,y1,z1) };
+      nativeCollision = prepareNativeCollision(nativeScene.colliders);
+      const player = nativeScene.gameplay?.player;
+      if (!player || !nativeScene.navigation) throw new Error('La scène locale doit inclure ses collisions, chemins et paramètres de jeu.');
+      const masks=nativeScene.gameplay.collisionMasks;
+      nativePlayerCollision=nativeCollisionView(nativeCollision,masks.player);
+      nativeEnemyCollision=nativeCollisionView(nativeCollision,masks.enemy);
+      nativeShotCollision=nativeCollisionView(nativeCollision,masks.bullet);
+      nativeSightCollision=nativeCollisionView(nativeCollision,nativeScene.gameplay.enemy.eyesightLayerMask);
+      nativeItemCollision=nativeCollisionView(nativeCollision,masks.item);
+      nativeEyeHeight = player.height / 2 - player.center.y;
+      nativeFeet = vec(state.camera.x, state.camera.y-nativeEyeHeight, state.camera.z);
+      const support = nativeGroundAt(nativePlayerCollision,nativeFeet,{...player,maxDrop:.3,maxRise:player.stepOffset});
+      nativeGrounded = Boolean(support);
+      if (support) { nativeFeet.y=support.y+player.groundClearance; state.camera.y=nativeFeet.y+nativeEyeHeight; }
+      for (const item of nativeScene.interactables) for (const model of item.models) renderer.setNativeInstanceVisible(model.instanceId,true);
+      nativeItems = createNativeItems(nativeScene,nativeCollision,{
+        setVisible:(id,visible)=>renderer.setNativeInstanceVisible(id,visible),
+        gravity:nativeScene.gameplay.physics.gravity,
       });
-      // Authored candidate positions, with Web encounter timing—not a native spawner replay.
-      state.enemies = nativeScene.anchors.enemy.map((point, id) => {
-        const m = point.worldMatrix;
-        return { x:m[12], y:m[13], z:m[14], id, alive:true, active:true, clock:0,
-          face:0, delay:0, fireTimer:2+id, strafe:0, phase:0, walking:false, deathAt:null };
-      });
+      nativeEncounter = createNativeEncounter(nativeScene,nativeEnemyCollision,Math.random,{sightCollision:nativeSightCollision});
     } else if (!nativeScene && !nativeInspection && !localAssetManifest?.assets?.scenePackage) {
       state.solids = buildContainersCollisionSolids();
       resetContainersTarget();
@@ -424,6 +445,7 @@ function loadLevel(index) {
   }
   nativeClock = createMcdGameplayClock(state.camera);
   nativeVelocity.x = 0; nativeVelocity.z = 0; jumpRequested = false;
+  nativeJumpAt=-Infinity;
   weaponGeneration++;
   state.bullets = []; state.fragments = []; state.drops = [];
   state.speed = .04; state.shotPulse = 0; state.lookActivity = 0;
@@ -529,7 +551,7 @@ function reload() {
   audio.pickup();
 }
 function addBullet(from, direction, friendly, type = 'normal') {
-  const speed = type === 'throw' ? 30 : nativeGameplay()
+  const speed = type === 'throw' ? (nativeGameplay() ? 28 : 30) : nativeGameplay()
     ? (friendly ? nativePistol.bulletSpeed : 28) : friendly ? 37 : 8.4;
   const bullet = { pos: { ...from }, direction: { ...direction }, speed, friendly, type,
     ttl: type === 'throw' ? 2 : 5, age: 0 };
@@ -538,6 +560,15 @@ function addBullet(from, direction, friendly, type = 'normal') {
 }
 function shoot() {
   if (state.fireDelay > 0 || state.reload > 0) return;
+  if (nativeGameplay() && nativeItems?.held) {
+    if (nativeItems.held.isKatana) {
+      const hit=findMeleeTarget();
+      if(hit)killEnemy(hit);
+      state.fireDelay=.5;state.recoil=1;
+      addMcdGameplayPulse(nativeClock,.05,.2);
+    } else throwWeapon();
+    return;
+  }
   state.fireDelay = state.weapon ? (nativeGameplay() ? nativePistol.attackDelay : .19) : .36;
   if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .2);
   state.shotPulse = 1;
@@ -545,7 +576,12 @@ function shoot() {
   if (!state.weapon) {
     // Unarmed close-range attack; useful after throwing the gun.
     const hit = findMeleeTarget();
-    if (hit) killEnemy(hit);
+    if (hit) {
+      if(nativeGameplay()) applyNativeEnemyContact(hit,{
+        stickable:false,isKiller:false,headshotKiller:false,cutLimbs:false,
+      },{...hit.lastMeleeContact,point:vec(hit.x,hit.y+1.2,hit.z)},multiply3(cameraAxes(state.camera.yaw,state.camera.pitch).forward,3));
+      else killEnemy(hit);
+    }
     else audio.empty();
     return;
   }
@@ -559,7 +595,9 @@ function shoot() {
   state.ammo--; state.shots++;
   const { forward, right } = cameraAxes(state.camera.yaw, state.camera.pitch);
   const origin = add3(add3(state.camera, multiply3(forward, .68)), multiply3(right, .12));
-  addBullet(origin, forward, true);
+  // The visible first-person muzzle may extend past a wall; do not start a
+  // projectile on its far side.
+  if(!nativeGameplay() || !nativeSegmentHit(nativeShotCollision,state.camera,origin))addBullet(origin, forward, true);
   state.muzzle = .09;
   shootFlash.style.opacity = '.5';
   audio.shoot();
@@ -570,10 +608,17 @@ function shoot() {
   }
 }
 function throwWeapon() {
+  if (nativeGameplay() && nativeItems?.held) {
+    throwNativeItem(nativeItems,state.camera,cameraAxes(state.camera.yaw,state.camera.pitch).forward);
+    state.shotPulse=1;state.recoil=1;state.fireDelay=.38;
+    addMcdGameplayPulse(nativeClock,.05,.5);audio.throwWeapon();return;
+  }
   if (!state.weapon || state.reload > 0) return;
   const { forward, right } = cameraAxes(state.camera.yaw, state.camera.pitch);
-  const origin = add3(add3(state.camera, multiply3(forward, .72)), multiply3(right, .12));
+  const origin = nativeGameplay() ? add3(state.camera,multiply3(forward,.075))
+    : add3(add3(state.camera, multiply3(forward, .72)), multiply3(right, .12));
   const thrown = addBullet(origin, forward, true, 'throw');
+  if(nativeGameplay())thrown.velocity=multiply3(forward,28);
   thrown.ammo = Math.max(0, state.ammo);
   if (nativeGameplay() && thrown.ammo === 0) {
     thrown.unpickable = true;
@@ -586,11 +631,17 @@ function throwWeapon() {
   audio.throwWeapon();
 }
 function nearbyPickup() {
-  if (state.weapon) return null;
-  let nearest = null, best = 2.2;
+  if (state.weapon || nativeItems?.held) return null;
+  const axes=cameraAxes(state.camera.yaw,state.camera.pitch);
+  let nearest = nativeGameplay() ? nearestNativeItem(nativeItems,state.camera,axes.forward) : null;
+  let best = nearest ? distance3(getNativeItemPosition(nearest),state.camera) : 2.2;
   for (const drop of state.drops) {
     if (drop.unpickable) continue;
-    const distance = distanceXZ(drop, state.camera);
+    const distance = nativeGameplay() ? distance3(drop,state.camera) : distanceXZ(drop,state.camera);
+    if(nativeGameplay()) {
+      const delta=normalize3(vec(drop.x-state.camera.x,drop.y-state.camera.y,drop.z-state.camera.z));
+      if(delta.x*axes.forward.x+delta.y*axes.forward.y+delta.z*axes.forward.z<.8 || nativeSegmentHit(nativeSightCollision,state.camera,drop))continue;
+    }
     if (distance < best) { nearest = drop; best = distance; }
   }
   return nearest;
@@ -598,6 +649,9 @@ function nearbyPickup() {
 function pickup() {
   const drop = nearbyPickup();
   if (!drop) return;
+  if(nativeGameplay() && nativeItems.items.includes(drop)) {
+    if(pickupNativeItem(nativeItems,drop)) {state.shotPulse=.5;audio.pickup();} return;
+  }
   state.drops.splice(state.drops.indexOf(drop), 1);
   state.weapon = true; state.ammo = drop.ammo ?? (nativeGameplay() ? nativePistol.ammo : 6);
   weaponGeneration++;
@@ -605,6 +659,12 @@ function pickup() {
   audio.pickup({ reloaded: drop.ammo === 0 });
 }
 function findMeleeTarget() {
+  if(nativeGameplay()) {
+    const end=add3(state.camera,multiply3(cameraAxes(state.camera.yaw,state.camera.pitch).forward,2.25));
+    const contact=closestImpact({friendly:true,type:'melee'},state.camera,end);
+    if(contact?.type==='enemy') {contact.enemy.lastMeleeContact=contact;return contact.enemy;}
+    return null;
+  }
   const axes = cameraAxes(state.camera.yaw, state.camera.pitch);
   let selected = null, best = 2.25;
   for (const enemy of state.enemies) {
@@ -632,21 +692,47 @@ function shatterAt(position, count, color = RED, floorY = 0) {
   }
   if (state.fragments.length > 650) state.fragments.splice(0, state.fragments.length - 650);
 }
+function dropNativeEnemyWeapon(enemy) {
+  const socket=enemy.weaponMatrix;
+  if(!socket)return;
+  state.drops.push({x:socket[12],y:socket[13],z:socket[14],bob:0,
+    ammo:nativePistol.ammo,matrix:new Float32Array(socket),velocity:vec(0,0,0),enemyModel:true});
+}
+function applyNativeEnemyContact(enemy,item,hit,velocity) {
+  const result=applyThrownEnemyContact(enemy.reaction,item,{
+    partId:hit.partId,isBulletProof:hit.isBulletProof,isArmored:hit.isArmored,isMushroom:hit.isMushroom,
+    bossMind:false,velocitySquared:velocity.x**2+velocity.y**2+velocity.z**2,
+    thrownByPlayer:true,shouldKill:false,direction:normalize3(velocity),relativeVelocity:velocity,position:hit.point,
+  },{damage:1,stunTimeMultiplier:1,superThrows:false});
+  for(const action of result.actions) {
+    if(action.type==='drop-weapon')dropNativeEnemyWeapon(enemy);
+    if(action.type==='stun') {
+      enemy.stunnedAt=state.worldClock;enemy.runtime.pendingShot=null;enemy.attackIntentAt=null;
+    }
+    if(action.type==='kill')killEnemy(enemy);
+  }
+  return result;
+}
 function killEnemy(enemy) {
   if (!enemy.alive) return;
+  enemy.deathFireAction=enemy.fireAction??null;
   enemy.alive = false;
   enemy.deathAt = state.worldClock;
   state.kills++; state.score += 100;
   state.hits++;
   const floorY = floorAt(enemy.x, enemy.z, enemy.y);
-  shatterAt(vec(enemy.x, enemy.y + 1.12, enemy.z), 23, RED, floorY);
-  if (!nativeGameplay() || nativeScene.worldPistol || nativeScene.pistol) {
-    state.drops.push({ x: enemy.x, y: floorY + .38, z: enemy.z, bob: rand(0, 7),
-      ammo: nativeGameplay() ? nativePistol.ammo : 6 });
+  if(nativeGameplay()) {
+    if(enemy.reaction.hasWeapon) {dropNativeEnemyWeapon(enemy);enemy.reaction.hasWeapon=false;}
+    enemy.reaction.dead=true;enemy.runtime.pendingShot=null;
+  } else {
+    shatterAt(vec(enemy.x, enemy.y + 1.12, enemy.z), 23, RED, floorY);
+    state.drops.push({x:enemy.x,y:floorY+.38,z:enemy.z,bob:rand(0,7),ammo:6});
   }
   state.shotPulse = Math.max(.65, state.shotPulse);
   audio.shatter({ position: vec(enemy.x, enemy.y + 1.12, enemy.z) });
-  if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
+  if(nativeGameplay()) {
+    if(readyForVictory(nativeEncounter,state.enemies))state.transition=1;
+  } else if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
 }
 function damagePlayer() {
   state.health--;
@@ -657,20 +743,32 @@ function damagePlayer() {
 }
 function closestImpact(bullet, start, end) {
   let best = 1.1, hit = null;
-  for (const solid of state.solids) {
+  if(nativeGameplay()) {
+    const contact=nativeSphereHit(bullet.type==='throw'?nativeItemCollision:nativeShotCollision,start,end,bullet.type==='throw'?.08:bullet.type==='melee'?.12:0);
+    if(contact) {best=contact.t;hit={...contact,type:'wall'};}
+  } else for (const solid of state.solids) {
     const t = segmentAabb(start, end, solid.min, solid.max);
     if (t !== null && t < best) { best = t; hit = { type: 'wall', t }; }
   }
   if (bullet.friendly) {
     for (const enemy of state.enemies) {
       if (!enemy.alive) continue;
+      if(nativeGameplay()) {
+        const contact=hitNativeBody(enemy.hitShapes,start,end,bullet.type==='throw'?.08:bullet.type==='melee'?.12:0);
+        if(contact&&contact.t<best){best=contact.t;hit={...contact,type:'enemy',enemy};}
+        continue;
+      }
       for (const [height, radius] of [[1.26, .58], [1.91, .37]]) {
         const t = segmentSphere(start, end, vec(enemy.x, enemy.y + height, enemy.z), radius + (bullet.type === 'throw' ? .2 : 0));
         if (t !== null && t < best) { best = t; hit = { type: 'enemy', enemy, t }; }
       }
     }
   } else {
-    const t = segmentSphere(start, end, vec(state.camera.x, state.camera.y - .35, state.camera.z), .51);
+    const player=nativeScene?.gameplay?.player;
+    const contact=nativeGameplay() ? hitNativeBody([{source:{},radius:player.radius,
+      a:vec(nativeFeet.x,nativeFeet.y+player.radius,nativeFeet.z),
+      b:vec(nativeFeet.x,nativeFeet.y+player.height-player.radius,nativeFeet.z)}],start,end) : null;
+    const t = nativeGameplay() ? contact?.t??null : segmentSphere(start, end, vec(state.camera.x, state.camera.y - .35, state.camera.z), .51);
     if (t !== null && t < best) { best = t; hit = { type: 'player', t }; }
   }
   return hit;
@@ -678,19 +776,14 @@ function closestImpact(bullet, start, end) {
 
 function floorAt(x, z, belowY) {
   if (!nativeGameplay()) return 0;
-  let floor = -Infinity;
-  for (const solid of state.solids) {
-    if (x >= solid.min.x && x <= solid.max.x && z >= solid.min.z && z <= solid.max.z &&
-        solid.max.y <= belowY + .15) floor = Math.max(floor, solid.max.y);
-  }
-  return Number.isFinite(floor) ? floor : nativeScene.anchors.player[0].worldMatrix[13];
+  return nativeGroundAt(nativePlayerCollision,vec(x,belowY,z),{
+    radius:.05,height:.1,maxDrop:30,maxRise:.15,slopeLimit:45,
+  })?.y ?? belowY;
 }
 function walkThroughScene(position, feet) {
   if (containersPreviewEnabled && nativeInspection) return position;
-  const obstacles = nativeGameplay()
-    ? state.solids.filter(s => s.max.y > feet + .12 && s.min.y < feet + 1.6)
-    : containersPreviewEnabled ? containersWalkSolids(state.solids, feet + 1.6) : state.solids;
-  return resolveWalk(position, nativeGameplay() ? .4 : .34, obstacles);
+  const obstacles = containersPreviewEnabled ? containersWalkSolids(state.solids, feet + 1.6) : state.solids;
+  return resolveWalk(position,.34,obstacles);
 }
 function update(dt) {
   state.runClock += dt;
@@ -714,7 +807,7 @@ function update(dt) {
   let worldDt;
   if (native) {
     const tick = stepMcdGameplayClock(nativeClock, {
-      dt, x: horizontal, y: fwd, grounded: state.hop <= 0 && state.verticalSpeed <= 0,
+      dt, x: horizontal, y: fwd, grounded: nativeGrounded,
       yaw: state.camera.yaw, pitch: state.camera.pitch,
     });
     state.speed = tick.timeScale;
@@ -729,18 +822,29 @@ function update(dt) {
     worldDt = dt * state.speed;
   }
   state.worldClock += worldDt;
+  if(native)for(const enemy of state.enemies)advanceEnemyReaction(enemy.reaction,worldDt);
   for (let i = state.drops.length - 1; i >= 0; i--) {
     if (state.drops[i].expiresAt <= state.worldClock) state.drops.splice(i, 1);
+    else if(native && state.drops[i].velocity) {
+      const drop=state.drops[i],start=vec(drop.x,drop.y,drop.z);
+      drop.velocity.y+=nativeScene.gameplay.physics.gravity.y*worldDt;
+      const end=add3(start,multiply3(drop.velocity,worldDt));
+      const hit=nativeSphereHit(nativeItemCollision,start,end,.08);
+      const next=hit?add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),hit.t)):end;
+      drop.x=next.x;drop.y=next.y;drop.z=next.z;
+      if(hit)drop.velocity=null;
+    }
   }
   const norm = moving ? 1 / Math.hypot(fwd, horizontal) : 0;
   if (native) {
-    const grounded = state.hop <= 0 && state.verticalSpeed <= 0;
+    const grounded = nativeGrounded;
     if (grounded) {
       nativeVelocity.x = horizontal * norm * 6 * Math.fround(1.1);
       nativeVelocity.z = fwd * norm * 6 * Math.fround(1.1);
       if (jumpRequested) {
         state.verticalSpeed = 5.75 * 5 * Math.fround(.4);
         nativeJumpAt = state.worldClock;
+        nativeGrounded=false;
       }
     } else {
       const damping = Math.pow(Math.fround(.99), dt / Math.fround(.0166666));
@@ -757,14 +861,18 @@ function update(dt) {
       directionRotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
       scaledDeltaTime: worldDt,
     });
-    const next = walkThroughScene({ ...state.camera,
-      x: state.camera.x + displacement.x,
-      z: state.camera.z - displacement.z,
-    }, state.camera.y - 1.6);
-    state.camera.x = next.x; state.camera.z = next.z;
+    const player=nativeScene.gameplay.player;
+    const moved=moveNativeCharacter(nativePlayerCollision,nativeFeet,
+      vec(displacement.x,displacement.y,-displacement.z),{
+        ...player,groundSnap:state.verticalSpeed<=0 && state.worldClock-nativeJumpAt>.6?.3:0,
+      });
+    nativeFeet=moved.position;nativeGrounded=moved.grounded;
+    if(nativeGrounded)nativeFeet.y+=player.groundClearance;
+    state.camera.x=nativeFeet.x;state.camera.z=nativeFeet.z;state.camera.y=nativeFeet.y+nativeEyeHeight;
+    if(moved.grounded||moved.ceiling)state.verticalSpeed=0;
+    const support=nativeGroundAt(nativePlayerCollision,nativeFeet,{...player,maxDrop:30,maxRise:0});
+    state.hop=nativeGrounded?0:Math.max(.001,nativeFeet.y-(support?.y??nativeFeet.y));
     state.walkCycle += worldDt * Math.hypot(nativeVelocity.x, nativeVelocity.z) * 1.4;
-    state.hop += displacement.y;
-    if (state.hop <= 0) { state.hop = 0; state.verticalSpeed = 0; }
   } else {
     if (moving) {
       const yaw = state.camera.yaw;
@@ -785,11 +893,46 @@ function update(dt) {
       if (state.hop < 0) { state.hop = 0; state.verticalSpeed = 0; }
     }
   }
-  state.camera.y = (containersPreviewEnabled ? previewCameraY : 1.68) + state.hop;
+  if(!native)state.camera.y = (containersPreviewEnabled ? previewCameraY : 1.68) + state.hop;
+  if(native && nativeCombatStarted) {
+    const events=advanceNativeEncounter(nativeEncounter,{
+      scaledDeltaTime:worldDt,unscaledDeltaTime:dt,playerPosition:state.camera,
+      playerForward:cameraAxes(state.camera.yaw,state.camera.pitch).forward,playerFeet:nativeFeet,enemies:state.enemies,
+    });
+    for(const event of events)if(event.type==='spawn')state.enemies.push(event.enemy);
+  }
 
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
     if (containersPreviewEnabled && (nativeInspection || !nativeScene || !nativeCombatStarted)) continue;
+    if(native) {
+      enemy.clock+=worldDt;
+      advanceNativeEnemyWeapon(enemy.runtime,nativeEncounter.enemySettings,worldDt);
+      const aim=vec(state.camera.x,state.camera.y-.25,state.camera.z);
+      const toUnity=p=>vec(-p.x,p.y,p.z);
+      enemy.aimState??={};
+      const aimed=enemy.spineUp?advanceNativeAimTarget(enemy.aimState,nativeScene.gameplay.aim,{
+        target:toUnity(aim),muzzle:enemy.muzzlePosition?toUnity(enemy.muzzlePosition):null,
+        bodyPosition:toUnity(enemy),bodyForward:toUnity(vec(Math.sin(enemy.face),0,-Math.cos(enemy.face))),
+        spineUp:toUnity(enemy.spineUp),
+      },worldDt):{ready:false,targetInSight:false,position:toUnity(aim)};
+      enemy.aimReady=aimed.ready;
+      const attack=runNativeEnemyGunAttack(enemy.runtime,nativeEncounter.enemySettings,{
+        scaledDeltaTime:worldDt,unscaledDeltaTime:dt,targetSight:enemy.encounter.visible,
+        sightMode:'all-directions',aimTargetInSight:enemy.encounter.canAttack&&aimed.targetInSight,aimReady:aimed.ready,
+        weaponInRightPosition:enemy.encounter.canAttack,allowAttacking:true,canShot:true,
+        active:enemy.alive&&enemy.reaction.hasWeapon&&enemy.reaction.stunRemaining===0,animationTarget:toUnity(aimed.position),
+      });
+      if(attack.shot)enemy.attackIntentAt=state.worldClock;
+      if(!enemy.reaction.hasWeapon && enemy.reaction.stunRemaining===0 &&
+          distance3(enemy,nativeFeet)<nativeEncounter.unarmedStopDistance+.15 &&
+          !nativeSegmentHit(nativeSightCollision,vec(enemy.x,enemy.y+1.2,enemy.z),state.camera) &&
+          state.worldClock>=(enemy.nextPunchAt??0)) {
+        enemy.nextPunchAt=state.worldClock+.75;enemy.punchAt=state.worldClock;damagePlayer();
+        if(state.screen!=='playing')return;
+      }
+      continue;
+    }
     enemy.walking = false;
     enemy.clock += worldDt;
     if (state.waveClock < enemy.delay) continue;
@@ -818,6 +961,21 @@ function update(dt) {
     }
   }
 
+  if(native)advanceNativeItems(nativeItems,worldDt,{
+    hitEnemy:(item,start,end)=>{
+      let best=null;
+      for(const enemy of state.enemies)if(enemy.alive) {
+        const hit=hitNativeBody(enemy.hitShapes,start,end,item.radius);
+        if(hit&&(!best||hit.t<best.t))best={...hit,enemyId:enemy.id,enemy};
+      }
+      return best;
+    },
+    applyContact:(item,hit)=>{
+      if(hit.kind!=='enemy')return undefined;
+      const result=applyNativeEnemyContact(hit.enemy,item,hit,item.velocity);
+      return result.shatter?'shatter':result.attach?'attach':'stop';
+    },
+  });
   for (let i=state.bullets.length-1;i>=0;i--) {
     const bullet=state.bullets[i];
     if (bullet.expiresAt <= state.worldClock) {
@@ -825,13 +983,22 @@ function update(dt) {
       continue;
     }
     const start=bullet.pos;
+    if(bullet.velocity) {
+      bullet.velocity.y+=nativeScene.gameplay.physics.gravity.y*worldDt;
+      bullet.direction=normalize3(bullet.velocity);bullet.speed=Math.hypot(bullet.velocity.x,bullet.velocity.y,bullet.velocity.z);
+    }
     const end=add3(start,multiply3(bullet.direction,bullet.speed*worldDt));
     const impact=closestImpact(bullet,start,end);
     bullet.age+=worldDt;bullet.ttl-=worldDt;
     if (impact) {
-      if (impact.type==='enemy') killEnemy(impact.enemy);
+      if (impact.type==='enemy') {
+        if(native&&bullet.type==='throw')applyNativeEnemyContact(impact.enemy,{
+          stickable:false,isKiller:false,headshotKiller:false,cutLimbs:false,
+        },impact,bullet.velocity);
+        else killEnemy(impact.enemy);
+      }
       else if (impact.type==='player') damagePlayer();
-      if (bullet.type==='throw' && impact.type==='wall') {
+      if (bullet.type==='throw' && impact.type==='wall' && !native) {
         const p=add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
         state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0,ammo:bullet.ammo,
           unpickable:bullet.unpickable,expiresAt:bullet.expiresAt});
@@ -865,9 +1032,12 @@ function updateHud() {
   const percent = state.speed * 100;
   $('time-pct').textContent = `${percent < 1 ? percent.toFixed(1) : String(Math.round(percent)).padStart(2, '0')}%`;
   $('time-fill').style.width = `${Math.max(3,state.speed*100)}%`;
-  $('ammo').innerHTML = `${String(Math.max(0, state.ammo)).padStart(2,'0')}<span>/${nativeGameplay() ? '05' : '06'}</span>`;
+  $('ammo').innerHTML = nativeItems?.held ? 'OBJET<span>/ LANCER</span>'
+    : `${String(Math.max(0, state.ammo)).padStart(2,'0')}<span>/${nativeGameplay() ? '05' : '06'}</span>`;
   $('health').textContent = '◆ '.repeat(Math.max(0,state.health)) + '◇ '.repeat(Math.max(0,3-state.health));
-  $('pickup-prompt').hidden = !nearbyPickup();
+  const pickupTarget=nearbyPickup();
+  $('pickup-prompt').hidden = !pickupTarget;
+  $('pickup-prompt').textContent = pickupTarget ? `E · RAMASSER ${pickupTarget.name??'LE PISTOLET'}` : '';
   $('stage-banner').hidden = state.stageBanner <= 0;
   $('stage-banner').style.opacity = String(Math.min(1,state.stageBanner*1.7));
   flash.style.opacity = String(clamp(state.damage * 1.4,0,.68));
@@ -878,6 +1048,10 @@ function updateHud() {
 function rayTarget() {
   const from=state.camera, axes=cameraAxes(from.yaw,from.pitch);
   const to=add3(from,multiply3(axes.forward,40));
+  if(nativeGameplay()) {
+    const hit=closestImpact({friendly:true,type:'normal'},from,to);
+    return hit?.type==='enemy'?hit.enemy:null;
+  }
   let max=1;
   for(const solid of state.solids) {
     const t=segmentAabb(from,to,solid.min,solid.max);
@@ -906,6 +1080,8 @@ function drawInspectedEnemy() {
 }
 
 function enemyFireAction(enemy, animationClock) {
+  if(!enemy.alive)return enemy.deathFireAction??null;
+  if(enemy.reaction && (!enemy.reaction.hasWeapon || enemy.reaction.stunRemaining>0))return null;
   if (!Number.isFinite(enemy.attackIntentAt) || !nativeSkinInfo?.availableActions.includes('fire')) return null;
   const timing = nativeSkinInfo.actionTiming.fire;
   const speed = nativeSkinInfo.states.fire.speed;
@@ -926,7 +1102,10 @@ function drawEnemy(enemy) {
     const dying = !enemy.alive;
     // Native Kill disables Animator at the actual impact pose; hit is a stun clip.
     const animationClock = dying ? enemy.deathAt : state.worldClock;
-    const requested = dying ? (enemy.animation?.state ?? 'idle') : enemy.walking ? 'walk' : 'idle';
+    const requested = dying ? (enemy.animation?.state ?? 'idle')
+      : enemy.reaction?.stunRemaining>0 ? 'hit'
+      : state.worldClock-(enemy.punchAt??-Infinity)<.5 ? 'punch'
+      : enemy.walking ? (enemy.reaction?.hasWeapon===false?'run':'walk') : 'idle';
     const statePlayback = Boolean(nativeSkinInfo?.states[requested]);
     if (!enemy.animation) enemy.animation = { state: requested, startedAt: animationClock, previous: null };
     const animation = enemy.animation;
@@ -945,13 +1124,40 @@ function drawEnemy(enemy) {
       elapsed: animationClock - animation.startedAt,
     } : null;
     const time = animationClock - animation.startedAt;
+    enemy.fireAction=enemyFireAction(enemy,animationClock);
     nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, animation.state, time, {
-      statePlayback, transition, action: enemyFireAction(enemy, animationClock),
+      statePlayback, transition, action: enemy.fireAction,
       shaderTime: state.runClock, cameraPosition: state.camera,
     })
       ?? renderer.drawLocalEnemyDiagnostic(actorMatrix);
-    if (enemy.alive && nativeEnemyStats?.weaponAttachmentMatrix) {
-      renderer.drawNativeWeapon(nativeEnemyStats.weaponAttachmentMatrix, true);
+    if(nativeGameplay() && nativeEnemyStats?.boneModelMatrices) {
+      enemy.hitShapes=sampleNativeBodyShapes(nativeScene.gameplay.hitShapes,actorMatrix,nativeEnemyStats.boneModelMatrices,enemy.hitShapes);
+      const bones=nativeEnemyStats.boneModelMatrices,offset=nativeScene.gameplay.aim.spineBoneIndex*16;
+      enemy.spineUp=normalize3(vec(actorMatrix[0]*bones[offset+4]+actorMatrix[4]*bones[offset+5]+actorMatrix[8]*bones[offset+6],
+        actorMatrix[1]*bones[offset+4]+actorMatrix[5]*bones[offset+5]+actorMatrix[9]*bones[offset+6],
+        actorMatrix[2]*bones[offset+4]+actorMatrix[6]*bones[offset+5]+actorMatrix[10]*bones[offset+6]));
+    }
+    if (enemy.alive && enemy.reaction?.hasWeapon!==false && nativeEnemyStats?.weaponAttachmentMatrix) {
+      const socket=nativeEnemyStats.weaponAttachmentMatrix;
+      if(!enemy.weaponMatrix)enemy.weaponMatrix=new Float32Array(16);
+      enemy.weaponMatrix.set(socket);
+      renderer.drawNativeWeapon(socket,true);
+      const local=nativeScene?.worldPistol?.muzzleLocalMatrix;
+      if(local) {
+        enemy.muzzlePosition=vec(
+          socket[0]*local[12]+socket[4]*local[13]+socket[8]*local[14]+socket[12],
+          socket[1]*local[12]+socket[5]*local[13]+socket[9]*local[14]+socket[13],
+          socket[2]*local[12]+socket[6]*local[13]+socket[10]*local[14]+socket[14]);
+        enemy.muzzleForward=normalize3(vec(socket[0]*local[8]+socket[4]*local[9]+socket[8]*local[10],
+          socket[1]*local[8]+socket[5]*local[9]+socket[9]*local[10],
+          socket[2]*local[8]+socket[6]*local[9]+socket[10]*local[10]));
+        if(state.screen==='playing' && enemy.runtime?.pendingShot) {
+          const shot=consumeNativeEnemyShot(enemy.runtime,enemy.muzzlePosition);
+          if(!nativeSegmentHit(nativeShotCollision,shot.position,shot.target)) {
+            addBullet(shot.position,shot.direction,false);audio.enemyShoot({position:shot.position});
+          }
+        }
+      }
     }
     return;
   }
@@ -976,9 +1182,9 @@ function drawEnemy(enemy) {
 function drawPickup(drop) {
   const bob = Math.sin(state.worldClock*2.3+drop.bob)*.075;
   if (nativeGameplay()) {
-    const angle = state.worldClock * .65, c = Math.cos(angle), s = Math.sin(angle);
-    weaponMatrix.set([c,0,-s,0, 0,1,0,0, s,0,c,0, drop.x,drop.y+bob,drop.z,1]);
-    renderer.drawNativeWeapon(weaponMatrix);
+    weaponMatrix.set(drop.matrix??[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
+    weaponMatrix[12]=drop.x;weaponMatrix[13]=drop.y;weaponMatrix[14]=drop.z;
+    renderer.drawNativeWeapon(weaponMatrix,drop.enemyModel===true);
     return;
   }
   const floorY = drop.y - .38;
@@ -991,6 +1197,10 @@ function drawViewModel(camera) {
   const sway=Math.sin(state.walkCycle)*.013;
   const bob=Math.cos(state.walkCycle*.5)*.012;
   const shot=state.recoil*.13;
+  if(nativeGameplay() && nativeItems?.held) {
+    for(const draw of nativeItemDraws(nativeItems,camera).held)renderer.drawNativeInstance(draw.instanceId,draw.modelMatrix,true);
+    return;
+  }
   if (nativeGameplay() && state.weapon) {
     const hand = nativeScene.firstPersonPistol?.handPosition;
     if (hand) {
@@ -1129,6 +1339,10 @@ function render() {
     for(const enemy of state.enemies) {
       if(enemy.alive || (containersPreviewEnabled && nativeSkinInfo && enemy.deathAt !== null && state.worldClock - enemy.deathAt < .8)) drawEnemy(enemy);
     }
+    if(nativeGameplay()) {
+      const draws=nativeItemDraws(nativeItems,cam);
+      for(const draw of [...draws.world,...draws.fragments])renderer.drawNativeInstance(draw.instanceId,draw.modelMatrix);
+    }
     for(const bullet of state.bullets) drawBullet(bullet);
     for(const p of state.fragments) renderer.shard(p.x,p.y,p.z,p.sx,p.sy,p.sz,p.color,p.rx,p.ry,p.rz,clamp(p.life/.6,0,1));
     if(state.screen==='playing') drawViewModel(cam);
@@ -1144,6 +1358,12 @@ function render() {
     gameplay: { timeScale: state.speed, nativeClock: nativeGameplay(),
       ammo: state.ammo, fireDelay: state.fireDelay, weapon: state.weapon,
       initialEquipment: nativeGameplay() ? nativeScene.initialEquipment : null,
+      feet:nativeGameplay()?{...nativeFeet}:null,grounded:nativeGameplay()?nativeGrounded:null,
+      encounter:nativeEncounter?{killTarget:nativeEncounter.killTarget,killed:nativeEncounter.killed,pending:nativeEncounter.spawner.pending.length,
+        enemies:state.enemies.map(e=>({id:e.id,x:e.x,y:e.y,z:e.z,alive:e.alive,walking:e.walking,stun:e.reaction.stunRemaining,
+          armed:e.reaction.hasWeapon,canAttack:e.encounter.canAttack,spawnPoint:e.encounter.spawnPointId,muzzle:e.muzzlePosition,forward:e.muzzleForward}))}:null,
+      items:nativeItems?nativeItems.items.map(item=>({id:item.id,name:item.name,state:item.state,position:getNativeItemPosition(item)})):[],
+      heldItem:nativeItems?.held?.id??null,originalFragmentCount:nativeItems?.fragments.reduce((n,g)=>n+g.shards.filter(s=>!s.destroyed).length,0)??0,
       hop: state.hop, velocity: { ...nativeVelocity }, audio: audio.getMetrics() },
   };
 }

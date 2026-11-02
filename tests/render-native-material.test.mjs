@@ -96,6 +96,10 @@ test('Package classification, not material names, controls world-pass eligibilit
   const packet = createNativeSceneMaterialPacket(red, { renderCategory: 'technical_trigger_volume' });
   assert.equal(packet.worldPassEligible, false);
   assert.equal(packet.renderCategory, 'technical_trigger_volume');
+  const fragment = createNativeSceneMaterialPacket(red, { renderCategory: 'interactive_fragment' });
+  assert.equal(fragment.worldPassEligible, false);
+  assert.equal(fragment.family, 'red-crystal');
+  assert.equal(fragment.pass.base.depthWrite, true);
   assert.throws(() => createNativeSceneMaterialPacket(red), /Unknown native render category/);
 });
 

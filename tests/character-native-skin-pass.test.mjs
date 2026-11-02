@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createNativeSkinPass, loadNativeSkinPackage, sampleNativeSkinPalette,
+  sampleNativeSkinPose, sampleNativeWeaponAttachment,
 } from '../src/characters/native-skin-pass.js';
 
 // Entirely authored two-joint triangle; no commercial geometry, rig or clip bytes.
@@ -425,4 +426,33 @@ test('62 hierarchy bones compact to the verified 60 weighted uniform matrices', 
 test('GPU pass refuses unsupported palette size before compiling or drawing', () => {
   const { gl } = mockGl({ uniformLimit: 18 });
   assert.throws(() => createNativeSkinPass(gl, sourcePackage()), /uniform vectors/);
+});
+
+test('CPU pose gives the current source socket for weapon detach, independent of drawing', () => {
+  const localMatrix = identity();
+  localMatrix[13] = 0.5;
+  const pkg = sourcePackage({
+    weaponAttachment: { bone: 'child', localMatrix, source: 'authored socket fixture',
+      coordinates: 'Fixture bone-local affine transform, column-major' },
+  });
+  const pose = sampleNativeSkinPose(pkg, { clip: 'walk', time: 0.5, playback: 'clamp' });
+  const model = identity();
+  model[12] = 10;
+  model[14] = 7;
+  const socket = sampleNativeWeaponAttachment(pkg, model, pose.boneModelMatrices);
+  near([socket[12],socket[13],socket[14]],[12,.5,7]);
+  near([pose.boneModelMatrices[28]],[2]);
+  // Child skin palette is offset by the inverse bind, unlike the socket.
+  near([pose.palette[28]],[1]);
+  assert.deepEqual(pose.palette,
+    sampleNativeSkinPalette(pkg, { clip: 'walk', time: 0.5, playback: 'clamp' }));
+  pose.boneModelMatrices[28] = 99;
+  near([socket[12]],[12]);
+});
+
+test('socket sampling does not fabricate a detached position when source attachment is absent', () => {
+  const pkg = sourcePackage();
+  const pose = sampleNativeSkinPose(pkg, { clip: 'walk', time: 0, playback: 'clamp' });
+  assert.equal(sampleNativeWeaponAttachment(pkg, identity(), pose.boneModelMatrices), null);
+  assert.throws(() => sampleNativeWeaponAttachment(pkg, identity(), []), /components/);
 });

@@ -43,16 +43,22 @@ upload them. The generated playable prototype remains available in **Vue**.
 | --- | --- |
 | WASD / ZQSD | Move |
 | Mouse | Look |
-| Left click | Shoot / punch if disarmed |
-| R | Reload |
-| F / right click | Throw gun (instantly kills on hit) |
-| E | Pick up a dropped gun |
+| Left click | Shoot / punch if disarmed; throw a held object or strike with a katana |
+| R | Reload in the generated prototype rooms |
+| F / right click | Throw the held gun or object |
+| E | Pick up an aimed, reachable gun or usable object |
 | Space | Jump |
-| Shift | Sprint |
+| Shift | Sprint in the generated prototype rooms |
 | Escape | Pause / release mouse |
 | Enter | Start / restart on menu |
 
-**Time scales with movement, aiming and shooting.** Native sampled poses advance on the Web world clock and freeze during pause. The source-selected scene uses authored spawn candidates with Web encounter timing and axis-aligned collider approximations—not the original spawning system or PhysX. Death freezes the pose and creates Web debris; native ragdoll death is not reproduced. The older generated rooms retain their own prototype rules.
+**Time scales with movement, aiming and shooting.** Native sampled poses advance on the Web world clock and freeze during pause. The older generated rooms retain their own prototype rules.
+
+The configured Dojo encounter uses the source navigation polygons and connected doorways, source startup/door delays and difficulty limits. Enemy, player, projectile and object collisions use their distinct source layer masks. Movement sweeps a finite capsule against transformed source boxes, including stairs, slopes and ceilings; combat contacts follow the sampled enemy bone colliders. This is a Web implementation, not Unity PhysX or the complete native AI.
+
+Source-authored bowls, cups, bottles, bonsai, fans, shurikens and katanas can be picked up and thrown. Picking up an object removes its original world draw and colliders rather than duplicating it. Ordinary blunt hits stun and disarm; sharp objects can kill and remain recoverable after sticking. Breakable objects use their authored fragments, not random substitute debris. Enemy weapons drop from their current animated socket. Death freezes the sampled enemy pose; native ragdolls are not reproduced.
+
+The encounter currently equips enemies with pistols rather than reproducing the complete weighted native weapon selection. The original red-light/audio doorway warning is not rendered, although its source delay is retained. Katana held placement uses its original sampled idle weapon-bone pose; animated player hands and katana swings are not reproduced. Stuck-object attachment does not follow a native ragdoll, and fragment motion is ballistic rather than a full fragment-to-world rigid-body simulation.
 
 ## Files
 

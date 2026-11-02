@@ -325,6 +325,8 @@ function shader(gl, type, source) {
 
 /** Caller supplies private decoded assets. No asset URLs or original data are embedded. */
 export function createNativeWorldPass(gl, scene, images) {
+  const auxiliaryInstances = scene.auxiliaryInstances ?? [];
+  const worldInstances = [...scene.instances, ...auxiliaryInstances];
   const program = gl.createProgram(), meshes = new Map(), textures = new Map();
   const shaders = [];
   const attributeBuffers = [];
@@ -457,7 +459,7 @@ export function createNativeWorldPass(gl, scene, images) {
     uploadTexture(concreteTextures.poreTextureId);
     uploadTexture(concreteTextures.fogGradientTextureId, { clamp: true });
     packets = new Map();
-    const materialInstances = [...scene.instances];
+    const materialInstances = [...worldInstances];
     if (scene.worldPistol) {
       materialInstances.push({ ...scene.worldPistol, classification: { category: 'world' } });
     }
@@ -576,6 +578,16 @@ export function createNativeWorldPass(gl, scene, images) {
     ]),
   });
   const identity = [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+  const instanceMap = new Map(worldInstances.map(instance => [instance.id, instance]));
+  const heldMaterial = scene.firstPersonPistol?.draws
+    .map(draw => packets.get(draw))
+    .find(material => material.packet.family === 'first-person-black-crystal');
+  const hiddenInstances = new Set(auxiliaryInstances.map(instance => instance.id));
+  function requireInstance(id) {
+    const instance = instanceMap.get(id);
+    if (!instance) throw new RangeError('Unknown native world instance: ' + id);
+    return instance;
+  }
   const worldWeapon = scene.worldPistol ?? scene.pistol?.instance;
   let weaponLocal = scene.worldPistol?.localMatrix ?? identity;
   if (!scene.worldPistol) {
@@ -585,7 +597,7 @@ export function createNativeWorldPass(gl, scene, images) {
     }
   }
   function render(viewProjection, camera, weaponMatrix = null, clock = {}, firstPerson = false,
-    weaponLocalMatrix = weaponLocal) {
+    weaponLocalMatrix = weaponLocal, selectedInstance = null, instanceTransform = null) {
     const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM);
     const previousVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE);
@@ -604,6 +616,7 @@ export function createNativeWorldPass(gl, scene, images) {
     let sourceConcreteDrawCalls = 0, concreteDrawCalls = 0;
     let blackCrystalDrawCalls = 0, redCrystalDrawCalls = 0, cutoutDrawCalls = 0, monitorDrawCalls = 0;
     let firstPersonDrawCalls = 0;
+    let heldObjectDrawCalls = 0;
     try {
       gl.useProgram(program);
       gl.uniformMatrix4fv(uniforms.uViewProjection, false, viewProjection);
@@ -652,11 +665,14 @@ export function createNativeWorldPass(gl, scene, images) {
       gl.vertexAttrib4f(colorLocation, 0, 0, 0, 1);
       gl.vertexAttrib2f(lightmapUvLocation, 0, 0);
       gl.vertexAttrib4f(tangentLocation, 1, 0, 0, 1);
-      const instances = firstPerson ? [scene.firstPersonPistol] :
-        weaponMatrix ? [worldWeapon] : scene.instances;
+      const instances = selectedInstance ? [selectedInstance] :
+        firstPerson ? [scene.firstPersonPistol] :
+        weaponMatrix ? [worldWeapon] : worldInstances;
       for (const instance of instances) {
+        if (!selectedInstance && !weaponMatrix && hiddenInstances.has(instance.id)) continue;
         const local = firstPerson ? scene.firstPersonPistol.localMatrix : weaponLocalMatrix;
-        const transform = weaponMatrix ? meshModelMatrices(multiplyMatrices(weaponMatrix, local)) : instance;
+        const transform = instanceTransform ??
+          (weaponMatrix ? meshModelMatrices(multiplyMatrices(weaponMatrix, local)) : instance);
         gl.uniformMatrix4fv(uniforms.uModel, false, transform.model);
         gl.uniformMatrix3fv(uniforms.uNormal, false, transform.normal);
         gl.uniform1f(uniforms.uModelSign, transform.mirrored ? -1 : 1);
@@ -666,7 +682,7 @@ export function createNativeWorldPass(gl, scene, images) {
         gl.uniform1i(uniforms.uHasNormals, preparedMesh.hasNormals ? 1 : 0);
         gl.uniform1i(uniforms.uHasTangents, preparedMesh.hasTangents ? 1 : 0);
         for (const draw of instance.draws) {
-          const material = packets.get(draw);
+          const material = firstPerson && selectedInstance ? heldMaterial : packets.get(draw);
           applyNativeWorldBaseState(gl, material.packet.pass, inheritedState);
           gl.uniform4fv(uniforms.uColor, material.color);
           gl.uniform4fv(uniforms.uST, material.st);
@@ -695,7 +711,10 @@ export function createNativeWorldPass(gl, scene, images) {
           if (material.mode === 3) redCrystalDrawCalls++;
           if (material.mode === 4) cutoutDrawCalls++;
           if (material.mode === 5) monitorDrawCalls++;
-          if (material.mode === 6) firstPersonDrawCalls++;
+          if (material.mode === 6) {
+            if (selectedInstance) heldObjectDrawCalls++;
+            else firstPersonDrawCalls++;
+          }
           triangles += draw.range.indexCount / 3;
         }
       }
@@ -725,16 +744,43 @@ export function createNativeWorldPass(gl, scene, images) {
       sourceCutoutDrawCalls: cutoutDrawCalls,
       sourceMonitorDrawCalls: monitorDrawCalls,
       sourceFirstPersonPistolDrawCalls: firstPersonDrawCalls,
+      sourceFirstPersonObjectDrawCalls: heldObjectDrawCalls,
       unsupportedMaterialCompositionDrawCalls: drawCalls - sourceConcreteDrawCalls -
-        blackCrystalDrawCalls - redCrystalDrawCalls - monitorDrawCalls - firstPersonDrawCalls,
+        blackCrystalDrawCalls - redCrystalDrawCalls - monitorDrawCalls - firstPersonDrawCalls - heldObjectDrawCalls,
       genericLightingDrawCalls: drawCalls - sourceConcreteDrawCalls -
-        blackCrystalDrawCalls - redCrystalDrawCalls - monitorDrawCalls - firstPersonDrawCalls,
+        blackCrystalDrawCalls - redCrystalDrawCalls - monitorDrawCalls - firstPersonDrawCalls - heldObjectDrawCalls,
       lightmapCoverage,
       concreteCompositionCoverage,
     };
   }
   return {
     draw: (vp, camera, clock) => render(vp, camera, null, clock),
+    // Visibility controls only the authored world placement, not explicit draws.
+    setInstanceVisible(id, visible) {
+      requireInstance(id);
+      if (typeof visible !== 'boolean') throw new TypeError('Instance visibility must be boolean');
+      if (visible) hiddenInstances.delete(id);
+      else hiddenInstances.add(id);
+    },
+    /**
+     * Reuse an authored renderer at an absolute mesh-local-to-Web-world matrix.
+     * Hide on pickup before the frame's world draw to avoid a one-frame duplicate.
+     * Child attachment transforms are the caller's responsibility; unlike the
+     * pistol path, this never appends an unrelated weapon attachment matrix.
+     */
+    drawInstance(id, worldMatrix, viewProjection, camera, clock) {
+      const instance = requireInstance(id);
+      const transform = meshModelMatrices(worldMatrix);
+      return render(viewProjection, camera, null, clock, false, weaponLocal, instance, transform);
+    },
+    // ThrowableItemWeapon replaces the source world material with the same
+    // FOV-independent material as the pistol; geometry and ranges stay intact.
+    drawHeldInstance(id, worldMatrix, viewProjection, camera, clock) {
+      const instance = requireInstance(id);
+      if (!heldMaterial) throw new Error('Held native instance requires source first-person material');
+      const transform = meshModelMatrices(worldMatrix);
+      return render(viewProjection, camera, null, clock, true, weaponLocal, instance, transform);
+    },
     drawWeapon: (vp, camera, matrix, clock, enemy = false) => worldWeapon
       ? render(vp, camera, matrix, clock, false,
         enemy && scene.worldPistol ? scene.worldPistol.enemyLocalMatrix : weaponLocal) : null,

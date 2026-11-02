@@ -4,6 +4,7 @@ const WORLD_CATEGORY = 'world';
 const CATEGORIES = new Set([
   WORLD_CATEGORY,
   'first-person-weapon',
+  'interactive_fragment',
   'technical_trigger_volume',
   'technical_player_or_spawn_capsule',
   'crosshair_overlay_excluded_by_initial_world_camera',

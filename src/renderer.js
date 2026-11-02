@@ -458,6 +458,18 @@ export function createRenderer(canvas) {
     drawCalls += report.drawCalls;
     return report.drawCalls > 0;
   }
+  function setNativeInstanceVisible(id, visible) {
+    return nativeWorld?.setInstanceVisible(id, visible) ?? false;
+  }
+  function drawNativeInstance(id, matrix, held = false) {
+    if (!nativeWorld) return false;
+    const report = held
+      ? nativeWorld.drawHeldInstance(id, matrix, viewProjection, currentCamera, currentSceneClock)
+      : nativeWorld.drawInstance(id, matrix, viewProjection, currentCamera, currentSceneClock);
+    if (!report) return false;
+    drawCalls += report.drawCalls;
+    return report.drawCalls > 0;
+  }
   // A local, source-converted OBJ may be reused for different serialized
   // submesh placements via per-draw affine transforms (SH-04/11 #68/#63).
   // No original data is shipped; non-identity models remain opt-in.
@@ -496,6 +508,7 @@ export function createRenderer(canvas) {
     begin,draw,affineBox,replacePrivateMesh,replacePrivateTexture,drawPrivateMesh,
     replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin,
     replaceNativeWorld, drawNativeWorld, drawNativeWeapon, drawFirstPersonWeapon,
+    setNativeInstanceVisible, drawNativeInstance,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,

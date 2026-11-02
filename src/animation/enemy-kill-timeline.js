@@ -1,8 +1,8 @@
 /**
  * PejAiAnimator.Kill command plan, MCD build 20299547.
  * PRIVATE evidence: research #86, PejAiAnimator.cs:1008-1112, artifact 13140401513.
- * Only call after THIS METHOD's invocation is independently established.
- * Body.Kill -> Controller.Kill does not directly call Animator.Kill (#87/#89).
+ * Ordinary Body.Kill -> Controller.Kill -> OnKill -> Animator.onKill reaches
+ * this method; the event subscription is installed by PrepareDelegates.
  *
  * Emits commands; does not emulate Animator, Unity rigidbodies, HDR or rendering.
  */

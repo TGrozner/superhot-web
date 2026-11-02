@@ -305,11 +305,13 @@ export function prepareNativeScene(scenePackage) {
   const entryCamera = scenePackage.entryCamera == null ? null : prepareCamera(scenePackage.entryCamera);
 
   const instances = [];
+  const auxiliaryInstances = [];
   const instanceMap = new Map();
   for (const source of sourceList(scenePackage.instances, 'instances')) {
     const id = sourceId(source?.id, 'instance id');
     if (instanceMap.has(id)) throw new Error('Duplicate instance id: ' + id);
-    if (source.renderClassification?.worldPassEligible !== true) continue;
+    const fragment = source.renderClassification?.category === 'interactive_fragment';
+    if (source.renderClassification?.worldPassEligible !== true && !fragment) continue;
     const meshId = sourceId(source.meshId, id + ' meshId');
     const preparedMesh = meshes.get(meshId);
     if (!preparedMesh) throw new Error(id + ' references missing mesh ' + meshId);
@@ -336,7 +338,7 @@ export function prepareNativeScene(scenePackage) {
       classification: source.renderClassification,
       source,
     });
-    instances.push(packet);
+    (fragment ? auxiliaryInstances : instances).push(packet);
     instanceMap.set(id, packet);
   }
 
@@ -383,6 +385,8 @@ export function prepareNativeScene(scenePackage) {
   const worldPistol = scenePackage.worldPistol == null ? null : Object.freeze({
     ...prepareWeapon(scenePackage.worldPistol, 'world pistol'),
     enemyLocalMatrix: meshModelMatrices(scenePackage.worldPistol.enemyLocalMatrix).model,
+    muzzleLocalMatrix: scenePackage.worldPistol.muzzleLocalMatrix == null ? null
+      : meshModelMatrices(scenePackage.worldPistol.muzzleLocalMatrix).model,
   });
   let firstPersonPistol = null;
   if (scenePackage.firstPersonPistol) {
@@ -397,10 +401,23 @@ export function prepareNativeScene(scenePackage) {
       projection: Object.freeze({ ...source.projection }),
     });
   }
+  const interactables = (scenePackage.interactables ?? []).map(source => {
+    for (const model of [...source.models, ...source.shards]) {
+      if (!instanceMap.has(model.instanceId)) throw new Error(source.id + ' references a missing pickup renderer');
+      meshModelMatrices(model.localMatrix);
+    }
+    finiteVector(source.center, 3, source.id + ' center');
+    if (!Number.isFinite(source.radius) || source.radius <= 0) throw new RangeError(source.id + ' requires a positive radius');
+    return Object.freeze({ ...source, worldMatrix: meshModelMatrices(source.worldMatrix).model });
+  });
 
   return Object.freeze({
     meshes,
     instances: Object.freeze(instances),
+    auxiliaryInstances: Object.freeze(auxiliaryInstances),
+    interactables: Object.freeze(interactables),
+    navigation: scenePackage.navigation ?? null,
+    gameplay: scenePackage.gameplay ?? null,
     instanceMap,
     materialMap,
     textures,
