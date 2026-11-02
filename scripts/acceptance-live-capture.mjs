@@ -107,17 +107,26 @@ const cameraOK = (c) => c?.source==='RUNTIME_OBSERVED' && ['x','y','z','yaw','pi
 const maxCameraDiff = (a,b) => ({position:Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z),angle:Math.hypot(a.yaw-b.yaw,a.pitch-b.pitch),fov:Math.abs(a.fovYDegrees-b.fovYDegrees)});
 /** A source-qualified LOCAL browser draw is useful evidence, not MCD pixel parity. */
 export function localMeshDrawEvidence(stats) {
+  // #105: two owner-selected source files, three Mesh6 draw placements and
+  // one Mesh7 draw. Application counters are NOT an independent GPU readback.
   const reasons=[];
   if(stats?.mode!=='CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME') reasons.push('CONTAINERS_BROWSER_ROUTE_UNVERIFIED');
+  if(stats?.matchedNativeScene!==false) reasons.push('NON_NATIVE_PREVIEW_PROVENANCE_MISSING');
   if(stats?.activeScreen!=='playing'||stats?.browserMeasured!==true) reasons.push('LIVE_BROWSER_FRAME_UNVERIFIED');
   if(stats?.locallyLoadedSourceGroups!==2) reasons.push('TWO_LOCAL_SOURCE_GROUPS_UNVERIFIED');
-  if(stats?.generatedManifest?.privateIndexedDraws!==2) reasons.push('TWO_PRIVATE_INDEXED_DRAWS_UNVERIFIED');
+  if(stats?.generatedManifest?.sourceQualifiedMesh6DrawPackets!==3) reasons.push('THREE_MESH6_SOURCE_PLACEMENTS_UNVERIFIED');
+  if(stats?.generatedManifest?.privateIndexedDraws!==4) reasons.push('FOUR_PRIVATE_INDEXED_DRAWS_UNVERIFIED');
+  if(stats?.generatedManifest?.sourceConvertedApproximationOnly!==true ||
+     stats?.generatedManifest?.localFilePreviewOnly!==true ||
+     stats?.generatedManifest?.nativeMeshMatch!==false)
+    reasons.push('SOURCE_CONVERTED_PREVIEW_NOT_QUALIFIED');
   if(!Number.isSafeInteger(stats?.generatedManifest?.hiddenByPrivateMesh)||
-    stats.generatedManifest.hiddenByPrivateMesh<2) reasons.push('PROXY_SUBSTITUTION_UNVERIFIED');
-  if(!Number.isSafeInteger(stats?.totalWebGLDrawCalls)||stats.totalWebGLDrawCalls<2) reasons.push('WEBGL_DRAW_COUNT_UNVERIFIED');
+     stats.generatedManifest.hiddenByPrivateMesh<2) reasons.push('PROXY_SUBSTITUTION_UNVERIFIED');
+  if(!Number.isSafeInteger(stats?.totalWebGLDrawCalls)||stats.totalWebGLDrawCalls<4)
+    reasons.push('WEBGL_DRAW_COUNT_UNVERIFIED');
   if(!number(stats?.p95FrameMs)||stats.p95FrameMs<=0||
-    !Number.isSafeInteger(stats?.samples)||stats.samples<1) reasons.push('FRAME_TIMING_UNVERIFIED');
-  return {status:reasons.length?'WEB_LOCAL_MESH_UNVERIFIED':'WEB_LOCAL_MESH_GPU_DRAW_OBSERVED_NOT_MCD_PARITY',
+     !Number.isSafeInteger(stats?.samples)||stats.samples<1) reasons.push('FRAME_TIMING_UNVERIFIED');
+  return {status:reasons.length?'WEB_LOCAL_MESH_UNVERIFIED':'WEB_APP_REPORTED_FOUR_INDEXED_DRAWS_NOT_MCD_PARITY',
     nativeParityCertified:false,reasons};
 }
 
@@ -258,11 +267,15 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
     await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'w',code:'KeyW',windowsVirtualKeyCode:87});
     await sleep(holdMs);await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key:'w',code:'KeyW',windowsVirtualKeyCode:87});
     await sleep(60);const after=await snap('after-keyw');
+    // Browser-only compositor pixel change. No native reference is inferred.
+    const webOnlyPixelVariation=metrics(
+      decodePng(readFileSync(join(out,frames[0].file))),
+      decodePng(readFileSync(join(out,frames[1].file))));
     const hook=after.hook,scene=hook?.scene?.binding==='ACTIVE_SCENE_PROVEN'?hook.scene:{key:null,binding:'WEB_PROXY_OR_UNKNOWN',room:after.room};
     const manifest={schemaVersion:1,captureKind:'ACTUAL_BROWSER_CDP_PNG',scene,camera:cameraOK(hook?.camera)?hook.camera:null,
       coordinateFrameId:hook?.coordinateFrameId||null,stimulusId:'IDLE_THEN_KEYW_'+holdMs+'MS',initialStateId:hook?.initialStateId||null,
       timeScale:number(hook?.timeScale)?hook.timeScale:null,viewport:{width:frames[0].width,height:frames[0].height,dpr:1},frames,
-      performance:after.performance,
+      performance:after.performance,webOnlyPixelVariation,
       localMeshPreview:privateFiles[0]?localMeshDrawEvidence(after.performance):
         {status:'WEB_PROXY_ONLY_NO_LOCAL_MESH',nativeParityCertified:false},
       notes:'Web actual CDP pixels. Local private OBJ GPU draw is NOT MCD frame parity.'};
@@ -277,7 +290,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
       const out=arg(a,'--out')||join(tmpdir(),'sh10-web-'+Date.now());
       const m=await captureWeb(arg(a,'--url'),out,{chrome:arg(a,'--chrome')||undefined,
         mesh6:arg(a,'--mesh6')||null,mesh7:arg(a,'--mesh7')||null});
-      process.stdout.write(JSON.stringify({status:'BROWSER_CAPTURED_NATIVE_UNPAIRED',out,frames:m.frames,scene:m.scene,performance:m.performance,localMeshPreview:m.localMeshPreview},null,2)+'\n');
+      process.stdout.write(JSON.stringify({status:'BROWSER_CAPTURED_NATIVE_UNPAIRED',out,frames:m.frames,scene:m.scene,performance:m.performance,webOnlyPixelVariation:m.webOnlyPixelVariation,localMeshPreview:m.localMeshPreview},null,2)+'\n');
     }else{
       const wp=arg(a,'--web'),np=arg(a,'--native');if(!wp||!np)throw Error('Use --capture-web --url http://localhost:PORT/?scene=containers --out /tmp/capture OR --web /tmp/web-capture.json --native /private/native.json --thresholds /private/thresholds.json [--gate]');
       if(isInside(np))throw Error('Native reference must be outside public repo');

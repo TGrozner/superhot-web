@@ -388,3 +388,46 @@ SH-05's responsibility; SH-10 does not change entrypoint/renderer/levels.
 No native screenshots or operator tolerance values are invented, and no
 native corpus request, runner job, or GitHub Actions workflow is launched.
 No intentionally red assertion enters CI.
+
+### SH-10 2026-11-02 — corrected live browser gate, native still unpaired
+
+**Corrected real Web integration contract:** SH-05's merged #105 draws THREE
+source-qualified placements from ONE locally loaded Mesh6 group47, plus ONE
+Mesh7 group48 indexed draw. The old SH-10 acceptance gate incorrectly demanded
+two private indexed draws from two files and was therefore stale. The corrected
+manual-only gate requires exactly two locally selected source groups, three
+Mesh6 placement packets, four indexed draw calls, at least two suppressed
+generated-proxy packets, nonzero frame-time measurements and explicit
+`sourceConvertedApproximationOnly=true`, `localFilePreviewOnly=true`,
+`nativeMeshMatch=false`. It returns
+`WEB_APP_REPORTED_FOUR_INDEXED_DRAWS_NOT_MCD_PARITY` only when the current
+application counters agree. These are **app-reported draws, not independent
+GPU readback**, and still do not prove visible native fidelity.
+
+The same Chromium/CDP capture, once runnable on the operator's machine, records
+two real Web PNG frames and `webOnlyPixelVariation` (centroid displacement,
+edge-F1, color and luminance). No synthetic image, shader, mesh or source
+corpus is deposited here. No native reference image or threshold was obtained.
+An original MCD pair remains **INCONNU / NON_COMPARABLE** until scene, camera,
+frame phase, stimulus, initial state and viewport are paired.
+
+**Enemy-body P0 pending SH-05 + SH-14**: private research #80/#81 establishes
+the original candidates `sharedassets0.assets:pathID284` (5237 vertices)
+and headless 285 (4895 vertices). Their OBJ.gz exports remain exclusively
+private. Current public Containers has no original-enemy File input, no
+source-qualified enemy indexed draw and no active rig/skin: therefore a Web
+enemy screenshot and a native comparison are **NOT OBSERVED**, not refuted.
+After SH-05 exposes an opt-in local enemy input and proof counters, SH-10 can
+gate an actual browser screenshot with original owner/path, indexed draw and
+proxy replacement. Static original geometry alone does not prove pose/AI.
+
+**Top three visible owner criteria:** (1) SH-05 + SH-04 scene, camera, FOV,
+initial pose and no artificial first-frame jump: SH-15 #109 found a Web
+source-level z=31 spawn versus z<=21.8 move clamp (9.2-unit discontinuity
+predicted, *not measured in pixels*); (2) SH-05 + SH-11/12/14 actual Chromium
+cargo **and enemy** source-qualified draws with screenshot; (3) SH-05 +
+SH-13/15 and SH-01/02/03 original paired pixels, color, lighting and
+time variation. R/Replay, Containers 120 vs initializer 60, time
+cap/override, player Time.deltaTime and projectile phases stay provisional
+until a matching original runtime trace is available. No CI workflow, runtime,
+research request, runner or private asset touched.

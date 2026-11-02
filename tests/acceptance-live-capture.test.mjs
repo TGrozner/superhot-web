@@ -21,26 +21,28 @@ test('strict PNG decoder rejects invalid sources',()=>{
   assert.throws(()=>decodePng(Buffer.from('synthetic invalid fixture')),/PNG signature/);
 });
 
-test('browser local OBJ GPU evidence rejects partial or proxy-only previews', () => {
+test('live Containers mapping requires two files, four indexed draws and three Mesh6 placements', () => {
+  // Synthetic counter shape from merged Web #105; not an actual browser run.
   const live={
-    mode:'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME',
+    mode:'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME',matchedNativeScene:false,
     activeScreen:'playing',browserMeasured:true,locallyLoadedSourceGroups:2,
-    generatedManifest:{privateIndexedDraws:2,hiddenByPrivateMesh:3,nativeMeshMatch:false},
-    totalWebGLDrawCalls:12,p95FrameMs:15.9,samples:50,
+    generatedManifest:{privateIndexedDraws:4,sourceQualifiedMesh6DrawPackets:3,
+      hiddenByPrivateMesh:6,nativeMeshMatch:false,localFilePreviewOnly:true,
+      sourceConvertedApproximationOnly:true},
+    totalWebGLDrawCalls:20,p95FrameMs:15.9,samples:50,
   };
   const observed=localMeshDrawEvidence(live);
-  assert.equal(observed.status,'WEB_LOCAL_MESH_GPU_DRAW_OBSERVED_NOT_MCD_PARITY');
+  assert.equal(observed.status,'WEB_APP_REPORTED_FOUR_INDEXED_DRAWS_NOT_MCD_PARITY');
   assert.equal(observed.nativeParityCertified,false);
   assert.deepEqual(observed.reasons,[]);
-  const noIndexed=localMeshDrawEvidence({...live,generatedManifest:{...live.generatedManifest,privateIndexedDraws:0}});
-  assert.equal(noIndexed.status,'WEB_LOCAL_MESH_UNVERIFIED');
-  assert.ok(noIndexed.reasons.includes('TWO_PRIVATE_INDEXED_DRAWS_UNVERIFIED'));
-  assert.ok(localMeshDrawEvidence({...live,locallyLoadedSourceGroups:1})
-    .reasons.includes('TWO_LOCAL_SOURCE_GROUPS_UNVERIFIED'));
-  assert.ok(localMeshDrawEvidence({...live,generatedManifest:{...live.generatedManifest,hiddenByPrivateMesh:0}})
-    .reasons.includes('PROXY_SUBSTITUTION_UNVERIFIED'));
-  assert.ok(localMeshDrawEvidence({...live,browserMeasured:false})
-    .reasons.includes('LIVE_BROWSER_FRAME_UNVERIFIED'));
-  assert.ok(localMeshDrawEvidence({...live,p95FrameMs:null})
-    .reasons.includes('FRAME_TIMING_UNVERIFIED'));
+  const change=(part)=>localMeshDrawEvidence({...live,...part});
+  const generated=(part)=>change({generatedManifest:{...live.generatedManifest,...part}});
+  assert.ok(generated({privateIndexedDraws:2}).reasons.includes('FOUR_PRIVATE_INDEXED_DRAWS_UNVERIFIED'));
+  assert.ok(generated({sourceQualifiedMesh6DrawPackets:2}).reasons.includes('THREE_MESH6_SOURCE_PLACEMENTS_UNVERIFIED'));
+  assert.ok(generated({sourceConvertedApproximationOnly:false}).reasons.includes('SOURCE_CONVERTED_PREVIEW_NOT_QUALIFIED'));
+  assert.ok(generated({hiddenByPrivateMesh:0}).reasons.includes('PROXY_SUBSTITUTION_UNVERIFIED'));
+  assert.ok(change({locallyLoadedSourceGroups:1}).reasons.includes('TWO_LOCAL_SOURCE_GROUPS_UNVERIFIED'));
+  assert.ok(change({matchedNativeScene:undefined}).reasons.includes('NON_NATIVE_PREVIEW_PROVENANCE_MISSING'));
+  assert.ok(change({browserMeasured:false}).reasons.includes('LIVE_BROWSER_FRAME_UNVERIFIED'));
+  assert.ok(change({p95FrameMs:null}).reasons.includes('FRAME_TIMING_UNVERIFIED'));
 });
