@@ -165,3 +165,86 @@ export function deliveredMcdKeyboardBinding(unityKeyCode) {
     ? MCD_SOURCE_KEYBOARD_PROFILE[unityKeyCode]
     : null;
 }
+
+
+/**
+ * Source-qualified SHInputCamera input delta; opt-in and independent of the
+ * existing PROVISIONAL WEB mouse/keyboard rules above.
+ *
+ * PROUVÉ for delivered MCD code, not runtime execution: PRIVATE research #107,
+ * managed/Assembly-CSharp/InputSystem/SHInputCamera.cs:35-90, Steam build
+ * 20299547, artifact 13143742282. Sensitivities are EFFECTIVE parameters
+ * supplied by the caller, not unconditionally the serialized CameraLook
+ * values. InputManager's device/cache selection and active Containers values
+ * remain INCONNU. All input axes are InputDevice RightStick values, NOT DOM
+ * MouseEvent.movementX/Y. Numeric restrictions are WEB API guards only.
+ */
+export function mcdSourcePadCurve(stick, deadzone, exponent) {
+  if (![stick, deadzone, exponent].every(Number.isFinite)) {
+    throw new RangeError('pad curve inputs must be finite');
+  }
+  if (deadzone < 0 || exponent <= 0) {
+    throw new RangeError('pad curve requires a nonnegative deadzone and positive exponent');
+  }
+  if (Math.abs(stick) <= deadzone) return 0;
+  // Crucially NOT pow(abs(stick) - deadzone, exponent): negative stick
+  // uses abs(stick - deadzone), so the native curve is asymmetric.
+  return Math.sign(stick) * Math.pow(Math.abs(stick - deadzone), exponent);
+}
+
+/**
+ * Pure producer of native-camera *input deltas*, NOT yaw/pitch or radians.
+ * `devices` includes every InputManager device; boolean device class and
+ * active-device classification must be provided explicitly. Apply the
+ * unscaled frame factor AFTER summing ALL devices when active is not mouse.
+ * Pause/lock, slow-aim, original UI sensitivities, GetInput's Update cache,
+ * and CameraLook.Update's pivot transforms are outside this contract.
+ */
+export function mcdSourceCameraInputDelta({
+  devices,
+  activeDeviceIsKeyboardMouse,
+  mouseSensitivityX,
+  mouseSensitivityY,
+  gamepadSensitivityX,
+  gamepadSensitivityY,
+  deadzone,
+  exponent,
+  unscaledDeltaTime,
+} = {}) {
+  if (!Array.isArray(devices)) throw new TypeError('devices must be an explicit array');
+  if (typeof activeDeviceIsKeyboardMouse !== 'boolean') {
+    throw new TypeError('activeDeviceIsKeyboardMouse is required');
+  }
+  for (const [name, value] of Object.entries({
+    mouseSensitivityX, mouseSensitivityY, gamepadSensitivityX,
+    gamepadSensitivityY, deadzone, exponent, unscaledDeltaTime,
+  })) {
+    if (!Number.isFinite(value)) throw new RangeError(`${name} must be finite`);
+  }
+  if (unscaledDeltaTime < 0) throw new RangeError('unscaledDeltaTime must be nonnegative');
+  if (deadzone < 0 || exponent <= 0) throw new RangeError('invalid pad curve parameters');
+  let x = 0;
+  let y = 0;
+  for (const device of devices) {
+    if (typeof device?.isKeyboardMouse !== 'boolean') {
+      throw new TypeError('device.isKeyboardMouse must be explicit');
+    }
+    const { rightStickX, rightStickY } = device;
+    if (!Number.isFinite(rightStickX) || !Number.isFinite(rightStickY)) {
+      throw new RangeError('device axes must be finite');
+    }
+    if (device.isKeyboardMouse) {
+      x += rightStickX * mouseSensitivityX;
+      y += rightStickY * mouseSensitivityY;
+    } else {
+      x += mcdSourcePadCurve(rightStickX, deadzone, exponent) * gamepadSensitivityX;
+      y += mcdSourcePadCurve(rightStickY, deadzone, exponent) * gamepadSensitivityY;
+    }
+  }
+  const scale = activeDeviceIsKeyboardMouse ? 1 : unscaledDeltaTime * 60;
+  const result = { x: x * scale, y: y * scale };
+  if (!Number.isFinite(result.x) || !Number.isFinite(result.y)) {
+    throw new RangeError('camera input delta must be finite');
+  }
+  return result;
+}
