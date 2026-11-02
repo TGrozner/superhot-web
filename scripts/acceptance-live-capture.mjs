@@ -241,7 +241,7 @@ export function renderedOriginalSceneEvidence(frame, { requireSkin = false } = {
       !number(projection.far) || projection.far <= projection.near ||
       !number(projection.aspect) || projection.aspect <= 0)
     reasons.push('RENDERED_PROJECTION_UNVERIFIED');
-  if (!cameraOK(frame?.camera))
+  if (!frame?.camera || !['x','y','z','yaw','pitch'].every(key => number(frame.camera[key])))
     reasons.push('RENDERED_CAMERA_UNVERIFIED');
   if (requireSkin) {
     const enemy = frame?.nativeEnemy;
