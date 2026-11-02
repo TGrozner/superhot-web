@@ -51,6 +51,10 @@ export function planBulletFixedContactSequence({
       if (pair.outcome === 'other-can-collide-unverified') {
         return result('pair-can-collide-unverified', i + 1, i);
       }
+      if (pair.outcome === 'parent-weapon-ids-incomplete' ||
+          pair.outcome === 'parent-weapon-guard-conflict') {
+        return result(pair.outcome, i + 1, i);
+      }
       if (typeof hit.destroyedAfterHandler !== 'boolean') {
         return result('destruction-state-unverified', i + 1, i);
       }

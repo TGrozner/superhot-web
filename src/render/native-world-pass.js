@@ -68,9 +68,11 @@ void main() {
   vec3 n = uMode == 2 && uHasNormals == 1
     ? vNormal
     : (uHasNormals == 1 ? normalize(vNormal) : normalize(cross(dFdx(vWorld), dFdy(vWorld))));
-  if (uMode != 2 && dot(n, uCamera - vWorld) < 0.0) n = -n;
+  // Only the reflection normal faces the camera; Concrete and diffuse stay geometric.
+  vec3 reflectionNormal = n;
+  if (dot(reflectionNormal, uCamera - vWorld) < 0.0) reflectionNormal = -reflectionNormal;
   if (uMode == 1 && uTextured == 1) {
-    float level = nativeBlackCrystalReflectionLevel(uTexture, reflect(normalize(vWorld - uCamera), n));
+    float level = nativeBlackCrystalReflectionLevel(uTexture, reflect(normalize(vWorld - uCamera), reflectionNormal));
     outColor = vec4(vec3(level), 1.0);
     return;
   }

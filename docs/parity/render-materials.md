@@ -481,3 +481,10 @@ but the native shader-global phase and light state are unmatched. One pose's
 RGB difference increased despite better material structure; these metrics are
 not a monotonic fidelity score. Exact per-pose values are in `visual.md`;
 images and the `native-web-red-crystal-comparison-v1.json` report remain private.
+
+The later PR142 normal fix is retained in this full composition: only the
+reflection normal is flipped toward the camera. Concrete seam/diffuse inputs
+retain their geometric normal, including the recovered unnormalized Concrete
+varying. The merged root again rendered360 world draws/121 Concrete draws with
+Red Crystal active and GL error0. Source-text regex checks of old GLSL variable
+names were removed rather than repinned to the reconstructed shader.
