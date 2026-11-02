@@ -79,7 +79,8 @@ const assessComparisonReadiness = ({ declaration, method, binding, nativeTrace, 
     || method.assemblySha256 !== evidence.secondaryReport.source.assemblyCSharpSha256
     || !Array.isArray(method.sourceLines) || method.sourceLines.length !== 2
     || !method.sourceLines.every(Number.isInteger)
-    || method.sourceLines[0] < 1 || method.sourceLines[1] < method.sourceLines[0]) {
+    || method.sourceLines[0] < evidence.source.nextUnreadLine
+    || method.sourceLines[1] < method.sourceLines[0]) {
     missing.push('method-body');
   }
   if (!nonBlank(binding?.owner) || !/^-?\d+$/.test(String(binding.pathId ?? ''))
@@ -137,7 +138,7 @@ const comparisonFixture = () => {
       name: 'FixedUpdate',
       sourcePath: evidence.source.sourcePath,
       assemblySha256: evidence.secondaryReport.source.assemblyCSharpSha256,
-      sourceLines: [25, 30],
+      sourceLines: [26, 30],
     },
     binding: { scene: 'synthetic-scene', owner: 'synthetic-owner', pathId: '42' },
     // Fabricated metadata deliberately mimics build IDs: admission is NOT authentication.
@@ -178,7 +179,7 @@ test('TC-Q02: a secondary handoff is not a method body or a runtime sample', () 
 test('TC-Q03: uncalibrated or unordered timestamps cannot become an observation', () => {
   const candidate = {
     declaration,
-    method: { type: 'TimeControl', name: 'FixedUpdate', sourcePath: evidence.source.sourcePath, assemblySha256: evidence.secondaryReport.source.assemblyCSharpSha256, sourceLines: [25, 30] },
+    method: { type: 'TimeControl', name: 'FixedUpdate', sourcePath: evidence.source.sourcePath, assemblySha256: evidence.secondaryReport.source.assemblyCSharpSha256, sourceLines: [26, 30] },
     binding: { scene: 'fixture', owner: 'fixture', pathId: '42' },
     nativeTrace: { build: 'fixture', scene: 'fixture', unit: 'frames', valueUnit: 'seconds-per-step', samples: [{ t: 0, value: 60 }, { t: 1, value: 120 }] },
     webTrace: { commit: 'fixture', unit: 'seconds', valueUnit: 'seconds-per-step', samples: [{ t: 1, value: 60 }, { t: 1, value: 120 }] },
@@ -426,4 +427,18 @@ test('TC-Q24: another class or source file cannot stand in for the TimeControl m
     assert.deepEqual(result.missing, ['method-body']);
     assert.equal(result.parityCertified, false);
   }
+});
+
+
+test('TC-Q25: initializer-only ranges cannot be presented as method-body evidence', () => {
+  for (const sourceLines of [[16, 16], [10, 25], [1, 200], [25, 30]]) {
+    const candidate = comparisonFixture();
+    candidate.method.sourceLines = sourceLines;
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['method-body']);
+    assert.equal(result.parityCertified, false);
+  }
+  // Lines beyond the read excerpt are synthetic metadata here, not a native proof.
+  assert.equal(assessComparisonReadiness(comparisonFixture()).status, 'COMPARABLE');
 });
