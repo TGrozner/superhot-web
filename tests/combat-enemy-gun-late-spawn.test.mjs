@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planEnemyBaseGunAttack, planEnemyBaseGunLateSpawn } from '../src/combat/enemy-gun-late-spawn.js';
+import { planPejAiGunAttackTick } from '../src/combat/ai-gun-attack-branch.js';
+import { planBulletFixedContactSequence } from '../src/combat/bullet-fixed-contact-sequence.js';
 
 const vec = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const attack = overrides => planEnemyBaseGunAttack({
@@ -104,4 +106,42 @@ test('invalid active inputs fail instead of inventing source runtime values', ()
   assert.throws(() => attack({ isAttackReady: 1 }), /explicit boolean/);
   assert.throws(() => late({ projectileSpeed: undefined }), /live finite/);
   assert.throws(() => late({ deferredTarget: { x: NaN, y: 1, z: 0 } }), /finite xyz/);
+});
+
+test('synthetic end-to-end source chain: AI Attack -> late bullet -> wall OR player contact', () => {
+  const decision = planPejAiGunAttackTick({
+    canSeePlayer360: true, aimTargetInSight: true, targetRerollReady: true,
+    weaponPositionReady: true, timeToReady: 0, stopAimingTime: .1,
+    weaponAttackReady: true, inMiddleOfSeries: false, aimTargetReady: true,
+  });
+  assert.equal(decision.attackRequested, true);
+  const weapon = attack({ attackCalled: decision.attackRequested });
+  assert.equal(weapon.fireSfxCallRequested, true);
+  const emitted = late({ pending: weapon.pendingAfterAttack });
+  assert.equal(emitted.launchRequested, true);
+  const base = {
+    current: { firedByPlayer: false, sniperBullet: false },
+    projectilePosition: emitted.request.origin,
+    velocity: emitted.request.velocity,
+  };
+  const wall = planBulletFixedContactSequence({
+    ...base,
+    orderedHits: [
+      { layer: 'Environment', ignored: false, destroyedAfterHandler: false },
+      { layer: 'CustomCollider', ignored: false, hasPlayerController: true,
+        destroyedAfterHandler: false },
+    ],
+  });
+  assert.equal(wall.status, 'native-loop-stop-requested');
+  assert.equal(wall.stoppedAt, 0);
+  assert.ok(wall.events.some(e => e.type === 'environment-handler-request'));
+  assert.ok(!wall.events.some(e => e.type === 'player-kill-request'));
+  const clearPath = planBulletFixedContactSequence({
+    ...base, orderedHits: [
+      { layer: 'CustomCollider', ignored: false, hasPlayerController: true,
+        destroyedAfterHandler: false },
+    ],
+  });
+  assert.ok(clearPath.events.some(e => e.type === 'player-kill-request'));
+  // Synthetic, source-bounded event requests only; no actual frame, Pooler or damage.
 });
