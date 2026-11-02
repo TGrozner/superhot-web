@@ -539,3 +539,132 @@ export function decodeIndexedObjPayload(objText, options) {
     world: worldMatrix === undefined ? null : meshModelMatrices(worldMatrix),
   };
 }
+
+
+/**
+ * Select explicit multiword Wavefront OBJ groups, or a UNIQUE terminal source
+ * group token such as "2_24". For UnityPy-style descriptive group labels the
+ * token resolves to the whole actual label, never to an assumed GO/material.
+ *
+ * Safe two-argument usage preserves OBJ coordinates/winding. A native->Web
+ * conversion MUST be supplied explicitly via options.axisSigns and winding.
+ * "expectedGroups" supplies independent source assertions, rather than
+ * treating numbers measured from this same OBJ as proof of native identity.
+ *
+ * No commercial file I/O, material guessing, scene-instance mapping or upload.
+ * The output's ranges have NO materialSlot: bind diagnostic/qualified materials
+ * separately. Each range can be sent straight to uploadIndexedMesh().draw().
+ */
+export function parseObjGroupsIntoIndexedMesh(objText, groupNames, options = {}) {
+  if (typeof objText !== 'string' || objText.length === 0 ||
+      objText.length > 32 * 1024 * 1024) {
+    throw new TypeError('OBJ must be decoded text of 1..33554432 characters');
+  }
+  if (!Array.isArray(groupNames) || groupNames.length < 1 || groupNames.length > 64) {
+    throw new TypeError('Select 1..64 exact or uniquely suffixed OBJ group labels');
+  }
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('OBJ selection options must be an object');
+  }
+  const chosen = new Map();
+  for (const selector of groupNames) {
+    if (typeof selector !== 'string' || selector.length > 256 ||
+        selector.trim() !== selector || selector.length === 0 ||
+        /[\r\n\t]/.test(selector) || chosen.has(selector)) {
+      throw new TypeError('OBJ selectors must be unique non-empty labels');
+    }
+    chosen.set(selector, { name: null, triangles: 0, positionRefs: new Set() });
+  }
+  const expected = options.expectedGroups ?? {};
+  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) {
+    throw new TypeError('expectedGroups must be a selector-keyed object');
+  }
+  for (const key of Object.keys(expected)) {
+    if (!chosen.has(key)) throw new Error('Unselected OBJ source assertion: ' + key);
+  }
+  const signs = options.axisSigns ?? [1, 1, 1];
+  const isIdentitySigns = Array.isArray(signs) && signs.length === 3 &&
+    signs.every((value, index) => value === 1);
+  if (!isIdentitySigns && options.winding === undefined) {
+    throw new Error('OBJ axis conversion requires explicit winding keep/flip');
+  }
+
+  // Cheap selection/evidence pass. It never modifies OBJ data and handles
+  // relative face indices at their ORIGINAL point of declaration.
+  let sourcePositionCount = 0, active = null;
+  for (const [lineNumber, raw] of objText.split(/\r?\n/).entries()) {
+    const line = raw.split('#', 1)[0].trim();
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    if (parts[0] === 'v') {
+      sourcePositionCount++;
+    } else if (parts[0] === 'g') {
+      const fullName = parts.slice(1).join(' ');
+      const matches = groupNames.filter(selector => fullName === selector ||
+        (/^2_\d+$/.test(selector) && fullName.endsWith(' ' + selector)));
+      if (matches.length > 1) {
+        throw new Error('Ambiguous OBJ group: multiple selectors match ' + fullName);
+      }
+      active = matches.length ? chosen.get(matches[0]) : null;
+      if (active) {
+        if (active.name !== null) throw new Error('Selected OBJ group is declared more than once: ' + fullName);
+        active.name = fullName;
+      }
+    } else if (parts[0] === 'f' && active) {
+      if (parts.length !== 4) throw new Error('Selected OBJ group must contain triangles only');
+      if (++active.triangles > 2_000_000) throw new RangeError('OBJ group too many triangles');
+      for (const corner of parts.slice(1)) {
+        const positionToken = corner.split('/', 1)[0];
+        active.positionRefs.add(objIndex(positionToken, sourcePositionCount,
+          'OBJ line ' + (lineNumber + 1) + ' position'));
+      }
+    }
+  }
+
+  // Source-provided expected fields remain independent of the selected data.
+  // If omitted, counts are useful for transport, NOT native-provenance checks.
+  const specs = [];
+  for (const [selector, entry] of chosen) {
+    if (entry.name === null || entry.triangles === 0) {
+      throw new Error('Requested OBJ group missing or empty: ' + selector);
+    }
+    const check = Object.hasOwn(expected, selector) ? expected[selector] : {};
+    if (!check || typeof check !== 'object' || Array.isArray(check)) {
+      throw new TypeError('Invalid source assertions for OBJ group: ' + selector);
+    }
+    specs.push({
+      name: entry.name,
+      materialSlot: specs.length, // INTERNAL range ordinal only; removed below.
+      expectedTriangles: check.expectedTriangles ?? entry.triangles,
+      expectedPositionRefs: check.expectedPositionRefs ?? entry.positionRefs.size,
+      expectedBounds: check.expectedBounds,
+    });
+  }
+
+  const decoded = decodeIndexedObjPayload(objText, {
+    coordinateSpace: 'web-rh',
+    axisSigns: signs,
+    winding: options.winding ?? 'keep',
+    groups: specs,
+    worldMatrix: options.worldMatrix,
+  });
+  return {
+    mesh: decoded.mesh,
+    // DO NOT expose a fake native material binding inferred from OBJ ordering.
+    drawRanges: decoded.drawRanges.map(({ materialSlot: internalOrdinal, ...range }) => ({
+      ...range, selector: groupNames[internalOrdinal],
+    })),
+    groupEvidence: decoded.groupEvidence.map((proof, index) => ({
+      ...proof, selector: groupNames[index],
+      independentChecks: {
+        triangles: expected[groupNames[index]]?.expectedTriangles !== undefined,
+        positionRefs: expected[groupNames[index]]?.expectedPositionRefs !== undefined,
+        bounds: expected[groupNames[index]]?.expectedBounds !== undefined,
+      },
+    })),
+    windingFlipped: decoded.windingFlipped,
+    world: decoded.world,
+    geometryProvenance: 'locally-provided-obj-text-not-native-runtime-proof',
+    materialBindingsResolved: false,
+  };
+}
