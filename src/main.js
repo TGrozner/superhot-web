@@ -439,6 +439,7 @@ function loadLevel(index) {
       for (const item of nativeScene.interactables) for (const model of item.models) renderer.setNativeInstanceVisible(model.instanceId,true);
       nativeItems = createNativeItems(nativeScene,nativeCollision,{
         setVisible:(id,visible)=>renderer.setNativeInstanceVisible(id,visible),
+        getBounds:id=>renderer.getNativeInstanceBounds(id),
         gravity:nativeScene.gameplay.physics.gravity,
       });
       nativeEncounter = createNativeEncounter(nativeScene,nativeEnemyCollision,Math.random,{sightCollision:nativeSightCollision});
