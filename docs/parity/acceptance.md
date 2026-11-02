@@ -331,3 +331,60 @@ Any reported score is *operator-attested, not independent certification*;
 The new files live on the SH-10 branch only. They have not been merged,
 there is no completed browser capture and no native reference paired.
 Do **not** run the strict native gate as part of CI.
+
+## SH-10 — opt-in two-OBJ browser proof (2026-11-02)
+
+**This is a NEW Web-visible gate, not native parity.** SH-05 merged public #98
+(local File API + indexed WebGL2 draw) and #97 (source-neutral OBJ adapter).
+The current Containers preview can replace exactly two generated proxies with
+two source-qualified, operator-supplied **private** local OBJ/OBJ.gz files:
+mesh level28:6 / group47 and mesh level28:7 / group48. Each requires an
+exactly verified 1,546-triangle source group. The OBJ bytes are **never**
+shipped from this repository, fetched by the game, or included in the report.
+
+The isolated SH-10 script now supports a **local-only** CDP file-input smoke
+test on the *same machine* that holds the private exports. Both inputs are
+mandatory together, because a 1-of-2 preview is not a valid two-group draw
+observation. Inputs must resolve outside the public checkout (symlinks checked,
+256MB maximum per file). The command below is illustrative, **NOT executed
+against the owner's game or proprietary files in SH-10's environment**:
+
+    node scripts/acceptance-live-capture.mjs --capture-web \
+      --url 'http://127.0.0.1:3000/?scene=containers' \
+      --mesh6 /private/exports/mesh6.obj.gz \
+      --mesh7 /private/exports/mesh7.obj.gz \
+      --out /tmp/sh10-live-obj-capture
+
+The script uses `DOM.setFileInputFiles`, waits for **actual browser-reported**
+`locallyLoadedSourceGroups=2`, `generatedManifest.privateIndexedDraws=2`,
+at least two suppressed proxy packets (`hiddenByPrivateMesh>=2`), measured
+WebGL draw calls and nonzero sampled frame timings. It rejects source-file
+presence alone, a one-file load, synthetic fixtures, or a preview where the
+indexed GPU draw is not reported. Afterward it captures two actual Web PNG
+frames (idle → KeyW 300ms) and records SHA-256. No original bytes or source
+file names are written to the public checkout. Local browser access and this
+CDP file-input path **still require a real end-to-end execution**; Chromium
+navigation was previously blocked in SH-10's sandbox.
+
+A successful local-OBJ result is exactly
+`WEB_LOCAL_MESH_GPU_DRAW_OBSERVED_NOT_MCD_PARITY`, **never** NATIVE_PROVEN or
+1:1. The browser still has **no independently attested original MCD active
+scene, camera pose, field of view, materials, frame phase or native counterpart
+PNG**. Therefore the native compare gate must still return **INCONNU**. PR
+#101 (SH-15) reports a *serialized* build28 60.0000267° vertical FOV versus
+the current Web shader's analytical ~64.66°; without a native active-camera
+trace this is a source-qualified framing candidate, not a measured pixel gap.
+The public #99 TimeControl and R-profile models are isolated source contracts,
+not yet activated browser bindings; the existing five handoff checks remain
+**PROVISIONAL**.
+
+**Three visible acceptance priorities for SH-05** remain strictly ordered:
+(1) two-group local OBJ **GPU draws + scene/camera/FOV read-only snapshots**
+at both frames; (2) corresponding native private frames with the same
+scene, angle, viewport and semantic ROIs, then centroid/silhouette metrics;
+(3) color, light and time variation with the same input and frame phase.
+The optional read-only `window.__sh10AcceptanceSnapshot()` hook remains
+SH-05's responsibility; SH-10 does not change entrypoint/renderer/levels.
+No native screenshots or operator tolerance values are invented, and no
+native corpus request, runner job, or GitHub Actions workflow is launched.
+No intentionally red assertion enters CI.
