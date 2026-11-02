@@ -28,16 +28,28 @@ export function advanceProjectile(projectile, worldDelta, geometry = {}) {
       expired: projectile.ttl === 0 };
   }
 
-  const destination = add3(projectile.pos, multiply3(projectile.direction,
-    projectile.speed * availableTime));
+  // Finite inputs may still overflow during integration. Fail before tracing
+  // rather than allowing an invalid endpoint to masquerade as a missed hit.
+  const travel = projectile.speed * availableTime;
+  if (!Number.isFinite(travel)) {
+    throw new RangeError('Projectile travel must remain finite');
+  }
+  const destination = add3(projectile.pos, multiply3(projectile.direction, travel));
+  if (!finitePoint(destination)) {
+    throw new RangeError('Projectile destination must remain finite');
+  }
   const impact = firstImpact(projectile.pos, destination, geometry);
   const elapsed = availableTime * (impact?.t ?? 1);
   const remaining = Math.max(0, projectile.ttl - elapsed);
+  const age = (projectile.age ?? 0) + elapsed;
+  if (!Number.isFinite(age)) {
+    throw new RangeError('Projectile age must remain finite');
+  }
   const next = {
     ...projectile,
     pos: impact ? impact.point : destination,
     ttl: remaining,
-    age: (projectile.age ?? 0) + elapsed,
+    age,
   };
   return { projectile: next, impact, expired: impact !== null || remaining === 0 };
 }
