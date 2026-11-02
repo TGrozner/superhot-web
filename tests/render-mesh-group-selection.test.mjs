@@ -33,6 +33,11 @@ const conversion = {
   },
 };
 
+const conversionFor = (...names) => ({
+  ...conversion,
+  expectedGroups: Object.fromEntries(names.map(name => [name, conversion.expectedGroups[name]])),
+});
+
 test('short terminal tokens resolve two unique descriptive OBJ groups into indexed ranges', () => {
   const result = parseObjGroupsIntoIndexedMesh(
     SYNTHETIC_WEDGE_OBJ, ['2_24', '2_47'], conversion,
@@ -55,7 +60,7 @@ test('short terminal tokens resolve two unique descriptive OBJ groups into index
 
 test('Web RH double reflection keeps winding and normals aligned on a non-cubic triangle', () => {
   const { mesh, windingFlipped } = parseObjGroupsIntoIndexedMesh(
-    SYNTHETIC_WEDGE_OBJ, ['2_24'], conversion,
+    SYNTHETIC_WEDGE_OBJ, ['2_24'], conversionFor('2_24'),
   );
   assert.equal(windingFlipped, false);
   const vec = i => Array.from(mesh.vertices.slice(mesh.indices[i] * 8, mesh.indices[i] * 8 + 3));
