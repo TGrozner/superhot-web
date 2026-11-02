@@ -261,3 +261,46 @@ diagnostic.colorProvenance; // 'native-serialized-color-parameter-web-diagnostic
 **Actual visual acceptance:** on `?scene=containers`, with owner-provided `.obj.gz`, verify `nativeEnemyLoaded=1`, `privateIndexedDraws` rising by one, a browser screenshot showing the enemy geometry, capture a same-camera *generated Web red* vs *source-param diagnostic red* pair, and calculate actual per-pixel delta/changed-pixel fraction in SH-15. Only after a native MCD capture at matched camera/pose/lighting may a native similarity score be claimed. Node CI on metadata cannot replace that observation.
 
 **Separate Concrete texture / bake blocker:** existing [research #85](https://github.com/TGrozner/superhot-research/issues/85) owner-qualified `resources.assets:248` diffuse and `sharedassets28.assets:2` lightmap identities, but **no texels, encoding or UV2**. One bounded private issue [research #100](https://github.com/TGrozner/superhot-research/issues/100) has been requested to inspect **two exact Texture2D stream descriptors only**, not extract/copy pixels into this public repo. Its `result.json` must be inspected before any new claim. This request does **not** repeat #41/#50/#73/#75/#85. Keep all native binaries, shaders and images private.
+
+
+### P0 native RGB24 diffuse / DXT5 lightmap stream discovery, PRIVATE #100 completed
+
+The **only** new bounded private corpus query this cycle, [research #100](https://github.com/TGrozner/superhot-research/issues/100), run **41443954188**, artifact **13141079714**, returned SUCCESS. Its actual `result.json` was read: `operation=query`, exactly **2 rows**, `truncated=false`, both exact `Texture2D` owners. **This resolves actual stream offsets and compressed formats, not pixels.**
+
+| Source texture | Unity serialized record | External payload location (private PC only) |
+| --- | --- | --- |
+| Concrete diffuse `resources.assets:248` | `128 × 128`, `m_TextureFormat=3` = **RGB24**, `m_MipCount=8`, `m_ColorSpace=1` | `resources.assets.resS` offset **59500780**, length **65535** bytes |
+| Baked `sharedassets28.assets:2` | `2048 × 2048`, `m_TextureFormat=12` = **DXT5/BC3**, `m_MipCount=12`, `m_ColorSpace=1` | `sharedassets28.assets.resS` offset **0**, length **5592432** bytes |
+
+The serialized `image data` field has zero inline bytes in both records; actual image bytes are **not present in any public artifact or this public repository**. The width/mip count and stream length independently cross-check format layout: `Σ_{level=0..7}(128>>level)^2*3 = 65535` RGB24 bytes; `Σ_{level=0..11} ceil(max(1,2048>>level)/4)^2*16 = 5592432` DXT5 bytes. These equations are tested using synthetic metadata only. Numeric `m_ColorSpace=1` is preserved as serialized; **Unity/runtime transfer/tonemapping is not inferred from it**.
+
+The Unity enum numbers are documented as [RGB24 = 3](https://docs.unity.com/en-us/engine/6000.5/script-reference/unityengine/textureformat/rgb24) and [DXT5 = 12](https://docs.unity.com/en-us/engine/6000.6/script-reference/unityengine/textureformat/dxt5). They do not independently identify the selected MCD shader pass, the baked-lightmap decoding interpretation, or a native screenshot. The external resource paths/offsets are local original-file metadata, **not a request to publish game assets**.
+
+**SH-05 exact first genuinely source-textured Web experiment (SH-05-owned files only):**
+
+```js
+import {
+  containersBuild28ConcreteMaterialSource,
+  decodeContainersConcreteRgb24Mip0,
+} from './render/material-model.js';
+
+const tex = containersBuild28ConcreteMaterialSource().mainTexture.nativeStream;
+// Input: a user-selected LOCAL File object for the original resources.assets.resS.
+// Never fetch from GitHub, commit it, send it to a server, or persist it.
+const exactSection = await localResSFile.slice(
+  tex.sourceByteOffset,
+  tex.sourceByteOffset + tex.sourceByteCount,
+).arrayBuffer();
+const decoded = decodeContainersConcreteRgb24Mip0(exactSection);
+// decoded.width=128, .height=128, .pixelsRgba=Uint8Array(65536)
+// Bind via gl.texImage2D(...gl.RGBA,...decoded.pixelsRgba), with an
+// explicitly generated DIAGNOSTIC UV-sampling shader in SH-05's renderer;
+// sample uv0 * [0.10000000149,0.10000000149] + [0,0].
+// Do not claim native XULM shading, mip/filter/origin or gamma equivalence.
+```
+
+Only the **first RGB24 mip** is decoded; lower mips remain in the private input and are ignored. The byte order is copied RGB→RGBA with alpha255, without a gamma transform or vertical flip. **Vertical orientation, native wrap/filter behavior, Unity gamma/color space and XULM shader vertex/fragment logic are still UNVERIFIED.** SH-05 should capture two **real browser screenshots** at the same camera, generated flat cargo vs source texel diagnostic, quantify changed pixels and frame p95, and label the experiment honestly. This is the shortest viable path to a *real source-image versus flat fallback visual delta* without inventing texture pixels.
+
+**SH-12 contract:** preserve verified source UV0 for `Mesh6:g24/g47`, `Mesh7:g48` group draw ranges; do not replace with UV2. The decoded diffuse uses the source-authored `_MainTex` 0.1× UV0 transform. Atlas is DXT5/BC3, but **no native UV2 channel or atlas orientation has been transported**; do not decode/sample as if native until source-qualified UV2, bake encoding and original shader sample rules are recovered. Browser local texture upload, palette, shader draw belongs exclusively to SH-05, not SH-13.
+
+No native screenshot, original texture bytes, actual browser draw with this PNG-equivalent stream, or 1:1 measurement has been observed. This PR adds metadata and a deterministic pure decoder, **not the GPU integration**.
