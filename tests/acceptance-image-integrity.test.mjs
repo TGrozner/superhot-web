@@ -74,15 +74,20 @@ function fixture(){
   const camera={x:1,y:2,z:3,yaw:0,pitch:0};
   const projection={verticalScale:Math.sqrt(3),near:.1,far:100,aspect:1};
   const web={...base,captureKind:'ACTUAL_BROWSER_CDP_PNG',
+    captureSurface:'GAMEPLAY_ONLY_NO_UI',
     webRenderedFrameBracketsObserved:true,
-    frames:frames.map((f,i)=>({...f,renderFrameIdBefore:i?24:10,
+    frames:frames.map((f,i)=>({...f,captureSurface:'GAMEPLAY_ONLY_NO_UI',
+      canvasSurfaceBefore:'WEB_BROWSER_REPORTED_CANVAS_ONLY_NOT_NATIVE_PARITY',
+      canvasSurfaceAfter:'WEB_BROWSER_REPORTED_CANVAS_ONLY_NOT_NATIVE_PARITY',renderFrameIdBefore:i?24:10,
       renderFrameIdAfter:i?25:11,renderedCameraBefore:{...camera},
       renderedCameraAfter:{...camera},renderedProjectionBefore:{...projection},
       renderedProjectionAfter:{...projection}}))};
   const native={...base,captureKind:'OPERATOR_ATTESTED_NATIVE_MCD_PNG',
+    captureSurface:'OPERATOR_ATTESTED_GAMEPLAY_NO_HUD',
     game:'SUPERHOT: MIND CONTROL DELETE',build:'20299547',
     observationId:'SYNTHETIC_UNIT_FIXTURE_NOT_NATIVE',
-    frames:frames.map(f=>({...f,camera:{...camera,source:'RUNTIME_OBSERVED'},
+    frames:frames.map(f=>({...f,captureSurface:'OPERATOR_ATTESTED_GAMEPLAY_NO_HUD',
+      camera:{...camera,source:'RUNTIME_OBSERVED'},
       projection:{...projection,source:'RUNTIME_OBSERVED'}})),
     regions:[{id:'visible-object',rect:[0,0,1,1]}]};
   const webPath=join(webDir,'web-capture.json'),nativePath=join(nativeDir,'native-capture.json');
