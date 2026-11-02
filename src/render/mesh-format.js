@@ -811,3 +811,137 @@ export function parseEntireObjIntoIndexedMesh(objText, options = {}) {
     skinningAvailable: false, // OBJ does not transport Unity bind poses, bone weights or clips.
   };
 }
+
+
+/**
+ * Read-only orientation assay for source-neutral indexed meshes.
+ *
+ * Compares each nondegenerate triangle's geometric cross product with the
+ * averaged SOURCE vertex normals. This identifies a possible OBJ axis/winding
+ * mismatch before WebGL2 rendering, without guessing the correct conversion.
+ * No normalization, geometry edits, culling changes or material assumptions
+ * are applied to the source mesh. Run once at local-file load, not each frame.
+ *
+ * A negative-determinant instance model reverses GPU triangle front-facing,
+ * whereas the inverse-transpose normal uniform preserves transformed normals.
+ * This is reported separately; it never silently flips indices or normals.
+ *
+ * Smooth/custom normals need not be parallel to a face: 'ambiguous' is NOT a
+ * failure, and even an all-aligned result is NOT proof of original MCD pixels.
+ */
+export function auditIndexedMeshOrientation(mesh, {
+  drawRanges = [{ firstIndex: 0, indexCount: mesh?.indexCount }],
+  worldMatrix,
+  alignmentThreshold = 0.25,
+} = {}) {
+  if (!mesh || !(mesh.vertices instanceof Float32Array) ||
+      !(mesh.indices instanceof Uint16Array || mesh.indices instanceof Uint32Array) ||
+      mesh.strideBytes !== MESH_VERTEX_STRIDE ||
+      !Number.isSafeInteger(mesh.vertexCount) || mesh.vertexCount < 3 ||
+      mesh.vertices.length !== mesh.vertexCount * 8 ||
+      !Number.isSafeInteger(mesh.indexCount) || mesh.indexCount !== mesh.indices.length ||
+      mesh.indexCount < 3 || mesh.indexCount % 3 !== 0) {
+    throw new TypeError('Orientation assay requires a canonical indexed mesh');
+  }
+  if (!Number.isFinite(alignmentThreshold) || alignmentThreshold < 0 ||
+      alignmentThreshold >= 1) {
+    throw new RangeError('alignmentThreshold must be within [0,1)');
+  }
+  if (!Array.isArray(drawRanges) || !drawRanges.length || drawRanges.length > 1024) {
+    throw new TypeError('Orientation assay needs 1..1024 explicit draw ranges');
+  }
+  const mirroredWorld = worldMatrix === undefined ?
+    false : meshModelMatrices(worldMatrix).mirrored;
+  const values = mesh.vertices, indices = mesh.indices;
+  const stats = () => ({
+    triangles: 0, aligned: 0, opposed: 0,
+    ambiguous: 0, degenerate: 0, zeroNormal: 0,
+    signedCosineSum: 0, compared: 0,
+    minSignedCosine: Infinity, maxSignedCosine: -Infinity,
+  });
+  const total = stats();
+  function sample(destination, firstIndex, indexCount) {
+    for (let i = firstIndex; i < firstIndex + indexCount; i += 3) {
+      const a = indices[i], b = indices[i + 1], c = indices[i + 2];
+      if (a >= mesh.vertexCount || b >= mesh.vertexCount || c >= mesh.vertexCount) {
+        throw new RangeError('Orientation assay encountered an out-of-range index');
+      }
+      const av = a * 8, bv = b * 8, cv = c * 8;
+      for (const offset of [0, 1, 2, 3, 4, 5]) {
+        if (![values[av + offset], values[bv + offset], values[cv + offset]]
+          .every(Number.isFinite)) {
+          throw new RangeError('Orientation assay encountered non-finite position/normal');
+        }
+      }
+      const ux = values[bv] - values[av], uy = values[bv + 1] - values[av + 1],
+        uz = values[bv + 2] - values[av + 2];
+      const vx = values[cv] - values[av], vy = values[cv + 1] - values[av + 1],
+        vz = values[cv + 2] - values[av + 2];
+      const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      const faceLength = Math.hypot(fx, fy, fz);
+      const nx = values[av + 3] + values[bv + 3] + values[cv + 3],
+        ny = values[av + 4] + values[bv + 4] + values[cv + 4],
+        nz = values[av + 5] + values[bv + 5] + values[cv + 5];
+      const normalLength = Math.hypot(nx, ny, nz);
+      destination.triangles++;
+      total.triangles++;
+      if (faceLength === 0) {
+        destination.degenerate++;
+        total.degenerate++;
+        continue;
+      }
+      if (normalLength === 0) {
+        destination.zeroNormal++;
+        total.zeroNormal++;
+        continue;
+      }
+      const signedCosine = Math.max(-1, Math.min(1,
+        (fx * nx + fy * ny + fz * nz) / (faceLength * normalLength)));
+      if (!Number.isFinite(signedCosine)) {
+        throw new RangeError('Orientation assay suffered non-finite vector arithmetic');
+      }
+      const category = signedCosine > alignmentThreshold ? 'aligned' :
+        signedCosine < -alignmentThreshold ? 'opposed' : 'ambiguous';
+      destination[category]++;
+      total[category]++;
+      for (const stat of [destination, total]) {
+        stat.compared++;
+        stat.signedCosineSum += signedCosine;
+        stat.minSignedCosine = Math.min(stat.minSignedCosine, signedCosine);
+        stat.maxSignedCosine = Math.max(stat.maxSignedCosine, signedCosine);
+      }
+    }
+  }
+  function finalize(stat) {
+    return {
+      triangles: stat.triangles, aligned: stat.aligned, opposed: stat.opposed,
+      ambiguous: stat.ambiguous, degenerate: stat.degenerate,
+      zeroNormal: stat.zeroNormal,
+      compared: stat.compared,
+      meanSignedCosine: stat.compared ? stat.signedCosineSum / stat.compared : null,
+      minSignedCosine: stat.compared ? stat.minSignedCosine : null,
+      maxSignedCosine: stat.compared ? stat.maxSignedCosine : null,
+    };
+  }
+  const ranges = drawRanges.map((range) => {
+    const firstIndex = range?.firstIndex ?? 0;
+    const indexCount = range?.indexCount ?? mesh.indexCount;
+    if (!Number.isSafeInteger(firstIndex) || !Number.isSafeInteger(indexCount) ||
+        firstIndex < 0 || indexCount < 3 || indexCount % 3 !== 0 ||
+        firstIndex + indexCount > mesh.indexCount) {
+      throw new RangeError('Orientation assay draw range violates index buffer');
+    }
+    const local = stats();
+    sample(local, firstIndex, indexCount);
+    return {
+      firstIndex, indexCount, groupName: range?.groupName ?? null,
+      ...finalize(local),
+    };
+  });
+  return {
+    ...finalize(total), ranges, alignmentThreshold,
+    mirroredWorld, worldTriangleWindingReversed: mirroredWorld,
+    geometryOnly: true,
+    nativeShadingOrPixelParityProven: false,
+  };
+}
