@@ -4,6 +4,7 @@ import { createGeneratedLighting, lightingUniformPacket } from './render/lightin
 import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
 import { enemyRedCrystalDiagnosticWebPacket } from './render/material-model.js';
 import { createNativeSkinPass } from './characters/native-skin-pass.js';
+import { createDojoPlayerAnimationPass } from './characters/native-player-animation.js';
 import { createNativeWorldPass } from './render/native-world-pass.js';
 
 // Legacy Web fog is generated, not MCD. SH-13 owns the source-qualified lighting model.
@@ -427,6 +428,29 @@ export function createRenderer(canvas) {
     drawCalls += report.drawCalls;
     return report;
   }
+  let nativePlayerHands = null;
+  function replaceDojoPlayerHands(playerPacket = null, rig = null, clips = null) {
+    // Only scene-authorized private packets may instantiate a first-person
+    // skinned draw. Replacing a scene drops the previous GL resources first.
+    nativePlayerHands?.dispose();
+    nativePlayerHands = null;
+    if (!playerPacket) return false;
+    nativePlayerHands = createDojoPlayerAnimationPass(gl, { playerPacket, rig, clips });
+    return true;
+  }
+  function drawDojoPlayerHands({ heldItem, modelMatrix, phase = 'held',
+      sourceClipTime, descriptor = null } = {}) {
+    if (!nativePlayerHands || heldItem?.isKatana !== true) return null;
+    const report = nativePlayerHands.draw({
+      heldItem, phase, sourceClipTime, modelMatrix,
+      descriptor, viewProjection, cameraPosition: currentCamera,
+      shaderTime: currentSceneClock.unscaledTime,
+      // Diagnostic Web-lit tint: no claim of native hands shader parity.
+      color: [0.81, 0.84, 0.87, 1],
+    });
+    if (report) drawCalls += report.handsDrawCalls;
+    return report;
+  }
   let nativeWorld = null;
   let nativeSkinLighting;
   function replaceNativeWorld(prepared, images) {
@@ -512,6 +536,7 @@ export function createRenderer(canvas) {
     begin,draw,affineBox,replacePrivateMesh,replacePrivateTexture,drawPrivateMesh,
     replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin,
     replaceNativeWorld, drawNativeWorld, drawNativeWeapon, drawFirstPersonWeapon,
+    replaceDojoPlayerHands, drawDojoPlayerHands,
     setNativeInstanceVisible, drawNativeInstance, getNativeInstanceBounds,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),

@@ -17,6 +17,7 @@ import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
 import { createNativeHud } from './render/native-hud.js';
+import { multiplyMatrices } from './scenes/graph.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -53,6 +54,9 @@ let nativeScene = null;
 let nativeSkinInfo = null;
 let localAssetManifest = null;
 let nativeHudReady = false;
+let nativeHandsCameraLocal = null;
+let nativeHandsStatus = 'PLAYER_HANDS_SOURCE_UNAVAILABLE';
+let nativeHandsStats = null;
 // Common sharedassets0.assets:711 -> PistolGun:4849 settings, not a scene pickup.
 const nativePistol = Object.freeze({ ammo: 5, attackDelay: Math.fround(.6), bulletSpeed: 36 });
 let weaponGeneration = 0;
@@ -277,6 +281,55 @@ if (containersPreviewEnabled) {
         } catch {
           nativeHudReady = false;
           nativeHud.setActive(false);
+        }
+      }
+      // Source-only Dojo hands: no generic/guessed clips, no made-up camera
+      // offsets and no fabricated katana swing. The recovered adapter draws
+      // only when the local scene provides explicit clip and local-matrix data.
+      renderer.replaceDojoPlayerHands(null);
+      nativeHandsCameraLocal = null;
+      nativeHandsStatus = 'PLAYER_HANDS_SOURCE_UNAVAILABLE';
+      const packet = prepared.playerAnimation;
+      const dojoSource = prepared.source.sceneBuildIndex === 10
+        && prepared.source.serializedOwner === 'level10'
+        && prepared.source.scenePath.replaceAll('\\', '/').endsWith('/SHRL_Dojo2.unity');
+      if (dojoSource && packet) {
+        const profile = packet.profiles?.katana;
+        const clips = packet.sourceClips ?? profile?.sourceClips ?? profile?.clips;
+        const localMatrix = packet.handsCameraLocalMatrix ?? profile?.handsCameraLocalMatrix;
+        const boneName = packet.skin?.bones?.[packet.weaponBone]?.name;
+        if (localMatrix?.length === 16
+          && Array.from(localMatrix).every(x => Number.isFinite(x) && Number.isFinite(Math.fround(x)))
+          && Number.isFinite(
+            localMatrix[0]*(localMatrix[5]*localMatrix[10]-localMatrix[6]*localMatrix[9])
+            -localMatrix[4]*(localMatrix[1]*localMatrix[10]-localMatrix[2]*localMatrix[9])
+            +localMatrix[8]*(localMatrix[1]*localMatrix[6]-localMatrix[2]*localMatrix[5]))
+          && Math.abs(
+            localMatrix[0]*(localMatrix[5]*localMatrix[10]-localMatrix[6]*localMatrix[9])
+            -localMatrix[4]*(localMatrix[1]*localMatrix[10]-localMatrix[2]*localMatrix[9])
+            +localMatrix[8]*(localMatrix[1]*localMatrix[6]-localMatrix[2]*localMatrix[5])) > 1e-12
+          && localMatrix[3] === 0 && localMatrix[7] === 0
+          && localMatrix[11] === 0 && localMatrix[15] === 1
+          && typeof boneName === 'string' && boneName.length
+          && typeof clips?.held === 'string' && typeof clips?.swing === 'string') {
+          try {
+            // IDs are the documented Dojo scene rig references, while
+            // 'provenance' identifies this private owner-supplied packet.
+            const rig = {
+              scene:'SHRL_Dojo2', sceneBuildIndex:10,
+              animatorPathId:6333, handManagerPathId:6545,
+              rendererPathId:6378, weaponBoneTransformPathId:2896,
+              weaponBoneName:boneName,
+              provenance:'owner-local-scene-package-SHRL_Dojo2-level10',
+            };
+            renderer.replaceDojoPlayerHands(packet, rig, clips);
+            nativeHandsCameraLocal = Array.from(localMatrix);
+            nativeHandsStatus = 'DOJO_HANDS_SOURCE_READY_WEB_HELD_CLOCK';
+          } catch {
+            nativeHandsStatus = 'DOJO_HANDS_SOURCE_PACKET_REJECTED';
+          }
+        } else {
+          nativeHandsStatus = 'DOJO_HANDS_SOURCE_CLIPS_OR_MATRIX_MISSING';
         }
       }
       nativeInspection = false;
@@ -1255,6 +1308,38 @@ function drawViewModel(camera) {
   const bob=Math.cos(state.walkCycle*.5)*.012;
   const shot=state.recoil*.13;
   if(nativeGameplay() && nativeItems?.held) {
+    if (nativeItems.held.isKatana && nativeHandsCameraLocal) {
+      // The camera basis matches the existing owner-local first-person item
+      // transform. Only the camera-child offset comes from the source packet.
+      const basis = [
+        -axes.right.x,-axes.right.y,-axes.right.z,0,
+        axes.up.x,axes.up.y,axes.up.z,0,
+        axes.forward.x,axes.forward.y,axes.forward.z,0,
+        camera.x,camera.y,camera.z,1,
+      ];
+      const modelMatrix = multiplyMatrices(basis, nativeHandsCameraLocal);
+      // The held loop is a Web-preview sample, NOT a reconstructed player
+      // Animator clock or a verified native swing event.
+      try {
+        const receipt = renderer.drawDojoPlayerHands({
+          heldItem:nativeItems.held, phase:'held',
+          sourceClipTime:state.worldClock, modelMatrix,
+        });
+        if (receipt) nativeHandsStats = {
+          handsDrawCalls:receipt.handsDrawCalls,
+          handsTriangles:receipt.handsTriangles,
+          sourcePoseSampled:receipt.sourcePoseSampled,
+        };
+      } catch {
+        // Reject malformed local clip/transform without breaking the existing
+        // playable Dojo or removing the owner's static held-katana model.
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsCameraLocal = null;
+        nativeHandsStatus = 'DOJO_HANDS_WEB_DRAW_REJECTED_FALLBACK';
+      }
+    }
+    // Source blade geometry keeps its already-proven held transform; the
+    // camera-child katana socket offset is not yet proven.
     for(const draw of nativeItemDraws(nativeItems,camera).held)renderer.drawNativeInstance(draw.instanceId,draw.modelMatrix,true);
     return;
   }
@@ -1312,6 +1397,7 @@ function drawBullet(bullet) {
 }
 function render() {
   nativeEnemyStats = null;
+  nativeHandsStats = null;
   const cam={...state.camera};
   if(state.screen==='playing') cam.y+=Math.sin(state.walkCycle)*.012;
   // Native materials apply their source lighting/fog; do not add generated Web fog.
@@ -1408,6 +1494,8 @@ function render() {
     frameId: ++renderedFrameId, activeScreen: state.screen, camera: { ...cam },
     worldClock: state.worldClock,
     nativeEnemy: nativeEnemyStats,
+    nativeHands: nativeHandsStats,
+    nativeHandsStatus,
     generatedManifest: manifestStats,
     totalWebGLDrawCalls: renderer.getDrawCalls(),
     nativeScene: nativeScene ? { source: nativeScene.source, meshes: nativeScene.meshes.size,
