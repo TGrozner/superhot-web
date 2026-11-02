@@ -5,6 +5,7 @@
 ## Evidence policy
 
 - **NATIVE-PROVEN** = specific native assembly/serialized prefab value or traced runtime observation with exact artifact/path, file hash, member/field and contextual provenance.
+- **HANDOFF-REPORTED** = a claim summarized in the native team's private handoff, not yet cross-checked in this lane against member/serialized object and runtime proof. It is useful direction, **not** NATIVE-PROVEN.
 - **WEB-OBSERVED** = behavior in the current public `superhot-web` source only. This is **not** evidence that MCD behaves the same way.
 - **PROVISIONAL** = independently designed Web-only numerical or interface decision needed for a testable primitive.
 - **UNKNOWN** = there is not yet sufficient native evidence to claim any target behavior or value.
@@ -12,8 +13,17 @@
 ### Available primary evidence
 
 - Private gateway: `TGrozner/superhot-research`, `.github/workflows/corpus-query.yml`, manually dispatched against self-hosted `superhot-local`, with read-only operations `status`, `list`, `read`, `bytes`, `query`. It does **not** run the original game or guarantee a parity measurement.
-- Successful private runs inspected: `41367631061` (Unity type counts), `41367755041` (only lines 1–25 of `decompiled/TimeControl.decompiled.cs`), `41367855635` (a partial PNG byte slice). These artifacts contain **no evidence of combat or enemy AI semantics**, so there are **zero NATIVE-PROVEN combat claims in this ledger**. Do not publish the private artifacts in this public repository.
+- Successful private runs inspected: `41367631061` (Unity type counts), `41367755041` (lines 1–25 of `decompiled/TimeControl.decompiled.cs`), `41367855635` (partial PNG byte slice), and **`41368361512` (`HANDOFF.md`, lines 1–100)**. The handoff supplies native team observations but does not expose their underlying combat method/member proof here; there are **zero independently NATIVE-PROVEN combat values in this ledger**. Do not publish the private artifacts in this public repository.
 - Web baseline: `TGrozner/superhot-web@9f01f92411b4e125b2c992deee53602a8c67c416`, `src/main.js` and `src/math.js` (read before this branch).
+
+### Combat facts HANDOFF-REPORTED, awaiting source-level verification
+
+The private native team's handoff (`HANDOFF.md`, run `41368361512`, lines 1–100) identifies MCD Steam AppID `690040`, build `20299547`, Unity `2018.4.14f1` and Assembly-CSharp SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`. It directs combat investigators to `spec/combat/combat-specification.md`, `serialized-settings.md`, `implementation-extension.md`, `ai-and-powers.md`, `modifiers-catalogue.md`, `unknowns.json` and `coverage-expanded.json` **inside the private corpus**. Those files have not been read by this lane.
+
+- **HANDOFF-REPORTED**: the recovered keyboard/mouse binding maps **R to Replay**, not to magazine reload; `KillReloadMod` resets delays/animations without refilling ammunition. This contradicts the Web demo's R-to-reload behavior, so it must **not** be treated as a faithful MCD input mapping.
+- **HANDOFF-REPORTED**: the native `ShotGun` emits **1 + pelletsCount** projectiles and some dispersion vectors are **not** normalized. The actual `pelletsCount` depends on the instantiated/serialized weapon, not merely the class default.
+- **HANDOFF-REPORTED**: projectile travel uses `Update`, some sweeps use `FixedUpdate`, and delayed enemy shots are emitted after pose adjustment in `LateUpdate`. This lane's pure `advanceProjectile` deliberately **does not model this native multi-phase scheduling**.
+- **UNKNOWN here**: collision layer masks, hit reactions, enemy aim/LOS/navigation, spawn timing, actual damage, projectile speed and per-weapon setup. Inspect the referenced private reports and serialized overrides before configuring them.
 
 ### Existing Web prototype, not native MCD
 
@@ -39,7 +49,7 @@ These modules are intentionally **not wired into `src/main.js`**. The integrator
 
 ## Next native research requests (private only)
 
-Issue #3 requests the dedicated `superhot-research` gateway to inventory the relevant source paths, then inspect scoped code/serialized values and obtain repeatable native observations. Suitable initial JSON requests (one per workflow dispatch):
+Issue #3 requests the dedicated `superhot-research` gateway to read the handoff-named `spec/combat/` reports first, then inspect scoped code/serialized values and obtain repeatable native observations. Suitable initial JSON requests (one per workflow dispatch):
 
 ```json
 {"operation":"list","path":"spec","offset":0,"limit":200}
