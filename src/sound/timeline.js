@@ -103,7 +103,17 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
 
   function deliver(event) {
     try {
-      if (dispatch(event) === false) rejected++;
+      const result = dispatch(event);
+      // The timeline is synchronous. A Promise/thenable can reject after
+      // flushDue has returned; treating it as accepted would hide failures.
+      // Observe rejected promises to avoid an unhandled rejection, but do
+      // not claim that asynchronous playback finished or became audible.
+      if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
+          typeof result.then === 'function') {
+        void Promise.resolve(result).catch(() => {});
+        throw new TypeError('sound dispatch callback must be synchronous');
+      }
+      if (result === false) rejected++;
       else accepted++;
     } catch (error) {
       failed++;
