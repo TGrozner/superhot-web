@@ -597,3 +597,53 @@ export function advanceMcdSourceLookTimeshift(state, {
   next.currentTimeModifier = amount;
   return { state: next, measured: true, wroteModifier: true, deltaAngleDegrees: delta };
 }
+
+/**
+ * Scene-identity gate for the Containers-only reconstructed gameplay clock.
+ *
+ * OBSERVED WEB: src/main.js currently constructs createMcdGameplayClock for
+ * every loaded native scene, including SHRL_Dojo2 (build10).
+ * PROVED SERIALIZED, NOT EXECUTED: private research #38, artifact 13134630168,
+ * identifies level28:TimeControl18679 with denominator 120 in Containers.
+ * Its TimeControl method contract is research #13, artifact 13134370412,
+ * MCD build 20299547. The Dojo/level10 instance and denominator are UNKNOWN.
+ *
+ * This is opt-in: SH-05 owns selection/fallback in src/main.js. Returning null
+ * for an unqualified scene preserves that distinction rather than guessing a
+ * Dojo denominator or silently applying the Containers profile.
+ */
+export const MCD_CONTAINERS_SERIALIZED_TIME_SCENE = Object.freeze({
+  sceneBuildIndex: 28,
+  scenePath: 'Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity',
+  serializedOwner: 'level28',
+});
+
+export function qualifyMcdGameplayClockScene(sceneSource) {
+  const known = MCD_CONTAINERS_SERIALIZED_TIME_SCENE;
+  const sourceQualified = sceneSource != null
+    && sceneSource.sceneBuildIndex === known.sceneBuildIndex
+    && sceneSource.scenePath === known.scenePath
+    && sceneSource.serializedOwner === known.serializedOwner;
+  return Object.freeze({
+    status: sourceQualified
+      ? 'CONTAINERS_SERIALIZED_TIME_PROFILE_ONLY'
+      : 'NATIVE_SCENE_TIME_UNKNOWN',
+    sourceQualified,
+    fixedTimestepDenominator: sourceQualified ? 120 : null,
+    nativeRuntimeObserved: false,
+  });
+}
+
+/**
+ * Only yield the historical Containers Web clock after exact source identity.
+ * No clock is created for Dojo/level10, unknown scenes or incomplete metadata;
+ * the caller must explicitly choose a WEB-PROVISIONAL fallback for those.
+ * This does not alter existing callers of createMcdGameplayClock.
+ */
+export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pitch = 0 } = {}) {
+  const qualification = qualifyMcdGameplayClockScene(sceneSource);
+  return Object.freeze({
+    qualification,
+    clock: qualification.sourceQualified ? createMcdGameplayClock({ yaw, pitch }) : null,
+  });
+}
