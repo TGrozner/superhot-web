@@ -45,6 +45,10 @@ Then visit **http://localhost:4173**. No `npm install` needed. Alternatively use
 - `.github/workflows/verify.yml` — lightweight CI
 - `publish.ps1` — GitHub repository creation and GitHub Pages setup
 
+## Private research material
+
+Local reverse-engineering evidence and original game material belong in the ignored `/private/` directory, outside this public project's distributable files. Authorized research access uses a separate private, read-only corpus gateway. Never publish that corpus, decompiled source, or original assets in this repository, its issues, logs, or GitHub Pages; they are not covered by this project's MIT license.
+
 ## Validation
 
 ```bash
