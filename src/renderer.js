@@ -368,15 +368,21 @@ export function createRenderer(canvas) {
   }
   let skinnedEnemy = null;
   let skinClips = {};
+  let skinStates = {};
   function replaceNativeCharacter(receipt, sourcePackage = null) {
     let nextSkin = null, nextStatic = null;
     const instances = {};
+    const stateInstances = {};
     try {
       if (sourcePackage) {
         if (sourcePackage.source?.variant !== receipt.variant) throw new Error('Character mesh and rig variants differ');
         nextSkin = createNativeSkinPass(gl, sourcePackage);
-        for (const clip of ['idle', 'walk', 'hit']) {
-          instances[clip] = nextSkin.createInstance({ clip, playback: clip === 'hit' ? 'clamp' : 'loop' });
+        for (const clip of nextSkin.availableClips) {
+          instances[clip] = nextSkin.createInstance({ clip,
+            playback: ['idle', 'walk', 'run'].includes(clip) ? 'loop' : 'clamp' });
+        }
+        for (const state of Object.keys(nextSkin.states)) {
+          stateInstances[state] = nextSkin.createStateInstance(state);
         }
       }
       nextStatic = createEnemyStaticIndexedPass(gl, program, uniforms, receipt, {
@@ -388,13 +394,29 @@ export function createRenderer(canvas) {
     skinnedEnemy = nextSkin;
     nativeEnemyPass = nextStatic;
     skinClips = instances;
+    skinStates = stateInstances;
     return nextSkin ? { bones: nextSkin.jointCount, weightedBones: nextSkin.weightedJointCount,
-      clips: nextSkin.availableClips } : null;
+      clips: nextSkin.availableClips, states: nextSkin.states, clipDurations: nextSkin.clipDurations,
+      actionTiming: nextSkin.actionTiming,
+      availableActions: nextSkin.availableActions,
+      actionDurations: Object.fromEntries(Object.entries(nextSkin.actionPrecompositions)
+        .map(([name, action]) => [name, action.actionDuration])),
+      transitions: Object.fromEntries(nextSkin.availableTransitions.map(key =>
+        [key, sourcePackage.transitions[key].duration])) } : null;
   }
-  function drawNativeSkin(modelMatrix, clip, time) {
+  function drawNativeSkin(modelMatrix, clip, time, {
+    statePlayback = false, transition = null, action = null, shaderTime = 0,
+    cameraPosition = currentCamera,
+  } = {}) {
     if (!skinnedEnemy) return null;
+    const instance = (statePlayback ? skinStates : skinClips)[clip];
+    if (!instance) throw new Error('Native animation unavailable: ' + clip);
+    const scale = name => statePlayback ? skinnedEnemy.states[name].speed : 1;
     const report = skinnedEnemy.draw({
-      instance: skinClips[clip], modelMatrix, viewProjection, time,
+      instance, modelMatrix, viewProjection, time: time * scale(clip),
+      transition: transition ? { from: (statePlayback ? skinStates : skinClips)[transition.from],
+        fromTime: transition.fromTime * scale(transition.from), elapsed: transition.elapsed } : null,
+      action, shaderTime, cameraPosition,
       color: [0.720588207244873, 0, 0, 1],
     });
     drawCalls += report.drawCalls;

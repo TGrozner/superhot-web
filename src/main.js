@@ -8,6 +8,7 @@ import { parseObjGroupsIntoIndexedMesh } from './render/mesh-format.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { prepareNativeScene } from './scenes/native-scene-local.js';
+import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove } from './time.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -42,7 +43,13 @@ let nativeEnemyGeneration = 0;
 let nativeEnemyStats = null;
 let nativeScene = null;
 let nativeSkinInfo = null;
+let localAssetManifest = null;
+// level28:18701 pickup -> sharedassets0.assets:711 -> PistolGun:4849.
+const nativePistol = Object.freeze({ ammo: 5, attackDelay: Math.fround(.6), bulletSpeed: 36 });
+let weaponGeneration = 0;
+let jumpRequested = false;
 let nativeInspection = false;
+let nativeInspectionAt = 0;
 let nativeCombatStarted = false;
 const nativeGameplay = () => containersPreviewEnabled && nativeScene && !nativeInspection;
 const actorMatrix = new Float32Array(16);
@@ -55,6 +62,7 @@ const enemyInspectionMatrix = new Float32Array([
 ]);
 function frameLocalEnemy() {
   nativeInspection = true;
+  nativeInspectionAt = state.runClock;
   if (nativeScene) {
     const anchor = nativeScene.anchors.enemy[0].worldMatrix;
     enemyInspectionMatrix[12] = anchor[12];
@@ -64,6 +72,8 @@ function frameLocalEnemy() {
   state.camera = { x: enemyInspectionMatrix[12], y: enemyInspectionMatrix[13] + 1.15, z: enemyInspectionMatrix[14] + 4, yaw: 0, pitch: -.04 };
   previewCameraY = state.camera.y;
   state.hop = 0; state.verticalSpeed = 0;
+  keys.clear();
+  setScreen('playing');
 }
 const localMeshPreviewSpec = Object.freeze([
   { inputId: 'private-mesh6', slot: 'mesh6', groupIndex: 47,
@@ -101,6 +111,12 @@ if (containersPreviewEnabled) {
         variant: receipt.variant, triangles: receipt.mesh.triangleCount,
       });
       $('frame-private-enemy').disabled = false;
+      const animationSelect = $('private-animation');
+      animationSelect.disabled = !nativeSkinInfo;
+      for (const option of animationSelect.options) {
+        option.disabled = !nativeSkinInfo?.clips.includes(option.value);
+      }
+      if (!nativeSkinInfo?.clips.includes(animationSelect.value)) animationSelect.value = 'idle';
       enemyStatus.textContent = enemySummary();
       if (containersPreviewEnabled && !nativeScene) resetContainersTarget();
       return true;
@@ -112,6 +128,7 @@ if (containersPreviewEnabled) {
     }
     return false;
   }
+  $('private-animation').addEventListener('change', frameLocalEnemy);
   enemyInput.addEventListener('change', () => loadEnemyFile(enemyInput.files?.[0], $('private-enemy-variant').value));
   $('frame-private-enemy').addEventListener('click', frameLocalEnemy);
   $('frame-containers').addEventListener('click', () => {
@@ -194,7 +211,6 @@ if (containersPreviewEnabled) {
   for (const spec of localMeshPreviewSpec) {
     $(spec.inputId).addEventListener('change', () => loadMeshFile(spec, $(spec.inputId).files?.[0]));
   }
-  let localAssetManifest = null;
   async function localAssetFile(id) {
     const descriptor = localAssetManifest?.assets?.[id];
     if (!descriptor) throw new Error('Export local non configuré.');
@@ -215,11 +231,17 @@ if (containersPreviewEnabled) {
       }));
       const failed = decoded.find(result => result.status === 'rejected');
       if (failed) throw failed.reason;
+      for (const lightmap of prepared.lightmaps.values()) {
+        if (lightmap.compressedAssetId) {
+          const file = await localAssetFile(lightmap.compressedAssetId);
+          images.set(lightmap.compressedAssetId, new Uint8Array(await file.arrayBuffer()));
+        }
+      }
       renderer.replaceNativeWorld(prepared, images);
       nativeScene = prepared;
       nativeInspection = false;
       loadLevel(0);
-    } finally { for (const image of images.values()) image.close(); }
+    } finally { for (const image of images.values()) image.close?.(); }
   }
   $('private-enemy-variant').addEventListener('change', async () => {
     if (!localAssetManifest) return;
@@ -302,6 +324,19 @@ const state = {
   recoil: 0, muzzle: 0, hop: 0, verticalSpeed: 0, walkCycle: 0,
   kills: 0, damage: 0, instructions: false,
 };
+let nativeClock = createMcdGameplayClock();
+const nativeVelocity = { x: 0, z: 0 };
+let nativeJumpAt = 0;
+
+function initializeAudio() {
+  const assets = Object.fromEntries(Object.keys(localAssetManifest?.assets ?? {})
+    .map(id => [id, `/local-assets/${id}`]));
+  // Both verified event bindings point at sharedassets0.assets:604.
+  if (assets.audioPistolFirePrimary) assets.audioEnemyFire = assets.audioPistolFirePrimary;
+  void audio.init().then(() => audio.loadLocalAssets(assets)).catch(error => {
+    $('local-assets-status').textContent = `Audio local indisponible : ${error.message}`;
+  });
+}
 
 function setScreen(name) {
   state.screen = name;
@@ -369,12 +404,18 @@ function loadLevel(index) {
       resetContainersTarget();
     }
   }
+  nativeClock = createMcdGameplayClock(state.camera);
+  nativeVelocity.x = 0; nativeVelocity.z = 0; jumpRequested = false;
+  weaponGeneration++;
   state.bullets = []; state.fragments = []; state.drops = [];
   state.speed = .04; state.shotPulse = 0; state.lookActivity = 0;
   state.waveClock = 0; state.stageBanner = containersPreviewEnabled ? 0 : 2.2; state.transition = 0;
-  state.ammo = 6; state.weapon = true; state.reload = 0; state.fireDelay = 0;
+  state.ammo = nativeGameplay() ? nativePistol.ammo : 6;
+  state.weapon = true; state.reload = 0; state.fireDelay = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
+  $('ammo-hint').textContent = nativeGameplay() ? '/ CHANGER D’ARME UNE FOIS VIDE' : '/ R POUR RECHARGER';
+  audio.setOriginalMode(Boolean(containersPreviewEnabled && nativeScene));
   $('room-name').textContent = containersPreviewEnabled
     ? 'CONTAINERS · GÉOMÉTRIE ORIGINALE · COMBAT WEB'
     : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
@@ -401,8 +442,8 @@ function requestMouse() {
     });
   }
 }
-function start() { audio.init(); resetGame(); requestMouse(); }
-function resume() { audio.init(); setScreen('playing'); requestMouse(); }
+function start() { initializeAudio(); resetGame(); requestMouse(); }
+function resume() { initializeAudio(); setScreen('playing'); requestMouse(); }
 function pause() { if (state.screen === 'playing') setScreen('paused'); }
 function finish(win) {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -433,22 +474,31 @@ document.addEventListener('keydown', (event) => {
   if ((state.screen === 'dead' || state.screen === 'win') && event.code === 'Enter') { start(); return; }
   if (state.screen === 'paused' && (event.code === 'Escape' || event.code === 'Enter')) { resume(); return; }
   if (state.screen !== 'playing') return;
-  if (event.code === 'KeyR') reload();
+  if (event.code === 'Escape') {
+    pause();
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+    return;
+  }
+  if (event.code === 'KeyR' && !nativeGameplay()) reload();
   if (event.code === 'KeyF') throwWeapon();
   if (event.code === 'KeyE') pickup();
-  if (event.code === 'Space' && state.hop < .02) state.verticalSpeed = 5.2;
+  if (event.code === 'Space' && state.hop < .02) {
+    if (nativeGameplay()) jumpRequested = true;
+    else state.verticalSpeed = 5.2;
+  }
 });
 document.addEventListener('keyup', (event) => keys.delete(event.code));
 document.addEventListener('mousemove', (event) => {
   if (state.screen !== 'playing' || document.pointerLockElement !== canvas) return;
   state.camera.yaw += event.movementX * .00245;
-  state.camera.pitch = clamp(state.camera.pitch - event.movementY * .00245, -1.42, 1.42);
+  const pitchLimit = nativeGameplay() ? 80 * Math.PI / 180 : 1.42;
+  state.camera.pitch = clamp(state.camera.pitch - event.movementY * .00245, -pitchLimit, pitchLimit);
   state.lookActivity = clamp(Math.hypot(event.movementX, event.movementY) / 34, .12, 1);
 });
 document.addEventListener('contextmenu', (event) => { if (state.screen === 'playing') event.preventDefault(); });
 document.addEventListener('mousedown', (event) => {
   if ((event.button !== 0 && event.button !== 2) || state.screen !== 'playing') return;
-  if (document.pointerLockElement !== canvas) { nativeCombatStarted = true; audio.init(); requestMouse(); return; }
+  if (document.pointerLockElement !== canvas) { nativeCombatStarted = true; initializeAudio(); requestMouse(); return; }
   if (event.button === 2) throwWeapon();
   else shoot();
 });
@@ -460,13 +510,17 @@ function reload() {
   audio.pickup();
 }
 function addBullet(from, direction, friendly, type = 'normal') {
-  const speed = type === 'throw' ? 30 : friendly ? 37 : 8.4;
-  state.bullets.push({ pos: { ...from }, direction: { ...direction }, speed, friendly, type,
-    ttl: type === 'throw' ? 2 : 5, age: 0 });
+  const speed = type === 'throw' ? 30 : nativeGameplay()
+    ? (friendly ? nativePistol.bulletSpeed : 28) : friendly ? 37 : 8.4;
+  const bullet = { pos: { ...from }, direction: { ...direction }, speed, friendly, type,
+    ttl: type === 'throw' ? 2 : 5, age: 0 };
+  state.bullets.push(bullet);
+  return bullet;
 }
 function shoot() {
   if (state.fireDelay > 0 || state.reload > 0) return;
-  state.fireDelay = state.weapon ? .19 : .36;
+  state.fireDelay = state.weapon ? (nativeGameplay() ? nativePistol.attackDelay : .19) : .36;
+  if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .2);
   state.shotPulse = 1;
   state.recoil = 1;
   if (!state.weapon) {
@@ -476,7 +530,13 @@ function shoot() {
     else audio.empty();
     return;
   }
-  if (state.ammo <= 0) { audio.empty(); return; }
+  if (state.ammo <= 0) {
+    if (nativeGameplay()) state.fireDelay = 0;
+    if (nativeGameplay() && state.ammo < 0) { throwWeapon(); return; }
+    audio.empty();
+    if (nativeGameplay()) state.ammo--;
+    return;
+  }
   state.ammo--; state.shots++;
   const { forward, right } = cameraAxes(state.camera.yaw, state.camera.pitch);
   const origin = add3(add3(state.camera, multiply3(forward, .68)), multiply3(right, .12));
@@ -484,15 +544,23 @@ function shoot() {
   state.muzzle = .09;
   shootFlash.style.opacity = '.5';
   audio.shoot();
+  if (nativeGameplay()) {
+    const generation = weaponGeneration;
+    audio.scheduleReady({ delaySeconds: nativePistol.attackDelay,
+      isWeaponThrown: () => !state.weapon || weaponGeneration !== generation });
+  }
 }
 function throwWeapon() {
   if (!state.weapon || state.reload > 0) return;
   const { forward, right } = cameraAxes(state.camera.yaw, state.camera.pitch);
   const origin = add3(add3(state.camera, multiply3(forward, .72)), multiply3(right, .12));
-  addBullet(origin, forward, true, 'throw');
+  const thrown = addBullet(origin, forward, true, 'throw');
+  thrown.ammo = Math.max(0, state.ammo);
   state.weapon = false; state.ammo = 0; state.shotPulse = 1;
+  weaponGeneration++;
+  if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .5);
   state.recoil = 1; state.fireDelay = .38;
-  audio.shoot();
+  audio.throwWeapon();
 }
 function nearbyPickup() {
   if (state.weapon) return null;
@@ -507,9 +575,10 @@ function pickup() {
   const drop = nearbyPickup();
   if (!drop) return;
   state.drops.splice(state.drops.indexOf(drop), 1);
-  state.weapon = true; state.ammo = 6;
+  state.weapon = true; state.ammo = drop.ammo ?? (nativeGameplay() ? nativePistol.ammo : 6);
+  weaponGeneration++;
   state.shotPulse = .5;
-  audio.pickup();
+  audio.pickup({ reloaded: drop.ammo === 0 });
 }
 function findMeleeTarget() {
   const axes = cameraAxes(state.camera.yaw, state.camera.pitch);
@@ -547,9 +616,10 @@ function killEnemy(enemy) {
   state.hits++;
   const floorY = floorAt(enemy.x, enemy.z, enemy.y);
   shatterAt(vec(enemy.x, enemy.y + 1.12, enemy.z), 23, RED, floorY);
-  state.drops.push({ x: enemy.x, y: floorY + .38, z: enemy.z, bob: rand(0, 7) });
+  state.drops.push({ x: enemy.x, y: floorY + .38, z: enemy.z, bob: rand(0, 7),
+    ammo: nativeGameplay() ? nativePistol.ammo : 6 });
   state.shotPulse = Math.max(.65, state.shotPulse);
-  audio.shatter();
+  audio.shatter({ position: vec(enemy.x, enemy.y + 1.12, enemy.z) });
   if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
 }
 function damagePlayer() {
@@ -594,7 +664,7 @@ function walkThroughScene(position, feet) {
   const obstacles = nativeGameplay()
     ? state.solids.filter(s => s.max.y > feet + .12 && s.min.y < feet + 1.6)
     : containersPreviewEnabled ? containersWalkSolids(state.solids, feet + 1.6) : state.solids;
-  return resolveWalk(position, .34, obstacles);
+  return resolveWalk(position, nativeGameplay() ? .4 : .34, obstacles);
 }
 function update(dt) {
   state.runClock += dt;
@@ -605,7 +675,7 @@ function update(dt) {
   state.damage = Math.max(0, state.damage - dt);
   state.muzzle = Math.max(0, state.muzzle - dt);
   state.recoil = Math.max(0, state.recoil - dt * 4.8);
-  state.fireDelay = Math.max(0, state.fireDelay - dt);
+  if (!nativeGameplay()) state.fireDelay = Math.max(0, state.fireDelay - dt);
   if (state.reload > 0) {
     state.reload -= dt;
     if (state.reload <= 0) { state.reload = 0; state.ammo = 6; }
@@ -614,28 +684,77 @@ function update(dt) {
   const horizontal = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
   // KeyboardEvent.code follows physical keys: works on both QWERTY and AZERTY layouts.
   const moving = Math.hypot(fwd, horizontal) > 0;
-  const wanted = Math.max(.035, moving ? .98 : 0, state.lookActivity * .77, state.shotPulse * .85, state.reload > 0 ? .60 : 0);
-  state.speed = lerp(state.speed, wanted, 1 - Math.exp(-8 * dt));
-  const worldDt = dt * state.speed;
-  state.worldClock += worldDt;
-  if (moving) {
-    const norm = 1 / Math.hypot(fwd, horizontal);
-    const yaw = state.camera.yaw;
-    const sx = Math.sin(yaw) * fwd + Math.cos(yaw) * horizontal;
-    const sz = -Math.cos(yaw) * fwd + Math.sin(yaw) * horizontal;
-    const velocity = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8.9 : 6.7;
-    const next = walkThroughScene({ ...state.camera,
-      x: state.camera.x + sx * norm * velocity * dt,
-      z: state.camera.z + sz * norm * velocity * dt,
-    }, state.camera.y - 1.6);
-    state.camera.x = containersPreviewEnabled ? next.x : clamp(next.x, -14.9, 14.9);
-    state.camera.z = containersPreviewEnabled ? next.z : clamp(next.z, -33.8, 21.8);
-    state.walkCycle += dt * velocity * 1.4;
+  const native = nativeGameplay();
+  let worldDt;
+  if (native) {
+    const tick = stepMcdGameplayClock(nativeClock, {
+      dt, x: horizontal, y: fwd, grounded: state.hop <= 0 && state.verticalSpeed <= 0,
+      yaw: state.camera.yaw, pitch: state.camera.pitch,
+    });
+    state.speed = tick.timeScale;
+    worldDt = tick.worldDelta;
+    state.fireDelay = Math.max(0, state.fireDelay - worldDt);
+    audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
+    audio.advanceWorldTime(worldDt);
+    audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
+  } else {
+    const wanted = Math.max(.035, moving ? .98 : 0, state.lookActivity * .77, state.shotPulse * .85, state.reload > 0 ? .60 : 0);
+    state.speed = lerp(state.speed, wanted, 1 - Math.exp(-8 * dt));
+    worldDt = dt * state.speed;
   }
-  if (state.verticalSpeed !== 0 || state.hop > 0) {
-    state.hop += state.verticalSpeed * dt;
-    state.verticalSpeed -= 14 * dt;
-    if (state.hop < 0) { state.hop = 0; state.verticalSpeed = 0; }
+  state.worldClock += worldDt;
+  const norm = moving ? 1 / Math.hypot(fwd, horizontal) : 0;
+  if (native) {
+    const grounded = state.hop <= 0 && state.verticalSpeed <= 0;
+    if (grounded) {
+      nativeVelocity.x = horizontal * norm * 6 * Math.fround(1.1);
+      nativeVelocity.z = fwd * norm * 6 * Math.fround(1.1);
+      if (jumpRequested) {
+        state.verticalSpeed = 5.75 * 5 * Math.fround(.4);
+        nativeJumpAt = state.worldClock;
+      }
+    } else {
+      const damping = Math.pow(Math.fround(.99), dt / Math.fround(.0166666));
+      const speed = 6 * (state.worldClock - nativeJumpAt < .5 ? Math.fround(1.1) : 1);
+      nativeVelocity.x = horizontal * norm * (speed * .05 + Math.fround(.2)) + nativeVelocity.x * damping * .95;
+      nativeVelocity.z = fwd * norm * (speed * .05 + Math.fround(.2)) + nativeVelocity.z * damping * .95;
+      state.verticalSpeed *= .05 + damping * .95;
+      state.verticalSpeed += Math.fround(-9.81) * 5 * worldDt;
+    }
+    jumpRequested = false;
+    const yaw = state.camera.yaw;
+    const displacement = mcdSourcePlayerPreConstraintMove({
+      velocity: { x: nativeVelocity.x, y: state.verticalSpeed, z: nativeVelocity.z },
+      directionRotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+      scaledDeltaTime: worldDt,
+    });
+    const next = walkThroughScene({ ...state.camera,
+      x: state.camera.x + displacement.x,
+      z: state.camera.z - displacement.z,
+    }, state.camera.y - 1.6);
+    state.camera.x = next.x; state.camera.z = next.z;
+    state.walkCycle += worldDt * Math.hypot(nativeVelocity.x, nativeVelocity.z) * 1.4;
+    state.hop += displacement.y;
+    if (state.hop <= 0) { state.hop = 0; state.verticalSpeed = 0; }
+  } else {
+    if (moving) {
+      const yaw = state.camera.yaw;
+      const sx = Math.sin(yaw) * fwd + Math.cos(yaw) * horizontal;
+      const sz = -Math.cos(yaw) * fwd + Math.sin(yaw) * horizontal;
+      const velocity = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8.9 : 6.7;
+      const next = walkThroughScene({ ...state.camera,
+        x: state.camera.x + sx * norm * velocity * dt,
+        z: state.camera.z + sz * norm * velocity * dt,
+      }, state.camera.y - 1.6);
+      state.camera.x = containersPreviewEnabled ? next.x : clamp(next.x, -14.9, 14.9);
+      state.camera.z = containersPreviewEnabled ? next.z : clamp(next.z, -33.8, 21.8);
+      state.walkCycle += dt * velocity * 1.4;
+    }
+    if (state.verticalSpeed !== 0 || state.hop > 0) {
+      state.hop += state.verticalSpeed * dt;
+      state.verticalSpeed -= 14 * dt;
+      if (state.hop < 0) { state.hop = 0; state.verticalSpeed = 0; }
+    }
   }
   state.camera.y = (containersPreviewEnabled ? previewCameraY : 1.68) + state.hop;
 
@@ -660,11 +779,13 @@ function update(dt) {
     enemy.fireTimer -= worldDt;
     if (enemy.fireTimer <= 0 && d < 37) {
       enemy.fireTimer = rand(1.65, 2.55);
+      // Web AI owns this attack decision; native controller activation is not recovered.
+      enemy.attackIntentAt = state.worldClock;
       const origin = vec(enemy.x, enemy.y + 1.42, enemy.z);
       const aim = vec(state.camera.x, state.camera.y - .25, state.camera.z);
       const direction = normalize3(vec(aim.x-origin.x,aim.y-origin.y,aim.z-origin.z));
       addBullet(origin, direction, false);
-      audio.enemyShoot();
+      audio.enemyShoot({ position: origin });
     }
   }
 
@@ -679,7 +800,7 @@ function update(dt) {
       else if (impact.type==='player') damagePlayer();
       if (bullet.type==='throw' && impact.type==='wall') {
         const p=add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
-        state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0});
+        state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0,ammo:bullet.ammo});
       }
       state.bullets.splice(i,1);
     } else if (bullet.ttl<=0 || Math.abs(end.x)>40 || Math.abs(end.z)>48 || end.y>12 || end.y<-.5) {
@@ -707,9 +828,10 @@ function update(dt) {
 }
 
 function updateHud() {
-  $('time-pct').textContent = `${String(Math.round(state.speed * 100)).padStart(2,'0')}%`;
+  const percent = state.speed * 100;
+  $('time-pct').textContent = `${percent < 1 ? percent.toFixed(1) : String(Math.round(percent)).padStart(2, '0')}%`;
   $('time-fill').style.width = `${Math.max(3,state.speed*100)}%`;
-  $('ammo').innerHTML = `${String(state.ammo).padStart(2,'0')}<span>/06</span>`;
+  $('ammo').innerHTML = `${String(Math.max(0, state.ammo)).padStart(2,'0')}<span>/${nativeGameplay() ? '05' : '06'}</span>`;
   $('health').textContent = '◆ '.repeat(Math.max(0,state.health)) + '◇ '.repeat(Math.max(0,3-state.health));
   $('pickup-prompt').hidden = !nearbyPickup();
   $('stage-banner').hidden = state.stageBanner <= 0;
@@ -735,15 +857,61 @@ function rayTarget() {
   return null;
 }
 
+function drawInspectedEnemy() {
+  enemyInspectionMatrix[0] = nativeSkinInfo ? -1 : 1;
+  const clip = $('private-animation').value;
+  const statePlayback = Boolean(nativeSkinInfo?.states[clip]);
+  nativeEnemyStats = renderer.drawNativeSkin(enemyInspectionMatrix, clip,
+    state.runClock - nativeInspectionAt, {
+      statePlayback, shaderTime: state.runClock, cameraPosition: state.camera,
+    })
+    ?? renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
+}
+
+function enemyFireAction(enemy, animationClock) {
+  if (!Number.isFinite(enemy.attackIntentAt) || !nativeSkinInfo?.availableActions.includes('fire')) return null;
+  const timing = nativeSkinInfo.actionTiming.fire;
+  const speed = nativeSkinInfo.states.fire.speed;
+  const sourceDuration = nativeSkinInfo.actionDurations.fire;
+  const elapsed = animationClock - enemy.attackIntentAt;
+  const exitAt = sourceDuration / speed * timing.exitTime;
+  if (elapsed < 0 || elapsed >= exitAt + timing.exitDuration) return null;
+  const blend = Math.min(1, elapsed / timing.entryDuration,
+    Math.max(0, 1 - (elapsed - exitAt) / timing.exitDuration));
+  return { state: 'fire', time: Math.min(sourceDuration, elapsed * speed), weight: 1, blend };
+}
+
 function drawEnemy(enemy) {
   if (containersPreviewEnabled && localNativeEnemy) {
     const angle = (nativeSkinInfo ? Math.PI : 0) - enemy.face, c = Math.cos(angle), s = Math.sin(angle);
     const mirror = nativeSkinInfo ? -1 : 1;
     actorMatrix.set([c*mirror,0,-s*mirror,0, 0,1,0,0, s,0,c,0, enemy.x,enemy.y,enemy.z,1]);
     const dying = !enemy.alive;
-    const clip = dying ? 'hit' : enemy.walking ? 'walk' : 'idle';
-    const time = dying ? state.worldClock - enemy.deathAt : enemy.clock;
-    nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, clip, time)
+    // Native Kill disables Animator at the actual impact pose; hit is a stun clip.
+    const animationClock = dying ? enemy.deathAt : state.worldClock;
+    const requested = dying ? (enemy.animation?.state ?? 'idle') : enemy.walking ? 'walk' : 'idle';
+    const statePlayback = Boolean(nativeSkinInfo?.states[requested]);
+    if (!enemy.animation) enemy.animation = { state: requested, startedAt: animationClock, previous: null };
+    const animation = enemy.animation;
+    if (animation.previous && animationClock - animation.startedAt >= animation.previous.duration) {
+      animation.previous = null;
+    }
+    if (!dying && animation.state !== requested && !animation.previous) {
+      const duration = nativeSkinInfo?.transitions[animation.state + '->' + requested];
+      animation.previous = duration ? { state: animation.state,
+        startedAt: animation.startedAt, duration } : null;
+      animation.state = requested; animation.startedAt = state.worldClock;
+    }
+    const transition = animation.previous ? {
+      from: animation.previous.state,
+      fromTime: animationClock - animation.previous.startedAt,
+      elapsed: animationClock - animation.startedAt,
+    } : null;
+    const time = animationClock - animation.startedAt;
+    nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, animation.state, time, {
+      statePlayback, transition, action: enemyFireAction(enemy, animationClock),
+      shaderTime: state.runClock, cameraPosition: state.camera,
+    })
       ?? renderer.drawLocalEnemyDiagnostic(actorMatrix);
     return;
   }
@@ -811,6 +979,13 @@ function drawBullet(bullet) {
   const {pos,direction,type,friendly}=bullet;
   const yaw=Math.atan2(direction.x,-direction.z);
   const pitch=Math.asin(clamp(direction.y,-1,1));
+  if (type === 'throw' && nativeGameplay()) {
+    const axes = cameraAxes(yaw, pitch);
+    weaponMatrix.set([axes.right.x,axes.right.y,axes.right.z,0,
+      axes.up.x,axes.up.y,axes.up.z,0, -axes.forward.x,-axes.forward.y,-axes.forward.z,0,
+      pos.x,pos.y,pos.z,1]);
+    if (renderer.drawNativeWeapon(weaponMatrix)) return;
+  }
   const color=friendly?BLACK:RED_LIGHT;
   const thickness=type==='throw'?.19:friendly?.065:.12;
   const trail=type==='throw'?.42:friendly?.48:1.15;
@@ -832,9 +1007,7 @@ function render() {
   if (containersPreviewEnabled && nativeScene) {
     manifestStats = nativeInspection ? null : renderer.drawNativeWorld();
     if (nativeInspection) {
-      enemyInspectionMatrix[0] = nativeSkinInfo ? -1 : 1;
-      nativeEnemyStats = renderer.drawNativeSkin(enemyInspectionMatrix, 'idle', state.worldClock)
-        ?? renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
+      drawInspectedEnemy();
     }
   } else if (containersPreviewEnabled) {
     // SH-04/11: three independently joined Mesh6 submeshes share almost
@@ -867,9 +1040,7 @@ function render() {
     });
     const target = state.enemies.find(enemy => enemy.alive);
     if (nativeInspection) {
-      enemyInspectionMatrix[0] = nativeSkinInfo ? -1 : 1;
-      nativeEnemyStats = renderer.drawNativeSkin(enemyInspectionMatrix, 'idle', state.worldClock)
-        ?? renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
+      drawInspectedEnemy();
     } else if (target) drawEnemy(target);
     else nativeEnemyStats = null;
     // Prototype-only weapon, bullet and impact visuals; authentic MCD
@@ -916,6 +1087,9 @@ function render() {
     totalWebGLDrawCalls: renderer.getDrawCalls(),
     nativeScene: nativeScene ? { meshes: nativeScene.meshes.size,
       instances: nativeScene.instances.length, textures: nativeScene.textures.size } : null,
+    gameplay: { timeScale: state.speed, nativeClock: nativeGameplay(),
+      ammo: state.ammo, fireDelay: state.fireDelay, weapon: state.weapon,
+      hop: state.hop, velocity: { ...nativeVelocity }, audio: audio.getMetrics() },
   };
 }
 
@@ -952,7 +1126,10 @@ function frame(now) {
       nativeSkin: nativeSkinInfo,
       nativeScene: nativeScene ? { meshes: nativeScene.meshes.size, instances: nativeScene.instances.length,
         textures: nativeScene.textures.size, sourceCameraProjection: nativeScene.camera.projection } : null,
-      enemies: state.enemies.map(e => ({ x:e.x,y:e.y,z:e.z,alive:e.alive,clip:e.alive ? (e.walking ? 'walk' : 'idle') : 'hit',clock:e.clock })),
+      enemies: state.enemies.map(e => ({ x:e.x,y:e.y,z:e.z,alive:e.alive,
+        clip:e.animation?.state ?? (e.walking ? 'walk' : 'idle'),clock:e.clock,
+        poseFrozenAtDeath: !e.alive && Boolean(nativeSkinInfo) })),
+      nativeActionActivationVerified: false,
       worldClock: state.worldClock,
       camera: { ...state.camera },
       nativeMaterialShaderMatch: false,

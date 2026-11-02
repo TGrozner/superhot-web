@@ -7,7 +7,7 @@
  * A malformed caller-provided ruleset must not leak non-finite target values.
  * Native TimeControl source #13 now establishes the order of its LateUpdate;
  * the explicit source-qualified model below is separate from these Web rules.
- * Active shifter inputs and runtime measurements are still unverified.
+ * Containers composes the source-qualified clock below; demos retain stepTime.
  *
  * Call stepTime only for an active simulation tick. The optional paused flag
  * freezes all time domains and activity decay when a caller needs a pure
@@ -353,6 +353,86 @@ export function mcdSourcePlayerTimeTargets({
     movementTarget: Math.fround(adjusted * power),
     jumpTarget: isGrounded ? 0 : Math.fround(Math.fround(0.75) * power),
   };
+}
+
+/**
+ * Default Containers runtime composition, without POWER/SlomoJump modifiers.
+ * PlayerController, CameraLookTimeControl and SimplifiedTimeShifter supply the
+ * three source time domains here; collision/Unity callback ordering remain Web.
+ */
+export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
+  const source = createMcdSourceTimeState({ fixedTimestepDenominator: 120, powerActive: false });
+  source.shifters = Array.from({ length: 3 }, () => ({
+    terminated: false, currentTimeModifier: 0,
+  }));
+  return {
+    source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
+    lookBuffer: 0, lookMeasuredAt: 0, lookWarmup: 10, yaw, pitch,
+  };
+}
+
+/** Native pulse durations use world time and expire strictly after the deadline. */
+export function addMcdGameplayPulse(clock, duration, amount) {
+  if (!Number.isFinite(duration) || duration < 0 || !Number.isFinite(amount) || amount < 0) {
+    throw new RangeError('Time pulse duration and amount must be finite and nonnegative');
+  }
+  clock.source.shifters.push({
+    terminated: false, currentTimeModifier: Math.fround(amount),
+    expiresAt: clock.worldTime + Math.fround(duration),
+  });
+}
+
+export function stepMcdGameplayClock(clock, {
+  dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
+}) {
+  if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
+    throw new RangeError('Gameplay time input must be finite with nonnegative dt');
+  }
+  clock.realTime += dt;
+  if (paused) {
+    clock.yaw = yaw; clock.pitch = pitch;
+    return { worldDelta: 0, timeScale: 0, aggregate: clock.aggregate };
+  }
+  // Update consumes the previously applied scale; LateUpdate writes the next.
+  const worldDelta = Math.fround(Math.fround(dt) * clock.timeScale);
+  clock.worldTime += worldDelta;
+  const targets = mcdSourcePlayerTimeTargets({
+    processedX: x, processedY: y, isGrounded: grounded,
+    cameraDollyMode: false, powerActive: false, canAlterTimescale: true,
+  });
+  const [movement, jump, look] = clock.source.shifters;
+  movement.currentTimeModifier = advanceMcdSourceLinearShifter({
+    ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.movement,
+    currentTimeModifier: movement.currentTimeModifier,
+    targetTimeModifier: targets.movementTarget, unscaledDeltaTime: dt,
+  });
+  jump.currentTimeModifier = advanceMcdSourceLinearShifter({
+    ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.jump,
+    currentTimeModifier: jump.currentTimeModifier,
+    targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: dt,
+  });
+  if (clock.lookWarmup > 0) {
+    clock.yaw = yaw; clock.pitch = pitch; clock.lookWarmup--;
+  }
+  if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
+    // Quaternion.Angle for the yaw/pitch camera, not raw mouse-pixel distance.
+    const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
+    const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+    clock.lookBuffer = Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03)));
+    look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
+    clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
+    clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
+  }
+  for (const pulse of clock.source.shifters) {
+    if (pulse.expiresAt !== undefined) pulse.terminated = clock.worldTime > pulse.expiresAt;
+  }
+  const next = advanceMcdSourceTime(clock.source);
+  clock.source = next.state;
+  if (next.wroteTimeScale) {
+    clock.timeScale = next.timeScale;
+    clock.aggregate = next.aggregate;
+  }
+  return { worldDelta, timeScale: clock.timeScale, aggregate: clock.aggregate };
 }
 
 /**
