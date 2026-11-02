@@ -836,3 +836,49 @@ masks et volumes, et comparaison d'une poursuite/tir de l'autre côté
 d'un obstacle dans les deux jeux. Ne pas transformer les valeurs par
 défaut d'une classe en paramètres natifs actifs. Aucun fichier SH-05
 n'est modifié par ce lot.
+
+## SH-03 — PejAiController GunAttack decision chain (2026-11-02)
+
+**PROUVÉ (méthode C# statique, pas exécution Containers)** : lecture privée
+`TGrozner/superhot-research#140`, run `41501049816`, artifact `13169030963`,
+`managed/Assembly-CSharp/PejAiController.cs:996–1082` ; SHA-256 UTF-8 du
+texte borné `3eb02696085f21386521dc93a88ab271894ed065d9e30bafd4f3acbbc826eb11` ;
+`result.json` SHA-256 `727306718289eb2f5338e9cac9c7739a970a4d12fb123e7ed0602f8328f9e866`.
+MCD Steam build `20299547`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Relecture directe des octets JSON de cet artifact effectuée le 02/11/2026
+et empreintes recalculees. Aucun code décompilé ou asset n'est publié ici.
+
+`GunAttackBehaviour.OnRun` demande d'abord `CanSeePlayer360()` ; si false,
+retourne Failure sans déplacement ni attaque. Si true, appelle le dispatch
+virtuel `UpdateLocation()` ; si `AimTargetComponent.IsTargetInSight()` est
+false, demande `SetAimTargetAtPlayer()` puis `WeaponLower()` et retourne
+Running. Sinon il demande `WeaponPrepare()`, puis `GunAttack()` ; un refus de
+`UpdateTargetReroll()` sort de cette dernière sans même `Aim()`. Lorsqu'il
+continue, la pose d'arme est vérifiée ; `GetTimeToReady()>stopAimingTime` ou
+la pose invalide demande `RefreshAimTarget()`, puis `Aim()`.
+Une demande `Weapon.Attack(animationAimTarget.position,haveBeenSeen)` suivie
+de `RerollTarget()` exige **toutes** les conditions `IsAttackReady`, pose
+valide et `(IsInMiddleOfSeries || AimTargetComponent.IsReady())`. Sinon,
+`CheckReload()` est demandé **seulement si** arme non prête ou pose invalide ;
+un aim non prêt hors série n'appelle pas CheckReload. Les preuves privées #134
+et #135 traitent séparément `CanSeePlayer360` ; la présence d'une simple cible
+à distance n'autorise donc pas un tir. Le `UpdateLocation()` virtuel peut être
+redéfini pour un `DefensiveGunAttackBehaviour`, où l'écart
+`MinimumDistanceToPlayer * 0.5` modifie le reroll de navigation.
+
+**WEB PROVISOIRE** : `src/combat/ai-gun-attack-branch.js` ne livre que des
+**demandes** de méthodes à partir de prédicats explicites ; `Weapon.Attack`
+**ne prouve pas** qu'un projectile a été émis par le Pooler. Les dix tests
+synthétiques couvrent refus de vue, IK, reroll, pose, série, préparation
+et demande d'attaque. Aucun appel PhysX/animation/IK, aucun navigateur et
+aucun tir effectif n'ont été mesurés.
+
+**INCONNU / raccord SH-05** : arbre et archétype actifs sur les ennemis de
+Containers, états runtime du `CanSeePlayer360`, `AimTarget`, `Weapon`,
+`UpdateTargetReroll`, couches et contact Physics, phase d'appel, rafraîchissement
+de `onBulletSpawnController`, transformation finale muzzle et succès de
+`PoolerScript`. Une tranche réfutable doit instrumenter **un seul ennemi**
+et sa chaîne `OnRun → Weapon.Attack → deferredBulletSpawn → LateUpdate → Bullet`,
+puis comparer le contact et la réaction sur la même scène source. Pas de raccord
+dans `src/main.js` avec des paramètres par défaut non vérifiés.
