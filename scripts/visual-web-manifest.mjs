@@ -114,6 +114,41 @@ export function verifyOriginalWebPngDigest(bytes, expectedDigest) {
   return {originalPngSha256:actual};
 }
 
+/**
+ * Pixel-level delivery gate: the synchronous WebGL2 RGBA8 readback is hashed
+ * before asynchronous browser PNG encoding. A saved PNG is not proven to
+ * contain that exact frame until the *decoded* pixels yield the same digest.
+ * The SH15Capture PNG-blob digest alone detects mutation of the PNG bytes,
+ * but cannot detect browser canvas/encoder color conversion between readPixels
+ * and toBlob. The Web framebuffer was initialized with alpha:false, and the
+ * offline PNG decoder already rejects nonopaque alpha.
+ *
+ * This detects loss/re-encoding in the WEB capture chain, NOT native/Web
+ * color parity. Only a genuine native active-frame capture may prove that.
+ */
+export function verifySavedWebPixelDigest(decoded, expectedDigest) {
+  if (!decoded || !Number.isSafeInteger(decoded.width) ||
+      !Number.isSafeInteger(decoded.height) || decoded.width<=0 ||
+      decoded.height<=0 || decoded.width*decoded.height>8_000_000 ||
+      !(decoded.rgb instanceof Uint8Array) ||
+      decoded.rgb.length!==decoded.width*decoded.height*3 ||
+      typeof expectedDigest!=='string' || !SHA.test(expectedDigest)) {
+    throw new TypeError('Valid decoded RGB and same-frame RGBA8 digest are required');
+  }
+  const rgba=Buffer.allocUnsafe(decoded.width*decoded.height*4);
+  for (let i=0,j=0;i<decoded.rgb.length;i+=3,j+=4) {
+    rgba[j]=decoded.rgb[i];
+    rgba[j+1]=decoded.rgb[i+1];
+    rgba[j+2]=decoded.rgb[i+2];
+    rgba[j+3]=255;
+  }
+  const actual=createHash('sha256').update(rgba).digest('hex');
+  if (actual!==expectedDigest.toLowerCase()) {
+    throw new Error('Saved Web PNG pixels differ from same-frame WebGL2 RGBA readback; encoded color fidelity unverified');
+  }
+  return {decodedFrameRgbaSha256:actual};
+}
+
 /** All inputs are owner-private. Merely assigning stateId never proves native
  * frame synchronization; native MCD and SH-10 acceptance remain independent.
  */
@@ -169,6 +204,11 @@ export function preparePrivateWebManifest(bytes, {
   if(decoded.width!==width||decoded.height!==height) {
     throw new Error('Invalid PNG image payload dimensions');
   }
+  // A PNG with a valid blob hash may still differ from the pixels frozen by
+  // synchronous readPixels if the 2D canvas/browser encoder transforms RGB.
+  // Require exact RGBA8 identity before using that PNG as a measured Web frame.
+  const {decodedFrameRgbaSha256}=verifySavedWebPixelDigest(
+    decoded,metadata.rawFrameRgbaSha256);
   const {viewMatrix,projectionMatrix,maxViewProjectionCoefficientDelta}=
     matricesFromWebFrame(metadata.camera.pose,metadata.projection);
   return {
@@ -184,6 +224,7 @@ export function preparePrivateWebManifest(bytes, {
         captureMethod:metadata.captureMethod,webCommit:metadata.webCommit,
         frameId:metadata.frameId,worldClock:metadata.worldClock,
         originalPngSha256,rawFrameRgbaSha256:metadata.rawFrameRgbaSha256,
+        decodedFrameRgbaSha256,encodedWebPixelFidelityVerified:true,
         nativeCameraAuthenticated:false,nativeStateAuthenticated:false,
         stateIdOwnerSuppliedNotProven:true,
       },
@@ -191,7 +232,8 @@ export function preparePrivateWebManifest(bytes, {
     receipt:{
       status:'WEB_CAPTURE_MANIFEST_PREPARED_NATIVE_PAIR_UNVERIFIED',
       sceneMatchedIndependently:true,sourceWorldRendered:true,
-      pngDigestVerified:true,sourceObjectPairsProvided:false,
+      pngDigestVerified:true,encodedWebPixelFidelityVerified:true,
+      sourceObjectPairsProvided:false,
       viewport:[width,height],frameId:metadata.frameId,
       maxViewProjectionCoefficientDelta,
       nativeFrameAuthenticated:false,pixelComparisonPerformed:false,oneToOneVerified:false,
