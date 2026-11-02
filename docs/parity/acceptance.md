@@ -750,3 +750,28 @@ counts, or from unpaired RGB images. SH-05/SH-04/SH-15: first register the
 same active source scene and runtime camera for both frames; SH-12/SH-14:
 then compare visible silhouettes/locations; SH-13/SH-01/SH-02/SH-03:
 finally compare material, lighting and temporal response at paired instants.
+
+### SH-10 — cadence des paires de PNG (gate temporelle P0, 2 novembre 2026)
+
+`frames[].tMs` dans les captures CDP est calculé à la fin des screenshots,
+relativement au **début de chaque session de capture**. Le manifeste natif
+utilise un autre début. Comparer directement les deux `tMs` absolus pouvait
+attribuer au rendu un simple décalage d'amorçage des captures.
+
+Le comparateur ne compare désormais que l'**intervalle entre les deux PNG**
+dans chaque session (`captureIntervalsMs.web/native`), puis
+`intervalErrorMs`. Un écart supérieur à la tolérance opérateur
+`timingMs` renvoie `NON_COMPARABLE_CAPTURE_INTERVAL` **avant toute mesure
+pixel**, avec zéro ROI scorée. Une simple translation de tous les timestamps
+d'une capture ne constitue plus un `MEASURED_VISIBLE_GAP`.
+Cette correction ne normalise pas la simulation et ne suppose aucune
+cadence/frame native.
+
+Attention : des intervalles wall-clock identiques ne prouvent toujours ni
+une exécution MCD au même état, ni `Time.deltaTime`, ni l'instant réel
+du KeyW. Les horloges de jeu, l'instant d'application du stimulus, le
+TimeControl actif et les phases Update/Fixed/LateUpdate restent à observer
+avec **SH-01/02/03/05/15** avant de déclarer une concordance temporelle.
+Scène, caméra et projection observées par PNG restent des préconditions.
+Les deux nouveaux tests utilisent des PNG synthétiques uniquement ; une
+suite Node verte ne valide pas une capture Chromium ou une frame MCD.
