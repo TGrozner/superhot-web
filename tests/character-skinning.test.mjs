@@ -14,7 +14,7 @@ const base = () => defineIndexedMesh({
   indices: [0,1,2],
 });
 const weights = [1,0,0,0, 0,1,0,0, .5,.5,0,0];
-const indices = [0,0,0,0, 1,0,0,0, 0,1,0,0];
+const indices = [0,1,0,0, 0,1,0,0, 0,1,0,0];
 const bind = (overrides = {}) => createIndexedSkinBinding({
   mesh: base(), boneIds: ['custom-joint-A', 'custom-joint-B'],
   inverseBindMatrices: [identity(), identity()],
