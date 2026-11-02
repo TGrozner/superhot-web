@@ -261,3 +261,96 @@ export function advanceMcdSourceTime(state) {
     aggregate,
   };
 }
+
+/**
+ * Source-qualified movement/jump time shifter rates for the delivered MCD
+ * PlayerController initialization. PRIVATE provenance: research #94,
+ * artifact 13140707485, PlayerController.cs:168-185 (build 20299547).
+ * Registration in Awake is proven; execution/active instance is not.
+ */
+export const MCD_SOURCE_PLAYER_TIME_SHIFTERS = Object.freeze({
+  movement: Object.freeze({
+    inSmoothing: Math.fround(0.025),
+    outSmoothing: Math.fround(0.5),
+  }),
+  jump: Object.freeze({
+    inSmoothing: Math.fround(0.5),
+    outSmoothing: Math.fround(0.9),
+  }),
+});
+
+/**
+ * One assignment to AsymmetricSmoothLinearInstantTimeShifter.CurrentTimeModifier.
+ * PRIVATE primary evidence: research #92, artifact 13139289153,
+ * AsymmetricSmoothLinearInstantTimeShifter.cs:11-40. Unity feeds
+ * Time.unscaledDeltaTime; the caller must supply this independently of any
+ * scaled/world delta. Rates, current value and target are all explicit.
+ *
+ * This is the delivered C# float32 setter's arithmetic only. It does NOT
+ * advance the registry, model Unity's update scheduler, or prove that the
+ * PlayerController instance executed in Containers. Input validation is a
+ * WEB API safeguard, not an extra native branch.
+ */
+export function advanceMcdSourceLinearShifter({
+  currentTimeModifier,
+  targetTimeModifier,
+  inSmoothing,
+  outSmoothing,
+  unscaledDeltaTime,
+} = {}) {
+  const supplied = { currentTimeModifier, targetTimeModifier, inSmoothing, outSmoothing, unscaledDeltaTime };
+  for (const [name, value] of Object.entries(supplied)) {
+    if (!Number.isFinite(value)) throw new RangeError(name + ' must be finite');
+  }
+  if (unscaledDeltaTime < 0) throw new RangeError('unscaledDeltaTime must be nonnegative');
+  let current = Math.fround(currentTimeModifier);
+  const target = Math.fround(targetTimeModifier);
+  const factor = Math.fround(Math.fround(unscaledDeltaTime) * 60);
+  if (target > current) {
+    const rise = Math.fround(Math.fround(Math.fround(inSmoothing) * target) * factor);
+    current = Math.fround(current + rise);
+    if (current > target) current = target;
+  } else {
+    const fall = Math.fround(Math.fround(outSmoothing) * factor);
+    current = Math.fround(current - fall);
+    if (current < target) current = target;
+  }
+  return current;
+}
+
+/**
+ * Source-qualified pair of targets written by PlayerController.UpdateMovement,
+ * PRIVATE research #96, artifact 13140787579, PlayerController.cs:331-394.
+ * processedX/Y are values AFTER control-blocking, axis swaps and forced
+ * forward input handled by the real PlayerController. This function does NOT
+ * reproduce those guards or infer actual keyboard/POWER/grounded state.
+ *
+ * When canAlterTimescale is false, native code does not call either setter:
+ * null means "not written", NEVER reset a stored modifier to zero.
+ */
+export function mcdSourcePlayerTimeTargets({
+  processedX,
+  processedY,
+  isGrounded,
+  cameraDollyMode,
+  powerActive,
+  canAlterTimescale,
+} = {}) {
+  if (!Number.isFinite(processedX) || !Number.isFinite(processedY)) {
+    throw new RangeError('processed movement axes must be finite');
+  }
+  for (const [name, value] of Object.entries({ isGrounded, cameraDollyMode, powerActive, canAlterTimescale })) {
+    if (typeof value !== 'boolean') throw new TypeError(name + ' must be explicitly supplied');
+  }
+  if (!canAlterTimescale) {
+    return { writes: false, movementTarget: null, jumpTarget: null };
+  }
+  const magnitude = Math.fround(Math.min(1, Math.hypot(Math.fround(processedX), Math.fround(processedY))));
+  const adjusted = cameraDollyMode ? Math.fround(magnitude / 2) : magnitude;
+  const power = powerActive ? Math.fround(0.2) : 1;
+  return {
+    writes: true,
+    movementTarget: Math.fround(adjusted * power),
+    jumpTarget: isGrounded ? 0 : Math.fround(Math.fround(0.75) * power),
+  };
+}
