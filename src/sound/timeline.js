@@ -5,6 +5,7 @@
  * audio timing. All clock choices must be supplied by the caller and validated
  * against private-corpus evidence before a native-parity claim is possible.
  */
+import { snapshotSoundParams } from './params.js';
 
 export const SOUND_CLOCKS = Object.freeze({ REAL: 'real', WORLD: 'world' });
 export const SOUND_EVIDENCE = Object.freeze({
@@ -75,9 +76,11 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
 
     const dueSeconds = nowFor(clock) + delaySeconds;
     if (!Number.isFinite(dueSeconds)) throw new RangeError('sound event due time overflowed');
+    // Validate and snapshot before consuming an ID: invalid data is atomic.
+    const immutableParams = snapshotSoundParams(params);
     const event = Object.freeze({
       id: nextId++, name, clock, dueSeconds, evidence,
-      params: Object.freeze({ ...params }),
+      params: immutableParams,
     });
     pending.push(event);
     enqueued++;
