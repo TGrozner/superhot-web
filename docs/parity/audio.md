@@ -79,3 +79,9 @@ The modules are deliberately not wired to src/main.js or src/audio.js;
 SH-05 owns integration. No game audio or binary is included here.
 The first verified original producer/guard/clip chain is the next
 parity gate before native event mappings can be asserted.
+
+## SH-07 follow-up: independent Web metadata
+
+**PROUVÉ (WEB ONLY):** src/sound/params.js recursively snapshots and freezes event parameters before the timeline assigns the event ID. Nested arrays and objects cannot be changed through the caller's original references. Invalid inputs fail before enqueue; tests/sound-params.test.mjs checks mutation, cycles, accessors, invalid numbers, and size limits.
+
+**INCONNU (NATIVE MCD):** this is a defensive Web policy, not evidence of native time domains, producer conditions, playback parameters or audible output. The private handoff referenced above names spec/world/audio-vfx-deep.md as the next targeted read; primary method bodies and observed playback have not been obtained. Accepted Web dispatch is not proof of a heard sound.
