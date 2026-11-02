@@ -4,6 +4,8 @@ import {
   MCD_SOURCE_PLAYER_TIME_SHIFTERS,
   advanceMcdSourceLinearShifter,
   mcdSourcePlayerTimeTargets,
+  createMcdSourceTimeState,
+  advanceMcdSourceTime,
 } from '../src/time.js';
 
 const movement = MCD_SOURCE_PLAYER_TIME_SHIFTERS.movement;
@@ -77,4 +79,28 @@ test('opt-in source adapter requires explicit context and independently supplied
   const previous = { currentTimeModifier: 0.1, targetTimeModifier: 1, ...movement, unscaledDeltaTime: 1 / 60 };
   advanceMcdSourceLinearShifter(previous);
   assert.equal(previous.currentTimeModifier, 0.1);
+});
+
+test('synthetic frame contributes movement and airborne jump to source max then override zero', () => {
+  // This is an explicitly supplied frame snapshot, NOT a measured Containers tick.
+  const context = targets({ processedX: 1, processedY: 0, isGrounded: false });
+  const movementModifier = apply(0, context.movementTarget, movement, 1 / 60);
+  const jumpModifier = apply(0, context.jumpTarget, jump, 1 / 60);
+  assert.equal(movementModifier, Math.fround(0.025));
+  assert.equal(jumpModifier, Math.fround(0.375));
+  const base = createMcdSourceTimeState({ fixedTimestepDenominator: 120, powerActive: false });
+  assert.equal(base.fixedDeltaTime, Math.fround(1 / Math.fround(120)));
+  const ready = {
+    ...base, delayedUpdates: 0,
+    shifters: [
+      { terminated: false, currentTimeModifier: movementModifier },
+      { terminated: false, currentTimeModifier: jumpModifier },
+    ],
+  };
+  const active = advanceMcdSourceTime(ready);
+  assert.equal(active.aggregate, jumpModifier);
+  assert.equal(active.timeScale, jumpModifier);
+  const forced = advanceMcdSourceTime({ ...ready, forcedTimeScale: 0 });
+  assert.equal(forced.aggregate, jumpModifier);
+  assert.equal(forced.timeScale, 0);
 });
