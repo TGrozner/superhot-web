@@ -335,3 +335,207 @@ export function decodeIndexedMeshPayload(payload) {
     world: payload.worldMatrix === undefined ? null : meshModelMatrices(payload.worldMatrix),
   };
 }
+
+
+/**
+ * Transform authorized, already-decoded Wavefront OBJ text into the existing
+ * indexed WebGL2 packet. The parser neither loads source files nor guesses
+ * native materials, scene instance IDs, camera state or Unity->Web transforms.
+ *
+ * OBJ has separate indices for position, UV and normal at each triangle corner,
+ * requiring GPU vertices to split at texture/normal seams.
+ */
+const OBJ_NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+const OBJ_REF_PATTERN = /^-?[1-9]\d*$/;
+
+function objFloat(token, label) {
+  if (!OBJ_NUMBER_PATTERN.test(token ?? '')) throw new TypeError(label + ' must be decimal');
+  const n = Number(token);
+  if (!Number.isFinite(n) || Math.abs(n) > FLOAT_MAX) {
+    throw new RangeError(label + ' must fit finite float32');
+  }
+  return n;
+}
+
+function objIndex(token, count, label) {
+  if (!OBJ_REF_PATTERN.test(token ?? '')) throw new TypeError(label + ' requires a nonzero OBJ index');
+  const raw = Number(token);
+  if (!Number.isSafeInteger(raw)) throw new RangeError(label + ' exceeds safe integer');
+  const index = raw > 0 ? raw - 1 : count + raw;
+  if (index < 0 || index >= count) throw new RangeError(label + ' exceeds declared OBJ attributes');
+  return index;
+}
+
+function assertObjBounds(actual, expected, label) {
+  if (expected === undefined) return;
+  if (!expected || typeof expected !== 'object' ||
+      !Array.isArray(expected.min) || !Array.isArray(expected.max) ||
+      expected.min.length !== 3 || expected.max.length !== 3 ||
+      typeof expected.tolerance !== 'number' || !Number.isFinite(expected.tolerance) ||
+      expected.tolerance < 0 || expected.tolerance > 1) {
+    throw new TypeError(label + ' needs min/max[3] and finite tolerance 0..1');
+  }
+  for (const axis of [0, 1, 2]) {
+    for (const field of ['min', 'max']) {
+      if (typeof expected[field][axis] !== 'number' ||
+          !Number.isFinite(expected[field][axis]) ||
+          Math.abs(actual[field][axis] - expected[field][axis]) > expected.tolerance) {
+        throw new RangeError(label + ' does not match verified OBJ bounds');
+      }
+    }
+  }
+}
+
+/**
+ * Required descriptor:
+ * {
+ *   coordinateSpace: 'web-rh',
+ *   axisSigns: [1|-1, 1|-1, 1|-1],  // independently proved OBJ->Web signs
+ *   winding: 'keep'|'flip',         // explicit AFTER axisSigns
+ *   groups: [{ name, materialSlot, expectedTriangles, expectedPositionRefs,
+ *              expectedBounds?: { min:[x,y,z], max:[x,y,z], tolerance } }],
+ *   worldMatrix?: column-major WEB affine 4x4
+ * }
+ *
+ * No silent inference from group suffix, OBJ usemtl or filename. Source counts
+ * are checked before GPU upload; quads/polygons or absent UV/normal fail.
+ */
+export function decodeIndexedObjPayload(objText, options) {
+  if (typeof objText !== 'string' || objText.length === 0 ||
+      objText.length > 32 * 1024 * 1024) {
+    throw new TypeError('OBJ must be decoded text of 1..33554432 characters');
+  }
+  if (!options || typeof options !== 'object' || options.coordinateSpace !== 'web-rh') {
+    throw new TypeError('Explicit target coordinateSpace web-rh is required');
+  }
+  const { axisSigns, winding, groups, worldMatrix } = options;
+  if (!Array.isArray(axisSigns) || axisSigns.length !== 3 ||
+      !axisSigns.every((n) => n === 1 || n === -1)) {
+    throw new TypeError('Explicit axisSigns[3] (+1/-1) required, no guessed Unity conversion');
+  }
+  if (winding !== 'keep' && winding !== 'flip') {
+    throw new TypeError('Explicit OBJ winding keep/flip required after axis mapping');
+  }
+  if (!Array.isArray(groups) || groups.length < 1 || groups.length > 1024) {
+    throw new TypeError('Select 1..1024 verified OBJ groups');
+  }
+  const chosen = new Map();
+  for (const spec of groups) {
+    if (!spec || typeof spec.name !== 'string' || !spec.name ||
+        spec.name !== spec.name.trim() || /[\r\n\t]/.test(spec.name) ||
+        chosen.has(spec.name)) {
+      throw new TypeError('OBJ group names must be unique exact exporter labels');
+    }
+    requireSourceInteger(spec.materialSlot, 'OBJ materialSlot', 0, 1023);
+    requireSourceInteger(spec.expectedTriangles, 'OBJ expectedTriangles', 1, 2_000_000);
+    requireSourceInteger(spec.expectedPositionRefs, 'OBJ expectedPositionRefs', 3, MAX_VERTICES);
+    chosen.set(spec.name, { spec, faces: [], seen: false });
+  }
+
+  const srcPositions = [], srcNormals = [], srcUVs = [];
+  let activeGroup = null;
+  for (const [index, rawLine] of objText.split(/\r?\n/).entries()) {
+    const line = rawLine.split('#', 1)[0].trim();
+    if (!line) continue;
+    const parts = line.split(/\s+/), op = parts[0];
+    const label = 'OBJ line ' + (index + 1);
+    if (op === 'v' || op === 'vn' || op === 'vt') {
+      const components = op === 'vt' ? 2 : 3;
+      if (parts.length !== components + 1 &&
+          !(op === 'v' && parts.length === 5) &&
+          !(op === 'vt' && parts.length === 4)) {
+        throw new TypeError(label + ': invalid ' + op + ' width');
+      }
+      const values = parts.slice(1, components + 1).map((n, i) => objFloat(n, label + '[' + i + ']'));
+      if (parts.length === components + 2) {
+        const extra = objFloat(parts[components + 1], label + ' extra component');
+        if ((op === 'v' && extra !== 1) || (op === 'vt' && extra !== 0)) {
+          throw new Error(label + ': non-default homogeneous/UV component unsupported');
+        }
+      }
+      const table = op === 'v' ? srcPositions : op === 'vn' ? srcNormals : srcUVs;
+      if (table.length >= MAX_VERTICES) throw new RangeError('OBJ attribute table too large');
+      table.push(values);
+    } else if (op === 'g') {
+      if (parts.length < 2) throw new Error(label + ': empty group declaration');
+      // UnityPy exports a descriptive multiword label after g; treat the entire
+      // exporter header as ONE exact group name, never infer a numeric suffix.
+      activeGroup = parts.slice(1).join(' ');
+      const selected = chosen.get(activeGroup);
+      if (selected) {
+        if (selected.seen) throw new Error(label + ': selected OBJ group reopened');
+        selected.seen = true;
+      }
+    } else if (op === 'f') {
+      const selected = chosen.get(activeGroup);
+      if (!selected) continue;
+      if (parts.length !== 4) throw new Error(label + ': only triangle faces supported');
+      if (selected.faces.length >= 2_000_000) throw new RangeError('OBJ group too many triangles');
+      selected.faces.push(parts.slice(1).map((corner) => {
+        const fields = corner.split('/');
+        if (fields.length !== 3 || fields.some((f) => !f)) {
+          throw new Error(label + ': each face corner needs v/vt/vn');
+        }
+        return [
+          objIndex(fields[0], srcPositions.length, label + ' position'),
+          objIndex(fields[1], srcUVs.length, label + ' UV'),
+          objIndex(fields[2], srcNormals.length, label + ' normal'),
+        ];
+      }));
+    } else if (!['o', 's', 'usemtl', 'mtllib'].includes(op)) {
+      throw new Error(label + ': unsupported OBJ record ' + op);
+    }
+  }
+
+  const positions = [], normals = [], uvs = [], indices = [], drawRanges = [], groupEvidence = [];
+  const corners = new Map();
+  for (const { spec, faces, seen } of chosen.values()) {
+    if (!seen || faces.length !== spec.expectedTriangles) {
+      throw new RangeError('OBJ group ' + spec.name + ' missing or mismatched triangle count');
+    }
+    const firstIndex = indices.length, positionRefs = new Set();
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const face of faces) {
+      for (const [pi, ti, ni] of (winding === 'flip' ? [face[0], face[2], face[1]] : face)) {
+        positionRefs.add(pi);
+        const key = pi + '/' + ti + '/' + ni;
+        let gpuIndex = corners.get(key);
+        if (gpuIndex === undefined) {
+          gpuIndex = positions.length / 3;
+          if (gpuIndex >= MAX_VERTICES) throw new RangeError('OBJ too many distinct GPU corner vertices');
+          const p = srcPositions[pi], n = srcNormals[ni], uv = srcUVs[ti];
+          for (let axis = 0; axis < 3; axis++) {
+            positions.push(p[axis] * axisSigns[axis]);
+            normals.push(n[axis] * axisSigns[axis]);
+          }
+          uvs.push(uv[0], uv[1]);
+          corners.set(key, gpuIndex);
+        }
+        indices.push(gpuIndex);
+        for (let axis = 0; axis < 3; axis++) {
+          const value = srcPositions[pi][axis] * axisSigns[axis];
+          min[axis] = Math.min(min[axis], value);
+          max[axis] = Math.max(max[axis], value);
+        }
+      }
+      if (indices.length > 6_000_000) throw new RangeError('OBJ index buffer too large');
+    }
+    if (positionRefs.size !== spec.expectedPositionRefs) {
+      throw new RangeError('OBJ group ' + spec.name + ' distinct position refs differ');
+    }
+    assertObjBounds({ min, max }, spec.expectedBounds, 'OBJ group ' + spec.name);
+    drawRanges.push({
+      firstIndex, indexCount: indices.length - firstIndex,
+      materialSlot: spec.materialSlot, groupName: spec.name,
+    });
+    groupEvidence.push({
+      groupName: spec.name, triangleCount: faces.length,
+      distinctPositionRefs: positionRefs.size, bounds: { min, max },
+    });
+  }
+  return {
+    mesh: defineIndexedMesh({ positions, normals, uvs, indices }),
+    drawRanges, groupEvidence, windingFlipped: winding === 'flip',
+    world: worldMatrix === undefined ? null : meshModelMatrices(worldMatrix),
+  };
+}
