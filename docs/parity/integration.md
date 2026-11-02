@@ -388,3 +388,25 @@ SHA-256 matched
 execution, browser frame, original MCD screenshot, or pixel difference was
 produced in this cycle.** The full-scene visual delta is **unmeasured**,
 not zero. Source/gameplay fidelity 1:1 remains UNASSESSED.
+
+## SH-16 — Dojo/build10 Web-only CI handoff (02 November 2026; supersedes Containers P0)
+
+The release target is now **MCD `SHRL_Dojo2`, build index 10, serialized owner `level10`**. Containers/build28 gates remain historical opt-in diagnostics and must **not** be run as default release checks. The owner will test `main` on localhost only **after** SH-05 integration. No owner runner/Windows/WSL/Unity/Frida, corpus extraction or proprietary file is required by this change. The latest stable source of Dojo gameplay and the five **unpublished** checkpoint lots are documented in `docs/dojo-reprise.md`; do not reimplement the archived hands/HUD/death/weapons/door-lights batch here.
+
+### Hosted-CI-capable static contract
+
+`node scripts/integration-dojo-smoke.mjs` inspects **only checked-out public** `src/main.js`, `src/renderer.js` and `server.mjs`. It fails if the local-allowlist scene loader, source world/skin draw, collider and projectile path, native encounter, victory/restart callbacks or source-identity telemetry hooks disappear. `node --test tests/integration-dojo-smoke.test.mjs` exercises the lexical audit and 15 **synthetic** contract tests. No owner-local asset, localhost, original program or screenshot is opened. The passing status `DOJO_STATIC_WEB_INTERFACE_REACHABLE_NOT_EXECUTED` proves references and public API shape only, **not a scene or game run**.
+
+`assessDojoWorldActorSmoke({ expectedSource, sourceBudget, samples })` is a pure, bounded companion to SH-10's `assessDojoPlaythrough` (which exclusively owns start → spawn → six/seven eliminations → victory → restart). SH-05 may pass the actual `prepared.source` and `summarizePreparedNativeWorld(prepared)` output, plus 2–32 pairs of `{ frame: window.__superhotGetRenderedFrameSnapshot(), metrics: structuredClone(window.__superhotSceneMetrics) }` **captured after real rendered frames**. This gate independently requires `build10 / SHRL_Dojo2.unity / level10` in package, frame and asynchronous metrics; rejects a Containers frame even with identical counts; checks indexed world draws/triangles against the independently prepared budget; and distinguishes source-world submission, a last-actor skinned submission, an instantiated six/seven-target encounter, and a living enemy. Do not call it with invented evidence in a release report. The CLI itself deliberately does **not** look for browser frames or private files.
+
+**SH-05 exact hooks and routing**: keep `src/main.js`, `src/renderer.js`, `src/levels.js` exclusive to SH-05. Do not add `assessContainersBuild28VerticalEvidence` or `integration-containers-package.mjs` as a blocking Dojo release prerequisite (PR #164 is merged as an optional Containers-only diagnostic, not a Dojo P0 gate). Preserve the existing `__superhotGetRenderedFrameSnapshot` and `__superhotSceneMetrics` fields while integrating SH-10's full-playthrough trace gate. For the full-run check, use SH-10's module instead of extending this smoke to duplicate it. Let SH-15 separately record *real* GPU PNG / source gameplay comparisons, and SH-03 own attack→contact→body-part evidence. A green smoke or GitHub CI run is **not** proof of physical collisions, audible sound, native parity, GPU pixels, or a successful played game. Both `measuredVisibleDelta` and the 1:1 verdict remain unassessed until independently captured same-state Web/native images.
+
+### Merge-train review: priority/risk at the stable Dojo cut
+
+- #134 (SH-14) skin remap: materially useful for posed characters, but merge conflict reported and OBJ declaration index ≠ GPU face-corner order (3,012/5,237 EnemyMerged reordered); require rebasing and source-weight order validation, preserve functioning Dojo skin.
+- #150 (SH-13) opaque GL depth/blend: potentially visible in Dojo Concrete/Crystal, but merge conflict and **no exact-head CI** found; do not silently apply Containers-only shader assumptions to Dojo.
+- #164 (SH-16) private **Containers-only** preflight: **already merged by SH-05**; preserve only as an explicitly invoked Containers diagnostic. Its deliberate Dojo rejection must never be a default Dojo acceptance or release gate.
+- #165 (SH-06), merged: punch timing source-backed request-only, no native active strike/contact or player view demonstrated; keep collision/animation wiring with SH-05, not an automatic Dojo visible improvement.
+- #166 (SH-01) CameraAngle world quaternion: Containers-static only; not evidence that Dojo's active camera invokes that producer. Its documentation does not block current Dojo playability.
+
+**Outstanding actual acceptance:** public Node/static checks cannot certify a complete Dojo victory, real body hit, actual GPU images or matched MCD pixels. SH-05 must explicitly preserve the stable Dojo baseline and choose merge order; Thomas alone performs the final owner-local test.
