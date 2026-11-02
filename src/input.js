@@ -122,6 +122,17 @@ export function applyMouseLook({ yaw, pitch, movementX, movementY }, rules = PRO
   for (const [name, value] of Object.entries({yaw, pitch, movementX, movementY})) {
     if (!Number.isFinite(value)) throw new RangeError(`${name} must be finite`);
   }
+  // PROVISIONAL WEB input-rule invariants. Invalid caller rules must not
+  // invert the pitch clamp, saturate activity through division by zero, or
+  // return activity outside [0, 1]. These are NOT native MCD parameters.
+  if (!Number.isFinite(rules.pitchLimit)) throw new RangeError('pitch must remain finite');
+  if (rules.pitchLimit < 0) throw new RangeError('pitchLimit must be nonnegative');
+  if (!Number.isFinite(rules.lookActivityDivisor)) throw new RangeError('lookActivity must remain finite');
+  if (rules.lookActivityDivisor <= 0) throw new RangeError('lookActivityDivisor must be positive');
+  if (!Number.isFinite(rules.minimumLookActivity)) throw new RangeError('lookActivity must remain finite');
+  if (rules.minimumLookActivity < 0 || rules.minimumLookActivity > 1) {
+    throw new RangeError('minimumLookActivity must be within [0, 1]');
+  }
   const nextYaw = yaw + movementX * rules.mouseSensitivity;
   if (!Number.isFinite(nextYaw)) throw new RangeError('yaw must remain finite');
   const nextPitch = clamp(pitch - movementY * rules.mouseSensitivity, -rules.pitchLimit, rules.pitchLimit);
