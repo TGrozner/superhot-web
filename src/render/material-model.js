@@ -153,6 +153,16 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     uvChannel:'uv0',uvScale:Object.freeze([0.10000000149011612,0.10000000149011612]),
     uvOffset:Object.freeze([0,0]),imagePixelsDecoded:false,
     imageEncodingKnown:false,
+    // Private #100 / 13141079714: stream metadata ONLY, no texels in Git/Web.
+    nativeStream:Object.freeze({
+      owner:'resources.assets',pathId:248,
+      width:128,height:128,unityFormatId:3,unityFormatName:'RGB24',
+      serializedColorSpace:1,mipCount:8,
+      sourceResource:'resources.assets.resS',
+      sourceByteOffset:59500780,sourceByteCount:65535,
+      inlineBytes:0,payloadAvailableInWeb:false,
+      evidence:'private research #100 artifact 13141079714',
+    }),
   }),
   lightmapTexture:Object.freeze({
     sourceSceneOwner:'level28',sourceSettingsPathId:18622,
@@ -160,6 +170,16 @@ const CONTAINERS_CONCRETE_SOURCE=Object.freeze({
     targetOwner:'sharedassets28.assets',targetPathId:2,
     name:'Lightmap-0_comp_light',
     imagePixelsDecoded:false,uv2StreamDecoded:false,
+    // Private #100 / 13141079714: BC3/DXT5 atlas descriptor, NOT pixels.
+    nativeStream:Object.freeze({
+      owner:'sharedassets28.assets',pathId:2,
+      width:2048,height:2048,unityFormatId:12,unityFormatName:'DXT5',
+      serializedColorSpace:1,mipCount:12,
+      sourceResource:'sharedassets28.assets.resS',
+      sourceByteOffset:0,sourceByteCount:5592432,
+      inlineBytes:0,payloadAvailableInWeb:false,
+      evidence:'private research #100 artifact 13141079714',
+    }),
   }),
   shaderProperties:Object.freeze({
     // Do not translate these into Web uniforms before the shipped custom
@@ -279,5 +299,164 @@ export function containersBuild28CargoMaterialBinding(rendererPathId) {
       samplingAuthorized:false,
       provenance:'unity-serialized-reference-only',
     }):null,
+  });
+}
+
+
+/**
+ * P0 source-qualified RED CRYSTAL ENEMY, unrelated to Concrete cargo material.
+ *
+ * Native metadata was inspected inside PRIVATE Actions result.json:
+ * #93 artifact 13139554254: renderers 4748/4749 -> meshes 284/285,
+ * material (0,13), 60/59 bones, enabled, lightmap index 65535.
+ * #95 artifact 13141157351: serialized Material13, authored shader inputs.
+ * #98 artifact 13141163607: shader owner qualified to globalgamemanagers:28.
+ * #88/#90: independently checked OBJ triangles/positions (private bytes).
+ *
+ * No Unity shader pass, final fragments, animated pose or runtime instance
+ * was observed. The color below is a *DIAGNOSTIC WEB INPUT*, not final MCD RGB.
+ */
+const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
+  material:Object.freeze({
+    owner:'sharedassets0.assets',pathId:13,
+    name:'MAIN RedCrystalNuEnemyMaterial',
+    rendererReference:Object.freeze({fileId:0,pathId:13}),
+    serializedTextureEnvironmentCount:0,
+  }),
+  shader:Object.freeze({
+    owner:'globalgamemanagers.assets',pathId:28,
+    name:'XULM FULLFORWARD/Red Crystal',
+    materialReference:Object.freeze({fileId:1,pathId:28}),
+    serializedKeyword:'_ALLOWLOCALFOG_ON',
+    actualPassAndVariantVerified:false,
+  }),
+  shaderInputs:Object.freeze({
+    _Color:Object.freeze([0.720588207244873,0,0,1]),
+    _EmissionColor:Object.freeze([0.5220588445663452,0,0,1]),
+    _FogColor:Object.freeze([0.6838235259056091,0,0,1]),
+    _Alpha:0,
+    _IsEnemy:1,
+    _AllowLocalFog:1,
+    _FogDistance:5,
+    _FogLength:7,
+  }),
+  sourceEvidence:'private research #93/13139554254, #95/13141157351, #98/13141163607',
+  status:'unity-serialized-owner-qualified-params-no-render-pass',
+  webShadingReady:false,
+  runtimeNativePixelsVerified:false,
+  nativeTexturePixelsAvailable:false,
+  nativeSurfaceAlphaKnown:false,
+  nativeLocalFogPixelsKnown:false,
+});
+
+const ENEMY_RED_CRYSTAL_RENDERERS=Object.freeze([
+  Object.freeze({
+    rendererPathId:4748,meshPathId:284,meshName:'EnemyMerged',
+    objGroup:'EnemyMerged_0',sourceVertexCount:5237,
+    sourceTriangleCount:2254,rootBonePathId:2257,boneCount:60,
+  }),
+  Object.freeze({
+    rendererPathId:4749,meshPathId:285,meshName:'EnemyMergedHeadless',
+    objGroup:'EnemyMergedHeadless_0',sourceVertexCount:4895,
+    sourceTriangleCount:2132,rootBonePathId:2257,boneCount:59,
+  }),
+]);
+
+/**
+ * Resolves an exact enemy SkinnedMeshRenderer -> native material owner, while
+ * retaining static-only OBJ and missing skinning/lightmap/pass limitations.
+ */
+export function enemyRedCrystalMaterialBinding(rendererPathId) {
+  int(rendererPathId,'rendererPathId',1);
+  const r=ENEMY_RED_CRYSTAL_RENDERERS.find(x=>x.rendererPathId===rendererPathId);
+  if(!r) throw new RangeError('No proved EnemyMerged material binding for renderer '+rendererPathId);
+  return Object.freeze({
+    sourceOwner:'sharedassets0.assets',rendererPathId,rendererEnabled:true,
+    mesh:Object.freeze({
+      owner:'sharedassets0.assets',pathId:r.meshPathId,name:r.meshName,
+      objGroup:r.objGroup,sourceVertexCount:r.sourceVertexCount,
+      sourceTriangleCount:r.sourceTriangleCount,
+      staticObjOnly:true,skinWeightsAvailable:false,poseProven:false,
+    }),
+    materialSlot:0,materialSource:ENEMY_RED_CRYSTAL_SOURCE,
+    lightmapIndexSerialized:65535,lightmapSamplingEnabled:false,
+    rootBonePathId:r.rootBonePathId,boneCount:r.boneCount,
+    castShadowsSerialized:true,receiveShadowsSerialized:true,
+    runtimeScenePresenceVerified:false,
+  });
+}
+
+/**
+ * Deliberately show a visible source-derived RED diagnostic when SH-05 draws
+ * a privately selected static EnemyMerged OBJ. This forwards raw authored
+ * _Color RGB to the CURRENT WEB shader as if normalized display sRGB.
+ * That transfer function, emission, shading, and Unity color management are
+ * not proven. In particular, material _Alpha=0 must NOT hide this geometry.
+ *
+ * Do NOT use this packet for the concrete cargos, source-pixel comparisons,
+ * actual XULM shader emulation, or a native-fidelity assertion.
+ */
+export function enemyRedCrystalDiagnosticWebPacket(rendererPathId) {
+  const binding=enemyRedCrystalMaterialBinding(rendererPathId);
+  const nativeParameter=binding.materialSource.shaderInputs._Color;
+  const color=Object.freeze([nativeParameter[0],nativeParameter[1],nativeParameter[2],1]);
+  const colorHex='#'+color.slice(0,3)
+    .map(x=>Math.round(Math.max(0,Math.min(1,x))*255).toString(16).padStart(2,'0'))
+    .join('');
+  return Object.freeze({
+    rendererPathId,mesh:binding.mesh,color,colorHex,
+    colorEncoding:'display-srgb-diagnostic-assumption',
+    colorProvenance:'native-serialized-color-parameter-web-diagnostic-NOT-MCD-fragments',
+    fallbackUsed:true,
+    sourceMaterial:binding.materialSource.material,
+    sourceShader:binding.materialSource.shader,
+    sourceLightmapIndex:65535,lightmapSamplingEnabled:false,
+    shaderPassVerified:false,nativeRenderedColorKnown:false,
+    localFogProvenance:'_ALLOWLOCALFOG_ON-serialized-shader-branch-unverified',
+    webAlphaOverride:'opaque-diagnostic-only-not-_Alpha-mapping',
+  });
+}
+
+
+/**
+ * Diagnostic-only decoding boundary for the exact PRIVATE RGB24 mip chain:
+ * resources.assets:248 / resources.assets.resS offset59500780 size65535.
+ * No asset bytes are distributed by this module. SH-05 may pass an exact
+ * user-selected File.slice(start,end) ArrayBuffer to this pure function.
+ *
+ * First 128x128xRGB24 bytes form mip0 according to the serialized format and
+ * exact 65535-byte eight-mip size. Byte order is preserved RGB->RGBA with
+ * alpha 255; no gamma conversion, shader replication or vertical flip is
+ * applied. UV orientation, filtering, sampler state, postprocessing and
+ * native pixel colors remain unverified. SH-05 must label the experiment.
+ */
+export function decodeContainersConcreteRgb24Mip0(streamBytes) {
+  const meta=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeStream;
+  const bytes=streamBytes instanceof Uint8Array?streamBytes:
+    streamBytes instanceof ArrayBuffer?new Uint8Array(streamBytes):null;
+  if(!bytes) throw new TypeError('Native diffuse bytes must be Uint8Array or ArrayBuffer');
+  if(bytes.byteLength!==meta.sourceByteCount){
+    throw new RangeError('Exact source RGB24 eight-mip byte range required');
+  }
+  if(meta.unityFormatId!==3||meta.width!==128||meta.height!==128||meta.mipCount!==8){
+    throw new Error('Unrecognized serialized RGB24 layout');
+  }
+  const count=meta.width*meta.height;
+  const rgba=new Uint8Array(count*4);
+  for(let i=0;i<count;i++){
+    rgba[4*i]=bytes[3*i];
+    rgba[4*i+1]=bytes[3*i+1];
+    rgba[4*i+2]=bytes[3*i+2];
+    rgba[4*i+3]=255; // RGB24 has no source alpha; NOT material._Alpha.
+  }
+  return Object.freeze({
+    width:meta.width,height:meta.height,pixelsRgba:rgba,
+    sourceTexture:Object.freeze({owner:meta.owner,pathId:meta.pathId}),
+    uvScale:CONTAINERS_CONCRETE_SOURCE.mainTexture.uvScale,
+    uvOffset:CONTAINERS_CONCRETE_SOURCE.mainTexture.uvOffset,
+    provenance:'private-file-RGB24-mip0-EXPERIMENT-not-Unity-shader-parity',
+    sourceMipsIncludedInInput:meta.mipCount,mipsDecoded:1,
+    originVerified:false,colorTransferVerified:false,
+    shaderPassVerified:false,lightmapSamplingEnabled:false,
   });
 }
