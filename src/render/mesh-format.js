@@ -144,3 +144,194 @@ export function meshModelMatrices(worldMatrix) {
   }
   return { model, normal, mirrored: det < 0 };
 }
+
+
+/**
+ * Decode an EXPLICIT, source-neutral, already-authorized binary mesh layout.
+ *
+ * Not a Unity asset-file decoder: the scene owner must resolve/verify any
+ * native stream, compression, coordinates, channel declarations and provenance
+ * privately. Reject unknown formats, missing payloads and compressed data.
+ * No source bytes are bundled in this module.
+ */
+const SOURCE_COMPONENT_BYTES = Object.freeze({
+  float32: 4, float16: 2, snorm8: 1, unorm8: 1, snorm16: 2, unorm16: 2,
+});
+
+function requireSourceInteger(value, label, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new RangeError(label + ' must be an integer in ' + min + '..' + max);
+  }
+  return value;
+}
+
+function binarySourceBytes(value, label) {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  throw new TypeError(label + ' must be Uint8Array, Buffer or ArrayBuffer, not inferred JSON/hex/base64');
+}
+
+function halfSourceFloat(raw) {
+  const sign = raw & 0x8000 ? -1 : 1;
+  const exponent = (raw >>> 10) & 31, fraction = raw & 1023;
+  if (exponent === 31) return fraction ? NaN : sign * Infinity;
+  if (exponent === 0) return sign * 2 ** -14 * fraction / 1024;
+  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+}
+
+function readSourceComponent(view, byteOffset, format) {
+  switch (format) {
+    case 'float32': return view.getFloat32(byteOffset, true);
+    case 'float16': return halfSourceFloat(view.getUint16(byteOffset, true));
+    case 'snorm8': return Math.max(-1, view.getInt8(byteOffset) / 127);
+    case 'unorm8': return view.getUint8(byteOffset) / 255;
+    case 'snorm16': return Math.max(-1, view.getInt16(byteOffset, true) / 32767);
+    case 'unorm16': return view.getUint16(byteOffset, true) / 65535;
+    default: throw new TypeError('Unsupported source component format: ' + String(format));
+  }
+}
+
+/**
+ * Strict source-neutral boundary between a PRIVATE verified native extractor and
+ * public WebGL2 uploadIndexedMesh(). All geometry bytes supplied by caller.
+ *
+ * Payload:
+ * {
+ *   coordinateSpace: 'web-rh', byteOrder: 'little', compression: 'none', sourceWinding: 'ccw'|'cw',
+ *   vertexCount, streams: [{ bytes: Uint8Array, strideBytes, byteOffset? }],
+ *   attributes: {
+ *     position: { stream, offsetBytes, format },
+ *     normal:   { stream, offsetBytes, format },
+ *     uv0:      { stream, offsetBytes, format }
+ *   },
+ *   indexBufferBytes: Uint8Array, indexFormat: 'uint16'|'uint32',
+ *   submeshes: [{ firstByte, indexCount, baseVertex, materialSlot,
+ *                 topology: 'triangles', firstVertex?, vertexCount? }],
+ *   worldMatrix?: column-major WEB affine 4x4
+ * }
+ *
+ * Native Unity m_CompressedMesh / m_StreamData path alone cannot be supplied:
+ * streams must contain *decoded bytes*, obtained by an authorized converter.
+ * Source->Web axis/handedness conversion occurs BEFORE this function.
+ */
+export function decodeIndexedMeshPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new TypeError('Expected explicit decoded mesh payload object');
+  }
+  if (payload.compression !== 'none') {
+    throw new Error('Compressed/unknown source mesh: first prove and decode a real vertex stream');
+  }
+  if (payload.coordinateSpace !== 'web-rh') {
+    throw new Error('Coordinate conversion not proved: payload must be web-rh');
+  }
+  if (payload.byteOrder !== 'little') {
+    throw new Error('Source byte order must be explicit little-endian');
+  }
+  if (payload.sourceWinding !== 'ccw' && payload.sourceWinding !== 'cw') {
+    throw new Error('Source triangle winding must be explicitly ccw or cw after conversion');
+  }
+  const vertexCount = requireSourceInteger(payload.vertexCount, 'vertexCount', 3, MAX_VERTICES);
+  if (!Array.isArray(payload.streams) || !payload.streams.length || payload.streams.length > 16) {
+    throw new TypeError('Explicit vertex streams are required (at most 16)');
+  }
+  const streams = payload.streams.map((source, index) => {
+    if (!source || typeof source !== 'object') throw new TypeError('Invalid stream ' + index);
+    const bytes = binarySourceBytes(source.bytes, 'streams[' + index + '].bytes');
+    const strideBytes = requireSourceInteger(source.strideBytes, 'strideBytes', 1, 4096);
+    const byteOffset = requireSourceInteger(source.byteOffset ?? 0, 'stream byteOffset');
+    if (byteOffset + vertexCount * strideBytes > bytes.byteLength || bytes.byteLength > 128 * 1024 * 1024) {
+      throw new RangeError('Vertex stream is truncated or oversized: stream ' + index);
+    }
+    return { view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), strideBytes, byteOffset };
+  });
+  const attributes = payload.attributes;
+  if (!attributes || typeof attributes !== 'object') {
+    throw new TypeError('Explicit source channel layout is required');
+  }
+  function channel(name, components) {
+    const spec = attributes[name];
+    if (!spec || typeof spec !== 'object') throw new TypeError('Missing source channel: ' + name);
+    const streamIndex = requireSourceInteger(spec.stream, name + '.stream', 0, streams.length - 1);
+    const stream = streams[streamIndex];
+    const offsetBytes = requireSourceInteger(spec.offsetBytes, name + '.offsetBytes');
+    const componentWidth = SOURCE_COMPONENT_BYTES[spec.format];
+    if (!componentWidth) throw new TypeError('Unsupported ' + name + ' source format: ' + String(spec.format));
+    if (offsetBytes + components * componentWidth > stream.strideBytes) {
+      throw new RangeError(name + ' exceeds its declared vertex stride');
+    }
+    const values = new Float32Array(vertexCount * components);
+    for (let v = 0; v < vertexCount; v++) {
+      for (let c = 0; c < components; c++) {
+        const at = stream.byteOffset + v * stream.strideBytes + offsetBytes + c * componentWidth;
+        const value = readSourceComponent(stream.view, at, spec.format);
+        if (!Number.isFinite(value) || Math.abs(value) > FLOAT_MAX) {
+          throw new RangeError(name + ' contains a non-finite/unrepresentable vertex component');
+        }
+        values[v * components + c] = value;
+      }
+    }
+    return values;
+  }
+  const positions = channel('position', 3);
+  const normals = channel('normal', 3);
+  const uvs = channel('uv0', 2);
+
+  const indexBytes = binarySourceBytes(payload.indexBufferBytes, 'indexBufferBytes');
+  if (payload.indexFormat !== 'uint16' && payload.indexFormat !== 'uint32') {
+    throw new TypeError('indexFormat must be explicit uint16 or uint32');
+  }
+  const indexWidth = payload.indexFormat === 'uint32' ? 4 : 2;
+  if (indexBytes.byteLength > 24 * 1024 * 1024 || indexBytes.byteLength % indexWidth !== 0) {
+    throw new RangeError('Invalid index buffer byte length/alignment');
+  }
+  const indexView = new DataView(indexBytes.buffer, indexBytes.byteOffset, indexBytes.byteLength);
+  if (!Array.isArray(payload.submeshes) || !payload.submeshes.length || payload.submeshes.length > 1024) {
+    throw new TypeError('At least one explicit triangle submesh is required');
+  }
+  const indices = [], drawRanges = [];
+  for (let slot = 0; slot < payload.submeshes.length; slot++) {
+    const sub = payload.submeshes[slot];
+    if (!sub || sub.topology !== 'triangles') {
+      throw new Error('Non-triangle/unknown submesh topology is unsupported');
+    }
+    const firstByte = requireSourceInteger(sub.firstByte, 'submesh firstByte');
+    const indexCount = requireSourceInteger(sub.indexCount, 'submesh indexCount', 3, 6_000_000);
+    const baseVertex = requireSourceInteger(sub.baseVertex, 'submesh baseVertex', -MAX_VERTICES, MAX_VERTICES);
+    const materialSlot = requireSourceInteger(sub.materialSlot, 'submesh materialSlot', 0, 1023);
+    if (firstByte % indexWidth !== 0 || indexCount % 3 !== 0 ||
+        firstByte + indexCount * indexWidth > indexBytes.byteLength ||
+        indices.length + indexCount > 6_000_000) {
+      throw new RangeError('Submesh index range, topology or alignment is invalid');
+    }
+    const hasVertexRange = sub.firstVertex !== undefined || sub.vertexCount !== undefined;
+    let firstVertex = 0, lastVertex = vertexCount;
+    if (hasVertexRange) {
+      firstVertex = requireSourceInteger(sub.firstVertex, 'submesh firstVertex', 0, vertexCount);
+      const sourceVertexCount = requireSourceInteger(sub.vertexCount, 'submesh vertexCount', 1, vertexCount);
+      lastVertex = firstVertex + sourceVertexCount;
+      if (lastVertex > vertexCount) throw new RangeError('Submesh vertex range exceeds source mesh');
+    }
+    const firstIndex = indices.length;
+    for (let i = 0; i < indexCount; i += 3) {
+      const triangle = [];
+      for (let j = 0; j < 3; j++) {
+        const at = firstByte + (i + j) * indexWidth;
+        const rawIndex = indexWidth === 2 ? indexView.getUint16(at, true) : indexView.getUint32(at, true);
+        const resolved = rawIndex + baseVertex;
+        if (!Number.isSafeInteger(resolved) || resolved < firstVertex || resolved >= lastVertex) {
+          throw new RangeError('Index violates source/global submesh vertex range');
+        }
+        triangle.push(resolved);
+      }
+      if (payload.sourceWinding === 'cw') [triangle[1], triangle[2]] = [triangle[2], triangle[1]];
+      indices.push(...triangle);
+    }
+    drawRanges.push({ firstIndex, indexCount, materialSlot });
+  }
+  const mesh = defineIndexedMesh({ positions, normals, uvs, indices });
+  return {
+    mesh, drawRanges, sourceVertexCount: vertexCount,
+    windingFlipped: payload.sourceWinding === 'cw',
+    world: payload.worldMatrix === undefined ? null : meshModelMatrices(payload.worldMatrix),
+  };
+}
