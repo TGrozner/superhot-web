@@ -91,3 +91,34 @@ parity gate before native event mappings can be asserted.
 PROUVÉ (Web): `src/sound/timeline.js` now allows a delivery callback to cancel later events already eligible in the same flush. `cancel`, `clear`, and `reset` suppress the remaining events, and the returned count includes only callbacks invoked. Nested flushes return zero; new callback-scheduled events await a subsequent flush. Four cases are covered in `tests/sound-inflight-cancel.test.mjs`.
 
 INCONNU (MCD): none of these policies attest native Unity producer guards, sound scheduling, playback, or audibility. The research handoff and exact provenance in the earlier ledger remain the only known leads. No additional primary MCD audio evidence was obtained.
+
+
+## SH-07: finite clock precision (independent Web policy)
+
+**PROUVÉ (Web logic and tests only):** the former fixed 1e-9 second
+eligibility tolerance could dispatch an event delayed by 1e-10 seconds at
+clock time zero, before *any* advance. The timeline now compares clock
+values with relative IEEE-754 machine precision, and its enqueue timestamp
+prevents a positive-delay event from dispatching before that clock advances.
+It rejects positive delays and clock increments too small to be represented
+at the current clock magnitude, with atomic validation for both clocks.
+
+The near-due precision allowance can still schedule a callback up to roughly
+one representable clock quantum before its computed due timestamp **after**
+clock progression; it is a stated numeric tradeoff, not a physical audio
+latency claim. No callback acceptance is interpreted as audible playback.
+
+**Tests:** `tests/sound-clock-precision.test.mjs` isolates subnanosecond
+delays, one-ULP delay at a nonzero clock, lost-precision enqueue and advance,
+atomicity and fractional time accumulation. Other sound timeline tests remain
+applicable. This is synthetic Node/Web behavior only.
+
+**INCONNU (MCD):** native audio producer methods, their guards, real/DSP/world
+clock source and audible output remain unverified. Private provenance remains
+Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`,
+handoff run 41368361512 / artifact 13108420851; none of those sources
+proves this Web policy. Primary bounded read still needed via private
+`corpus-query`: `operation=read, path=spec/world/audio-vfx-deep.md,
+start=1, count=200` (private result only). No proprietary asset or PCM
+is included in this repository.
