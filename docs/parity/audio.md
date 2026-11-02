@@ -860,3 +860,70 @@ missing-WAV cases. Collect Chromium `AudioContext` state, actual decoded
 buffer identity, `lastPlayback`, a **nonzero analyser graph signal** and an
 actual audible output observation separately. Node tests are NOT an audio
 measurement. No native sample, bytes, game asset or mixer is published.
+
+
+## SH-07 — Dojo/build10 qualified bullet-contact → Stun audio bridge (2026-11-02)
+
+**PROUVÉ (SOURCE STATIQUE, PAS UNE EXÉCUTION DOJO):** le chemin
+`Bullet.EnemiesCollisionHandle` → `PejAiBody.Stun` produit une intention
+`EnemyStun` ou `EnemyStunConcrete` seulement après un contact qualifié et
+les gardes respectives. Provenance : build 20299547 / Assembly-CSharp SHA256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257` ;
+private research #127, artifact `13158822845`,
+`managed/Assembly-CSharp/Bullet.cs:785–970`, texte SHA256
+`6051142396c9bef59e1795f5da69f0f9ebba61d7bba30f8eba03f6eb0c79561e` ;
+research #105, artifact `13144030637`,
+`managed/Assembly-CSharp/PejAiBody.cs:478–536`, texte SHA256
+`578030aa9ee719e10eb61b454d5379f47237a15160875c9eb6852237207f29ca`.
+AudioPrefab #113 et liaisons Unity #144–147 documentés précédemment.
+Le flag de lecture `isConcrete` **vient de l'argument de cet appel Stun**,
+pas du champ persistant `stunedConcretePart` : en cas de Stun déjà actif,
+celui-ci peut conserver sa valeur antérieure.
+
+**PROUVÉ (WEB, CONTRAT PUR):** le module
+`src/sound/dojo-bullet-stun-audio.js` réutilise les plans déjà possédés
+par SH-06 (`planBulletBodyPartStun`) et SH-07
+(`planMcdSourceBoundStunClip`) pour distinguer les cas :
+contact non qualifié / pas de Stun ; garde `stunSoundRest` ou
+kamikaze sans audio ; pool explicitement absent ; requête clip locale.
+Si et seulement si une requête Stun source est produite, le module
+fournit au raccord SH-05 le sélecteur `webConcreteSelector`.
+Pour une requête audio valide et un pool affirmé présent,
+`EnemyStunConcrete` correspond à `resources.assets:1611` et
+`EnemyStun` à `resources.assets:1675`; **aucun son n'est fabriqué**.
+Les huit tests `tests/sound-dojo-bullet-stun-audio.test.mjs` sont conçus
+pour exercer l'intégration réelle des plans SH-03/06/07, mais leur succès
+CI ne serait pas une preuve de déclenchement natif ni de sortie audible.
+
+**ÉCART WEB CONSTATÉ AU HEAD PUBLIC `1462e5889`:**
+`src/main.js`, branche `applyNativeEnemyContact`, appelle
+`audio.stun({bodyId:enemy.id,position:enemy,realtimeSeconds:state.runClock})`
+sans `concrete`. L'API `src/audio.js` utilise
+`concrete=false` par défaut. Un véritable contact conduisant à
+`PejAiBody.Stun(isConcrete=true)` prendrait donc systématiquement
+l'option **non-concrete** dans ce chemin Web si aucun autre raccord
+ne corrige la sélection.
+
+**Contrat SH-05, sans toucher aux fichiers partagés :**
+faire remonter un contact partie-du-corps avec couple
+`(PejAiBodyPart,controller)` réellement qualifié, produire
+`planBulletBodyPartStun`, puis consommer
+`planDojoBulletStunAudio` uniquement pour ce même événement.
+Si `status==='source-local-clip-request'` et si le clip est réellement
+chargé, transmettre `webConcreteSelector` à `audio.stun` avec
+identité/body position/horloge du gameplay qualifiées. Conserver
+les délais/cooldowns et `source-pool-absent` comme blocages, ne pas
+supposer qu'un `isBulletProof` Web ou un flag persistant équivaut à
+l'argument natif. Les tirs/collisions Dojo n'ont **pas** encore été
+observés avec ce chaînage dans Chromium.
+
+**KATANA — PROUVÉ (HANDOFF) / INCONNU (RUNTIME):** le document
+`docs/dojo-reprise.md` constate les trois références de swing
+nulles dans le katana de cette scène. Le code `src/audio.js` refuse
+déjà un `itemCue('swing')` sans clip, couvert par
+`tests/audio-native.test.mjs` ; ne pas dupliquer ce test ni inventer
+un bruit de swing. La lecture du clip de contact/slice et la sortie
+d'AudioContext dans un Dojo complet restent à mesurer par SH-05 et
+Thomas sur leur session locale. Les observations antérieures ont
+seulement démontré WebAudio pickup/throw/shatter et les trois boucles
+d'ambiance de porte.
