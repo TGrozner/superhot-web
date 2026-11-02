@@ -51,7 +51,8 @@ test('relative v/vt/vn and positive one-based references preserve actual triangl
 test('axis conversion and explicit winding give noncuboid Web geometry, not source pose', () => {
   const out = parseEntireObjIntoIndexedMesh(WEDGE_WITHOUT_GROUP, sourceChecks);
   const v = out.mesh.vertices;
-  assert.deepEqual(Array.from(v.slice(0, 8)), [-1, 0, 3, 0, 0, -1, 0, 0]);
+  assert.deepEqual(Array.from(v.slice(0, 8), n => n === 0 ? 0 : n),
+    [-1, 0, 3, 0, 0, -1, 0, 0], 'signed zero is geometrically equivalent');
   assert.equal(v[3 * 8 + 3], -1, 'X normal converted with position at seam');
   assert.ok(Math.abs(v[3 * 8 + 6] - 0.25) < 1e-7, 'UV seam stays distinct');
   assert.equal(out.windingFlipped, false);
