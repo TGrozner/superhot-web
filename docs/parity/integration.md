@@ -309,3 +309,82 @@ It checks source tuple `(sceneBuildIndex,scenePath,serializedOwner)` **exactly**
 Existing private research #8–#15 ZIP `result.json` files were **directly downloaded and parsed again**, plus #16. No new `[corpus-query]`, runner invocation or public original bytes. #10 has five `sqlite_master` table definitions (`hierarchy/objects/scenes/serialized/sources`) and **no native mesh or screenshot**. #16 independently resolves the exact Containers `scenes` triple; SHA-256 above. The actual game asset package/screenshot is not in these artifacts.
 
 **Next owner-local cross-lane handoff, executable only by SH-05:** select the actual owner-local `scenePackage` that preserves the canonical build28/source path/owner, call `prepareNativeScene(package)`, then capture two completed playing-frame+~1Hz snapshots where both `frame.nativeScene.source` and `metrics.nativeScene.source` equal the canonical tuple and invoke `assessContainersBuild28VerticalEvidence` with `expectedSource:CONTAINERS_BUILD28_SERIALIZED_SOURCE`. A correct static tuple is the first gate; check `generatedManifest.drawCalls` against the exact prepared source budget and `nativeEnemy.skinned`, not historical hard-coded 68/360 counts. SH-04's raised platforms GO379/GO392 (serialized enabled/nontrigger) must still have their actual package instance/collider IDs joined before GPU and collision claims. SH-15's existing `captureContainersWeb` + offline saved-PNG Web manifest / source-common mask comparison owns any **real** visual delta. SH-03's combat/AI modules remain disconnected from a source-causal PhysX/bodypart hit in shared gameplay. **No new browser image, pixel delta, native runtime or player→projectile→bodypart trace was observed by SH-16 in this cycle.** SH-05 alone changes shared runtime and merges this PR.
+
+
+## SH-16 P0 — owner-local Containers package preflight before browser/GPU acceptance (2026-11-02)
+
+**Concrete selection blocker:** `server.mjs` exposes exactly one private
+`scenePackage` mapping from `private/browser-assets.json` under the
+`/local-assets/scenePackage` allowlist. The public entrypoint automatically
+calls `loadScene()` for that mapping; its generic WebGL telemetry mode is shared
+by Dojo/build10 and Containers/build28. A browser showing many meshes is **not**
+evidence that Containers was selected. Previously observed owner-local Dojo is
+*historical*, not a claim that SH-16 accessed today's owner's disk.
+
+**New executable owner-local preflight** (no Windows runner or game launch):
+
+```powershell
+# Run inside TGrozner/superhot-web on the owner PC:
+node scripts/integration-containers-package.mjs
+# Optional, for an explicitly selected local private/ directory:
+node scripts/integration-containers-package.mjs --private-dir private
+```
+
+This reads only the owner-local **allowlisted** `scenePackage` gzip JSON,
+enforces the same realpath/private-root boundary as the HTTP server, bounds
+compressed and decompressed size, checks the *exact independently qualified*
+scene tuple from already inspected private research #16
+(`28 / Assets/Scenes/SHRL/SHRL_ContainerPort/SHRL_ContainerPort.unity /
+level28`), runs the actual `prepareNativeScene` source contract, and derives
+the indexed mesh/triangle/collider budget via `summarizePreparedNativeWorld`.
+It also checks that the private manifest has a real local enemy OBJ+rig pair
+and that player collision, navigation, encounter parameters and enemy anchors
+are structurally present. **Only integers, booleans, statuses, and known public
+serialized-scene metadata are printed; no private paths, source JSON, OBJ,
+textures, native binary, shader, rig or screenshot is emitted or uploaded.**
+
+An exit code of **0** means
+`CONTAINERS_SOURCE_INPUTS_READY_FOR_BROWSER_SMOKE_NOT_RENDERED`: purely
+**local source-package readiness**, not successful Web rendering. An exit code
+of **2** distinguishes missing manifest/file, wrong scene (reported build index
+only), corrupt gzip, package preparation failure or missing vertical inputs.
+In particular, Dojo/build10 yields
+`SCENE_PACKAGE_IS_NOT_SERIALIZED_CONTAINERS_BUILD28` **without calling**
+`prepareNativeScene`; a self-consistent fake build28 path also fails. There
+is no fallback to invented meshes or fabricated camera poses.
+
+**SH-05 exact handoff / next visible gate:**
+
+1. Run the new preflight **on the owner-local package**. If it reports wrong
+   scene, select the independently exported genuine Containers package via the
+   private manifest. Do not rename Dojo to level28 or forge identity counters.
+2. After an actual Chromium WebGL2 render, collect two fresh frame+async
+   snapshots, call `assessContainersBuild28VerticalEvidence({expectedSource:
+   CONTAINERS_BUILD28_SERIALIZED_SOURCE,prepared,samples})`, check geometry
+   counts against this preflight's owner-local draw budget, and *save actual
+   WebGL2 PNG/readPixels* through SH-15. A separate original MCD gameplay
+   camera/state capture is necessary for any pixel/mask/IoU comparison.
+3. For gameplay, demand a **single** causal receipt
+   `projectileId→source collider/GO/bodypart→controller→armor/bulletproof/boss
+   guards→actual reaction pose/frame`; bare ammo decrease, actor last-draw and
+   enemy death counters remain insufficient. A source config containing fields
+   is not proof the game's native callbacks ran.
+
+**Cross-lane compatibility:** the preflight imports public
+`prepareNativeScene` from SH-04/SH-11 and the existing SH-16 budget function;
+it writes no SH-05-owned shared files and does not interfere with SH-15's
+capture/screenshot workflow or SH-03 native planners. All tests use authored
+miniature gzipped JSON and synthetic prepared objects, never private assets.
+
+**Primary reinspection this cycle:** existing research #8–#15 workflow ZIP
+archives were individually opened and their `result.json` contents parsed
+(the artifact IDs recorded in #72). Research #10 contains five SQLite schema
+rows only, not gameplay or a Containers world draw. Research #8 is a partial
+120-line static read; #13 is a 97-line TimeControl source read, #15 a 110-line
+static read. The existing research #16 `result.json` was also reopened and
+SHA-256 matched
+`bdbb4dbbef1a6984ede68c11443c77c40d12695d818a379d5f0efcfb9a3f9b8e`
+(one untruncated serialized scene record). **No new corpus-query, native
+execution, browser frame, original MCD screenshot, or pixel difference was
+produced in this cycle.** The full-scene visual delta is **unmeasured**,
+not zero. Source/gameplay fidelity 1:1 remains UNASSESSED.
