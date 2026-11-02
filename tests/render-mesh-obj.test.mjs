@@ -55,7 +55,7 @@ test('mirror X + flip winding keeps winding outward; UV/normal seam splits verte
   const crossZ = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
   assert.ok(crossZ > 0, 'mirror-x + reverse returns outward +Z');
   assert.deepEqual(a, [-1, 0, 0]);
-  assert.equal(v[3], 0);
+  assert.ok(Math.abs(v[3]) === 0, 'signed zero normal is still zero');
   assert.equal(v[5], 1);
   assert.equal(v[3 * 8 + 3], -1, 'reflected X normal in second triangle');
   assert.equal(v[3 * 8 + 6], 0.25, 'v1 has distinct UV on second face');
