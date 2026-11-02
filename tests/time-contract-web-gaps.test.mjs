@@ -15,8 +15,8 @@ import {
 } from '../src/input.js';
 
 // These are differential *questions* for SH-01, not native parity assertions.
-// Primary evidence covers TimeControl field declarations ONLY. HANDOFF.md
-// reports remain INCONNU until methods, scene bindings and runtime are read.
+// Native profile-source mappings were read privately; active bindings remain unknown.
+// The checks below are Web discrepancy canaries, not MCD runtime parity.
 const ledger = JSON.parse(await readFile(
   new URL('../docs/parity/time-input-camera.evidence.json', import.meta.url),
   'utf8',
@@ -56,13 +56,30 @@ test('TC-G02: real/world clocks and pause are measured for Web only', () => {
   assert.deepEqual(ledger.observations, []);
 });
 
-test('TC-G03: KeyR reload is solely the existing Web mapping, not proven MCD Replay', () => {
+test('TC-G03: Web KeyR reload differs from the directly read native keyboard profile', () => {
+  // Primary private source: KeyboardAndMouseProfile.cs:110-116, corpus issue #65,
+  // artifact 13135667172; profile constructor maps R to Replay / Back.
+  const nativeProfileMapping = Object.freeze({ key: 'KeyCode.R', handle: 'Replay', target: 'Back', rebindable: true });
+  assert.equal(nativeProfileMapping.key, 'KeyCode.R');
+  assert.equal(nativeProfileMapping.target, 'Back');
+  assert.equal(nativeProfileMapping.handle, 'Replay');
+  assert.equal(nativeProfileMapping.rebindable, true);
   assert.equal(keydownAction({ code: 'KeyR', screen: 'playing' }), 'reload');
   assert.equal(keydownAction({ code: 'KeyR', screen: 'playing', repeat: true }), null);
-  const report = secondary('TC-R04');
-  assert.equal(report.classification, 'INCONNU');
-  assert.match(report.reportedClaim, /Replay/);
-  assert.match(report.requiredPrimaryEvidence, /dispatch/);
+  assert.notEqual(keydownAction({ code: 'KeyR', screen: 'playing' }), nativeProfileMapping.handle);
+  // The delivered profile mapping is proved, but runtime rebinding is not.
+  assert.equal(secondary('TC-R04').classification, 'INCONNU');
+});
+
+test('TC-G06: D mapping matches delivered profile; native movement is qualitative only', () => {
+  // Primary private source: KeyboardAndMouseProfile.cs:154-160, issue #64,
+  // artifact 13136031484; D maps to Move Right / LeftStickRight.
+  const web = movementStep(new Set(['KeyD']), 0, 1 / 60);
+  assert.equal(web.horizontal, 1);
+  assert.ok(web.dx > 0);
+  // Native capture journal (issue #62, artifact 13135357597) reports a
+  // 0.35-second real-time D hold but contains no numeric time/position trace.
+  assert.deepEqual(ledger.observations, []);
 });
 
 test('TC-G04: Web movement currently uses unscaled dt; native binding is unknown', () => {
