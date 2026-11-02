@@ -102,7 +102,7 @@ function requireRenderedFrame(frame,expectedCamera,expectedScreen){
   }
   const pose=cameraPose(frame.camera);
   if(Object.keys(expected).some(key=>pose[key]!==expected[key])){
-    throw new Error('Rendered camera differs from expected Containers camera pose');
+    throw new Error('Rendered camera differs from expected source scene camera pose');
   }
   const projection=renderedProjection(frame.projection);
   if(frame.worldClock!==undefined&&(!Number.isFinite(frame.worldClock)||frame.worldClock<0)){
@@ -123,22 +123,25 @@ export function requireContainersWebEvidence({metrics,frame,expectedCamera,expec
   if(!Number.isSafeInteger(width)||width<=0||!Number.isSafeInteger(height)||height<=0)throw new Error('Invalid canvas size');
   if(strictViewport&&(width!==1920||height!==1080||dpr!==1))throw new Error('Require 1920x1080 canvas and DPR1 without resizing');
   if(metrics?.browserMeasured!==true){
-    throw new Error('Measured Containers telemetry unavailable');
+    throw new Error('Measured source scene telemetry unavailable');
   }
   const generated=frame?.generatedManifest??metrics.generatedManifest;
   let geometry;
-  if(metrics.mode==='CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'){
+  if(metrics.mode==='NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'){
     const nativeScene=frame?.nativeScene??metrics.nativeScene;
     const total=frame?.totalWebGLDrawCalls??metrics.totalWebGLDrawCalls;
     if(!nativeScene||['meshes','instances','textures'].some(key=>
         !Number.isSafeInteger(nativeScene[key])||nativeScene[key]<=0)||
+        !Number.isSafeInteger(nativeScene.source?.sceneBuildIndex)||nativeScene.source.sceneBuildIndex<0||
+        typeof nativeScene.source?.scenePath!=='string'||typeof nativeScene.source?.serializedOwner!=='string'||
         generated?.nativeGeometry!==true||!Number.isSafeInteger(generated.drawCalls)||generated.drawCalls<=0||
         !Number.isSafeInteger(generated.triangles)||generated.triangles<=0||
         !Number.isSafeInteger(total)||total<generated.drawCalls){
       throw new Error('Need loaded native scene and measured native world draws/triangles');
     }
     geometry={
-      nativeScene:Object.fromEntries(['meshes','instances','textures'].map(key=>[key,nativeScene[key]])),
+      nativeScene:{source:nativeScene.source,
+        ...Object.fromEntries(['meshes','instances','textures'].map(key=>[key,nativeScene[key]]))},
       generatedManifest:{drawCalls:generated.drawCalls,triangles:generated.triangles,
         nativeGeometry:true,nativeMaterialParity:false},
       totalWebGLDrawCalls:total,
@@ -151,7 +154,7 @@ export function requireContainersWebEvidence({metrics,frame,expectedCamera,expec
     geometry={locallyLoadedSourceGroups:2,mesh6DrawPackets:3,privateIndexedDraws:4,
       totalWebGLDrawCalls:metrics.totalWebGLDrawCalls};
   }else{
-    throw new Error('Measured Containers telemetry unavailable');
+    throw new Error('Measured source scene telemetry unavailable');
   }
   const rendered=requireRenderedFrame(frame,expectedCamera,expectedScreen);
   if(Math.abs(rendered.projection.aspect-width/height)>1e-6){
@@ -186,7 +189,7 @@ const toHex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2
 /**
  * In Chrome/Edge DevTools on the default root (or the manual local preview),
  * import this module and call captureContainersWeb({expectedCamera, expectedScreen:'playing', webCommit:'abcdef0'}).
- * expectedCamera must be the independently chosen Containers baseline pose
+ * expectedCamera must be the independently chosen source-scene baseline pose
  * {x,y,z,yaw,pitch}, not a copy of whichever camera happens to be active.
  * The synchronous __superhotGetRenderedFrameSnapshot getter must describe the
  * last completed canvas render, with detached camera values and rendered phase.
@@ -236,9 +239,15 @@ export async function captureContainersWeb({
   }
   const digest=await windowRef.crypto.subtle.digest('SHA-256',base);
   const capturedAt=new Date().toISOString();
+  const sourceScene=report.nativeScene?.source;
+  const scene=sourceScene?{
+    id:sourceScene.scenePath.split('/').pop().replace(/\.unity$/i,''),
+    buildIndex:sourceScene.sceneBuildIndex,scenePath:sourceScene.scenePath,
+    serializedOwner:sourceScene.serializedOwner,
+  }:{id:'Containers',buildIndex:28};
   const metadata={
     schemaVersion:1,origin:'web',status:'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING',
-    source:'WEBGL_CANVAS_NOT_MCD',scene:{id:'Containers',buildIndex:28},
+    source:'WEBGL_CANVAS_NOT_MCD',scene,
     capturedAt,webCommit:webCommit??'UNRECORDED',...report,rawCanvasSha256:toHex(digest),
     limitations:['No executed native MCD capture or paired active camera',
       'Web world clock/animation is not a matched native pose, even when the camera is fixed',
@@ -246,7 +255,7 @@ export async function captureContainersWeb({
       'No native/Web RGB, silhouette or 1:1 score computed'],
   };
   const marked=embedWebCaptureMetadata(base,metadata);
-  const intendedFilename='containers-web-'+capturedAt.replace(/[:.]/g,'-')+'.png';
+  const intendedFilename='native-scene-web-'+capturedAt.replace(/[:.]/g,'-')+'.png';
   if(download){
     const url=windowRef.URL.createObjectURL(new Blob([marked],{type:'image/png'}));
     try{

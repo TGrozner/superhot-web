@@ -583,16 +583,30 @@ export function containersConcreteGpuSamplerPacket({mipLevels=8}={}) {
  */
 export function sliceContainersBuild28LightmapBc3Mips(streamBytes) {
   const src=CONTAINERS_CONCRETE_SOURCE.lightmapTexture.nativeStream;
-  const bytes=streamBytes instanceof Uint8Array?streamBytes:
-    streamBytes instanceof ArrayBuffer?new Uint8Array(streamBytes):null;
-  if(!bytes) throw new TypeError('Local BC3 lightmap must be Uint8Array or ArrayBuffer');
   if(src.owner!=='sharedassets28.assets'||src.pathId!==2||src.unityFormatId!==12||
      src.width!==2048||src.height!==2048||src.mipCount!==12||
      src.sourceByteOffset!==0||src.sourceByteCount!==5592432) {
     throw new Error('Native Containers BC3 descriptor changed');
   }
+  return sliceNativeLightmapBc3Mips(streamBytes, src);
+}
+
+/** Zero-copy original BC3 mip slices, using the selected source texture metadata. */
+export function sliceNativeLightmapBc3Mips(streamBytes, src) {
+  if (!src || !Number.isSafeInteger(src.width) || src.width <= 0 ||
+      !Number.isSafeInteger(src.height) || src.height <= 0 ||
+      !Number.isSafeInteger(src.mipCount) || src.mipCount <= 0 ||
+      src.mipCount > 1 + Math.floor(Math.log2(Math.max(src.width, src.height))) ||
+      src.unityFormatId !== 12 || !Number.isSafeInteger(src.sourceByteCount) ||
+      src.sourceByteCount <= 0 || typeof src.owner !== 'string' ||
+      !Number.isSafeInteger(src.pathId)) {
+    throw new RangeError('Invalid source BC3 lightmap descriptor');
+  }
+  const bytes=streamBytes instanceof Uint8Array?streamBytes:
+    streamBytes instanceof ArrayBuffer?new Uint8Array(streamBytes):null;
+  if(!bytes) throw new TypeError('Local BC3 lightmap must be Uint8Array or ArrayBuffer');
   if(bytes.byteLength!==src.sourceByteCount){
-    throw new RangeError('Exact 5592432-byte PRIVATE BC3 atlas slice required');
+    throw new RangeError('Exact source BC3 atlas byte count required');
   }
   let offset=0,width=src.width,height=src.height;
   const levels=[];
@@ -627,9 +641,6 @@ export function sliceContainersBuild28LightmapBc3Mips(streamBytes) {
  * atlas preview. SH-12 must supply authentic UV2 before cargo bake sampling.
  */
 export function containersBuild28LightmapBc3GpuPacket({colorTransfer,mipLevels=12}={}) {
-  if(colorTransfer!=='unorm-diagnostic'&&colorTransfer!=='srgb-diagnostic'){
-    throw new RangeError('Specify unorm-diagnostic or srgb-diagnostic explicitly');
-  }
   if(mipLevels!==1&&mipLevels!==12){
     throw new RangeError('Only mip0 or all 12 original BC3 levels are supported');
   }
@@ -637,14 +648,28 @@ export function containersBuild28LightmapBc3GpuPacket({colorTransfer,mipLevels=1
   if(sampler.unityFilterMode!==1||sampler.unityWrapU!==1||sampler.unityWrapV!==1){
     throw new Error('Lightmap source sampler has changed');
   }
+  return Object.freeze({
+    ...nativeLightmapBc3GpuPacket({ colorTransfer, mipLevels }),
+    serializedAniso:3,
+  });
+}
+
+/** Bilinear/Clamp upload of supplied source mips; never synthesize mip levels. */
+export function nativeLightmapBc3GpuPacket({colorTransfer,mipLevels}={}) {
+  if(colorTransfer!=='unorm-diagnostic'&&colorTransfer!=='srgb-diagnostic'){
+    throw new RangeError('Specify unorm-diagnostic or srgb-diagnostic explicitly');
+  }
+  if(!Number.isSafeInteger(mipLevels)||mipLevels<1){
+    throw new RangeError('Source BC3 mip count must be a positive integer');
+  }
   const srgb=colorTransfer==='srgb-diagnostic';
   return Object.freeze({
     extensionName:srgb?'WEBGL_compressed_texture_s3tc_srgb':'WEBGL_compressed_texture_s3tc',
     internalFormatName:srgb?'COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT':'COMPRESSED_RGBA_S3TC_DXT5_EXT',
-    minFilter:mipLevels===12?'LINEAR_MIPMAP_NEAREST':'LINEAR',
+    minFilter:mipLevels>1?'LINEAR_MIPMAP_NEAREST':'LINEAR',
     magFilter:'LINEAR',wrapS:'CLAMP_TO_EDGE',wrapT:'CLAMP_TO_EDGE',
     maxLevel:mipLevels-1,generateMipmaps:false,mipLevels,
-    serializedFilterMode:1,serializedAniso:3,serializedMipBias:0,
+    serializedFilterMode:1,serializedMipBias:0,
     originalRuntimeOverrideVerified:false,
     colorTransferHypothesis:colorTransfer,uv2RequiredForNativeBake:true,
     nativeLightmapShaderVerified:false,

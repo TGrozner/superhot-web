@@ -1,6 +1,6 @@
 # SH-15 — Comparaison visuelle MCD ↔ Web (protocole, **pas** un certificat 1:1)
 
-**État courant :** six paires native/Web de personnages isolés ont été capturées et comparées ; les résultats et leurs limites figurent dans « Vérifications effectivement observées ». Aucune paire complète de gameplay n'établit la fidélité1:1. La cible est SUPERHOT: MIND CONTROL DELETE (MCD), Containers/buildIndex28. Les sections d'audit initial ci-dessous sont historiques.
+**État courant :** le localhost configuré charge désormais Dojo (`SHRL_Dojo2`, buildIndex10), identifié et capturé dans le replay natif laissé par le propriétaire. Les six paires de personnages isolés ci-dessous restent des références distinctes. Aucune paire complète de gameplay n'établit la fidélité1:1. La cible est SUPERHOT: MIND CONTROL DELETE ; les audits initiaux de Containers/buildIndex28 sont historiques.
 
 ## Les trois priorités visuelles à SH-05 — mise à jour après #98
 
@@ -80,18 +80,32 @@ node scripts/visual-framing.mjs --web-frame private/frame.json --native-vfov 60.
 
 Le descripteur contient le numéro de frame, la caméra, le champ `projection` et la matrice `viewProjection` effectivement envoyée au GPU. L'analyse calcule FOV, near/far et taille idéale projetée ; son verdict `PROJECTION_..._NO_PIXEL_MEASUREMENT` reste structurel, pas une comparaison d'images.
 
-Containers utilise la projection sérialisée 60.0000267° / near0.03 / far1000. Sa position de départ vient d'un point de départ auteur ; le transform sérialisé de la caméra, situé hors du niveau sous Core Mechanics, n'est pas ajouté à ce point. Ce choix Web ne prouve pas la sélection aléatoire faite par le jeu natif.
+La scène sélectionnée conserve ses caméras sérialisées. Si le paquet fournit une `entryCamera` observée, sa transformation et sa projection déterminent la vue d'entrée. Le Dojo utilise ainsi une caméra du replay, sans confondre ce point de vue avec un point de départ aléatoire ou l'état initial d'une nouvelle partie.
 
 ## Capture Web actuelle, sans flags
 
-1. Lancer `npm start`, ouvrir **http://localhost:4173/** et attendre le chargement des originaux configurés. La scène complète remplace le précédent aperçu de quatre cargos.
+1. Lancer `npm start`, ouvrir **http://localhost:4173/** et attendre le chargement de la scène sélectionnée dans la configuration privée. Le choix courant du propriétaire est Dojo, sans paramètre d'URL.
 2. Pour une capture, conserver une caméra fixe et relever `window.__superhotGetRenderedFrameSnapshot()`. Passer sa caméra exacte et son `activeScreen` à `captureContainersWeb({expectedCamera,expectedScreen,webCommit,strictViewport})`, importé depuis `/scripts/visual-web-capture.mjs`. Le mode strict demande un canvas1920×1080 et DPR1.
 3. Le script vérifie la caméra et la phase pendant l'encodage PNG. Il conserve projection, horloge et compteurs de la frame lorsque disponibles. Le dernier draw ennemi n'est **pas** la pose de tous les acteurs. L'horloge du monde peut avancer : aucune correspondance de pose native n'en est déduite.
 4. `downloadRequested` indique une demande de téléchargement, pas un fichier effectivement enregistré. Les images, modèles, données de pose et références originales restent privés.
 
 ## Vérifications effectivement observées
 
-La racine a été exercée dans Chromium/WebGL2 avec360 instances de décor,185037 triangles,68 meshes,21 textures, personnage original skinné et pistolet original. Marche, pause, tir, lancer et impact ont été exercés ; les contrôles de scénario ne prouvent pas un parcours natif. Le décor compte121 compositions Concrete MAIN sourcées et239 draws génériques. Les chemins BC3 à12 mips et PNG de repli sans S3TC ont tous deux été observés sans erreur GL.
+### Dojo observé dans le replay
+
+La lecture native a identifié la scène10. Une capture produite par Unity et deux inventaires de renderers/colliders ont été conservés en privé. Le second inventaire inclut les copies du replay dans `DontDestroyOnLoad` : les objets originaux déplacés vers layer25 ne sont pas supprimés au motif que le replay les masque.
+
+Le paquet applique uniquement21 exclusions de renderers de configuration de map appariés sans ambiguïté, et42 exclusions de colliders correspondants. Les états sérialisés et les observations sont conservés séparément. La vue Web charge178 draws de décor,49820 triangles,20 meshes,17 textures et312 BoxColliders ; l'atlas BC3 de4096² utilise ses13 mips. Le rendu observé compte141 compositions Concrete complètes,22 BlackCrystal et15 compositions partielles.
+
+La racine, le déplacement, l'inspection du personnage avec son arme, puis coup de poing→récupération du pistolet→tir5→4→lancer ont été exercés sans erreur GL. La prise de souris était une précondition simulée pour les scénarios de combat, qui utilisaient les vrais gestionnaires DOM. Les personnages prennent maintenant la direction lumineuse de level10, pas celle de Containers. Le brouillard de sol Concrete a été vérifié sur GPU désactivé, au centre et hors de sa hauteur d'effet.
+
+Le départ sans arme est le comportement source de base ; les modifications de partie et l'inventaire du replay ne sont pas reproduits. Les ennemis, leur chronologie et les débris restent une simulation Web. Les captures ne sont pas une paire quantitative enregistrée : instant, post-traitement, HUD et densité de pixels diffèrent encore.
+
+### Lot précédent — Containers
+
+La précédente racine avait été exercée avec272 draws de décor et549 colliders après retrait des marqueurs de spawn, des barrières désactivées de NODE6C et de81 fragments de classeurs cachés par l'initialisation source. Les objets intacts étaient conservés. Les chemins BC3 à12 mips et PNG sans S3TC avaient été observés dans ce lot ; ce dernier résultat ne qualifie pas à lui seul le repli PNG du nouveau Dojo.
+
+### Références isolées de personnages
 
 Six références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75, hit0.25, fire0.25 et punch0.5, à960×540, caméra(0,1.15,4), avec les mêmes matrices de vue/projection. La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux. Le Web utilise son véritable pass de skinning GPU et le shader Red Crystal reconstruit, sans redimensionnement, antialiasing désactivé. Le temps du shader Web est fixé à0 ; la phase globale native et son état lumineux ne sont pas enregistrés dans ces références. Les images et le rapport `native-web-red-crystal-comparison-v1.json` restent privés.
 

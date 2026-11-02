@@ -748,3 +748,10 @@ réfutable consiste à capturer deux bullets d'une même arme, puis de
 deux armes distinctes, relever les deux `parentWeaponId`, vérifier les
 demandes `SliceInHalf`, et refaire le même ordre de contacts et de
 destruction dans le Web. Aucun asset/code décompilé n'est publié.
+
+Empty native-mode pistol throws now follow `Gun.SpawnThrowawayAdditional:282–293`:
+unpickable immediately, removed after two world seconds from the throw, including
+after wall impact. A controlled browser input scenario reproduced the old empty
+repickup, then observed no pickup and the actual pistol draw disappearing at2.054s
+of world time; GL error0. Pointer-lock was a simulated precondition. Loaded throws
+and the explicit demo mode retain their existing pickup policy.

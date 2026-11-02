@@ -15,7 +15,7 @@ const localAssetTypes = {
   enemyHeadless: ['EnemyMergedHeadless.obj.gz', 'application/gzip'],
   enemyRig: ['enemy-merged-animated.json', 'application/json'],
   enemyHeadlessRig: ['enemy-merged-headless-animated.json', 'application/json'],
-  scenePackage: ['containers-scene.json.gz', 'application/gzip'],
+  scenePackage: ['native-scene.json.gz', 'application/gzip'],
   sceneLightmap_000: ['sceneLightmap_000.png', 'image/png'],
   sceneLightmapBc3: ['sceneLightmap_000.bc3', 'application/octet-stream'],
   sceneConcreteMicroseam: ['sceneConcreteMicroseam.png', 'image/png'],
@@ -39,7 +39,8 @@ try {
   const actualPrivateRoot = await realpath(privateRoot);
   for (const id of Object.keys(config)) {
     const descriptor = Object.hasOwn(localAssetTypes, id) ? localAssetTypes[id] :
-      (/^sceneTexture_[0-9]{3}$/.test(id) ? [`${id}.png`, 'image/png'] : null);
+      (/^scene(?:Texture|Lightmap)_[0-9]{3}$/.test(id) ? [`${id}.png`, 'image/png'] :
+        /^sceneLightmapBc3_[0-9]{3}$/.test(id) ? [`${id}.bc3`, 'application/octet-stream'] : null);
     if (!descriptor) continue;
     const [name, type] = descriptor;
     const file = await realpath(resolve(privateRoot, config[id]));

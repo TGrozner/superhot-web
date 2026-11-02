@@ -275,3 +275,18 @@ vérifiés **séparément** ; aucun test Unity runtime n'a été exécuté.
 **Livraison bornée :** `src/animation/enemy-stun-command-plan.js::planPejAiBodyStun` prend tous les états, temps Unity réels, IDs de renderers et vecteurs en arguments ; elle émet des commandes ordonnées et n'exécute aucune action Unity. `tests/animation-enemy-stun-command-plan.test.mjs` couvre la garde au seuil, l'annulation kamikaze, la comparaison stricte audio, boss/hors boss, les renderers nuls et la remise à zéro du focus. Aucune durée d'animation, clip de réaction, coefficient shader ni effet audio synthétique n'est inventé.
 
 **INCONNU / scénarios réfutables :** aucun chemin `tir → hit → PejAiBody.Stun` n'est établi sur l'instance réellement chargée de Containers. Les paramètres kamikaze et la présence des renderers actifs restent à vérifier pour cette instance. Une mort appelée seulement via `PejAiBody.Kill` ne doit pas être rejouée comme Stun. Le runtime Web fige désormais la pose au moment du décès au lieu d'utiliser le clip `hit`, avec des fragments encore provisoires : ce comportement ne valide ni un événement Stun ni un ragdoll natif. Le plan reste réservé à une invocation Stun confirmée.
+
+## Raccord visible des armes originales
+
+Les paquets privés v9 conservent les poses v8 et ajoutent l'attache droite du
+pistolet : WeaponSocket5567/Transform2227, enfant du poignet1973. Le rendu compose
+la pose finale du poignet et l'attache source, puis dessine le pistolet tenu.
+Repos, marche, course et tir isolé ont été affichés dans Chromium ; les variantes
+complète et sans tête conservent leur arme. La visée IK et le ragdoll restent distincts.
+
+Le joueur n'utilise plus ce modèle de pickup : son modèle actif est
+`sharedassets0.assets::149`, via Container1723 et modèle2232 du PistolGun711.
+La position de main vient de Gun4849 ; la projection20° vient de
+`level28::24367`, avec le shader8 et le matériau10. L'orientation a été observée
+dans la racine, puis après changement yaw/pitch et tir5→4. Le recul Web reste
+une approximation ; aucun alignement temporel complet des tweens natifs n'est revendiqué.

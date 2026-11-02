@@ -488,3 +488,20 @@ retain their geometric normal, including the recovered unnormalized Concrete
 varying. The merged root again rendered360 world draws/121 Concrete draws with
 Red Crystal active and GL error0. Source-text regex checks of old GLSL variable
 names were removed rather than repinned to the reconstructed shader.
+
+### Visible world and player-weapon composition
+
+The default draw now consumes reconstructed BlackCrystal reflection/specular/fog,
+static RedCrystal hazards, the fence's serialized alpha cutoff and monitor atlas
+animation. Qualified opaque/cutout passes apply source blend/depth state and restore
+inherited state. World and weapon clocks are supplied by the actual main loop.
+The latest root drew121 full Concrete,94 BlackCrystal,5 static RedCrystal,1 cutout
+and1 monitor with GL error0;51 compositions remain partial, including48 unlightmapped
+Concrete draws. This is not proof of all shader variants or postprocessing parity.
+
+The actual first-person baked hand/glock uses mesh149/material10/shader8 and a
+separate20° source projection, with foreground depth compression. It does not
+reuse the dropped-pistol mesh230 or its attachment chain. Root screenshots and
+a controlled yaw/pitch+shot scenario show the corrected forward-facing weapon.
+Private source package SHA-256:
+`ecff89ced2ea574f8b95824ee8d29fa3c0cae80f8f8611060db1cb3f4eefa0af`.

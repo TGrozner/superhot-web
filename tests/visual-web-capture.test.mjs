@@ -32,8 +32,9 @@ const metrics={
   },totalWebGLDrawCalls:61,p95FrameMs:17.5,
 };
 const nativeMetrics={
-  browserMeasured:true,mode:'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY',
-  nativeScene:{meshes:68,instances:360,textures:17},
+  browserMeasured:true,mode:'NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY',
+  nativeScene:{source:{sceneBuildIndex:10,scenePath:'Assets/Scenes/Fixture.unity',serializedOwner:'level10'},
+    meshes:68,instances:360,textures:17},
   generatedManifest:{drawCalls:360,triangles:185037,nativeGeometry:true,nativeMaterialParity:false},
   totalWebGLDrawCalls:371,p95FrameMs:17.5,
 };
@@ -57,7 +58,7 @@ test('real public preview counter contract uses 2 local files, 3 Mesh6 instances
 });
 test('default-root native world accepts real draw counters without manual File groups',()=>{
   const report=requireContainersWebEvidence({...input,metrics:nativeMetrics});
-  assert.deepEqual(report.nativeScene,{meshes:68,instances:360,textures:17});
+  assert.deepEqual(report.nativeScene,nativeMetrics.nativeScene);
   assert.deepEqual(report.generatedManifest,nativeMetrics.generatedManifest);
   assert.equal(report.totalWebGLDrawCalls,371);
   assert.equal(report.privateIndexedDraws,undefined);
@@ -75,7 +76,7 @@ test('native root rejects missing or contradictory draw evidence, not arbitrary 
     {generatedManifest:{...nativeMetrics.generatedManifest,nativeGeometry:false}},
     {totalWebGLDrawCalls:359},
   ]) assert.throws(()=>requireContainersWebEvidence({...input,metrics:{...nativeMetrics,...changes}}),/native world/);
-  const other={...nativeMetrics,nativeScene:{meshes:3,instances:8,textures:2},
+  const other={...nativeMetrics,nativeScene:{...nativeMetrics.nativeScene,meshes:3,instances:8,textures:2},
     generatedManifest:{...nativeMetrics.generatedManifest,drawCalls:9,triangles:120},totalWebGLDrawCalls:10};
   assert.equal(requireContainersWebEvidence({...input,metrics:other}).generatedManifest.drawCalls,9);
 });
@@ -212,7 +213,6 @@ test('capture records the rendered pose in PNG and reports only an intended down
   assert.equal(report.worldClock,1.25);
   assert.equal(report.cameraStatus,'RENDERED_FRAME_POSE_AND_PROJECTION_ONLY');
   assert.match(report.rawCanvasSha256,/^[0-9a-f]{64}$/);
-  assert.match(report.intendedFilename,/^containers-web-.*\.png$/);
   assert.equal(mock.requested.length,1);
   assert.equal(mock.requested[0].filename,report.intendedFilename);
   const bytes=new Uint8Array(await mock.requested[0].blob.arrayBuffer());

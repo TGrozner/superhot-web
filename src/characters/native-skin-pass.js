@@ -519,6 +519,19 @@ export function loadNativeSkinPackage(sourcePackage) {
     });
   });
 
+  let weaponAttachment = null;
+  if (sourcePackage.weaponAttachment != null) {
+    const attachment = sourcePackage.weaponAttachment;
+    const bone = checkedBones.findIndex(entry => entry.name === attachment.bone);
+    if (bone < 0) throw new TypeError('weaponAttachment.bone must name a sampled bone');
+    weaponAttachment = Object.freeze({
+      bone,
+      localMatrix: affineMatrix(attachment.localMatrix, 'weaponAttachment.localMatrix'),
+      source: explicitMetadata(attachment.source, 'weaponAttachment.source'),
+      coordinates: explicitMetadata(attachment.coordinates, 'weaponAttachment.coordinates'),
+    });
+  }
+
   const inverseBindMatrices = new Float32Array(bones.length * 16);
   for (let bone = 0; bone < bones.length; bone++) {
     inverseBindMatrices.set(affineMatrix(
@@ -599,7 +612,7 @@ export function loadNativeSkinPackage(sourcePackage) {
       gpuJointIndices, vertexCount, indexCount: indices.length,
     }),
     bones: Object.freeze(checkedBones), clips, states, transitions, actionTiming,
-    actionLayers, actionPrecompositions, clipDurations,
+    actionLayers, actionPrecompositions, clipDurations, weaponAttachment,
     availableClips: Object.freeze(Object.keys(clips)),
     availableTransitions: Object.freeze(Object.keys(transitions)),
     availableActions: Object.freeze(Object.keys(actionLayers).filter(name => actionLayers[name].webComposable)),
@@ -1163,6 +1176,10 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const actionFromPose = makePoseScratch(loaded);
   const transitionInput = { fromClip: '', fromTime: 0, fromPlayback: 'clamp', elapsed: 0 };
   const transitionResult = { key: null, duration: 0, weight: 1 };
+  // Borrowed by the draw report until the next draw. The exported local matrix
+  // includes the weapon geometry's basis conversion, not its source mesh offset.
+  const weaponModelMatrix = loaded.weaponAttachment ? new Float32Array(16) : null;
+  const weaponAttachmentMatrix = loaded.weaponAttachment ? new Float32Array(16) : null;
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1190,7 +1207,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
 
   const camera = new Float32Array(3);
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
-                  cameraPosition = null, color, transition = null, action = null } = {}) {
+                  cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
+                  color, transition = null, action = null } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1210,6 +1228,12 @@ export function createNativeSkinPass(gl, sourcePackage, {
     if (!shaderTimeProvided) shaderTime = time;
     if (!Number.isFinite(shaderTime) || !Number.isFinite(Math.fround(shaderTime))) {
       throw new TypeError('shaderTime must be a finite float32 source-clock sample');
+    }
+    numericArray(sourceLighting.directionToLight, 3, 'source light direction');
+    for (let component = 0; component < 3; component++) {
+      if (!Number.isFinite(Math.fround(sourceLighting.directionToLight[component]))) {
+        throw new RangeError('source light direction requires finite float32 xyz');
+      }
     }
     const cameraProvided = cameraPosition != null;
     const indexedCamera = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
@@ -1264,6 +1288,13 @@ export function createNativeSkinPass(gl, sourcePackage, {
       palette = evaluatePalette(loaded, loaded.clips[instance.clip], time, instance.playback, scratch,
         actionLayer ? actionPose : null, actionLayer?.mask, actionWeight);
     }
+    if (loaded.weaponAttachment) {
+      // Use globals, not the inverse-bind skin palette: every transition and
+      // precomposed fire path has already composed the same final hand pose here.
+      multiplyInto(scratch.globals, loaded.weaponAttachment.bone * 16,
+        loaded.weaponAttachment.localMatrix, 0, weaponModelMatrix, 0);
+      multiplyInto(modelMatrix, 0, weaponModelMatrix, 0, weaponAttachmentMatrix, 0);
+    }
     const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM);
     const previousVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     const culling = gl.isEnabled(gl.CULL_FACE);
@@ -1284,7 +1315,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
       gl.uniform4f(uniforms.uRedCrystalControl,
         loaded.mesh.hasSourceUV0 ? 1 : 0, shaderTime, viewportAspect, 0);
       gl.uniform3f(uniforms.uCameraPosition, camera[0], camera[1], camera[2]);
-      gl.uniform3f(uniforms.uSourceLightDirection, ...RED_CRYSTAL_SOURCE.directionToLight);
+      gl.uniform3f(uniforms.uSourceLightDirection, ...sourceLighting.directionToLight);
       if (culling) gl.frontFace(mirrored ? gl.CW : gl.CCW);
       gl.drawElements(gl.TRIANGLES, loaded.mesh.indexCount,
         loaded.mesh.indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
@@ -1299,6 +1330,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
       nativeClipSampled: true, runtimeEnemyInstanceVerified: false,
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
+      weaponAttachmentMatrix,
     };
     if (loaded.mesh.hasSourceUV0) {
       report.redCrystalSourceDefaultForward = true;
@@ -1308,7 +1340,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
       report.redCrystalVertexProgramSha256 = RED_CRYSTAL_SOURCE.vertexProgramSha256;
       report.redCrystalFragmentProgramSha256 = RED_CRYSTAL_SOURCE.fragmentProgramSha256;
       report.redCrystalUvProvenance = 'private-package-mesh-uv0';
-      report.redCrystalDirectionalProvenance = RED_CRYSTAL_SOURCE.directionProvenance;
+      report.redCrystalDirectionalProvenance = sourceLighting.directionProvenance;
       report.redCrystalShaderTime = shaderTime;
       report.redCrystalShaderTimeProvenance = shaderTimeProvided
         ? 'caller-supplied-clock-unmatched-native-global-phase'

@@ -78,8 +78,9 @@ test('SH16 distinguishes source-group upload path from a real measured browser s
 
 test('SH16 accepts native-root scene counters without requiring manual preview groups', () => {
   const metrics = {
-    mode: 'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY', browserMeasured: true,
-    nativeScene: { meshes: 68, instances: 360, textures: 17 },
+    mode: 'NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY', browserMeasured: true,
+    nativeScene: { source: { sceneBuildIndex: 10, scenePath: 'Assets/Scenes/Fixture.unity', serializedOwner: 'level10' },
+      meshes: 68, instances: 360, textures: 17 },
     generatedManifest: { drawCalls: 360, triangles: 185037, nativeGeometry: true },
     totalWebGLDrawCalls: 371, p95FrameMs: 16.7,
   };

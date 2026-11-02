@@ -3,6 +3,7 @@ import { containersConcreteGpuSamplerPacket } from './material-model.js';
 const WORLD_CATEGORY = 'world';
 const CATEGORIES = new Set([
   WORLD_CATEGORY,
+  'first-person-weapon',
   'technical_trigger_volume',
   'technical_player_or_spawn_capsule',
   'crosshair_overlay_excluded_by_initial_world_camera',
@@ -101,13 +102,45 @@ const SOURCE_CONTRACTS = Object.freeze({
       '_IsEnemy', '_ReflectionPower', '_ReflectionRampAngle',
       '_ReceivedLightPower', '_SpecularPower', '_SuperSpecularPower',
       '_UseAdditiveGradientMap', '_UseGradientMap',
+      '_HDRPhase', '_HDRPhaseB',
     ]),
     unresolved: Object.freeze([
       'selected FORWARDBASE compiled variant and live global shader keywords',
-      'meaning and production of the compiled reflection-direction varying',
       'native R8 sampling transfer despite serialized m_ColorSpace=1',
-      'directional light, shadows, focus/death state and runtime property blocks',
+      'runtime directional light/shadows, vertex deformation and property blocks',
       'post-processing, exposure and final framebuffer transfer',
+    ]),
+  }),
+  'sharedassets3.assets::2': Object.freeze({
+    family: 'concrete-2019-cutoff',
+    shader: 'globalgamemanagers.assets::22',
+    keyword: null,
+    texture: Object.freeze({
+      property: '_MainTex', source: 'sharedassets3.assets::3',
+      semantic: 'albedo-alpha-cutoff', uvSource: 'uv0',
+      width: 1024, height: 1024,
+    }),
+    parameters: Object.freeze(['_Color', '_Cutoff']),
+    unresolved: Object.freeze([
+      'cutout coverage is reconstructed; full Concrete lighting for this variant is not',
+      'runtime property blocks, source mip chain and post-processing',
+    ]),
+  }),
+  'sharedassets11.assets::3': Object.freeze({
+    family: 'monitor-screen',
+    shader: 'globalgamemanagers.assets::20',
+    keyword: null,
+    texture: Object.freeze({
+      property: '_MainTex', source: 'sharedassets11.assets::5',
+      semantic: 'animated-screen-atlas', uvSource: 'uv0',
+      width: 1024, height: 1024,
+    }),
+    parameters: Object.freeze([
+      '_NumX', '_NumY', '_PlaybackSpeed', '_TimeOffset', '_PositionOffset',
+    ]),
+    unresolved: Object.freeze([
+      'native clock phase and runtime property blocks',
+      'ground fog and post-processing',
     ]),
   }),
   'sharedassets0.assets::13': Object.freeze({
@@ -129,13 +162,26 @@ const SOURCE_CONTRACTS = Object.freeze({
     ]),
     unresolved: Object.freeze([
       'selected FORWARDBASE compiled variant and live global shader keywords',
-      'global texture sampled by the compiled pass (no material texture binding)',
-      'semantics/producers of the compiled procedural, overlay and additive varyings',
-      'camera/time/deformation varyings, local-fog globals and runtime property blocks',
-      'directional light and shadow inputs',
+      'inactive focus/glitch branches and their global texture producers',
+      'runtime deformation, focus/death property blocks and native clock phase',
+      'runtime directional light and shadow inputs',
       'post-processing, exposure and final framebuffer transfer',
     ]),
   }),
+});
+
+// Shader 8 shares only the reflection atlas/addressing with shader 12.
+const FIRST_PERSON_PISTOL_CONTRACT = Object.freeze({
+  family: 'first-person-black-crystal',
+  shader: 'globalgamemanagers.assets::8',
+  keyword: null,
+  texture: SOURCE_CONTRACTS['sharedassets0.assets::9'].texture,
+  parameters: Object.freeze(['_IsPlayerHands']),
+  unresolved: Object.freeze([
+    'runtime directional shadow texture and selected shadow keyword',
+    'native R8 sampling transfer and source reflection mip chain beyond imported mip0',
+    'post-processing, exposure and final framebuffer transfer',
+  ]),
 });
 
 const basePass = (name, colorWrite, depthWrite = true) => Object.freeze({
@@ -195,9 +241,23 @@ const PASS_CONTRACTS = Object.freeze({
     basePass('FORWARD', 'rgb'),
     additivePass('FORWARD ADD', 'rgb', false),
   ),
+  'first-person-black-crystal': Object.freeze({
+    ...materialPasses(basePass('FORWARDBASE', 'rgba'), null),
+    queue: 'geometry-minus-10000',
+    projection: 'source-custom-fov',
+    fragmentDepth: 'compressed-front-tenth',
+  }),
   'red-crystal': materialPasses(
     basePass('FORWARD BASE WITH DIRECTIONAL', 'rgba'),
     additivePass('FORWARD ADD', 'rgba', false),
+  ),
+  'concrete-2019-cutoff': Object.freeze({
+    ...materialPasses(basePass('MAIN FORWARD BASE WITH ONE DIRECTIONAL', 'rgba'), null),
+    alphaMode: 'cutout',
+    cutout: true,
+  }),
+  'monitor-screen': materialPasses(
+    basePass('MAIN FORWARD BASE WITH ONE DIRECTIONAL', 'rgba'), null,
   ),
 });
 
@@ -287,7 +347,11 @@ export function createNativeSceneMaterialPacket(material, {
     throw new TypeError('meshHasUv0 must be boolean or null');
   }
   const identity = sourceIdentity(material);
-  const contract = SOURCE_CONTRACTS[identity];
+  // The hazard material is a separate source asset using the same default
+  // Red Crystal shader and serialized focus branch as the enemy material.
+  const contract = SOURCE_CONTRACTS[identity] ??
+    (identity === 'sharedassets0.assets::10' ? FIRST_PERSON_PISTOL_CONTRACT :
+      identity === 'sharedassets0.assets::16' ? SOURCE_CONTRACTS['sharedassets0.assets::13'] : null);
   const worldPassEligible = renderCategory === WORLD_CATEGORY;
   if (!contract) {
     return freezeObject({
@@ -307,7 +371,7 @@ export function createNativeSceneMaterialPacket(material, {
   if (material.shader?.source !== contract.shader) {
     throw new Error(`${contract.family} requires exact shader ${contract.shader}`);
   }
-  if (!Array.isArray(material.keywords) || !material.keywords.includes(contract.keyword)) {
+  if (contract.keyword && (!Array.isArray(material.keywords) || !material.keywords.includes(contract.keyword))) {
     throw new Error(`${contract.family} requires active source keyword ${contract.keyword}`);
   }
   return freezeObject({
@@ -322,11 +386,17 @@ export function createNativeSceneMaterialPacket(material, {
     pass: PASS_CONTRACTS[contract.family],
     parameters: propertySubset(material, contract.parameters),
     texture: texturePacket(material, contract, meshHasUv0),
-    shaderMathCoverage: contract.family === 'black-crystal'
-      ? 'reflection-lookup-address-and-fourth-power-only'
+    shaderMathCoverage: contract.family === 'first-person-black-crystal'
+      ? 'custom-fov-derivative-normal-cubic-reflection-directional-compositor-and-depth'
+      : contract.family === 'black-crystal'
+        ? 'directional-vertex-reflection-specular-focus-and-fog-compositor'
       : contract.family === 'concrete-2019-main'
         ? 'compiled-directional-lightmap-forward-compositor-with-serialized-globals'
-        : 'final-rgb-compositor-and-opaque-output-alpha-only',
+        : contract.family === 'concrete-2019-cutoff'
+          ? 'source-alpha-cutoff-with-diffuse-lighting'
+          : contract.family === 'monitor-screen'
+            ? 'source-atlas-animation-view-offset-and-fog'
+            : 'compiled-default-focus-directional-compositor',
     unresolved: contract.unresolved,
   });
 }
@@ -443,15 +513,23 @@ vec4 nativeConcreteAccumulatedLight(
 }
 vec3 nativeConcreteLocalFog(
   vec3 rgb, sampler2D fogGradient, vec3 worldPosition, vec3 cameraPosition,
-  vec3 fogColor, float fogScale, float fogPower, float secondaryDistance
+  vec3 fogColor, float fogScale, float fogPower, float secondaryDistance,
+  vec3 groundFogColor, vec3 groundFog
 ) {
   float distanceToCamera = length(cameraPosition - worldPosition);
   float primary = clamp(distanceToCamera / fogScale, 0.0, 1.0);
   float secondary = min(clamp((distanceToCamera - secondaryDistance) * 0.01, 0.0, 1.0), 0.8);
   secondary += clamp(abs(worldPosition.y - cameraPosition.y) - 2.0, 0.0, 1.0) * 0.03;
-  vec3 distanceFog = mix(fogColor, vec3(1.0), secondary);
+  // Source fragment cb0[5].xy: altitude/scale; cb0[11].z: ground enable.
+  // _LocalShowFog is source-qualified to 1 by the scene lighting contract.
+  float ground = 0.0;
+  if (groundFog.z != 0.0) {
+    float height = abs(groundFog.x - worldPosition.y) / groundFog.y;
+    ground = clamp(2.0 * (1.0 - clamp(height * height * height, 0.0, 1.0)) * groundFog.z, 0.0, 1.0);
+  }
+  vec3 distanceFog = mix(mix(fogColor, groundFogColor, ground), vec3(1.0), secondary);
   float gradient = textureLod(fogGradient, vec2(primary, 0.5), 0.0).r * fogPower;
-  return mix(rgb, distanceFog, clamp(secondary + gradient, 0.0, 1.0));
+  return mix(rgb, distanceFog, clamp(secondary + gradient + ground, 0.0, 1.0));
 }`.trim(),
   blackCrystalReflection: `
 vec2 nativeBlackCrystalReflectionUv(vec3 direction) {
@@ -467,6 +545,27 @@ float nativeBlackCrystalReflectionLevel(sampler2D reflectionLookup, vec3 directi
   float value = texture(reflectionLookup, nativeBlackCrystalReflectionUv(direction)).r;
   float square = value * value;
   return square * square;
+}`.trim(),
+  // Independently reconstructed shader-8 directional base, not shader-12's
+  // vertex-lit Black Crystal. Direction inputs use the original world axes.
+  firstPersonBlackCrystal: `
+vec3 nativeFirstPersonBlackCrystal(
+  sampler2D reflectionLookup, vec3 normal, vec3 vertexView,
+  vec3 objectLight, vec3 sourceWorld, vec2 screenUv, float aspect, float time
+) {
+  vec3 reflected = reflect(-vertexView, normal);
+  vec2 atlasUv = nativeBlackCrystalReflectionUv(reflected);
+  atlasUv.x += fract(dot(sourceWorld, vec3(0.1)));
+  float sampleRed = texture(reflectionLookup, atlasUv).r;
+  float reflection = sampleRed * sampleRed * sampleRed;
+  float rim = clamp((0.2 - clamp(dot(normalize(vertexView), normal), 0.0, 1.0)) * 12.0, 0.0, 1.0);
+  float specular = pow(max(dot(normal, normalize(vertexView + objectLight)), 0.0) * 0.9, 20.0);
+  vec3 rgb = rim * vec3(0.12, 0.35, 0.39)
+    + reflection * vec3(0.15, 0.25, 0.3) - vec3(0.01, 0.02, 0.03)
+    + specular * vec3(3.3, 8.8, 9.9);
+  float stripe = abs(fract((screenUv.x * aspect + screenUv.y) * 90.0 + time) - 0.5) * 2.0;
+  rgb += stripe * stripe * vec3(0.09, 0.1, 0.13);
+  return rgb + (rgb.g > 0.9 ? 10.0 : 0.0);
 }`.trim(),
   redCrystalOutput: `
 vec4 nativeRedCrystalFinalOutput(

@@ -179,22 +179,24 @@ export async function auditVerticalIntegration(root = ROOT) {
 
 /**
  * Optional browser-telemetry assessment. The input MUST come from an actually
- * opened Containers root/manual-preview session; a fabricated JSON sample is not evidence.
+ * opened native-scene root/manual-preview session; a fabricated JSON sample is not evidence.
  * In-app counters do not prove that the browser displayed the expected pixels.
  */
 export function assessContainersBrowserMetrics(metrics) {
   if (metrics == null) return { status: 'NOT_OBSERVED', nativeParityVerdict: 'UNASSESSED' };
   if (typeof metrics !== 'object' || Array.isArray(metrics) ||
-      !['CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME','CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'].includes(metrics.mode) ||
+      !['CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME','NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'].includes(metrics.mode) ||
       metrics.browserMeasured !== true) {
     return { status: 'INVALID_OR_NOT_CONTAINERS', nativeParityVerdict: 'UNASSESSED' };
   }
-  if (metrics.mode === 'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY') {
+  if (metrics.mode === 'NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY') {
     const scene = metrics.nativeScene;
     const manifest = metrics.generatedManifest;
     const calls = metrics.totalWebGLDrawCalls;
     if (!scene || ['meshes','instances','textures'].some(key =>
       !Number.isSafeInteger(scene[key]) || scene[key] <= 0) ||
+      !Number.isSafeInteger(scene.source?.sceneBuildIndex) || scene.source.sceneBuildIndex < 0 ||
+      typeof scene.source?.scenePath !== 'string' || typeof scene.source?.serializedOwner !== 'string' ||
       manifest?.nativeGeometry !== true ||
       !Number.isSafeInteger(manifest.drawCalls) || manifest.drawCalls <= 0 ||
       !Number.isSafeInteger(manifest.triangles) || manifest.triangles <= 0 ||
@@ -204,7 +206,7 @@ export function assessContainersBrowserMetrics(metrics) {
     }
     return {
       status: 'APP_REPORTED_NATIVE_WORLD_DRAWS',
-      reportedNativeScene: { meshes: scene.meshes, instances: scene.instances, textures: scene.textures },
+      reportedNativeScene: { source: scene.source, meshes: scene.meshes, instances: scene.instances, textures: scene.textures },
       reportedNativeWorldDrawCalls: manifest.drawCalls,
       reportedNativeWorldTriangles: manifest.triangles,
       reportedTotalWebGLDrawCalls: calls,

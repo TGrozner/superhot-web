@@ -257,9 +257,14 @@ export function createRenderer(canvas) {
   let drawCalls=0;
   const viewProjection = new Float32Array(16);
   let currentCamera = null;
+  const currentSceneClock = { scaledTime: 0, unscaledTime: 0, timeScale: 1 };
   let projectionState = null;
-  function begin(camera, { fogStrength = GENERATED_FOG_STRENGTH, projection = null } = {}) {
+  function begin(camera, { fogStrength = GENERATED_FOG_STRENGTH, projection = null,
+    scaledTime = 0, unscaledTime = 0, timeScale = 1 } = {}) {
     currentCamera = camera;
+    currentSceneClock.scaledTime = scaledTime;
+    currentSceneClock.unscaledTime = unscaledTime;
+    currentSceneClock.timeScale = timeScale;
     if (!Number.isFinite(fogStrength) || fogStrength < 0 || fogStrength > 1) {
       throw new RangeError('fogStrength must be finite and within [0,1]');
     }
@@ -416,29 +421,42 @@ export function createRenderer(canvas) {
       instance, modelMatrix, viewProjection, time: time * scale(clip),
       transition: transition ? { from: (statePlayback ? skinStates : skinClips)[transition.from],
         fromTime: transition.fromTime * scale(transition.from), elapsed: transition.elapsed } : null,
-      action, shaderTime, cameraPosition,
+      action, shaderTime, cameraPosition, sourceLighting: nativeSkinLighting,
       color: [0.720588207244873, 0, 0, 1],
     });
     drawCalls += report.drawCalls;
     return report;
   }
   let nativeWorld = null;
+  let nativeSkinLighting;
   function replaceNativeWorld(prepared, images) {
     const next = createNativeWorldPass(gl, prepared, images);
     nativeWorld?.dispose();
     nativeWorld = next;
+    nativeSkinLighting = Object.freeze({
+      directionToLight: prepared.concreteLighting.globals.worldSpaceLightDirection,
+      directionProvenance: `${prepared.source.serializedOwner}-serialized-realtime-direction-web-space`,
+    });
   }
   function drawNativeWorld() {
     if (!nativeWorld) return null;
-    const report = nativeWorld.draw(viewProjection, currentCamera);
+    const report = nativeWorld.draw(viewProjection, currentCamera, currentSceneClock);
     drawCalls += report.drawCalls;
     return report;
   }
-  function drawNativeWeapon(modelMatrix) {
+  function drawNativeWeapon(modelMatrix, enemy = false) {
     if (!nativeWorld) return false;
-    const report = nativeWorld.drawWeapon(viewProjection, currentCamera, modelMatrix);
+    const report = nativeWorld.drawWeapon(viewProjection, currentCamera, modelMatrix, currentSceneClock, enemy);
+    if (!report) return false;
     drawCalls += report.drawCalls;
     return true;
+  }
+  function drawFirstPersonWeapon(modelMatrix) {
+    if (!nativeWorld) return false;
+    const report = nativeWorld.drawFirstPersonWeapon(viewProjection, currentCamera, modelMatrix, currentSceneClock);
+    if (!report) return false;
+    drawCalls += report.drawCalls;
+    return report.drawCalls > 0;
   }
   // A local, source-converted OBJ may be reused for different serialized
   // submesh placements via per-draw affine transforms (SH-04/11 #68/#63).
@@ -477,7 +495,7 @@ export function createRenderer(canvas) {
   return {
     begin,draw,affineBox,replacePrivateMesh,replacePrivateTexture,drawPrivateMesh,
     replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin,
-    replaceNativeWorld, drawNativeWorld, drawNativeWeapon,
+    replaceNativeWorld, drawNativeWorld, drawNativeWeapon, drawFirstPersonWeapon,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,
