@@ -10,7 +10,7 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 const finiteInteger = value => Number.isSafeInteger(value) && value >= 0;
 const dojoScene = source => isRecord(source) &&
   /(?:^|[\\/])SHRL_Dojo2(?:\.unity)?$/i.test(source.scenePath ?? '') &&
-  source.buildIndex === 10;
+  source.sceneBuildIndex === 10;
 const encounterOf = frame => frame?.gameplay?.encounter;
 const screenOf = frame => frame?.activeScreen;
 const killsOf = frame => encounterOf(frame)?.killed;
