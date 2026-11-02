@@ -370,7 +370,7 @@ export function auditNativeWorldStaticWiring(root = ROOT) {
     // The old literal "...actorMatrix, clip, time)" was obsolete and silently
     // marked an actually connected character draw as absent.
     skinnedActorRenderRouted:
-      /renderer\\.drawNativeSkin\\(\\s*actorMatrix\\s*,\\s*animation\\.state\\s*,\\s*time\\s*,/.test(main) &&
+      main.includes('renderer.drawNativeSkin(actorMatrix, animation.state, time, {') &&
       renderer.includes('function drawNativeSkin(') &&
       skin.includes('export function createNativeSkinPass('),
     sourceCameraProjectionRouted: main.includes('projection: nativeScene?.camera.projection'),
