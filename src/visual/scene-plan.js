@@ -1,0 +1,55 @@
+import { cameraAxes } from '../math.js';
+
+/** Generated palette: semantic labels, NOT recovered Unity materials or shaders. */
+export const GENERATED_PALETTE = Object.freeze({
+  chalk: '#e6ecf0', porcelain: '#f6f8f9', steel: '#485761',
+  glass: '#b9d9e3', red: '#d51e3b', shadow: '#202932',
+});
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+
+/** Conservative sphere/frustum test: only definitely invisible objects are culled. */
+export function isBoundsVisible(bounds, camera, {
+  aspect = 16 / 9, focalLength = 1.58, near = 0.045, far = 120,
+} = {}) {
+  if (!(aspect > 0) || !(focalLength > 0) || !(near >= 0) || !(far > near)) {
+    throw new RangeError('Invalid perspective projection');
+  }
+  const radius = bounds.radius;
+  if (!Number.isFinite(radius) || radius < 0) throw new TypeError('Invalid bounding sphere');
+  const axes = cameraAxes(camera.yaw, camera.pitch);
+  const delta = sub(bounds.center, camera);
+  const z = dot(delta, axes.forward);
+  if (z + radius < near || z - radius > far) return false;
+  const x = dot(delta, axes.right), y = dot(delta, axes.up);
+  const horizontal = aspect / focalLength, vertical = 1 / focalLength;
+  return Math.abs(x) <= z * horizontal + radius * Math.hypot(1, horizontal) &&
+    Math.abs(y) <= z * vertical + radius * Math.hypot(1, vertical);
+}
+
+/** No loss of rotations/shear: matrix packets require an affine-capable renderer. */
+export function planSceneDraws(graph, camera, options = {}) {
+  const packets = [];
+  let culled = 0, hidden = 0;
+  for (const item of graph) {
+    if (!item.primitive || !item.visible) { hidden++; continue; }
+    if (!isBoundsVisible(item.bounds, camera, options)) { culled++; continue; }
+    const color = GENERATED_PALETTE[item.material];
+    if (!color) throw new TypeError('Unknown generated material: ' + item.material);
+    const m = item.worldMatrix, s = item.primitive.size;
+    const diagonal = [1, 2, 4, 6, 8, 9].every((i) => Math.abs(m[i]) < 1e-7);
+    packets.push({
+      id: item.id, mesh: 'box', color, matrix: m.slice(), bounds: item.bounds,
+      // Legacy WebGL2 renderer accepts only translate + axis-aligned signed scales.
+      // Rotated/sheared meshes MUST NOT be silently flattened to an AABB.
+      legacyBoxArgs: diagonal ? [m[12], m[13], m[14], m[0]*s.x, m[5]*s.y, m[10]*s.z, color] : null,
+    });
+  }
+  // Group by material to reduce CPU state changes. This is not GPU instancing.
+  packets.sort((a, b) => a.color.localeCompare(b.color) || a.id.localeCompare(b.id));
+  return {
+    packets, culled, hidden,
+    affineRequired: packets.filter((p) => p.legacyBoxArgs === null).length,
+    estimatedLegacyDrawCalls: packets.filter((p) => p.legacyBoxArgs !== null).length,
+  };
+}
