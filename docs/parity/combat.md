@@ -484,3 +484,85 @@ nécessaires avant toute revendication de parité MCD.
 pour les directions infirmerait ce contrat ; une arme active avec une
 valeur `pelletsCount` différente infirmerait les **neuf** projectiles
 pour cette situation, sans infirmer la formule générale `1 + pelletsCount`.
+
+
+## SH-03 — enemy shotgun deferred fire: native source proven (2026-11-02)
+
+**PROUVÉ — code statique, PAS tir natif observé.** SUPERHOT MCD Steam build
+`20299547`, Unity `2018.4.14f1`, `Assembly-CSharp` SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+New, deduplicated private reads (no original code or asset published):
+
+| Private source | Returned report SHA-256 | Relevant native method |
+| --- | --- | --- |
+| `superhot-research#69`, artifact `13138341880` | `911ed644...43a416` | `spec/combat/ai-and-powers.md:61–84`; AI ordering/weapon family |
+| `superhot-research#70`, artifact `13137622737` | `f2d98cdb...a46c56bd2` | `managed/Assembly-CSharp/ShotGunPejAiWeapon.cs:21–68` |
+| `superhot-research#71`, artifact `13138660437` | `2b8166a7...0ca3754989` | `managed/Assembly-CSharp/GunPejAiWeapon.cs:74–117` |
+
+**PROUVÉ — method bodies**:
+
+- `ShotGunPejAiWeapon.Attack:39–56` always stores `haveBeenSeen`, but
+  enters Shoot only if `IsAttackReady()`. The successful branch marks
+  a **deferred** bullet spawn, calls a sound producer (NOT audible proof),
+  notifies the bullet-spawn hook, resets attack delay and alerts radius **5**.
+  The Attack target argument is not used to calculate this shotgun's spread.
+- `ShotGunPejAiWeapon.UpdateDeferredBulletSpawn:21–37` emits a **first**
+  spawn request followed by `pelletCount - 1` additional ones, then asks
+  to ignore mutual bullet collisions and clears its deferred flag.
+  `pelletCount = 6` at `:6` is a **C# INITIALIZER**, NOT a verified
+  Containers instance: six requests is the conditional prediction for
+  an active weapon retaining this value. Contrast: player `ShotGun.Fire`
+  emits **1 + pelletsCount**, so the two policies must not share a counter.
+- Primary direction candidate is `weaponForward × 1.16 + sphereSample / 35`.
+  Later candidates are `weaponForward + sphereSample × 1.5 / 15`.
+  Only extras vary speed by `Random.Range(-projectileSpeed/15,
+  +projectileSpeed/15)`. `GunPejAiWeapon.SpawnBulletLate:85–96`
+  **normalizes each direction** before launch; unlike the player ShotGun,
+  effective AI launch velocity has the supplied speed magnitude. The
+  actual spawn transform remains `bulletSpawnPoint.position` (no
+  randomness requested in these calls), not the artificial target point.
+- The first `SpawnBulletLate` requests default muzzle flash; all extras
+  pass `muzzleFlash=false`. `IgnoreCollisions:59–68` forms every pair:
+  for six non-null pooled bullets this is **15** pairwise requests.
+  `SpawnBulletLate` returns null on unavailable pool, and the native
+  pair loop does not protect null; do **not** assert six bullets existed,
+  15 PhysX exclusions succeeded, or that the deferred flag cleared if
+  execution throws.
+- **Source report, NOT runtime trace:** `PejAiAnimator.LateUpdate:1114–1211`
+  calls `UpdateDeferredBulletSpawn` after adjustment/IK of weapon pose.
+  The globally relative order of all Unity Update/FixedUpdate methods is
+  not established by this local call chain.
+
+**WEB IMPLEMENTATION, NOT MCD 1:1:** `src/combat/enemy-shotgun.js` adds
+`planEnemyShotgunAttack` (one readiness-gated request) and
+`planEnemyShotgunLateVolley` (post-pose candidate spawns, explicitly
+injected active `pelletCount`, projectile speed, aim, muzzle and random
+samples). The planner does **not** instantiate Bullet, implement
+`Physics.SphereCast`, run PhysX, consume ammo, cause damage, play sounds,
+or guarantee pool success. The `clearPendingOnSuccessfulCompletion`
+field is a **conditional** normal-completion instruction, not a trace
+that native completion happened. Input speed jitter factors in [-1,1]
+are supplied by the caller, not generated or claimed to match Unity RNG.
+Node tests use `pelletCount=6` and `speed=28` as **synthetic fixture
+choices matching C# initializers**, never as active Containers settings.
+
+**OBSERVÉ — test Web isolé:** eight deterministic cases locally passed
+with Node 22.16.0, including a gated attack, six queued AI shots,
+different normalized spread, muzzle taken from the *late* pose, velocity
+variation, and 15 pair candidates. The full repository check / GitHub CI
+and actual browser rendering must be reported separately on exact HEAD.
+
+**INCONNU:** the enemy shotgun's active scene `(owner,path_id)`, prefab
+overrides, active `pelletCount`, actual pose after IK, random samples,
+pool returns, attacker/target collider masks, player hit/damage reaction,
+audio audibility and visibility in Containers. No original Unity resource
+was put into the public repository.
+
+**Smallest falsifiable vertical for SH-05 only:** after identifying the
+active enemy weapon and `pelletCount`, log one native attack's readiness,
+frame phase, muzzle pose, number of successful pool bullet spawns, spread
+and speeds; compare a browser run showing the same **count and trajectories**.
+Use `src/main.js` only in lane SH-05 after code review; do not wire a
+default enemy shotgun or invent a player damage outcome. A measured
+native `pelletCount != 6` falsifies the six-shot scenario for that enemy,
+not the source formula. Audio producer calls must not be labeled audible.
