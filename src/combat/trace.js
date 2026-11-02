@@ -40,18 +40,43 @@ function sweptBoxFraction(start, end, min, max) {
 
 // Do not classify a nonzero segment as a point merely because it is short:
 // the general segmentSphere helper uses a < 1e-10 as its zero-length cutoff.
+// A scaled fallback prevents overflow/underflow in synthetic Web sweeps.
 function sweptSphereFraction(start, end, center, radius) {
-  const delta = subtract3(end, start);
-  const offset = subtract3(start, center);
+  const delta = subtract3(end, start), offset = subtract3(start, center);
+  if (Math.hypot(offset.x, offset.y, offset.z) <= radius) return 0;
   const c = dot3(offset, offset) - radius * radius;
-  if (c <= 0) return 0;
   const a = dot3(delta, delta);
-  if (a === 0) return null;
-  const halfB = dot3(offset, delta);
-  const discriminant = halfB * halfB - a * c;
-  if (discriminant < 0) return null;
-  const t = (-halfB - Math.sqrt(discriminant)) / a;
-  return t >= 0 && t <= 1 ? t : null;
+  const b = dot3(offset, delta);
+  const disc = b * b - a * c;
+  if (a > 0 && c > 0 && [a, c, b, disc].every(Number.isFinite)) {
+    if (disc < 0) return null;
+    const t = (-b - Math.sqrt(disc)) / a;
+    return t >= 0 && t <= 1 ? t : null;
+  }
+  const axes = ['x', 'y', 'z'];
+  const relativeFinite = axes.every((k) => Number.isFinite(delta[k]) && Number.isFinite(offset[k]));
+  let scale = radius;
+  for (const k of axes) {
+    scale = relativeFinite
+      ? Math.max(scale, Math.abs(delta[k]), Math.abs(offset[k]))
+      : Math.max(scale, Math.abs(start[k]), Math.abs(end[k]), Math.abs(center[k]));
+  }
+  if (scale === 0) return null;
+  const d = {}, o = {};
+  for (const k of axes) {
+    d[k] = relativeFinite ? delta[k] / scale : end[k] / scale - start[k] / scale;
+    o[k] = relativeFinite ? offset[k] / scale : start[k] / scale - center[k] / scale;
+  }
+  const r = radius / scale;
+  const cc = dot3(o, o) - r * r, aa = dot3(d, d);
+  // An exterior start must never become an artificial t=0 hit.
+  if (cc <= 0 || aa === 0) return null;
+  const bb = dot3(o, d);
+  if (bb >= 0) return null;
+  const dd = bb * bb - aa * cc;
+  if (dd < 0) return null;
+  const t = cc / (-bb + Math.sqrt(dd));
+  return Number.isFinite(t) && t >= 0 && t <= 1 ? t : null;
 }
 
 // A hit point must be finite whenever its endpoints and fraction are finite.
