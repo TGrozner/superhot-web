@@ -25,7 +25,11 @@ async function startFixture(t, configured) {
   await writeFile(join(root, 'scripts', 'capture.mjs'), 'export const example = 1;');
   await writeFile(join(root, 'private', 'model.bin'), 'generated-private-model-fixture');
   await writeFile(join(root, 'private', 'unlisted.bin'), 'must-not-be-served');
-  if (configured) await writeFile(join(root, 'private', 'browser-assets.json'), JSON.stringify({ mesh6: 'model.bin' }));
+  // Authored 1x1 PNG fixture only; never an original MCD sprite.
+  await writeFile(join(root,'private','hud.png'), Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/gVgAAAAASUVORK5CYII=',
+    'base64'));
+  if (configured) await writeFile(join(root, 'private', 'browser-assets.json'), JSON.stringify(typeof configured === 'object' ? configured : { mesh6: 'model.bin' }));
   child = spawn(process.execPath, [join(root, 'server.mjs')], {
     env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -81,4 +85,19 @@ test('a public checkout without private configuration does not invent original a
   assert.equal((await fetch(base + '/local-assets/mesh6')).status, 404);
   assert.equal((await fetch(base + '/private/model.bin')).status, 404);
   assert.equal((await fetch(base + '/')).status, 200);
+});
+
+
+test('owner-listed Dojo HUD PNG is available only through same-origin allowlist', async t => {
+  const base=await startFixture(t,{sceneHud_001:'hud.png'});
+  const manifest=await (await fetch(base+'/local-assets/manifest')).json();
+  assert.deepEqual(manifest,{assets:{sceneHud_001:{name:'sceneHud_001.png',type:'image/png'}}});
+  const image=await fetch(base+'/local-assets/sceneHud_001');
+  assert.equal(image.status,200);
+  assert.equal(image.headers.get('content-type'),'image/png');
+  const bytes=new Uint8Array(await image.arrayBuffer());
+  assert.deepEqual([...bytes.slice(0,8)],[137,80,78,71,13,10,26,10]);
+  assert.equal((await fetch(base+'/local-assets/sceneHud_002')).status,404);
+  assert.equal((await fetch(base+'/private/hud.png')).status,404);
+  assert.equal((await fetch(base+'/local-assets/sceneHud_001',{headers:{Origin:'https://elsewhere.example'}})).status,403);
 });

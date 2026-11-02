@@ -39,7 +39,8 @@ try {
   const actualPrivateRoot = await realpath(privateRoot);
   for (const id of Object.keys(config)) {
     const descriptor = Object.hasOwn(localAssetTypes, id) ? localAssetTypes[id] :
-      (/^scene(?:Texture|Lightmap)_[0-9]{3}$/.test(id) ? [`${id}.png`, 'image/png'] :
+      (/^sceneHud_[0-9]{3}$/.test(id) ? [`${id}.png`, 'image/png'] :
+      /^scene(?:Texture|Lightmap)_[0-9]{3}$/.test(id) ? [`${id}.png`, 'image/png'] :
         /^sceneLightmapBc3_[0-9]{3}$/.test(id) ? [`${id}.bc3`, 'application/octet-stream'] :
           /^audioNative_(?:resources_assets|sharedassets0_assets)_\d+$/.test(id) ? [`${id}.wav`, 'audio/wav'] : null);
     if (!descriptor) continue;

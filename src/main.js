@@ -16,6 +16,7 @@ import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
+import { createNativeHud } from './render/native-hud.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -26,6 +27,7 @@ const crosshair = $('crosshair');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
+const nativeHud = createNativeHud(hud, crosshair, $('health'));
 let renderer;
 try { renderer = createRenderer(canvas); }
 catch (error) {
@@ -50,6 +52,7 @@ let nativeEnemyStats = null;
 let nativeScene = null;
 let nativeSkinInfo = null;
 let localAssetManifest = null;
+let nativeHudReady = false;
 // Common sharedassets0.assets:711 -> PistolGun:4849 settings, not a scene pickup.
 const nativePistol = Object.freeze({ ammo: 5, attackDelay: Math.fround(.6), bulletSpeed: 36 });
 let weaponGeneration = 0;
@@ -252,6 +255,30 @@ if (containersPreviewEnabled) {
       renderer.replaceNativeWorld(prepared, images);
       nativeScene = prepared;
       if (prepared.gameplay?.audio) audio.configureSceneAudio(prepared.gameplay.audio);
+      nativeHudReady = false;
+      nativeHud.setActive(false);
+      // Do not replace the working generated HUD with broken sprite masks.
+      // The source-owned HUD is opt-in only after ALL private PNGs decode.
+      if (prepared.source.sceneBuildIndex === 10 && prepared.gameplay?.hud) {
+        try {
+          const receipt = nativeHud.configure(prepared.gameplay.hud, localAssetManifest?.assets);
+          if (receipt.ready) {
+            const ids = new Set([prepared.gameplay.hud.heartTextureId,
+              ...Object.values(prepared.gameplay.hud.crosshairs).map(binding => binding.textureId)]);
+            for (const id of ids) {
+              const file = await localAssetFile(id);
+              const bitmap = await createImageBitmap(file, {
+                imageOrientation:'none',premultiplyAlpha:'none',colorSpaceConversion:'none',
+              });
+              bitmap.close();
+            }
+            nativeHudReady = true;
+          }
+        } catch {
+          nativeHudReady = false;
+          nativeHud.setActive(false);
+        }
+      }
       nativeInspection = false;
       const name = nativeSceneName();
       $('scene-mode').querySelector('[value="original"]').textContent = `${name} · originaux locaux`;
@@ -457,6 +484,8 @@ function loadLevel(index) {
   state.waveClock = 0; state.stageBanner = containersPreviewEnabled ? 0 : 2.2; state.transition = 0;
   state.weapon = nativeGameplay() ? nativeScene.initialEquipment.armed : true;
   state.ammo = nativeGameplay() ? (state.weapon ? nativePistol.ammo : 0) : 6;
+  nativeHud.setActive(Boolean(nativeGameplay() && nativeHudReady));
+  nativeHud.reset();
   state.reload = 0; state.fireDelay = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
@@ -1043,16 +1072,16 @@ function update(dt) {
       else {state.health=Math.min(3,state.health+1);loadLevel(state.levelIndex+1);}
     }
   }
-  updateHud();
+  updateHud(dt);
 }
 
-function updateHud() {
+function updateHud(dt = 0) {
   const percent = state.speed * 100;
   $('time-pct').textContent = `${percent < 1 ? percent.toFixed(1) : String(Math.round(percent)).padStart(2, '0')}%`;
   $('time-fill').style.width = `${Math.max(3,state.speed*100)}%`;
   $('ammo').innerHTML = nativeItems?.held ? 'OBJET<span>/ LANCER</span>'
     : `${String(Math.max(0, state.ammo)).padStart(2,'0')}<span>/${nativeGameplay() ? '05' : '06'}</span>`;
-  $('health').textContent = '◆ '.repeat(Math.max(0,state.health)) + '◇ '.repeat(Math.max(0,3-state.health));
+  if (!nativeGameplay() || !nativeHudReady) $('health').textContent = '◆ '.repeat(Math.max(0,state.health)) + '◇ '.repeat(Math.max(0,3-state.health));
   const pickupTarget=nearbyPickup();
   $('pickup-prompt').hidden = !pickupTarget;
   $('pickup-prompt').textContent = pickupTarget ? `E · RAMASSER ${pickupTarget.name??'LE PISTOLET'}` : '';
@@ -1062,6 +1091,16 @@ function updateHud() {
   shootFlash.style.opacity = state.muzzle > 0 ? '.42' : '0';
   const target = rayTarget();
   crosshair.classList.toggle('target',!!target);
+  if (nativeGameplay() && nativeHudReady) {
+    const meleeTarget=state.fireDelay<=0?findMeleeTarget():null;
+    // Source HUD class names from the recovered packet, not inferred texture IDs.
+    const kind=nativeItems?.held?.isKatana ? (meleeTarget?'katana':'none')
+      :state.weapon || nativeItems?.held ? 'gun'
+      :pickupTarget ? 'hand' : meleeTarget ? 'takedown' : 'none';
+    nativeHud.update({dt,timeScale:state.speed,kind,hp:state.health,capacity:3,
+      cooldown:state.fireDelay,attackDelay:state.weapon?nativePistol.attackDelay:0,
+      visible:state.screen==='playing'});
+  }
 }
 function rayTarget() {
   const from=state.camera, axes=cameraAxes(from.yaw,from.pitch);
