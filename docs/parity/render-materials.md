@@ -505,3 +505,93 @@ reuse the dropped-pistol mesh230 or its attachment chain. Root screenshots and
 a controlled yaw/pitch+shot scenario show the corrected forward-facing weapon.
 Private source package SHA-256:
 `ecff89ced2ea574f8b95824ee8d29fa3c0cae80f8f8611060db1cb3f4eefa0af`.
+
+
+## SH-13 — Dojo/build10 source door-warning GPU handoff (2026-11-03)
+
+**Target now SHRL_Dojo2/build10/level10**, not historical Containers/build28. This
+section concerns a **source-qualified visible Web preview**, not a native frame
+or a recovered Unity light shader. The earlier private #41/#50 results are
+**Containers/level28** authority only, and cannot establish Dojo door lighting,
+fog state, exposure or dynamic light/global binding.
+
+### Already recovered, not reimplemented
+
+The recovered authored JS controller `createMcdDoorWarnings` in
+`src/sound/mcd-door-warning.js` is present on `main` (PR #181).
+It emits live per-door packets: source ID, `rendererId`, enabled spotlight,
+source `position/direction/right/up/range/intensity/color/spotAngle/cullingMask`,
+cookie asset ID, and an independent `falseLight.position/intensity/slot`.
+Its `trigger`/world-time `advance` mutates **range** for the spotlight,
+**intensity** for falseLight, and leaves the spotlight's authored intensity
+unchanged. It bounds false-light slots to three. No new curve was authored here.
+
+**Web-source fact:** the spawner emits `door-warning` before a spawn, and
+the encounter returns the command; current `src/main.js` ignores that
+command and does not render these packet lights. The browser therefore
+**does not yet show a door warning** through this pipeline. See
+[`SH-07 #7`](https://github.com/TGrozner/superhot-web/issues/7#issuecomment-6590721839)
+and [`SH-05 #5`](https://github.com/TGrozner/superhot-web/issues/5).
+
+### New owned adapter (no shared files changed)
+
+`prepareDojoDoorWarningLighting(scene.source, warnings.packets(), {
+verifiedDoorKeys, decodedCookies, meshLayer })` in
+`src/render/lighting-model.js` returns source spotlights **only** for the
+exact build10/level10 scene, an explicit owner-qualified
+`owner::pathId` join, enabled source warning, compatible Unity source
+layer mask and an **already decoded source cookie**. Missing cookie or
+unproved door identity fails closed rather than drawing an invented white/red
+spot. Returns separate false-light slot/position/intensity records without
+assuming their shader, color or falloff; preserves the source `rendererId`.
+The adapter has no access to private image bytes and performs no GL calls.
+
+`DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL` is a **provisional Web projector**:
+source cone/range and orientation basis, source cookie **alpha**, color and
+the unchanged authored intensity. Its hard cutoff, projection basis,
+missing shadows/falloff and additive Web color are **not proven native**.
+`sampleDojoDoorWarningWebPreview` supplies a CPU mirror for synthetic
+pixel-difference preflight. The source test uses a red (30,0,0) synthetic
+cone and sample alpha 0.4, obtaining preview (12,0,0) at the cone center
+versus (0,0,0) outside source range/mask/cookie. This is **not GPU output
+or a game comparison** until SH-05 inserts the GLSL in the actual pass.
+
+### Exact SH-05 integration handoff (exclusive shared-file owner)
+
+1. **Qualification:** on the local `SHRL_Dojo2` package, build a verified
+   `event.point -> gameplay.audio.doors[owner::pathId]` join from source
+   identity. `event.point.id` is not proof of that join. Require the
+   actual source door packet (with source renderer ID/cookie), its matching
+   scene layer and locally decoded PNG cookie; otherwise retain the current
+   no-warning path. **Do not synthesize cookies or light values.**
+2. **Runtime:** create ONE `createMcdDoorWarnings(gameplay.audio.doors)`
+   per loaded scene; on the encounter `door-warning`, trigger only its
+   source-joined key. Call `advance(worldDt)` on the **world clock**
+   each frame, independent of the spawner's unscaled scheduling. Reset on
+   restart/unload; do not change the independent ambient doorway audio.
+3. **GPU hookup:** per source world instance, supply `instance.layer` and
+   set of decoded cookie IDs to the adapter; bind actual PNG `sampler2D`
+   and pass the source values to the preview GLSL if Web-preview mode is
+   explicitly enabled. No global fake red overlay. Never use spotlight's
+   `cullingMask` to discard the separate false-light slots. The
+   `falseLights` data is **not render-ready photometry**: do not plug it
+   into the same cookie shader or assign a fabricated red color.
+4. **Measurement:** A/B one genuine Dojo in-browser GPU viewport at
+   identical camera, geometry, spawn event and world clock, source warning
+   disabled vs enabled, with cookie PNG decoded. Record two sampled frames,
+   door ROI RGB MAE/p95 and `gl.getError()`, plus exact scene ID, layer,
+   warning ID, cookie ID and light packet values. Also capture when the
+   curve expires; absent cookie must stay the stable generated fallback.
+   Only then compare to an independently registered private native frame.
+   HTML HUD and gameplay win state are orthogonal.
+
+**SH-12 interface:** no edits to mesh-format/gpu-mesh. Keep
+`instance.layer` (0..31), world-space position/normals and source
+transforms. The preview consumes the already prepared world position;
+it does not require new vertices, UVs, or an OBJ copy.
+
+**Unresolved**: actual Unity cookie projection handedness and UV orientation,
+source spotlight attenuation/occlusion, false-light shader/slot global
+binding, active native variant, full Dojo-local ambient/fog/bake/SH,
+runtime exposure/tonemap and a same-frame pixel comparison. Never mark
+`nativeLightingParity` true based on these source packets alone.
