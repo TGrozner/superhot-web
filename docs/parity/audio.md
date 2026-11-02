@@ -642,3 +642,40 @@ never guesses it. SH-05 alone may wire the native death-event policy to the
 existing local-only playback, after qualifying the enemy path and performing
 a real browser capture. No shared integration file or original media is
 altered by this PR.
+
+### SH-07 pool registration source — private research #124
+
+**NEW PROUVÉ (static source, build `20299547`):** bounded read
+[research #124](https://github.com/TGrozner/superhot-research/issues/124),
+run `41477755387`, artifact `13156944529`,
+`managed/Assembly-CSharp/AudioManager.cs:1–178`.
+The private `result.json` SHA-256 is
+`e27e22ca999d554ed87f055fe163d71f7b39047df84b1f5859aa8d78f6c8dadf`;
+the UTF-8 extracted source segment SHA-256 is
+`17669c58516f42155a59c1cbfc3972c4f39cae2880a6c9f2a7a7bd5ef0cc2b1d`.
+No source text is published.
+
+`AudioManager.Instance` lazily creates a persistent manager and calls
+`Initialize`; **pool initialization comes before mixer lookup**.
+`InitializeAudioObjectsPools` reflects `AudioGameObjectResources` fields.
+For each distinct prefab name it tries the exact resource path
+`Sounds/GameObjects/<Name>`; when `Resources.Load<GameObject>` returns
+null it logs an error **without registering a pool**, otherwise creates
+`ObjectPool(prefab, AudioPrefab.PoolSize, parent)`. An already-registered
+name skips resource lookup. The separate generic `AudioClip` pool has declared
+size 25; do not apply that capacity to `EnemyShatter`. Source locations:
+`AudioManager.cs:96–115,137–168`.
+
+**PROUVÉ composition:** the static `EnemyShatter` field name and declared
+size 5 from #120/#121, together with #124, establish a conditional
+registration attempt for `Sounds/GameObjects/EnemyShatter`. This is a
+stronger, testable gate than "all AudioPrefab fields are registered."
+
+**INCONNU:** whether the resource was successfully loaded in the actual
+Containers run, whether Unity created/reused this particular pool instance,
+and whether this enemy-death event produced audible output. Serialized
+asset presence does not substitute for observing `Resources.Load`.
+`planMcdAudioPrefabPoolInitialization` mirrors only the source decision
+with **explicit** runtime inputs; it never assumes pool presence. SH-05 may
+use this gate at the native/Web join, but no native runtime pool, AudioContext
+trace for enemy-death, or sampled speaker output is established here.

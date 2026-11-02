@@ -4,6 +4,7 @@
  * ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257.
  * Private research #113: AudioManager.cs:579-612; #89: PejAiBody.cs:565-602.
  * #120: AudioGameObjectResources.cs:35; #121: AudioPrefab.cs:1-6.
+ * #124: AudioManager.cs:96-115,137-168 (pool init).
  * Public logic only: no native code, clip, prefab, or waveform.
  */
 // Source initializer: new AudioPrefab("EnemyShatter", 5). This is a
@@ -98,5 +99,48 @@ export function planMcdBodyKillShatterPrefab({
     position: {x: origin.x, y: origin.y + 1.5, z: origin.z},
     pitchBeforeRequest,
     pitchRandomization: 0,
+  });
+}
+
+/**
+ * AudioManager.Instance initializes pools once, by reflecting the static
+ * AudioGameObjectResources fields (AudioManager.cs:96-115,137-168).
+ * The field's declared pool size is used only if Resources.Load<GameObject>
+ * finds Sounds/GameObjects/<Name>; an existing named pool is skipped.
+ * Private read research #124, artifact 13156944529. Source/static only.
+ *
+ * No claim about actual Resources assets, pool capacity or Unity execution.
+ * Finite integer validation is a Web boundary policy, not a native guard.
+ */
+export const MCD_PREFAB_POOL_RESULT = Object.freeze({
+  ALREADY_REGISTERED: 'already-registered',
+  MISSING_RESOURCE: 'prefab-resource-missing',
+  REGISTER: 'register-prefab-pool',
+});
+
+export function planMcdAudioPrefabPoolInitialization({
+  prefabName, declaredPoolSize, alreadyRegistered, resourceLoaded,
+} = {}) {
+  if (typeof prefabName !== 'string' || !prefabName.length) {
+    throw new TypeError('resolved AudioPrefab.Name is required');
+  }
+  if (!Number.isInteger(declaredPoolSize)) {
+    throw new TypeError('declaredPoolSize must be an integer');
+  }
+  boolean(alreadyRegistered, 'alreadyRegistered');
+  if (alreadyRegistered) {
+    // Native skips Resources.Load entirely for duplicate names.
+    return Object.freeze({status: MCD_PREFAB_POOL_RESULT.ALREADY_REGISTERED, prefabName});
+  }
+  boolean(resourceLoaded, 'resourceLoaded');
+  const resourcePath = 'Sounds/GameObjects/' + prefabName;
+  if (!resourceLoaded) {
+    return Object.freeze({
+      status: MCD_PREFAB_POOL_RESULT.MISSING_RESOURCE, prefabName, resourcePath,
+    });
+  }
+  return Object.freeze({
+    status: MCD_PREFAB_POOL_RESULT.REGISTER, prefabName, resourcePath,
+    declaredPoolSize,
   });
 }

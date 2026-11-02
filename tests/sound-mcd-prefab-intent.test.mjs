@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MCD_ENEMY_SHATTER_PREFAB, MCD_PREFAB_SOUND_RESULT,
+  MCD_ENEMY_SHATTER_PREFAB, MCD_PREFAB_SOUND_RESULT, MCD_PREFAB_POOL_RESULT,
+  planMcdAudioPrefabPoolInitialization,
   planMcdAudioPrefabPlay, planMcdBodyKillShatterPrefab,
 } from '../src/sound/mcd-prefab-sound-intent.js';
 
@@ -88,4 +89,39 @@ test('inputs are not retained by reference and explicit state is required', () =
   assert.equal(Object.isFrozen(result.position), true);
   assert.throws(() => planMcdAudioPrefabPlay(present({poolExists: null})), /poolExists/);
   assert.throws(() => planMcdAudioPrefabPlay(present({pitchRandomization: 0.1, unityRandomValue: 1.1})), /unityRandomValue/);
+});
+
+test('lazy AudioManager pool init registers EnemyShatter only when Resources.Load succeeds', () => {
+  assert.deepEqual(planMcdAudioPrefabPoolInitialization({
+    prefabName: MCD_ENEMY_SHATTER_PREFAB.name,
+    declaredPoolSize: MCD_ENEMY_SHATTER_PREFAB.declaredPoolSize,
+    alreadyRegistered: false, resourceLoaded: true,
+  }), {
+    status: MCD_PREFAB_POOL_RESULT.REGISTER,
+    prefabName: 'EnemyShatter',
+    resourcePath: 'Sounds/GameObjects/EnemyShatter',
+    declaredPoolSize: 5,
+  });
+});
+
+test('missing prefab resource logs an error in source and does not register a pool', () => {
+  const result = planMcdAudioPrefabPoolInitialization({
+    prefabName: 'EnemyShatter', declaredPoolSize: 5,
+    alreadyRegistered: false, resourceLoaded: false,
+  });
+  assert.equal(result.status, MCD_PREFAB_POOL_RESULT.MISSING_RESOURCE);
+  assert.equal(result.resourcePath, 'Sounds/GameObjects/EnemyShatter');
+  assert.equal('declaredPoolSize' in result, false);
+});
+
+test('existing pooled name skips resource lookup, without requiring resourceLoaded', () => {
+  assert.deepEqual(planMcdAudioPrefabPoolInitialization({
+    prefabName: 'EnemyShatter', declaredPoolSize: 5, alreadyRegistered: true,
+  }), {status: MCD_PREFAB_POOL_RESULT.ALREADY_REGISTERED, prefabName: 'EnemyShatter'});
+});
+
+test('pool plan fails closed on unknown resource state without inventing Unity defaults', () => {
+  assert.throws(() => planMcdAudioPrefabPoolInitialization({
+    prefabName: 'EnemyShatter', declaredPoolSize: 5, alreadyRegistered: false,
+  }), /resourceLoaded/);
 });
