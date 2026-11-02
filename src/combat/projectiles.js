@@ -8,6 +8,8 @@ const finitePoint = (p) => p !== null && typeof p === 'object' &&
  * Pure one-step projectile simulation using world-time seconds, not wall time.
  * Speed, direction, lifetime and collision volumes are injected by the caller;
  * no damage, weapon or native timing assumptions are embedded here.
+ * The direction's magnitude is deliberately preserved; normalization is an
+ * external policy, and non-unit native shotgun dispersion is not yet verified.
  */
 export function advanceProjectile(projectile, worldDelta, geometry = {}) {
   if (!Number.isFinite(worldDelta) || worldDelta < 0) {

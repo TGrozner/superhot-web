@@ -75,3 +75,46 @@ Only after confirming concrete paths and table columns, enumerate members/config
 2. Feed the function `firstImpact(start, end, { solids, targets })` geometry shaped as `{min,max}` / `{center,radius}`; prefer explicit owner/team filters **before** calling it. Do not assume friendly fire rules.
 3. `advanceProjectile(projectile, worldDelta, geometry)` expects a finite nonnegative **world** delta; movement `direction` already normalized by the caller. It returns `{ projectile, impact, expired }` without mutating its input. Do not integrate until a regression scenario validates expiry timing, first-hit order and scale switching.
 4. Do not claim the Web simulation is MCD-faithful based on these 13 unit tests. Replace PROVISIONAL mechanics only when native evidence becomes available.
+
+## Second SH-03 audit — 2026-11-02 (primary proof gate)
+
+The *private* `TGrozner/superhot-research` workflow run `41368361512` returned
+`HANDOFF.md` lines **1–100** (artifact `13108420851`, result text SHA-256
+`408cec616a4e1399120a72df8014e237073b649ab781da688b304df3b7e060a7`,
+bridge commit `be6d535e608f66c93db3acc422385035d1281063`).
+The handoff identifies MCD build **20299547**, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`
+(line **7**), and reports these **unverified** rules:
+
+| Handoff line | Status in SH-03 | Testable/native disproof required |
+| --- | --- | --- |
+| 74 — R=Replay; KillReloadMod adjusts delays/animations | **HANDOFF-REPORTED** | Check the concrete keyboard profile, action handler, and weapon/ammo mutation paths; observe the active native build with a nonempty and an empty magazine. |
+| 75 — ShotGun emits one primary plus `pelletsCount`; dispersal not necessarily normalized | **HANDOFF-REPORTED** | Inspect the exact method/IL token and active weapon instance `(owner,path_id)`; count emitted spawn calls and log each raw vector magnitude in a controlled native shot. |
+| 76 — movement Update / sweeps FixedUpdate / deferred enemy shot after LateUpdate | **HANDOFF-REPORTED** | Identify producer methods and actual call order, then capture phase-stamped projectile and AI traces. A single Web tick is **not** a verified substitute. |
+
+Zero combat mechanics are classified **NATIVE-PROVEN** on this branch: neither
+`spec/combat/combat-specification.md` nor member-level IL/serialized overrides
+have been returned to SH-03. The linked reports are private, not absent. The
+connected GitHub actions can **read** workflow runs and download existing
+artifacts, but do **not** expose a `workflow_dispatch` write action. Minimal
+private query, once an authorized dispatcher is available:
+
+```json
+{"operation":"read","path":"spec/combat/combat-specification.md","start":1,"count":200}
+```
+
+Follow with `spec/combat/serialized-settings.md` and `spec/combat/ai-and-powers.md`
+using the same read API (paginate with `next_start`); only then inspect scoped
+methods and serialized active objects, and distinguish source defaults,
+instance overrides, and executed runtime. No local scanner/game run was performed.
+
+### Provisional Web safety regression (this branch only)
+
+`firstImpact` rejects non-array geometry and inverted AABBs rather than
+silently skipping them or reporting an invalid wall hit. `advanceProjectile`
+retains the supplied direction's magnitude (its preexisting numeric behavior,
+now explicitly tested) and does **not** normalize shotgun spread or implement
+any MCD pellet/AI policy. Five additional `tests/combat-regression.test.mjs`
+cases verify these contracts, thin-wall swept traversal and noncollision step
+composition. These are tests of authored **WEB-PROVISIONAL** code only; they do
+not raise the native-evidence status.

@@ -20,6 +20,9 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
   if (!isFinitePoint(start) || !isFinitePoint(end)) {
     throw new TypeError('Segment endpoints must be finite 3D points');
   }
+  if (!Array.isArray(solids) || !Array.isArray(targets)) {
+    throw new TypeError('Geometry solids and targets must be arrays');
+  }
   let closest = null;
   const consider = (t, kind, entity, index) => {
     if (t === null || !Number.isFinite(t) || t < 0 || t > 1) return;
@@ -32,6 +35,9 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
     const solid = solids[i];
     if (!isFinitePoint(solid?.min) || !isFinitePoint(solid?.max)) {
       throw new TypeError('Every solid needs finite min/max points');
+    }
+    if (['x', 'y', 'z'].some((axis) => solid.min[axis] > solid.max[axis])) {
+      throw new RangeError('Every solid needs min <= max on every axis');
     }
     consider(segmentAabb(start, end, solid.min, solid.max), 'solid', solid, i);
   }
