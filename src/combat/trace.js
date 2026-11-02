@@ -1,10 +1,22 @@
-import { add3, dot3, multiply3, subtract3 } from '../math.js';
+import { dot3, subtract3 } from '../math.js';
 
 // Numerical tie tolerance; collision priorities are provisional Web rules, NOT native MCD evidence.
 export const IMPACT_EPSILON = 1e-9;
 
 const isFinitePoint = (point) => point !== null && typeof point === 'object' &&
   ['x', 'y', 'z'].every((axis) => Number.isFinite(point[axis]));
+
+// Keep slab fractions meaningful even when subtracting two finite endpoints
+// overflows double precision. This is numerical safety, not native hit testing.
+function slabFraction(boundary, origin, destination, delta) {
+  const numerator = boundary - origin;
+  if (Number.isFinite(numerator) && Number.isFinite(delta)) {
+    return numerator / delta;
+  }
+  const scale = Math.max(Math.abs(boundary), Math.abs(origin), Math.abs(destination));
+  return ((boundary / scale) - (origin / scale)) /
+    ((destination / scale) - (origin / scale));
+}
 
 // Combat-only exact-direction slabs: the general math helper treats displacements
 // below 1e-8 as parallel, which can miss very short but nonzero sweeps.
@@ -16,8 +28,8 @@ function sweptBoxFraction(start, end, min, max) {
       if (start[axis] < min[axis] || start[axis] > max[axis]) return null;
       continue;
     }
-    let a = (min[axis] - start[axis]) / delta;
-    let b = (max[axis] - start[axis]) / delta;
+    let a = slabFraction(min[axis], start[axis], end[axis], delta);
+    let b = slabFraction(max[axis], start[axis], end[axis], delta);
     if (a > b) [a, b] = [b, a];
     enter = Math.max(enter, a);
     leave = Math.min(leave, b);
@@ -40,6 +52,21 @@ function sweptSphereFraction(start, end, center, radius) {
   if (discriminant < 0) return null;
   const t = (-halfB - Math.sqrt(discriminant)) / a;
   return t >= 0 && t <= 1 ? t : null;
+}
+
+// A hit point must be finite whenever its endpoints and fraction are finite.
+// Handle exact endpoints before any multiplication (Infinity * 0 is NaN).
+function pointAtFraction(start, end, fraction) {
+  if (fraction === 0) return { x: start.x, y: start.y, z: start.z };
+  if (fraction === 1) return { x: end.x, y: end.y, z: end.z };
+  const result = {};
+  for (const axis of ['x', 'y', 'z']) {
+    const delta = end[axis] - start[axis];
+    result[axis] = Number.isFinite(delta)
+      ? start[axis] + delta * fraction
+      : start[axis] * (1 - fraction) + end[axis] * fraction;
+  }
+  return result;
 }
 
 /**
@@ -88,6 +115,6 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
   if (closest === null) return null;
   return {
     ...closest,
-    point: add3(start, multiply3(subtract3(end, start), closest.t)),
+    point: pointAtFraction(start, end, closest.t),
   };
 }
