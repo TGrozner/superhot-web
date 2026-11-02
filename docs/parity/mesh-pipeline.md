@@ -401,3 +401,49 @@ render a browser screenshot with a deliberate and independently qualified
 placement, and send SH-15 a same-camera original/Web comparison request.
 Do not claim a native pose, material, draw, or 1:1 before those observations.
 No new corpus query is required for this parser.
+
+
+## SH-12 P0 GPU UV0 gate for source-qualified Concrete texture (2026-11-02)
+
+The indexed mesh transport *already* has UV0 float32 at interleaved vertex offsets
+`position=0`, `normal=12`, `uv0=24`, stride **32 bytes**. Its uploader previously treated
+the shader's `aUV` location as optional. That behavior is correct for the fallback,
+untextured diagnostic material, but **not sufficient** for the requested Containers
+Concrete texture: a shader can compile successfully while optimizing away
+`aUV`, causing meaningless texturing despite correct OBJ UV0.
+
+**New source-neutral contract (SH-05 alone wires its shared renderer files):**
+
+```js
+const decoded = parseObjGroupsIntoIndexedMesh(localObjText, [
+  'Combined Mesh (root: scene)_48',
+  'Combined Mesh (root: scene)_46',
+  'Combined Mesh (root: scene)_77',
+], independentlyVerifiedSourceChecks);
+const gpu = uploadIndexedMesh(gl, program, decoded.mesh, {
+  requireUV: true, // FAIL before GPU allocation if program lacks active aUV
+});
+if (!gpu.uvAttributeBound) throw new Error('UV0 attribute not active');
+for (const sourceVerifiedRange of decoded.drawRanges) {
+  // SH-05 owns gl.useProgram, shader uniforms and texture binding.
+  // Bind verified source-selected local RGB24 pixels *before* drawing;
+  // source UV0 *_MainTex_ST.xy, source ST=(0.10000000149, 0.10000000149),
+  // offset (0,0), sourced separately by SH-13. Not UV2/lightmap.
+  gpu.draw(sourceVerifiedRange); // byte offsets handled by the uploader
+}
+gpu.dispose();
+```
+
+This gate deliberately validates only *active vertex-to-shader UV0 plumbing*.
+It does **not** decode texture pixels, bind a source texture, prove `_MainTex`
+sampling, reproduce the native XULM Concrete shader, validate UV2 lightmap,
+gamma/tone mapping or 1:1 native pixels. There is no automatic UV axis flip
+or inferred material binding. If `requireUV` is omitted, legacy untextured
+draws remain legal; `gpu.uvAttributeBound` reports whether the program has
+an active `aUV` attribute, not whether a native texture appeared onscreen.
+
+The new `tests/render-mesh-uv0-attribute.test.mjs` uses only a generated
+asymmetric non-cubic wedge and a mock WebGL2 context to prove the 32-byte
+vertex offsets, partial `drawElements` byte offset, fail-before-upload,
+and legacy compatibility. **A real Chromium GPU frame / private local file
+test is still an independent SH-05 / SH-15 acceptance gate.**
