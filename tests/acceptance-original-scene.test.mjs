@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { originalSceneDrawEvidence } from '../scripts/acceptance-live-capture.mjs';
+import { originalSceneDrawEvidence, renderedOriginalSceneEvidence } from '../scripts/acceptance-live-capture.mjs';
 
 // Diagnostic fixtures of the CURRENT public Web telemetry, not executed MCD.
 // Never put a deliberately red native/Web gate into ordinary Node CI.
@@ -63,4 +63,29 @@ test('skinned enemy requirement excludes static proxy and native-spawn overclaim
   assert.ok(check({ localNativeEnemy: { ...stats.localNativeEnemy, meshPathId: 999 } })
     .includes('SOURCE_SKINNED_WEB_DRAW_UNVERIFIED'));
   assert.deepEqual(originalSceneDrawEvidence(stats).reasons, []);
+});
+
+test('both sides of each browser PNG need an actual rendered scene, camera and projection', () => {
+  const frame = {
+    frameId: 48, activeScreen: 'playing',
+    camera: { x: 2, y: 1.6, z: 4, yaw: 0, pitch: -0.1 },
+    nativeScene: { meshes: 68, instances: 360, textures: 17 },
+    generatedManifest: { nativeGeometry: true, nativeMaterialParity: false,
+      drawCalls: 360, triangles: 185037 },
+    projection: { verticalScale: 1.732, near: 0.03, far: 1000, aspect: 16 / 9 },
+    nativeEnemy: { skinned: true, nativeClipSampled: true,
+      runtimeEnemyInstanceVerified: false, drawCalls: 1, materialParity: false },
+  };
+  const proof = renderedOriginalSceneEvidence(frame, { requireSkin: true });
+  assert.deepEqual(proof.reasons, []);
+  assert.equal(proof.nativeParityCertified, false);
+  assert.equal(proof.independentGpuReadback, false);
+  assert.ok(renderedOriginalSceneEvidence({ ...frame, nativeScene: null })
+    .reasons.includes('RENDERED_FULL_SOURCE_SCENE_UNVERIFIED'));
+  assert.ok(renderedOriginalSceneEvidence({ ...frame, projection: null })
+    .reasons.includes('RENDERED_PROJECTION_UNVERIFIED'));
+  assert.ok(renderedOriginalSceneEvidence({ ...frame, camera: null })
+    .reasons.includes('RENDERED_CAMERA_UNVERIFIED'));
+  assert.ok(renderedOriginalSceneEvidence({ ...frame, nativeEnemy: null }, { requireSkin: true })
+    .reasons.includes('RENDERED_ORIGINAL_SKIN_SUBMISSION_UNVERIFIED'));
 });
