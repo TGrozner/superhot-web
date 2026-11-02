@@ -25,6 +25,24 @@ const bulletFlags = (bullet, name) => {
   }
 };
 
+/**
+ * Bullet.CanCollide is invoked ON the encountered Bullet, with the current
+ * projectile as argument. IDs must be actual parentWeaponId integer fields,
+ * not shot IDs, tags, or inferred weapon types.
+ * Primary source: private research #122, Bullet.cs:519–527, build 20299547.
+ */
+export function canEncounteredBulletCollideWithCurrent({
+  currentParentWeaponId, encounteredParentWeaponId,
+}) {
+  const id = n => Number.isInteger(n) && n >= -2147483648 && n <= 2147483647;
+  if (!id(currentParentWeaponId) || !id(encounteredParentWeaponId)) {
+    throw new TypeError('both native parentWeaponId int32 values must be explicit');
+  }
+  // The zero special case belongs to the receiver, not the argument.
+  return currentParentWeaponId !== encounteredParentWeaponId ||
+    encounteredParentWeaponId === 0;
+}
+
 const output = (outcome, events, requiresDestroyedProbe = false) => ({
   outcome,
   events,
@@ -65,10 +83,28 @@ export function planBulletPairContact({
     return output('both-deflected-ignored', events);
   }
 
-  if (typeof otherCanCollideCurrent !== 'boolean') {
+  // Derive the actual other.CanCollide(current) branch only when both
+  // source parentWeaponId fields are available. Never interpret absence as 0.
+  const haveCurrentId = Object.hasOwn(current, 'parentWeaponId');
+  const haveEncounteredId = Object.hasOwn(encountered, 'parentWeaponId');
+  let canCollide = otherCanCollideCurrent;
+  if (haveCurrentId || haveEncounteredId) {
+    if (!haveCurrentId || !haveEncounteredId) {
+      return output('parent-weapon-ids-incomplete', events);
+    }
+    const sourceDecision = canEncounteredBulletCollideWithCurrent({
+      currentParentWeaponId: current.parentWeaponId,
+      encounteredParentWeaponId: encountered.parentWeaponId,
+    });
+    if (typeof canCollide === 'boolean' && canCollide !== sourceDecision) {
+      return output('parent-weapon-guard-conflict', events);
+    }
+    canCollide = sourceDecision;
+  }
+  if (typeof canCollide !== 'boolean') {
     return output('other-can-collide-unverified', events);
   }
-  if (!otherCanCollideCurrent) return output('other-can-collide-rejected', events);
+  if (!canCollide) return output('other-can-collide-rejected', events);
   if (!finiteVector(collisionPoint)) {
     throw new TypeError('collisionPoint must be a finite source contact position');
   }
