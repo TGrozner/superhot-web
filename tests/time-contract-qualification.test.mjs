@@ -11,7 +11,7 @@ const sha256 = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(val
 const commitSha = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
 const nonBlank = (value) => typeof value === 'string' && value.trim().length > 0;
 const validTrace = (trace) => trace?.unit === 'seconds'
-  && typeof trace.valueUnit === 'string' && trace.valueUnit.length > 0
+  && nonBlank(trace.valueUnit)
   && Array.isArray(trace.samples)
   && trace.samples.length >= 2
   && trace.samples.every((sample, index) => Number.isFinite(sample.t)
@@ -21,12 +21,21 @@ const validTrace = (trace) => trace?.unit === 'seconds'
 // Matching units and timestamps alone is insufficient to compare different actions.
 // These fields are metadata gates; a matching digest is NOT proof the corpus is authentic.
 const alignedStimulus = (nativeTrace, webTrace) =>
-  typeof nativeTrace?.scenarioId === 'string' && nativeTrace.scenarioId.length > 0
+  nonBlank(nativeTrace?.scenarioId)
   && nativeTrace.scenarioId === webTrace?.scenarioId
   && sha256(nativeTrace?.inputSha256)
   && nativeTrace.inputSha256 === webTrace?.inputSha256
-  && typeof nativeTrace.observable === 'string' && nativeTrace.observable.length > 0
+  && nonBlank(nativeTrace.observable)
   && nativeTrace.observable === webTrace?.observable;
+
+// A matching physical unit does not make scaled and unscaled clocks equivalent.
+// Update/FixedUpdate or pre/post-tick samples are different sampling phases.
+// These are caller-supplied metadata, not independently authenticated native facts.
+const alignedMeasurementBasis = (nativeTrace, webTrace) =>
+  nonBlank(nativeTrace?.clockDomain)
+  && nativeTrace.clockDomain === webTrace?.clockDomain
+  && nonBlank(nativeTrace?.samplingPhase)
+  && nativeTrace.samplingPhase === webTrace?.samplingPhase;
 
 // Compare event-relative windows; distinct sample rates are allowed inside a window.
 const alignedWindow = (nativeTrace, webTrace) =>
@@ -81,6 +90,7 @@ const assessComparisonReadiness = ({ declaration, method, binding, nativeTrace, 
     if (!alignedStimulus(nativeTrace, webTrace)) missing.push('matched-stimulus');
     if (!alignedWindow(nativeTrace, webTrace)) missing.push('matched-time-window');
     if (!alignedInitialContext(nativeTrace, webTrace)) missing.push('matched-initial-context');
+    if (!alignedMeasurementBasis(nativeTrace, webTrace)) missing.push('matched-measurement-basis');
   }
   return {
     status: missing.length ? 'INCONNU' : 'COMPARABLE',
@@ -100,6 +110,8 @@ const comparisonFixture = () => {
     scenarioId: 'synthetic-idle-v1',
     inputSha256: 'a'.repeat(64),
     observable: 'fixed-step-duration',
+    clockDomain: 'synthetic-unscaled-clock',
+    samplingPhase: 'synthetic-fixed-step-post-update',
     scene: 'synthetic-scene',
     initialStateSha256: 'c'.repeat(64),
     inputProfile: 'synthetic-keyboard-mouse-v1',
@@ -317,4 +329,58 @@ test('TC-Q18: input profile and deterministic seed must match across traces', ()
     assert.deepEqual(result.missing, ['matched-initial-context']);
     assert.equal(result.parityCertified, false);
   }
+});
+
+
+test('TC-Q19: matching units cannot hide scaled versus unscaled clock domains', () => {
+  const candidate = comparisonFixture();
+  candidate.webTrace.clockDomain = 'synthetic-world-scaled-clock';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['matched-measurement-basis']);
+  assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q20: matching windows cannot hide different frame sampling phases', () => {
+  const candidate = comparisonFixture();
+  candidate.webTrace.samplingPhase = 'synthetic-render-update-before-simulation';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['matched-measurement-basis']);
+  assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q21: absent or blank clock/phase provenance is not comparison evidence', () => {
+  for (const [side, field, value] of [
+    ['nativeTrace', 'clockDomain', undefined],
+    ['webTrace', 'clockDomain', '   '],
+    ['nativeTrace', 'samplingPhase', '  '],
+    ['webTrace', 'samplingPhase', undefined],
+  ]) {
+    const candidate = comparisonFixture();
+    candidate[side][field] = value;
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['matched-measurement-basis']);
+    assert.equal(result.parityCertified, false);
+  }
+});
+
+test('TC-Q22: whitespace-only observable or scenario labels are not evidence', () => {
+  for (const field of ['scenarioId', 'observable']) {
+    const candidate = comparisonFixture();
+    candidate.nativeTrace[field] = ' \t ';
+    candidate.webTrace[field] = ' \t ';
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['matched-stimulus']);
+    assert.equal(result.parityCertified, false);
+  }
+  const candidate = comparisonFixture();
+  candidate.nativeTrace.valueUnit = '   ';
+  candidate.webTrace.valueUnit = '   ';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['native-measurement', 'web-measurement']);
+  assert.equal(result.parityCertified, false);
 });
