@@ -1,3 +1,5 @@
+import { advanceNativeFragmentBody } from './native-fragment-physics.js';
+
 /**
  * Source-bounded GunPickup.ShatterInternal commands for a *confirmed* shatter.
  * MCD build 20299547, private managed/Assembly-CSharp/GunPickup.cs:784-855,
@@ -180,8 +182,14 @@ export function sampleGunPickupShatterProxy(plan, elapsed, { gravity, size, colo
  * a host physics solver. Gravity must come from the caller's source settings.
  */
 export function createGunPickupShardRuntime({
-  shards, parentVelocity, attachedToEnemy, torqueSamples, fadeDelays, gravity,
+  shards, parentVelocity, attachedToEnemy, torqueSamples, fadeDelays, gravity, physics = null,
 }) {
+  // Source collision geometry is optional until the private Dojo package supplies
+  // exact fragment dimensions. Legacy visual-only shards retain their behavior.
+  if (physics !== null && (!physics?.collisionScene?.boxes ||
+      !Number.isFinite(physics.fixedDelta) || physics.fixedDelta <= 0 || !physics.material)) {
+    throw new TypeError('Source fragment physics context required');
+  }
   if (!Array.isArray(shards)) throw new TypeError('authored shards must be an array');
   const ids = new Set();
   const sourceShards = shards.map(shard => {
@@ -195,7 +203,15 @@ export function createGunPickupShardRuntime({
       throw new TypeError('shard modelMatrix must be finite column-major affine');
     finiteNumber(shard.originalScale, 'originalScale');
     if (shard.originalScale <= 0) throw new RangeError('originalScale must be positive');
-    return { id: shard.id, originalScale: shard.originalScale, sourceMatrix: new Float64Array(m) };
+    const result = { id: shard.id, originalScale: shard.originalScale, sourceMatrix: new Float64Array(m) };
+    if (physics) {
+      const collisionRadius = finiteNumber(shard.collisionRadius, 'collisionRadius');
+      if (collisionRadius <= 0) throw new RangeError('Geometry-derived collision radius required');
+      const center = finiteVector(shard.collisionCenter ?? {x:m[12],y:m[13],z:m[14]}, 'collisionCenter');
+      Object.assign(result, { collisionRadius, position:center,
+        centerOffset:{x:center.x-m[12],y:center.y-m[13],z:center.z-m[14]} });
+    }
+    return result;
   });
   const plan = planGunPickupShatter({
     alreadyShattered: false, hasShardInstance: true, attachedToEnemy, parentVelocity,
@@ -205,9 +221,12 @@ export function createGunPickupShardRuntime({
   if (plan.status !== 'planned') throw new Error('Native shatter branch unavailable: ' + plan.status);
   return {
     elapsed: 0, gravity: finiteVector(gravity, 'gravity'),
-    physics: 'source-impulse-ballistic-no-angular-or-collision-simulation',
+    ...(physics ? { physicsContext: { ...physics, gravity: finiteVector(gravity, 'gravity') } } : {}),
+    physics: physics ? 'source-impulse-static-sphere-contacts-not-PhysX'
+      : 'source-impulse-ballistic-no-angular-or-collision-simulation',
     shards: sourceShards.map((s, i) => ({
       ...s, modelMatrix: new Float64Array(s.sourceMatrix), visible: true,
+      ...(physics ? {drag:0} : {}),
       velocity: {
         x: plan.shards[i].velocity.x + plan.shards[i].impulse.x / plan.shards[i].mass,
         y: plan.shards[i].velocity.y + plan.shards[i].impulse.y / plan.shards[i].mass,
@@ -251,11 +270,21 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
         shard.modelMatrix[index] = shard.sourceMatrix[index] * ratio;
       }
     }
-    for (const [axis, index] of [['x', 12], ['y', 13], ['z', 14]]) {
-      const position = shard.sourceMatrix[index] + shard.velocity[axis] * elapsed +
-        runtime.gravity[axis] * (elapsed / 2) * elapsed;
-      if (!Number.isFinite(position)) throw new RangeError('shard integration overflow');
-      shard.modelMatrix[index] = position;
+    if (runtime.physicsContext) {
+      // Swept source-shaped sphere contacts; never claim this solves native PhysX.
+      shard.contacts = advanceNativeFragmentBody(shard, scaledDelta, runtime.physicsContext);
+      for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
+        shard.modelMatrix[index] = shard.position[axis] - shard.centerOffset[axis] * ratio;
+      }
+    } else {
+      // Preserve the original proven Web ballistic visuals when the source
+      // bounds and collision material have not yet been installed.
+      for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
+        const position = shard.sourceMatrix[index] + shard.velocity[axis] * elapsed +
+          runtime.gravity[axis] * (elapsed / 2) * elapsed;
+        if (!Number.isFinite(position)) throw new RangeError('shard integration overflow');
+        shard.modelMatrix[index] = position;
+      }
     }
   }
   runtime.elapsed = elapsed;
