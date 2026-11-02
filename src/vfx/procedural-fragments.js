@@ -89,7 +89,9 @@ export function advanceFragment(fragment, dt, acceleration = { x: 0, y: 0, z: 0 
   const position = {}, velocity = {};
   for (const axis of ['x', 'y', 'z']) {
     position[axis] = fragment.position[axis] + fragment.velocity[axis] * step +
-      acceleration[axis] * step * step * 0.5;
+      // Halve time before multiplying: a * dt * dt can overflow even when
+      // the quadratic displacement and final velocity are representable.
+      acceleration[axis] * (step / 2) * step;
     velocity[axis] = fragment.velocity[axis] + acceleration[axis] * step;
     if (!Number.isFinite(position[axis]) || !Number.isFinite(velocity[axis])) {
       throw new RangeError('particle integration overflow');
