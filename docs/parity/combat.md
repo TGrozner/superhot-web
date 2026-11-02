@@ -302,3 +302,33 @@ nécessite toujours la passerelle `corpus-query` avec `workflow_dispatch`,
 non exposée par cette connexion. Ne copier ni données du corpus privé ni
 assets natifs dans le dépôt public. SH-05 est seul propriétaire de
 l'intégration `src/main.js` et des mesures de parité.
+
+
+## SH-03 geometry candidate membership — Web regression (2026-11-02)
+
+**WEB-PROVEN, not native:** `src/combat/trace.js` at baseline Git blob
+`57317b999b5033796a9b7f42343c394729b5e33a` used dynamic
+`solids.length` and `targets.length` while invoking getters on collider
+properties. A getter could append or remove a collider from either array
+during a single `firstImpact` call, changing which entities were tested.
+
+The Web trace now snapshots both candidate arrays **before** reading any
+collider properties. The original entity references, initial array indices,
+collision shapes, tie tolerance, first-hit ordering and point calculations
+are unchanged. Only candidate *membership* is stable for that call;
+collider values themselves continue to be sampled once per candidate.
+The primitive does not snapshot arbitrary external side effects.
+
+`tests/combat-geometry-membership.test.mjs` contains five synthetic
+Node scenarios for appending/removing solids, inserting targets across
+collections, mutating targets during their own sweep and a frozen-array
+projectile control. These are authored Web fixtures and do not encode
+MCD geometry, AI, weapon, damage or timing values.
+
+**NATIVE UNKNOWN:** MCD collider membership/scene update phases, hitbox
+definitions and impact ordering have not been observed or linked to Unity
+methods here. Do not use this regression to claim 1:1 parity. The
+minimum outstanding private-only read is
+`spec/combat/combat-specification.md` lines 1–200 through the authorized
+`corpus-query` gateway, followed by exact Unity member references and
+instantiated overrides. SH-05 alone may integrate into `src/main.js`.
