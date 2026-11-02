@@ -422,8 +422,9 @@ export function decodeIndexedObjPayload(objText, options) {
   const chosen = new Map();
   for (const spec of groups) {
     if (!spec || typeof spec.name !== 'string' || !spec.name ||
-        /\s/.test(spec.name) || chosen.has(spec.name)) {
-      throw new TypeError('OBJ group names must be unique single-token strings');
+        spec.name !== spec.name.trim() || /[\r\n\t]/.test(spec.name) ||
+        chosen.has(spec.name)) {
+      throw new TypeError('OBJ group names must be unique exact exporter labels');
     }
     requireSourceInteger(spec.materialSlot, 'OBJ materialSlot', 0, 1023);
     requireSourceInteger(spec.expectedTriangles, 'OBJ expectedTriangles', 1, 2_000_000);
@@ -456,8 +457,10 @@ export function decodeIndexedObjPayload(objText, options) {
       if (table.length >= MAX_VERTICES) throw new RangeError('OBJ attribute table too large');
       table.push(values);
     } else if (op === 'g') {
-      if (parts.length !== 2) throw new Error(label + ': ambiguous group declaration');
-      activeGroup = parts[1];
+      if (parts.length < 2) throw new Error(label + ': empty group declaration');
+      // UnityPy exports a descriptive multiword label after g; treat the entire
+      // exporter header as ONE exact group name, never infer a numeric suffix.
+      activeGroup = parts.slice(1).join(' ');
       const selected = chosen.get(activeGroup);
       if (selected) {
         if (selected.seen) throw new Error(label + ': selected OBJ group reopened');
