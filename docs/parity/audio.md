@@ -156,3 +156,32 @@ certificate. The bounded private read remains
 with follow-up assembly methods / Unity `(owner,path_id)` only if the report
 identifies them. Source build and Assembly SHA are recorded above. No native
 payload, recording or extracted method body is published.
+
+## SH-07: asynchronous sound callback results (Web-only safety gate)
+
+**PROUVÉ — source Web et scénarios synthétiques :** the synchronous queue
+previously treated a `Promise` returned by `dispatch(event)` as accepted,
+even if it later resolved to `false` or rejected. Similarly, the prototype
+sink always returned `true` after invoking a recognized synthetic method,
+even when that replacement returned a rejected Promise. The starting public
+blobs are `src/sound/timeline.js` `93bb4298484becf24fa5f9ffde4d9d71d110413a`
+and `src/sound/prototype-sink.js` `3d79a7ce81ed171d19ede68e2c0ebb19d880b591`.
+
+Both adapters now require a **synchronous** completion. A Promise or thenable
+is counted as a failed delivery; its rejection is observed to avoid an
+unhandled-rejection leak. Remaining queued events continue dispatching.
+No background completion is inferred and the queue never retries the event.
+This does not cancel an asynchronous side effect that a faulty callback may
+have started before returning. The pre-existing `src/audio.js` synth returns
+synchronously and remains untouched. Regression cases reside in
+`tests/sound-async-dispatch.test.mjs`. A successful test proves only these Web
+accounting rules, **not sound emitted, heard, or native behavior**.
+
+**INCONNU — MCD native producer/guard/timing/audibility:** unchanged. Private
+source baseline remains build 20299547 / Unity 2018.4.14f1, installed
+`Assembly-CSharp` SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`,
+handoff run 41368361512 / artifact 13108420851. No native method/clip
+identity or audible test was obtained by this Web-only change. The bounded,
+private `corpus-query` read of `spec/world/audio-vfx-deep.md` lines 1–200
+is still the required next input; do not publish proprietary content.

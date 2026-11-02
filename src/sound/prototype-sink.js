@@ -12,7 +12,15 @@ export function createPrototypeSoundSink(audio) {
     if (!event || event.evidence !== SOUND_EVIDENCE.PROTOTYPE || !allowed.has(event.name)) return false;
     const method = audio[event.name];
     if (typeof method !== 'function') return false;
-    method.call(audio);
+    const result = method.call(audio);
+    // The Web synth contract is synchronous. The browser audio methods in
+    // src/audio.js return void; an async replacement must not be counted as
+    // accepted before its Promise settles (or rejects without an observer).
+    if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
+        typeof result.then === 'function') {
+      void Promise.resolve(result).catch(() => {});
+      throw new TypeError('synthetic sound method must be synchronous');
+    }
     return true;
   };
 }
