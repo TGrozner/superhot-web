@@ -1,6 +1,7 @@
 import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
-import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest } from './levels.js';
+import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
+import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -24,7 +25,10 @@ const BLACK = '#202932', METAL = '#394650', GUN = '#0d171e';
 // Opt-in only: ?scene=synthetic. This is NOT a reconstructed MCD level.
 const syntheticManifestEnabled = new URLSearchParams(window.location.search).get('scene') === 'synthetic';
 const syntheticManifest = syntheticManifestEnabled ? buildSyntheticManifest() : null;
+const containersPreviewEnabled = new URLSearchParams(window.location.search).get('scene') === 'containers';
+const visualPreviewEnabled = syntheticManifestEnabled || containersPreviewEnabled;
 if (syntheticManifestEnabled) document.title += ' — SYNTHETIC SCENE (NOT MCD)';
+if (containersPreviewEnabled) document.title += ' — CONTAINERS COLLIDER PROXY (NOT MCD GAMEPLAY)';
 let manifestStats = null;
 const measuredFrameMs = [];
 let metricsNextAt = 0;
@@ -62,20 +66,33 @@ function loadLevel(index) {
     min: vec(o.x - o.w / 2, o.y - o.h / 2, o.z - o.d / 2),
     max: vec(o.x + o.w / 2, o.y + o.h / 2, o.z + o.d / 2),
   }));
-  state.camera = { x: state.level.spawn.x, y: 1.68, z: state.level.spawn.z, yaw: 0, pitch: 0 };
+  state.camera = containersPreviewEnabled
+    ? { ...CONTAINERS_BUILD28_DEMO_CAMERA }
+    : { x: state.level.spawn.x, y: 1.68, z: state.level.spawn.z, yaw: 0, pitch: 0 };
   state.enemies = state.level.enemies.map((e, i) => ({
     ...e, y: 0, id: i, alive: true, active: false, clock: 0, face: 0,
     fireTimer: rand(1.6, 2.7) + e.delay, strafe: rand(-1, 1), phase: rand(0, Math.PI * 2),
   }));
+  if (containersPreviewEnabled) {
+    // Visual-only review: do not retain invisible invented obstacle/enemy rules.
+    // No native BoxCollider physics has been connected to this preview.
+    state.objects = [];
+    state.solids = [];
+    state.enemies = [];
+  }
   state.bullets = []; state.fragments = []; state.drops = [];
   state.speed = .04; state.shotPulse = 0; state.lookActivity = 0;
   state.waveClock = 0; state.stageBanner = 2.2; state.transition = 0;
   state.ammo = 6; state.weapon = true; state.reload = 0; state.fireDelay = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
-  $('room-name').textContent = `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
-  $('stage-banner').textContent = `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
-    (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
+  $('room-name').textContent = containersPreviewEnabled
+    ? 'CONTAINERS BUILD28 · COLLIDER PROXY'
+    : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
+  $('stage-banner').textContent = containersPreviewEnabled
+    ? 'CONTAINERS BUILD28 · GENERATED PROXY ONLY · NOT MCD GAMEPLAY'
+    : `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
+      (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
 }
 
 function resetGame() {
@@ -308,7 +325,7 @@ function update(dt) {
     state.verticalSpeed -= 14 * dt;
     if (state.hop < 0) { state.hop = 0; state.verticalSpeed = 0; }
   }
-  state.camera.y = 1.68 + state.hop;
+  state.camera.y = (containersPreviewEnabled ? CONTAINERS_BUILD28_DEMO_CAMERA.y : 1.68) + state.hop;
 
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
@@ -465,19 +482,28 @@ function render() {
   const cam={...state.camera};
   if(state.screen==='playing') cam.y+=Math.sin(state.walkCycle)*.012;
   renderer.begin(cam);
-  for(const object of state.objects) {
-    renderer.box(object.x,object.y,object.z,object.w,object.h,object.d,object.color);
+  if (!containersPreviewEnabled) {
+    for(const object of state.objects) {
+      renderer.box(object.x,object.y,object.z,object.w,object.h,object.d,object.color);
+    }
+  }
+  if (containersPreviewEnabled) {
+    manifestStats = drawContainersBuild28Preview(renderer, cam, {
+      aspect: canvas.width / Math.max(1, canvas.height),
+    });
   }
   if (syntheticManifest) {
     manifestStats = drawGeneratedManifest(renderer, syntheticManifest, cam, {
       aspect: canvas.width / Math.max(1, canvas.height),
     });
   }
-  for(const drop of state.drops) drawPickup(drop);
-  for(const enemy of state.enemies) if(enemy.alive) drawEnemy(enemy);
-  for(const bullet of state.bullets) drawBullet(bullet);
-  for(const p of state.fragments) renderer.shard(p.x,p.y,p.z,p.sx,p.sy,p.sz,p.color,p.rx,p.ry,p.rz,clamp(p.life/.6,0,1));
-  if(state.screen==='playing') drawViewModel(cam);
+  if (!containersPreviewEnabled) {
+    for(const drop of state.drops) drawPickup(drop);
+    for(const enemy of state.enemies) if(enemy.alive) drawEnemy(enemy);
+    for(const bullet of state.bullets) drawBullet(bullet);
+    for(const p of state.fragments) renderer.shard(p.x,p.y,p.z,p.sx,p.sy,p.sz,p.color,p.rx,p.ry,p.rz,clamp(p.life/.6,0,1));
+    if(state.screen==='playing') drawViewModel(cam);
+  }
 }
 
 // Keep the world visible under the landing screen without advancing gameplay.
@@ -487,18 +513,19 @@ let last=performance.now();
 function frame(now) {
   const frameMs = Math.max(0, now - last);
   const dt=Math.min(.05,frameMs/1000);last=now;
-  if (syntheticManifest && frameMs > 0) {
+  if (visualPreviewEnabled && frameMs > 0) {
     measuredFrameMs.push(frameMs);
     if (measuredFrameMs.length > 240) measuredFrameMs.shift();
   }
   if(state.screen==='playing') update(dt);
   render();
-  if (syntheticManifest && now >= metricsNextAt && measuredFrameMs.length) {
+  if (visualPreviewEnabled && now >= metricsNextAt && measuredFrameMs.length) {
     metricsNextAt = now + 1000;
     const sorted = [...measuredFrameMs].sort((a, b) => a - b);
     const at = (p) => sorted[Math.ceil(sorted.length * p) - 1];
     window.__superhotSceneMetrics = Object.freeze({
-      mode: 'SYNTHETIC_NOT_MCD', matchedNativeScene: false,
+      mode: containersPreviewEnabled ? 'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME' : 'SYNTHETIC_NOT_MCD',
+      matchedNativeScene: false,
       activeScreen: state.screen, samples: sorted.length,
       p95FrameMs: at(.95), fpsAtP95FrameMs: 1000 / at(.95),
       p95Fps: 1000 / at(.05),

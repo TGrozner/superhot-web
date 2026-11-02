@@ -1,3 +1,4 @@
+import { createContainersBuild28DrawPlan, createContainersBuild28Nodes } from './scenes/containers-build28.js';
 import { buildSceneGraph } from './scenes/graph.js';
 import { planSceneDraws } from './visual/scene-plan.js';
 
@@ -175,5 +176,33 @@ export function drawGeneratedManifest(renderer, graph, camera, options = {}) {
     hidden: plan.hidden,
     affineDraws,
     legacyDraws,
+  };
+}
+
+
+/**
+ * SH-05 vertical build28 preview from SH-04's source-derived COLLIDER proxies.
+ * This is a generated VISUAL preview, not a matched MCD camera/mesh/shader or
+ * gameplay collision scene. No original geometry or materials are included.
+ */
+export function drawContainersBuild28Preview(renderer, camera, options = {}) {
+  const plan = createContainersBuild28DrawPlan(camera, options);
+  const graphNodes = createContainersBuild28Nodes();
+  for (const packet of plan.packets) {
+    // Source-derived proxy modules supply only generated axis-aligned boxes;
+    // fail rather than flatten a future oblique mesh to AABB without consent.
+    if (!packet.legacyBoxArgs) throw new Error('Containers preview packet needs explicit affine renderer contract');
+    renderer.box(...packet.legacyBoxArgs);
+  }
+  return {
+    objects: graphNodes.length,
+    nativeDerivedHullCount: 5,
+    visible: plan.packets.length,
+    culled: plan.culled,
+    hidden: plan.hidden,
+    affineDraws: 0,
+    legacyDraws: plan.packets.length,
+    collisionConnected: false,
+    nativeMeshMatch: false,
   };
 }
