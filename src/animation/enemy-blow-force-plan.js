@@ -90,7 +90,7 @@ export function planPejAiKillWithBlowForce(options) {
     branch: 'kill-with-blow-force-requested',
     commands: [
       ...blow.commands,
-      { op: 'invoke-controller-kill', method: 'Kill', afterSeconds: interval, scheduler: 'Unity Invoke' },
+      { op: 'request-unity-invoke', method: 'Kill', afterSeconds: interval, scheduler: 'Unity Invoke' },
     ],
     addBlowForceReturn: blow.returns,
   };
