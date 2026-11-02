@@ -1,0 +1,18 @@
+# SH-06 — Native BodyPartMeshCutter Shatter branch (MCD build 20299547)
+
+This supplements [animation-vfx.md](animation-vfx.md). **Statically PROVEN only**: not a trace of a Containers runtime instance, visual frame, shader output, or audible event.
+
+**Private primary evidence.** The bounded `managed/Assembly-CSharp/BodyPartMeshCutter.cs` reads were verified from extracted `result.json` in three private GitHub artifacts; original C# and commercial assets are NOT committed here:
+
+- [research #137](https://github.com/TGrozner/superhot-research/issues/137), artifact `13167155777`, source lines 1–180, read-text SHA256 `01f7de82460713dce39404ef9496ff949c58f39269fb2ad563b2ae8b339945bd`.
+- [research #138](https://github.com/TGrozner/superhot-research/issues/138), artifact `13165509147`, lines 181–360, SHA256 `c4cd569854e2a0db6f51e63ca5983c5d697894ae3bb61f3b2db1937f0ce92fbd`.
+- [research #139](https://github.com/TGrozner/superhot-research/issues/139), artifact `13166158579`, lines 361–465, SHA256 `a945be763f0ccc2e5af50fb92401a3a6eb9ebe4e2fbf84e017f37f6ccaae93ed`.
+
+**PROVEN source predicates and order (lines 270–412).** The method's third argument is `spawnParticles`, including when `PejAiBody.Explode` passes `!IsCivilian()` (#105). For an explicit `CutMode.Shatter`, the Shatter branch requires a cutter that is not yet removed, non-null `ShatterMeshes` and a non-triggered HDR chain reaction. The branch requests `CrystalCrush` through an audio prefab, detaches stuck objects, marks the cutter removed, requests `BreakJoints(false, spawnParticles)` and disables colliders. The **custom head** invokes `CustomEnemyHead.Shatter()` and returns its own renderer list: it does **not** execute the normal-head `HideOriginalMesh` or `EnableHDRChainReaction` loop in this method. For a noncustom head, `ReadyToShatter` aligns shard-parent TRS to the first skinned bone, activates it and requests `AddForceToSlices`. Otherwise it calls `SetupSeparatedBodyParts` with `deadPhase` and material priority `Parent.ArmorMaterial` > `bulletproofMat` > `Parent.BaseMaterial`. Only this noncustom path hides the original mesh and enables HDR on the shard renderers.
+
+**WEB-ONLY CONTRACT.** `src/vfx/body-part-shatter-branch.js` returns **source-gated intent descriptions** from explicitly supplied cutter flags. It neither executes these actions nor constructs, renders, or publishes any MCD mesh. Method-wide HDR locks, pickup detachments, body-mesh prelude and alternative `Cut`/`None` paths are outside this bounded planner. An ineligible Shatter branch does *not* mean the whole native method has no effects.
+
+**UNKNOWN / falsifiable before wiring #5.** No recorded real Containers invocation identifies a cutter, ShatterMeshes, HDR state, ReadyToShatter or custom head branch; no force vectors, shard topology, GPU draw, or audible `CrystalCrush` have been measured. Do not emit it on every `PejAiBody.Kill`: the body kill, explode, and cutter calls are separate native contracts. A same-event native trace of these flags and a browser GPU capture are required before any fidelity claim.
+
+
+**Explode argument forwarding corrected.** Previously `planPejAiBodyExplode` exposed each cutter command's third positional value as a generic `nonCivilian` property. The proof above establishes that `BodyPartMeshCutter.RemoveBodyPart` *consumes this slot as* `spawnParticles`. The source plan now retains the caller input `nonCivilian = !IsCivilian()` but labels each emitted cutter command `spawnParticles`; its test verifies both civilian states without claiming any particle actually spawned. This is a source-contract correction, not an observed Containers VFX improvement.
