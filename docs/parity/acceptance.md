@@ -674,3 +674,28 @@ les vrais PNG de silhouettes cargo+ennemi et leurs centroïdes/contours ;
 (3) mesurer couleur, lumière et deux instants temporels sur les mêmes ROI.
 Le jeu Web affiche des meshes source locaux mais la vraie instance native,
 les matériaux/lumières et les mouvements/réactions demeurent non appariés.
+
+### SH-10 — canvas-only Chromium screenshot gate (manual, 2 Nov 2026)
+
+Only CDP images of the WebGL canvas without DOM overlays are admissible for
+material/light comparisons. The capture harness temporarily hides non-canvas
+siblings in `#game-shell` while taking each PNG, checks CSS geometry, DPR,
+zoom, WebGL drawing buffer, GPU viewport and decoded PNG dimensions, then
+restores all elements in `finally`. An absent check fails closed; it is not
+an MCD rendering regression. No runtime module or private asset is modified.
+
+Web: `captureSurface=GAMEPLAY_ONLY_NO_UI`, plus per-frame pre/post
+`WEB_BROWSER_REPORTED_CANVAS_ONLY_NOT_NATIVE_PARITY`. A private native
+operator reference must separately attest per-frame
+`OPERATOR_ATTESTED_GAMEPLAY_NO_HUD`; the attestation is **not** independent
+proof of MCD origin. The PNGs are CDP compositor captures, not a GPU
+`readPixels` proof or a locked single native game frame.
+
+Isolated check: `node --test tests/acceptance-canvas-surface.test.mjs`.
+The previous synthetic browser demonstration restored the HUD, but no valid
+MCD↔Web matched active scene/camera/time pair has been acquired. **INCONNU**.
+Do not infer Containers/build28 from a Dojo/build10 root scene, from draw
+counts, or from unpaired RGB images. SH-05/SH-04/SH-15: first register the
+same active source scene and runtime camera for both frames; SH-12/SH-14:
+then compare visible silhouettes/locations; SH-13/SH-01/SH-02/SH-03:
+finally compare material, lighting and temporal response at paired instants.
