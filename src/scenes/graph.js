@@ -40,6 +40,11 @@ export function multiplyMatrices(a, b) {
       for (let k = 0; k < 4; k++) output[col * 4 + row] += a[k * 4 + row] * b[col * 4 + k];
     }
   }
+  // A finite authored transform can overflow after parent-child composition.
+  // Never hand an Infinity/NaN matrix to culling or WebGL uniforms.
+  if (output.some((v) => !Number.isFinite(v))) {
+    throw new RangeError('Scene matrix overflow during composition');
+  }
   return output;
 }
 
@@ -48,6 +53,7 @@ export function composeLocalMatrix(transform = {}) {
   const s = finiteVector(transform.scale, ['x', 'y', 'z'], 'scale', point(1, 1, 1));
   const q = finiteVector(transform.rotation, ['x', 'y', 'z', 'w'], 'rotation', { x: 0, y: 0, z: 0, w: 1 });
   const length = Math.hypot(q.x, q.y, q.z, q.w);
+  if (!Number.isFinite(length)) throw new RangeError('Rotation quaternion norm overflow');
   if (length < EPSILON) throw new TypeError('Rotation quaternion cannot be zero');
   const [x, y, z, w] = [q.x / length, q.y / length, q.z / length, q.w / length];
   const xx = x*x, yy = y*y, zz = z*z, xy = x*y, xz = x*z, yz = y*z;
@@ -68,12 +74,19 @@ export function mirrorZ(matrix) {
 
 /** Bounding box of a transformed generated box, including rotation, shear and negative scales. */
 export function boxBounds(matrix, size) {
+  if (!matrix || matrix.length !== 16) throw new TypeError('Box bounds requires a 4x4 matrix');
+  for (let i = 0; i < 16; i++) {
+    if (!Number.isFinite(matrix[i])) throw new RangeError('Box bounds requires finite matrix entries');
+  }
   const dimensions = finiteVector(size, ['x', 'y', 'z'], 'box size');
   if ([dimensions.x, dimensions.y, dimensions.z].some((v) => v < 0)) throw new RangeError('Box size must be nonnegative');
   const half = [dimensions.x / 2, dimensions.y / 2, dimensions.z / 2];
   const center = point(matrix[12], matrix[13], matrix[14]);
   const h = [0, 1, 2].map((row) => half.reduce((sum, extent, axis) => sum + Math.abs(matrix[axis * 4 + row]) * extent, 0));
-  return { center, halfExtents: point(...h), radius: Math.hypot(...h) };
+  if (h.some((v) => !Number.isFinite(v))) throw new RangeError('Box bounds extents overflow');
+  const radius = Math.hypot(...h);
+  if (!Number.isFinite(radius)) throw new RangeError('Box bounds radius overflow');
+  return { center, halfExtents: point(...h), radius };
 }
 
 /**
