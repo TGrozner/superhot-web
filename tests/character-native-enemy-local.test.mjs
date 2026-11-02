@@ -38,7 +38,8 @@ test('strict OBJ group binds to SH-12 indexed non-cuboid pipeline without claimi
   const source = decodeSourceNeutralEnemyObj(fakeObj, evidence);
   assert.equal(source.mesh.indexCount, 3);
   assert.equal(source.mesh.triangleCount, 1);
-  assert.deepEqual(source.groupEvidence[0].bounds, { min: [-1, 0, 0], max: [0, 1, 0] });
+  assert.deepEqual(source.groupEvidence[0].bounds.min.map((v) => v + 0), [-1, 0, 0]);
+  assert.deepEqual(source.groupEvidence[0].bounds.max.map((v) => v + 0), [0, 1, 0]);
   assert.equal(source.drawRanges[0].groupName, 'Demo_0');
   assert.deepEqual(source.sourceCounts, { v: 3, vt: 3, vn: 1 });
   assert.equal(source.mesh.vertices[2], 0);
