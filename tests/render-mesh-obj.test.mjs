@@ -49,6 +49,20 @@ test('source-qualified OBJ groups build indexed triangles with exact draw ranges
   assert.equal(out.windingFlipped, true);
 });
 
+test('exporter multiword OBJ group label is matched EXACTLY, not guessed by suffix', () => {
+  const label = 'Generated Mesh (demo: synthetic) 2_47';
+  const obj = OBJ.replace('g wedge_a', 'g ' + label);
+  const first = fixture().groups[0];
+  const opts = fixture({ groups: [{ ...first, name: label }] });
+  const out = decodeIndexedObjPayload(obj, opts);
+  assert.equal(out.mesh.triangleCount, 2);
+  assert.equal(out.drawRanges[0].groupName, label);
+  assert.equal(out.groupEvidence[0].distinctPositionRefs, 5);
+  assert.throws(() => decodeIndexedObjPayload(obj, fixture({
+    groups: [{ ...first, name: '2_47' }],
+  })), /triangle count/, 'suffix alone is not an object binding');
+});
+
 test('mirror X + flip winding keeps winding outward; UV/normal seam splits vertex', () => {
   const { mesh } = decodeIndexedObjPayload(OBJ, fixture());
   const v = mesh.vertices, ids = mesh.indices;
