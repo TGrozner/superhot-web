@@ -218,3 +218,46 @@ src.lightmapTexture; // {targetOwner:'sharedassets28.assets',targetPathId:2,...i
 Use `containersBuild28CargoMaterialBinding(rendererPathId)` to log **source-resolved identity** on the local `?scene=containers` group draw, and `materialDrawPacket(b.material,{fallback:createGeneratedMaterial(...)})` for the **unchanged visibly generated color** until source shader+texture pixels can be loaded privately and used in a verified renderer. The packet now carries `materialAsset` (the source identity), while `colorProvenance='generated-fallback-not-mcd'`, `lightmapSamplingEnabled=false`, and `nativeMaterialMetadata.webShadingReady=false` remain explicit. Existing source-backed scene `fogStrength=0` from #95 is unchanged; ambient/GI, exposure, tonemap and dynamic point/spot light selection remain **unknown**, not auto-applied.
 
 **P0 requested measurable next delta:** obtain *privately* actual `resources.assets:248` texels (source channel/format/encoding, stream locator), `globalgamemanagers.assets:25` shader variant/pass state or readable stage algorithm, and `sharedassets28.assets:2` lightmap pixels/UV2. Then build a local-only resource bridge and collect native/Web paired frames in SH-15. The next measurable target is source-textured container surfaces **versus** the current generated flat Web fallback, with pixel statistics at the same camera—not another synthetic test count. If only the references are present, keep the current visible fallback. One bounded private #85 query was used this cycle, no new runner or public source bytes.
+
+
+## 2026-11-02 P0 — authentic EnemyMerged Red Crystal shader *identity*, visible diagnostic hook
+
+**New source proof (not repeated bridge work):** private artifact `result.json` actually reopened for [research #93](https://github.com/TGrozner/superhot-research/issues/93) / `13139554254` (two enabled source `SkinnedMeshRenderer` records), [#95](https://github.com/TGrozner/superhot-research/issues/95) / `13141157351` (Material13 properties), and [#98](https://github.com/TGrozner/superhot-research/issues/98) / `13141163607` (qualified external Shader28 pointer). Existing #88/#90 validate private OBJ shape/triangle counts. The #95 float field SQL is truncated at 1200 characters, so only the *visible* fields reported here are asserted; no invented late property list. This is serialized data, **not runtime draw evidence**.
+
+| Real Unity source | Exact identity and observed serialized state |
+| --- | --- |
+| `sharedassets0.assets:SkinnedMeshRenderer4748` | enabled; mesh `sharedassets0.assets:284 EnemyMerged` (source OBJ `EnemyMerged_0`: 5237 `v`, 2254 triangles), one material slot `(fileID0,pathID13)`, root bone2257, 60 bones, lightmap index65535 |
+| `sharedassets0.assets:SkinnedMeshRenderer4749` | enabled; mesh `sharedassets0.assets:285 EnemyMergedHeadless` (4895 `v`, 2132 triangles), same material `(0,13)`, root bone2257, 59 bones, lightmap index65535 |
+| `sharedassets0.assets:Material13` | `MAIN RedCrystalNuEnemyMaterial`; shader pointer `(fileID1,pathID28)`, **no serialized `m_TexEnvs` entries**, keyword `_ALLOWLOCALFOG_ON` |
+| `globalgamemanagers.assets:Shader28` | pointer **resolved**, name **`XULM FULLFORWARD/Red Crystal`**; pixel/vertex program and selected keyword variant still unverified |
+| Serialized material input properties | `_Color=(0.720588207244873,0,0,1)`, `_EmissionColor=(0.5220588445663452,0,0,1)`, `_FogColor=(0.6838235259056091,0,0,1)`; `_IsEnemy=1`, `_Alpha=0`, `_AllowLocalFog=1`, `_FogDistance=5`, `_FogLength=7` |
+
+**Important fog distinction:** `level28:RenderSettings18511.m_Fog=false` is source-serialized *scene-level Unity fog OFF*, already hooked by SH-05 #95. Enemy material keyword `_ALLOWLOCALFOG_ON` and `_AllowLocalFog=1` are independent custom XULM shader inputs and could drive **local** fog. It is unsound to conclude this enemy has zero fog just because the scene fog setting is OFF. Local fog appearance is UNKNOWN until the original shader variant and real frame are observed. Likewise, `_Alpha=0` is a custom shader property, **not** proof of zero raster alpha; setting Web alpha=0 would make a potentially visible enemy disappear. No assumption that `_EmissionColor` adds directly to `_Color`.
+
+### New SH-13 API / exact independent SH-12 + SH-05 handoff
+
+`src/render/material-model.js` now exports `enemyRedCrystalMaterialBinding(rendererPathId)` for **4748 or 4749 only**, and `enemyRedCrystalDiagnosticWebPacket(rendererPathId)`. The latter intentionally forwards raw serialized `_Color` to the existing Web material uniform *as a diagnostic display-sRGB experiment*:
+
+```js
+import {
+  enemyRedCrystalMaterialBinding, enemyRedCrystalDiagnosticWebPacket,
+} from './render/material-model.js';
+const source = enemyRedCrystalMaterialBinding(4748);
+// source.mesh: {owner:'sharedassets0.assets',pathId:284,
+//   objGroup:'EnemyMerged_0',sourceVertexCount:5237,sourceTriangleCount:2254,
+//   staticObjOnly:true,skinWeightsAvailable:false,poseProven:false}
+// source.materialSource.material: {owner:'sharedassets0.assets',pathId:13,...}
+// source.materialSource.shader: {owner:'globalgamemanagers.assets',pathId:28,...}
+const diagnostic = enemyRedCrystalDiagnosticWebPacket(4748);
+diagnostic.colorHex; // '#b80000' (round(_Color.r * 255); *NOT* native final RGB)
+diagnostic.color; // [0.7205882072,0,0,1] — FORCE opaque diagnostic Web alpha
+diagnostic.colorProvenance; // 'native-serialized-color-parameter-web-diagnostic-NOT-MCD-fragments'
+```
+
+**SH-12: no additional mesh code requested.** Current merged [#111](https://github.com/TGrozner/superhot-web/pull/111) `parseEntireObjIntoIndexedMesh` is sufficient for a privately selected original `EnemyMerged` OBJ, as long as source-triangle and bounds gates remain enforced and UnityPy's independently verified axis conversion is preserved. Never apply the cargo concrete `resources.assets:3` shader or UV2 lightmap atlas to this enemy. No bone weights, bind poses, animated skinned surface or runtime instance are proven by the OBJ.
+
+**SH-05 alone** owns `main.js/renderer.js/levels.js`: after verified local `File` load and WebGL2 indexed upload, associate source renderer4748/mesh284 with `enemyRedCrystalDiagnosticWebPacket(4748).colorHex` for `renderer.drawPrivateMesh('enemy-merged',colorHex)` (renderer slot name and actual implementation are SH-05's decision). Count a distinct indexed enemy draw and show `STATIC NATIVE-SOURCE GEOMETRY — DIAGNOSTIC RED, UNRIGGED, NO NATIVE SHADER`. Position may be a clearly labeled diagnostic placement only; **do not** present it as a native Containers instance or modify the game progression automatically. Same hook for renderer4749/headless. Keep `fogStrength:0` only as the verified scene-level setting; do not implement the local fog branch without shader evidence. `#b80000` is an **input-palette delta** from an arbitrary Web red, not a measured native/Web pixel delta.
+
+**Actual visual acceptance:** on `?scene=containers`, with owner-provided `.obj.gz`, verify `nativeEnemyLoaded=1`, `privateIndexedDraws` rising by one, a browser screenshot showing the enemy geometry, capture a same-camera *generated Web red* vs *source-param diagnostic red* pair, and calculate actual per-pixel delta/changed-pixel fraction in SH-15. Only after a native MCD capture at matched camera/pose/lighting may a native similarity score be claimed. Node CI on metadata cannot replace that observation.
+
+**Separate Concrete texture / bake blocker:** existing [research #85](https://github.com/TGrozner/superhot-research/issues/85) owner-qualified `resources.assets:248` diffuse and `sharedassets28.assets:2` lightmap identities, but **no texels, encoding or UV2**. One bounded private issue [research #100](https://github.com/TGrozner/superhot-research/issues/100) has been requested to inspect **two exact Texture2D stream descriptors only**, not extract/copy pixels into this public repo. Its `result.json` must be inspected before any new claim. This request does **not** repeat #41/#50/#73/#75/#85. Keep all native binaries, shaders and images private.
