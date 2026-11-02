@@ -1,5 +1,68 @@
 # SH-10 — MCD acceptance matrix (source-qualified, not 1:1)
 
+## P0 UPDATE — full source Containers now on main (SH-05 a30a575, 2026-11-02)
+
+**This section supersedes the fallback-only 6-cargo gate immediately below for the
+current homepage.** SH-05 has now actually connected a private, locally loaded
+build28 scene package: **68 meshes / 360 world instances / 17 textures**,
+a source pistol and GPU skinned EnemyMerged/Headless clips. Its read-only
+browser reports `mode=CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY`,
+`generatedManifest.nativeGeometry=true`, nonzero world
+`drawCalls/triangles`, and `nativeMaterialParity=false`. This is
+**SOURCE GEOMETRY IN WEB**, not the executed original's camera, spawner,
+PhysX, weapon timing, material or scene state. Existing
+`localMeshDrawEvidence` applies **only to the old fallback route**; do
+not reject the original-scene mode for failing its six-cargo counters.
+
+**Actual browser capture gate (manual, outside CI):**
+
+```bash
+# In an owner-local environment already running npm start with its PRIVATE
+# loopback browser-assets.json allowlist and the complete scene package:
+node scripts/acceptance-live-capture.mjs --capture-web \
+  --url http://127.0.0.1:4173/ --out /tmp/sh10-source-scene \
+  --require-original-scene --require-enemy
+```
+
+The gate waits for actual browser telemetry and requires **at least**
+68/360/17 source scene counts; a real world indexed draw/triangle
+submission, positive measured frame timing and an app draw counter
+consistent with the world pass; explicit material/light parity=false.
+With `--require-enemy`, it requires source-qualified
+`sharedassets0.assets:284/2254` or `:285/2132`, a nonzero skinned
+Web draw and the explicit native-spawn-UNVERIFIED flag. These checks
+run again **before both** PNG captures to reject a partly loaded scene.
+The normal capture then saves two actual Chromium PNGs (idle, after
+KeyW), SHA-256, camera poses and render-frame brackets, and a Web-only
+pixel-change metric. The gate never calls the MCD executable, and
+app-reported draws **do not** independently verify GPU output. Do not
+publish private PNGs or native bytes.
+
+**Measured evidence vs missing evidence:** SH-05 reports having already
+exercised the whole local scene in actual Chromium, without GL errors
+(see issue #5, main `a30a575`), but **SH-10 has not executed this new
+capture gate in a browser**. SH-15 documents a separate, PRIVATE
+native/Web four-pose *isolated character* comparison at 960×540:
+silhouette IoU 0.9554–0.9615, center delta 0.63–0.81 px, normalized
+RGB delta 0.0940–0.1022. That comparison is **not** a matched
+Containers gameplay frame and not a 1:1 certificate. It must not be
+silently substituted for a full-scene reference.
+
+**Three VISIBLE convergence criteria for SH-05:** (1) independently
+match active native Containers scene/frame/pose/FOV/viewport and Web
+rendered-frame camera (SH-04/05/15); (2) pair private native/Web
+**actual PNGs** with identical player/enemy/weapon pose, evaluate
+missing instances, centroids and silhouette IoU, report uncertainty
+(SH-05/14/15); (3) quantify RGB/luminance, lightmaps/tonemapping and
+**time evolution** after the same stimulus with justified thresholds,
+sample-phase and timeScale (SH-01/02/03/05/13/15). Without that pair,
+native-vs-Web visual status remains **INCONNU**, not REJECTED.
+R=replay, Containers physical 120 vs 60 initializer, time max/cap/override,
+player deltaTime and projectile phases also remain provisional until
+native *runtime* context is tied to the tested browser route.
+
+
+
 
 ## CURRENT P0 visual gate — playable Containers main after SH-05 #128 (2 November 2026)
 
