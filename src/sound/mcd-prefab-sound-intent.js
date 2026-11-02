@@ -80,11 +80,11 @@ export function planMcdAudioPrefabPlay({
  * This composes the original body-dead early exit with the sound-call site.
  */
 export function planMcdBodyKillShatterPrefab({
-  bodyAlreadyDead, bodyWorldPosition, resolvedPrefabName,
+  controllerAlreadyDead, bodyWorldPosition, resolvedPrefabName,
   poolExists, reused, pitchBeforeRequest,
 } = {}) {
-  boolean(bodyAlreadyDead, 'bodyAlreadyDead');
-  if (bodyAlreadyDead) return null;
+  boolean(controllerAlreadyDead, 'controllerAlreadyDead');
+  if (controllerAlreadyDead) return null;
   const origin = position3(bodyWorldPosition);
   return planMcdAudioPrefabPlay({
     prefabName: resolvedPrefabName, poolExists, reused,
