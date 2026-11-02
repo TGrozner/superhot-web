@@ -124,8 +124,8 @@ Dans l'échantillon étudié, cinq GameObjects cargos et leurs modèles sont sé
 | ---: | ---: | --- | --- |
 | 336 | 7837 | 6:47 | `cargo-22` : groupe 47 local sans translation |
 | 459 | 7940 | 7:48 | `cargo-upper` : autre fichier local facultatif |
-| 461 | — | 7:46 | non raccordé en mesh source |
-| 673 | — | 7:77 | non raccordé en mesh source |
+| 461 | 7941 | 7:46 | non raccordé en mesh source |
+| 673 | 8123 | 7:77 | non raccordé en mesh source |
 | 839 | 8272 | 6:24 | `cargo-7` : réutilisation groupe 47 avec translation `(-7.35,0,+4.5)` |
 | 1003 | 8417 | 6:32 | instance ajoutée avec translation `(-1.4,-0.05,-25.2)` |
 
