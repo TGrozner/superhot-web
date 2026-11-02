@@ -12,6 +12,7 @@ import { inflateSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { framePairAlignment } from './acceptance-frame-alignment.mjs';
+import { CANVAS_CAPTURE_SURFACE, WEB_CANVAS_SURFACE_STATUS, canvasCaptureSurfaceEvidence, beginCanvasOnlyIsolationExpression, probeCanvasOnlyIsolationExpression, restoreCanvasOnlyIsolationExpression } from './acceptance-canvas-surface.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const isInside = (p, base = ROOT) => { const d = relative(base, resolve(p)); return !d || (!d.startsWith('..') && !isAbsolute(d)); };
@@ -287,6 +288,15 @@ export function compare(web, native, opts = {}) {
   const reasons=[];
   if (web?.schemaVersion!==1 || native?.schemaVersion!==1) reasons.push('SCHEMA_UNKNOWN');
   if (web?.captureKind!=='ACTUAL_BROWSER_CDP_PNG' || web?.syntheticFixture===true) reasons.push('WEB_NOT_VERIFIED');
+  if(web?.captureSurface!==CANVAS_CAPTURE_SURFACE || !Array.isArray(web?.frames) ||
+      web.frames.some(f=>f?.captureSurface!==CANVAS_CAPTURE_SURFACE ||
+        f?.canvasSurfaceBefore!==WEB_CANVAS_SURFACE_STATUS ||
+        f?.canvasSurfaceAfter!==WEB_CANVAS_SURFACE_STATUS))
+    reasons.push('WEB_CANVAS_SURFACE_UNVERIFIED');
+  if(native?.captureSurface!=='OPERATOR_ATTESTED_GAMEPLAY_NO_HUD' ||
+      !Array.isArray(native?.frames) ||
+      native.frames.some(f=>f?.captureSurface!=='OPERATOR_ATTESTED_GAMEPLAY_NO_HUD'))
+    reasons.push('NATIVE_HUD_ISOLATION_UNVERIFIED');
   if(native?.captureKind!=='OPERATOR_ATTESTED_NATIVE_MCD_PNG' || native?.game!=='SUPERHOT: MIND CONTROL DELETE' || native?.build!=='20299547' || !present(native?.observationId) || native?.syntheticFixture===true) reasons.push('NATIVE_UNVERIFIED');
   if(web?.scene?.binding!=='ACTIVE_SCENE_PROVEN' || native?.scene?.binding!=='ACTIVE_SCENE_PROVEN' || !present(web?.scene?.key) || web.scene.key!==native.scene.key) reasons.push('ACTIVE_SCENE_UNPAIRED');
   if(!cameraOK(web?.camera) || !cameraOK(native?.camera) || !present(web?.coordinateFrameId) || web.coordinateFrameId!==native.coordinateFrameId) reasons.push('CAMERA_UNPAIRED');
@@ -477,7 +487,13 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
     if(isInside(captureRoot))throw Error('Capture output resolves inside public checkout');
     const frames=[];const begin=Date.now();
     const snap=async(name)=>{
+      const isolation=await cdp.eval(beginCanvasOnlyIsolationExpression);
+      if(!isolation?.ok)throw Error('Canvas overlay isolation unavailable: '+(isolation?.reason||'UNKNOWN'));
+      try{
+      await sleep(50); // Allow Chromium compositor to display hidden DOM layers.
       const state=await cdp.eval(observation),rect=state.rect;
+      const surfaceBefore=canvasCaptureSurfaceEvidence(await cdp.eval(probeCanvasOnlyIsolationExpression));
+      if(surfaceBefore.reasons.length)throw Error('Canvas-only capture preflight: '+surfaceBefore.reasons.join(','));
       if(!state.playing)throw Error('Gameplay not active');
       if(requireOriginalScene){
         const proof=originalSceneDrawEvidence(state.performance,{requireSkin:requireEnemy});
@@ -500,6 +516,8 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
         if(evidence.reasons.length)throw Error('After PNG lacks rendered source frame: '+evidence.reasons.join(','));
       }
       const buf=Buffer.from(result.data,'base64'),image=decodePng(buf),file=name+'.png';
+      const surfaceAfter=canvasCaptureSurfaceEvidence(await cdp.eval(probeCanvasOnlyIsolationExpression),image);
+      if(surfaceAfter.reasons.length)throw Error('Canvas-only capture postflight: '+surfaceAfter.reasons.join(','));
       writeFileSync(join(captureRoot,file),buf,{flag:'wx'});
       frames.push({
         file,tMs:Date.now()-begin,phase:'displayed-frame-window',width:image.width,height:image.height,
@@ -510,8 +528,14 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
         renderedSceneCountsBefore:requireOriginalScene?before.nativeScene:null,
         renderedSceneCountsAfter:requireOriginalScene?after.nativeScene:null,
         exactSingleNativeFrame:false,
+        captureSurface:CANVAS_CAPTURE_SURFACE,canvasSurfaceBefore:surfaceBefore.status,
+        canvasSurfaceAfter:surfaceAfter.status,independentGpuReadback:false,
       });
       return state;
+      }finally{
+        const restored=await cdp.eval(restoreCanvasOnlyIsolationExpression);
+        if(!restored)throw Error('Canvas overlay isolation could not be restored');
+      }
     };
     await snap('idle');
     await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'w',code:'KeyW',windowsVirtualKeyCode:87});
@@ -529,6 +553,7 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       timeScale:number(hook?.timeScale)?hook.timeScale:null,viewport:{width:frames[0].width,height:frames[0].height,dpr:1},frames,
       performance:after.performance,webOnlyPixelVariation,
       webRenderedFrameBracketsObserved:true,
+      captureSurface:CANVAS_CAPTURE_SURFACE,
       localMeshPreview:requireOriginalScene?originalSceneDrawEvidence(after.performance,{requireSkin:requireEnemy}):
         (privateFiles.some(Boolean)||requireEnemy)?localMeshDrawEvidence(after.performance,{requireEnemy}):
         {status:'WEB_CARGO_DRAW_NOT_REQUIRED',nativeParityCertified:false},
