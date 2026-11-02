@@ -179,3 +179,37 @@ publication d'asset ou de corpus original.
 
 **Intégration :** modules purs uniquement ; le câblage `src/main.js` et
 les mesures navigateur restent réservés à SH-05 (issue #5).
+
+## SH-03 finite sphere sweep — 2026-11-02 (Web numerical safety, not MCD parity)
+
+**PROUVÉ / WEB ONLY (baseline)**: `src/combat/trace.js` blob
+`99e72e69611967d927dfdad9d6bc57cd83ae3dd1` evaluates
+`dot3(offset,offset) - radius²` and the quadratic discriminant directly.
+For finite synthetic segment endpoints `±1e200` and sphere radius `1e199`,
+intermediate squares overflow and the test misses the sphere. For
+`±1e-200` and radius `1e-201`, squared terms underflow and an exterior
+start appears to hit at `t=0`. With endpoints `±1e308`, vector subtraction
+overflows before the quadratic. The analytic entry in all three cases is
+`t≈0.45`. Baseline outcomes were reproduced under Node with the original
+sphere-sweep formula: respectively `null`, `0`, `null`.
+
+**Implementation / PROVISIONAL**: `src/combat/trace.js` retains the existing
+ordinary-input quadratic and uses a relative-coordinate, scaled fallback
+only when intermediates are not representable. `Math.hypot` distinguishes
+an interior start without squaring subnormal distances; the fallback
+rationalizes the entry root. `tests/combat-sphere-dynamic-range.test.mjs`
+checks three crossings, an off-axis near miss and an interior start.
+The fallback returns `null` rather than inventing an immediate hit if a
+positive entry separation disappears after scaling. This is a numerical
+guard, **not** a native collider or physics rule. CI and browser performance
+must be reported separately from isolated reproduction.
+
+**INCONNU / MCD**: actual projectile/collider data, hit layers, timing,
+weapon/projectile producer callsites, damage and enemy AI, including whether
+any native trajectory approaches these magnitudes. Last accessible private
+combat reference remains the *secondary* `HANDOFF.md` from workflow run
+`41368361512`, artifact `13108420851`. The authorized read-only
+`corpus-query` workflow requires unavailable `workflow_dispatch`; private
+request remains `{"operation":"read","path":"spec/combat/combat-specification.md","start":1,"count":200}`.
+No original assets or private reports are copied here. SH-05 alone owns
+`src/main.js` integration.
