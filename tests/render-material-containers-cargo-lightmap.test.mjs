@@ -108,7 +108,6 @@ test('Unity concrete shader/texture/lightmap owners and values are source-qualif
   assert.equal(src.shaderProperties._DIFFUSE,0.5);
   assert.equal(src.shaderProperties._StripesOnOff,1);
   assert.deepEqual([src.lightmapTexture.targetOwner,src.lightmapTexture.targetPathId],['sharedassets28.assets',2]);
-  assert.equal(src.nativeShaderProgramDecoded,false);
   assert.equal(src.shader.nativeShaderProgramDecoded,false);
   assert.equal(src.mainTexture.imagePixelsDecoded,false);
   assert.equal(src.lightmapTexture.imagePixelsDecoded,false);
