@@ -1,0 +1,52 @@
+# SH-12 — Indexed WebGL2 mesh contract (source-neutral)
+
+This module is an **independent transport/render primitive**, not a replica of any SUPERHOT: MIND CONTROL DELETE mesh. The sole built-in example is a procedurally generated capped cylinder. It does not include Unity/Steam data, original materials, textures or shaders, and is **not yet wired to the playable renderer**. SH-05 exclusively owns `src/main.js`, `src/renderer.js`, and `src/levels.js`.
+
+## Source qualification and current blocker
+
+SH-04's public handoff in [#4](https://github.com/TGrozner/superhot-web/issues/4) reports serialized `Containers/build28` GameObjects, TRS parent chains, MeshFilter/MeshRenderer slots and colliders based on bounded private index queries (#10, #16, #20, #27, #30, #32, #37, #39). **That is not an executed runtime mesh draw**, and does not reveal approved replacement mesh data, renderer shader or material color. Do not label this cylinder a `Containers` object. SH-11 [#75](https://github.com/TGrozner/superhot-web/issues/75) owns source->mesh/material resolution. SH-05's merged [#81](https://github.com/TGrozner/superhot-web/pull/81) already integrates an opt-in synthetic scene via affine *boxes*; this module adds the indexed *non-box* path, and does not duplicate #81's scene/normal-matrix work.
+
+## CPU layout
+
+```js
+import { defineIndexedMesh, makeCylinderMesh, meshModelMatrices } from './src/render/mesh-format.js';
+const generated = makeCylinderMesh({ radius: 0.5, height: 1, segments: 24 });
+// Or defineIndexedMesh({ positions: xyzArray, normals: xyzArray, uvs: uvArray, indices: triangleIndices });
+```
+
+`defineIndexedMesh` validates lengths, finite float32-compatible components, integral in-range triangle indices, and produces `{ vertices: Float32Array, indices: Uint16Array | Uint32Array, vertexCount, indexCount, triangleCount, strideBytes: 32, bounds }`. Vertex is interleaved `position.xyz | normal.xyz | uv.xy` (32-byte stride). Index type is 16-bit for `<=65536` vertices, otherwise 32-bit. All geometry is **already in the Web scene's coordinate system**; scene coordinate conversion is a separate concern (`src/scenes/graph.js`). Matrices are column-major affine Web world transforms. Uniforms must always be set per draw.
+
+## SH-05 exact hookup (integration owner only)
+
+Inside `createRenderer`, after the existing shader/program is linked and while the WebGL2 context is valid:
+
+```js
+import { makeCylinderMesh, meshModelMatrices } from './render/mesh-format.js';
+import { uploadIndexedMesh } from './render/gpu-mesh.js';
+const cylinder = uploadIndexedMesh(gl, program, makeCylinderMesh({ segments: 24 }));
+
+// Called after renderer.begin(camera). Color uniform still belongs to SH-05.
+function affineMesh(worldMatrix, color, alpha = 1) {
+  const { model, normal, mirrored } = meshModelMatrices(worldMatrix);
+  gl.uniform1i(uniforms.uUseAffine, 1);
+  gl.uniformMatrix4fv(uniforms.uAffineModel, false, model);
+  gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
+  // Reuse SH-05 color cache / uColor code from affineBox; no new material model here.
+  // If gl.CULL_FACE becomes enabled, account for mirrored winding (mirrored === true).
+  cylinder.draw(); // internally bindVertexArray() then gl.drawElements(TRIANGLES,...)
+  drawCalls++; // matches existing browser scene telemetry contract
+}
+// On renderer shutdown/context cleanup: cylinder.dispose();
+```
+
+Actual SH-05 shader currently exposes `aPosition`, `aNormal`, `uAffineModel`, `uAffineNormal`, `uUseAffine` and `uColor` (verified against `src/renderer.js` on 2026-11-02). If its shader grows `aUV`, the uploader will bind that attribute at offset 24; otherwise UV data remains available in the VBO but no UV channel is consumed. For non-cylinder data, create/cache one GPU mesh per distinct geometry, then issue one indexed draw per instance. `uploadIndexedMesh` saves/restores previous VAO and ARRAY_BUFFER binding while uploading, owns its VBO/EBO/VAO and provides idempotent `dispose()`. It neither owns `gl.useProgram` nor changes blending/culling/depth/test/projection.
+
+`meshModelMatrices` calculates the inverse-transpose 3×3 normal matrix (correct with rotation, nonuniform scale and shear), detects reflection via `mirrored`, and rejects singular/overflowed matrices. It uses the **supplied world matrix** directly: the author must not pre-scale geometry a second time. SH-05's own `normalMatrixFromAffine` already does the same for affine boxes; SH-05 can reuse that function if desired instead of calling the new helper.
+
+## Local evidence and missing validation
+
+- `node --test tests/render-mesh-*.test.mjs`: **7/7 passed locally** on Node 22.16.0. Tests check a 24-segment cylinder is curved and capped, winding is outward, separated normal/UV layout, uint16/uint32 boundaries, model normal orthogonality under shear/reflection, correct VAO offsets and indexed GPU calls in a mocked WebGL2 context.
+- **Not performed:** real WebGL2 browser/GPU render, shader compile for a mesh-enabled runtime, photo comparison, draw-call/FPS/p95, source mesh assignment to `Containers/build28`, runtime observation of original MCD. Mock tests are only API evidence, not a visual acceptance gate.
+- Next vertical-slice gate: SH-05 wires an opt-in **synthetic cylinder** first; obtains one browser screenshot and indexed draw-call telemetry; then swaps to a source-qualified generated replacement only after SH-04/SH-11 provide `owner,path_id -> approved geometry / material` plus matching scene transform. SH-15 compares native vs Web only with matched camera/reference observations.
+
+Ownership: SH-12 files `src/render/mesh-format.js`, `src/render/gpu-mesh.js`, `tests/render-mesh-*.test.mjs`, this document. SH-13 owns `src/render/material-model.js` and `src/render/lighting-model.js`. SH-05 alone touches existing renderer/entrypoint/levels.
