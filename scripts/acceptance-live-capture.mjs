@@ -106,30 +106,61 @@ export function metrics(a, b, roi = [0,0,1,1]) {
 const cameraOK = (c) => c?.source==='RUNTIME_OBSERVED' && ['x','y','z','yaw','pitch','fovYDegrees'].every(k=>number(c[k]));
 const maxCameraDiff = (a,b) => ({position:Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z),angle:Math.hypot(a.yaw-b.yaw,a.pitch-b.pitch),fov:Math.abs(a.fovYDegrees-b.fovYDegrees)});
 /** A source-qualified LOCAL browser draw is useful evidence, not MCD pixel parity. */
-export function localMeshDrawEvidence(stats) {
-  // #105: two owner-selected source files, three Mesh6 draw placements and
-  // one Mesh7 draw. Application counters are NOT an independent GPU readback.
-  const reasons=[];
-  if(stats?.mode!=='CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME') reasons.push('CONTAINERS_BROWSER_ROUTE_UNVERIFIED');
-  if(stats?.matchedNativeScene!==false) reasons.push('NON_NATIVE_PREVIEW_PROVENANCE_MISSING');
-  if(stats?.activeScreen!=='playing'||stats?.browserMeasured!==true) reasons.push('LIVE_BROWSER_FRAME_UNVERIFIED');
-  if(stats?.locallyLoadedSourceGroups!==2) reasons.push('TWO_LOCAL_SOURCE_GROUPS_UNVERIFIED');
-  if(stats?.generatedManifest?.sourceQualifiedMesh6DrawPackets!==3) reasons.push('THREE_MESH6_SOURCE_PLACEMENTS_UNVERIFIED');
-  if(stats?.generatedManifest?.privateIndexedDraws!==4) reasons.push('FOUR_PRIVATE_INDEXED_DRAWS_UNVERIFIED');
-  if(stats?.generatedManifest?.sourceConvertedApproximationOnly!==true ||
-     stats?.generatedManifest?.localFilePreviewOnly!==true ||
-     stats?.generatedManifest?.nativeMeshMatch!==false)
-    reasons.push('SOURCE_CONVERTED_PREVIEW_NOT_QUALIFIED');
-  if(!Number.isSafeInteger(stats?.generatedManifest?.hiddenByPrivateMesh)||
-     stats.generatedManifest.hiddenByPrivateMesh<2) reasons.push('PROXY_SUBSTITUTION_UNVERIFIED');
-  if(!Number.isSafeInteger(stats?.totalWebGLDrawCalls)||stats.totalWebGLDrawCalls<4)
-    reasons.push('WEBGL_DRAW_COUNT_UNVERIFIED');
-  if(!number(stats?.p95FrameMs)||stats.p95FrameMs<=0||
-     !Number.isSafeInteger(stats?.samples)||stats.samples<1) reasons.push('FRAME_TIMING_UNVERIFIED');
-  return {status:reasons.length?'WEB_LOCAL_MESH_UNVERIFIED':'WEB_APP_REPORTED_FOUR_INDEXED_DRAWS_NOT_MCD_PARITY',
-    nativeParityCertified:false,reasons};
+export function localMeshDrawEvidence(stats, { requireEnemy = false } = {}) {
+  // SH-05 #128 on main: six cargo source-qualified indexed submissions
+  // (Mesh6 x3 + THREE separately ranged Mesh7 groups); NOT six file uploads.
+  const reasons = [];
+  const g = stats?.generatedManifest;
+  if (stats?.mode !== 'CONTAINERS_SOURCE_GEOMETRY_WEB_GAMEPLAY_FALLBACK_NOT_MCD')
+    reasons.push('PLAYABLE_CONTAINERS_WEB_MODE_UNVERIFIED');
+  if (stats?.matchedNativeScene !== false)
+    reasons.push('NATIVE_SCENE_NOT_PROVEN_FLAG_MISSING');
+  if (stats?.activeScreen !== 'playing' || stats?.browserMeasured !== true)
+    reasons.push('LIVE_BROWSER_FRAME_UNVERIFIED');
+  if (stats?.locallyLoadedSourceGroups !== 2)
+    reasons.push('TWO_LOCAL_CARGO_SOURCE_GROUPS_UNVERIFIED');
+  if (g?.sourceQualifiedMesh6DrawPackets !== 3)
+    reasons.push('THREE_MESH6_SOURCE_PLACEMENTS_UNVERIFIED');
+  if (g?.verifiedLocalMesh7RangeDraws !== 3)
+    reasons.push('THREE_DISTINCT_MESH7_RANGES_UNVERIFIED');
+  if (g?.privateIndexedDraws !== 6)
+    reasons.push('SIX_CARGO_INDEXED_DRAWS_UNVERIFIED');
+  if (g?.convertedTrianglesDrawn !== 9276)
+    reasons.push('CARGO_SOURCE_TRIANGLE_ACCOUNTING_UNVERIFIED');
+  if (g?.sourceConvertedApproximationOnly !== true ||
+      g?.localFilePreviewOnly !== true || g?.nativeMeshMatch !== false ||
+      g?.nativeCombatParityVerified !== false)
+    reasons.push('WEB_FALLBACK_PROVENANCE_UNVERIFIED');
+  if (g?.collisionConnected !== true || g?.sourceDerivedColliderCount !== 5)
+    reasons.push('FIVE_WEB_FALLBACK_COLLIDERS_UNVERIFIED');
+  // Culling changes the number of hidden proxies per camera: never demand >=2.
+  if (!Number.isSafeInteger(g?.hiddenByPrivateMesh) || g.hiddenByPrivateMesh < 0)
+    reasons.push('PROXY_COUNTER_UNVERIFIED');
+  if (!Number.isSafeInteger(stats?.totalWebGLDrawCalls) ||
+      stats.totalWebGLDrawCalls < (requireEnemy ? 7 : 6))
+    reasons.push('WEBGL_APP_DRAW_COUNTER_UNVERIFIED');
+  if (!number(stats?.p95FrameMs) || stats.p95FrameMs <= 0 ||
+      !Number.isSafeInteger(stats?.samples) || stats.samples < 1)
+    reasons.push('BROWSER_FRAME_TIMING_UNVERIFIED');
+  if (requireEnemy) {
+    const enemy = stats?.localNativeEnemy;
+    const sourceQualified = enemy?.owner === 'sharedassets0.assets' &&
+      ((enemy.variant === 'merged' && enemy.meshPathId === 284 && enemy.triangles === 2254) ||
+       (enemy.variant === 'headless' && enemy.meshPathId === 285 && enemy.triangles === 2132));
+    if (!sourceQualified || !Number.isSafeInteger(stats?.nativeEnemyIndexedDrawCalls) ||
+        stats.nativeEnemyIndexedDrawCalls < 1 || g?.shootableWebFallbackEnemy !== true)
+      reasons.push('SOURCE_QUALIFIED_ENEMY_INDEXED_DRAW_UNVERIFIED');
+    if (stats?.nativeEnemySpawnVerified !== false ||
+        stats?.skinAnimationVerified !== false || g?.nativeEnemySpawnVerified !== false)
+      reasons.push('STATIC_ENEMY_NON_NATIVE_PROVENANCE_UNVERIFIED');
+  }
+  return {
+    status: reasons.length ? 'WEB_LOCAL_DRAW_EVIDENCE_UNVERIFIED' :
+      (requireEnemy ? 'WEB_APP_REPORTED_STATIC_ENEMY_AND_SIX_CARGO_DRAWS_NOT_MCD_PARITY' :
+        'WEB_APP_REPORTED_SIX_CARGO_DRAWS_NOT_MCD_PARITY'),
+    nativeParityCertified: false, independentGpuReadback: false, reasons,
+  };
 }
-
 
 /** Private local capture path and thresholds are *operator attestations*, not independent native certification. */
 export function compare(web, native, opts = {}) {
@@ -194,14 +225,17 @@ class Devtools {
     if(r.exceptionDetails)throw Error('Browser evaluation failed');return r.result?.value;}
 }
 
-export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromium',holdMs=300,mesh6=null,mesh7=null}={}){
+export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromium',holdMs=300,mesh6=null,mesh7=null,enemy=null,enemyVariant='merged',requireEnemy=false}={}){
   if(typeof WebSocket!=='function')throw Error('Node >=22 required');
   if(!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url))throw Error('Local HTTP URL required');
   if(!out||isInside(out))throw Error('Capture directory must remain outside public checkout');
   if(Boolean(mesh6)!==Boolean(mesh7))throw Error('Supply BOTH --mesh6 and --mesh7, or neither');
-  if(mesh6&&new URL(url).searchParams.get('scene')!=='containers')throw Error('Local OBJ proof requires ?scene=containers');
+  if(!Number.isSafeInteger(holdMs)||holdMs<25||holdMs>5000)throw Error('KeyW holdMs must be 25..5000 integer milliseconds');
+  if(!['merged','headless'].includes(enemyVariant))throw Error('Enemy variant must be merged/headless');
+  requireEnemy = Boolean(requireEnemy || enemy);
+  if((mesh6||enemy)&&new URL(url).searchParams.get('scene')==='synthetic')throw Error('Cannot prove MCD cargo/enemy on synthetic route');
   // Resolve symlinks. Local private files never appear in output or HTTP requests.
-  const privateFiles=[mesh6,mesh7].map(file=>{
+  const privateFiles=[mesh6,mesh7,enemy].map(file=>{
     if(!file)return null;
     let p;
     try{
@@ -232,41 +266,64 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       if(ready)break;await sleep(100);
     }if(!ready)throw Error('Web game canvas missing');
     await cdp.eval("document.querySelector('#start-button')?.click()");await sleep(300);
-    const observation="(()=>{const c=document.querySelector('#scene'),r=c.getBoundingClientRect(),g=c.getContext('webgl2');return {playing:document.querySelector('#hud')?.hidden===false,webgl2:!!g,rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:c.width,height:c.height,dpr:devicePixelRatio},room:document.querySelector('#room-name')?.textContent?.trim(),performance:window.__superhotSceneMetrics||null,hook:typeof window.__sh10AcceptanceSnapshot==='function'?window.__sh10AcceptanceSnapshot():null};})()";
+    const observation="(()=>{const c=document.querySelector('#scene'),r=c.getBoundingClientRect(),g=c.getContext('webgl2');return {playing:document.querySelector('#hud')?.hidden===false,webgl2:!!g,rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:c.width,height:c.height,dpr:devicePixelRatio},room:document.querySelector('#room-name')?.textContent?.trim(),performance:window.__superhotSceneMetrics||null,rendered:typeof window.__superhotGetRenderedFrameSnapshot==='function'?window.__superhotGetRenderedFrameSnapshot():null,hook:typeof window.__sh10AcceptanceSnapshot==='function'?window.__sh10AcceptanceSnapshot():null};})()";
     const first=await cdp.eval(observation);if(!first?.playing||!first?.webgl2)throw Error('Active WebGL2 game not observed');
-    if(privateFiles[0]){
-      // CDP file inputs reference local paths only; nothing is fetched or uploaded.
-      await cdp.call('DOM.enable');
-      const {root}=await cdp.call('DOM.getDocument',{depth:1});
-      for(const [i,id] of ['private-mesh6','private-mesh7'].entries()){
-        const {nodeId}=await cdp.call('DOM.querySelector',{nodeId:root.nodeId,selector:'#'+id});
-        if(!nodeId)throw Error('Private OBJ file input absent');
-        await cdp.call('DOM.setFileInputFiles',{nodeId,files:[privateFiles[i]]});
+    if(privateFiles.some(Boolean) || requireEnemy){
+      // CDP local File inputs only; the Web also supports owner-local loopback
+      // manifest autoload. No public upload and no shell on the owner's PC.
+      if(privateFiles.some(Boolean)){
+        await cdp.call('DOM.enable');
+        const {root}=await cdp.call('DOM.getDocument',{depth:1});
+        const inputs=[['private-mesh6',0],['private-mesh7',1],['private-enemy',2]];
+        if(privateFiles[2]){
+          await cdp.eval("document.querySelector('#private-enemy-variant').value="+JSON.stringify(enemyVariant));
+        }
+        for(const [id,i] of inputs){
+          if(!privateFiles[i])continue;
+          const {nodeId}=await cdp.call('DOM.querySelector',{nodeId:root.nodeId,selector:'#'+id});
+          if(!nodeId)throw Error('Expected local private File input absent: '+id);
+          await cdp.call('DOM.setFileInputFiles',{nodeId,files:[privateFiles[i]]});
+        }
       }
       let proof;
       for(let i=0;i<150;i++){
         const state=await cdp.eval(observation);
-        const msg=await cdp.eval("document.getElementById('private-mesh-status')?.textContent||''");
-        if(msg.startsWith('Échec'))throw Error('Private OBJ rejected by browser parser; inspect local UI');
-        proof=localMeshDrawEvidence(state?.performance);
+        const errors=await cdp.eval("[(document.querySelector('#private-mesh-status')?.textContent||''),(document.querySelector('#private-enemy-status')?.textContent||'')]");
+        if(errors.some(m=>m.startsWith('Échec')))throw Error('Local original file rejected by Web parser; inspect local status');
+        proof=localMeshDrawEvidence(state?.performance,{requireEnemy});
         if(proof.reasons.length===0)break;
         await sleep(100);
       }
-      if(proof?.reasons?.length)throw Error('Private OBJ GPU draw not verified: '+proof.reasons.join(','));
+      if(proof?.reasons?.length)throw Error('Local Web draw prerequisite not verified: '+proof.reasons.join(','));
     }
     mkdirSync(out,{recursive:true});const frames=[];const begin=Date.now();
     const snap=async(name)=>{
       const state=await cdp.eval(observation),rect=state.rect;
       if(!state.playing)throw Error('Gameplay not active');
+      const before=state.rendered;
+      if(!Number.isSafeInteger(before?.frameId)||before.frameId<1 ||
+         !['playing'].includes(before?.activeScreen))
+        throw Error('Read-only rendered-frame counter absent or not playing');
       const result=await cdp.call('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false,clip:{...rect,scale:1}});
+      const after=await cdp.eval("window.__superhotGetRenderedFrameSnapshot?.()||null");
+      if(!Number.isSafeInteger(after?.frameId)||after.frameId<before.frameId)
+        throw Error('Screenshot could not be bracketed by real Web render frames');
       const buf=Buffer.from(result.data,'base64'),image=decodePng(buf),file=name+'.png';
-      writeFileSync(join(out,file),buf);frames.push({file,tMs:Date.now()-begin,phase:'displayed-frame',width:image.width,height:image.height,sha256:hash(buf)});
+      writeFileSync(join(out,file),buf);
+      frames.push({
+        file,tMs:Date.now()-begin,phase:'displayed-frame-window',width:image.width,height:image.height,
+        sha256:hash(buf),renderFrameIdBefore:before.frameId,renderFrameIdAfter:after.frameId,
+        renderedCameraBefore:before.camera,renderedCameraAfter:after.camera,
+        exactSingleNativeFrame:false,
+      });
       return state;
     };
     await snap('idle');
     await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'w',code:'KeyW',windowsVirtualKeyCode:87});
     await sleep(holdMs);await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key:'w',code:'KeyW',windowsVirtualKeyCode:87});
     await sleep(60);const after=await snap('after-keyw');
+    if(frames[1].renderFrameIdBefore<=frames[0].renderFrameIdAfter)
+      throw Error('KeyW stimulus produced no newer rendered frame');
     // Browser-only compositor pixel change. No native reference is inferred.
     const webOnlyPixelVariation=metrics(
       decodePng(readFileSync(join(out,frames[0].file))),
@@ -276,9 +333,10 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       coordinateFrameId:hook?.coordinateFrameId||null,stimulusId:'IDLE_THEN_KEYW_'+holdMs+'MS',initialStateId:hook?.initialStateId||null,
       timeScale:number(hook?.timeScale)?hook.timeScale:null,viewport:{width:frames[0].width,height:frames[0].height,dpr:1},frames,
       performance:after.performance,webOnlyPixelVariation,
-      localMeshPreview:privateFiles[0]?localMeshDrawEvidence(after.performance):
-        {status:'WEB_PROXY_ONLY_NO_LOCAL_MESH',nativeParityCertified:false},
-      notes:'Web actual CDP pixels. Local private OBJ GPU draw is NOT MCD frame parity.'};
+      webRenderedFrameBracketsObserved:true,
+      localMeshPreview:(privateFiles.some(Boolean)||requireEnemy)?localMeshDrawEvidence(after.performance,{requireEnemy}):
+        {status:'WEB_CARGO_DRAW_NOT_REQUIRED',nativeParityCertified:false},
+      notes:'Web actual CDP PNG pixels bracketed by changing Web frame IDs, not single-frame/native evidence; local source OBJ draws and static enemy do NOT establish original MCD parity.'};
     writeFileSync(join(out,'web-capture.json'),JSON.stringify(manifest,null,2)+'\n');return manifest;
   }finally{if(cdp)cdp.ws.close();child.kill();await sleep(200);rmSync(profile,{recursive:true,force:true,maxRetries:3});}
 }
@@ -289,10 +347,12 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
     const a=process.argv.slice(2);if(a.includes('--capture-web')){
       const out=arg(a,'--out')||join(tmpdir(),'sh10-web-'+Date.now());
       const m=await captureWeb(arg(a,'--url'),out,{chrome:arg(a,'--chrome')||undefined,
-        mesh6:arg(a,'--mesh6')||null,mesh7:arg(a,'--mesh7')||null});
+        mesh6:arg(a,'--mesh6')||null,mesh7:arg(a,'--mesh7')||null,
+        enemy:arg(a,'--enemy')||null,enemyVariant:arg(a,'--enemy-variant')||'merged',
+        requireEnemy:a.includes('--require-enemy')});
       process.stdout.write(JSON.stringify({status:'BROWSER_CAPTURED_NATIVE_UNPAIRED',out,frames:m.frames,scene:m.scene,performance:m.performance,webOnlyPixelVariation:m.webOnlyPixelVariation,localMeshPreview:m.localMeshPreview},null,2)+'\n');
     }else{
-      const wp=arg(a,'--web'),np=arg(a,'--native');if(!wp||!np)throw Error('Use --capture-web --url http://localhost:PORT/?scene=containers --out /tmp/capture OR --web /tmp/web-capture.json --native /private/native.json --thresholds /private/thresholds.json [--gate]');
+      const wp=arg(a,'--web'),np=arg(a,'--native');if(!wp||!np)throw Error('Use --capture-web --url http://localhost:PORT/ --out /tmp/capture [--mesh6 /private/... --mesh7 /private/... --enemy /private/EnemyMerged.obj.gz --require-enemy] OR --web /tmp/web-capture.json --native /private/native.json --thresholds /private/thresholds.json [--gate]');
       if(isInside(np))throw Error('Native reference must be outside public repo');
       const limits=arg(a,'--thresholds');
       const result=compare(JSON.parse(readFileSync(wp,'utf8')),JSON.parse(readFileSync(np,'utf8')),
