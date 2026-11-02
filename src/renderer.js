@@ -1,4 +1,8 @@
 import { cameraAxes } from './math.js';
+import { createGeneratedLighting, lightingUniformPacket } from './render/lighting-model.js';
+
+// Legacy Web fog is generated, not MCD. SH-13 owns the source-qualified lighting model.
+const GENERATED_FOG_STRENGTH = lightingUniformPacket(createGeneratedLighting()).fogStrength;
 
 const vertexShaderSource = `#version 300 es
 precision highp float;
@@ -51,10 +55,11 @@ precision highp float;
 in vec3 vColor;
 in float vFog;
 in float vAlpha;
+uniform float uFogStrength;
 out vec4 fragColor;
 void main() {
   vec3 fog = vec3(.927,.948,.966);
-  vec3 color = mix(vColor, fog, vFog * .72);
+  vec3 color = mix(vColor, fog, vFog * uFogStrength);
   fragColor = vec4(color, vAlpha);
 }`;
 
@@ -167,7 +172,7 @@ export function createRenderer(canvas) {
   if (!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program)||'Shader link failed');
   gl.useProgram(program);
   const uniforms={};
-  for (const key of ['uTranslate','uScale','uRotate','uUseAffine','uAffineModel','uAffineNormal','uCamPos','uRight','uUp','uForward','uColor','uProjection']) {
+  for (const key of ['uTranslate','uScale','uRotate','uUseAffine','uAffineModel','uAffineNormal','uCamPos','uRight','uUp','uForward','uColor','uProjection','uFogStrength']) {
     uniforms[key]=gl.getUniformLocation(program,key);
   }
   const meshes={};
@@ -188,7 +193,10 @@ export function createRenderer(canvas) {
   gl.disable(gl.CULL_FACE);
   const colorCache=new Map();
   let drawCalls=0;
-  function begin(camera) {
+  function begin(camera, { fogStrength = GENERATED_FOG_STRENGTH } = {}) {
+    if (!Number.isFinite(fogStrength) || fogStrength < 0 || fogStrength > 1) {
+      throw new RangeError('fogStrength must be finite and within [0,1]');
+    }
     const width=Math.max(1,Math.floor(canvas.clientWidth*Math.min(window.devicePixelRatio||1,2)));
     const height=Math.max(1,Math.floor(canvas.clientHeight*Math.min(window.devicePixelRatio||1,2)));
     if (canvas.width!==width||canvas.height!==height) {
@@ -203,6 +211,7 @@ export function createRenderer(canvas) {
     gl.uniform3f(uniforms.uUp,...Object.values(axes.up));
     gl.uniform3f(uniforms.uForward,...Object.values(axes.forward));
     gl.uniform2f(uniforms.uProjection,width/height,1);
+    gl.uniform1f(uniforms.uFogStrength,fogStrength);
     drawCalls=0;
   }
   function draw(mesh,x,y,z,sx,sy,sz,color,rx=0,ry=0,rz=0,alpha=1) {
