@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "target": "SUPERHOT: MIND CONTROL DELETE",
+  "assessmentDate": "2026-11-02",
+  "source": {
+    "repository": "TGrozner/superhot-research",
+    "visibility": "private",
+    "headCommit": "be6d535e608f66c93db3acc422385035d1281063",
+    "snapshotCompletedUtc": "2026-11-02T00:05:57.026Z",
+    "snapshotFileCount": 511,
+    "snapshotAllMatched": true,
+    "workflowRun": 41367755041,
+    "artifactId": 13108091209,
+    "sourcePath": "decompiled/TimeControl.decompiled.cs",
+    "readStartLine": 1,
+    "readLineCount": 25,
+    "nextUnreadLine": 26,
+    "sourceFileBytes": 3565,
+    "retrievedTextSha256": "2dd2d1465e860ce6f69b0cd652550bd7ff4bbe25d1ba56e579d8a1207281a596"
+  },
+  "claims": [
+    {
+      "id": "TC-001",
+      "classification": "PROUVE",
+      "scope": "decompiled-field-initializer",
+      "symbol": "TimeControl.minTimescale",
+      "value": 0.01,
+      "sourceLines": [
+        10,
+        10
+      ],
+      "runtimeValidated": false
+    },
+    {
+      "id": "TC-002",
+      "classification": "PROUVE",
+      "scope": "decompiled-private-constant",
+      "symbol": "TimeControl.minTimescaleStep",
+      "value": 0.001,
+      "sourceLines": [
+        12,
+        12
+      ],
+      "runtimeValidated": false
+    },
+    {
+      "id": "TC-003",
+      "classification": "PROUVE",
+      "scope": "decompiled-field-initializer",
+      "symbol": "TimeControl.maxTimescale",
+      "value": 1,
+      "sourceLines": [
+        14,
+        14
+      ],
+      "runtimeValidated": false
+    },
+    {
+      "id": "TC-004",
+      "classification": "PROUVE",
+      "scope": "decompiled-field-initializer",
+      "symbol": "TimeControl.fixedTimestepDenominator",
+      "value": 60,
+      "sourceLines": [
+        16,
+        16
+      ],
+      "runtimeValidated": false
+    },
+    {
+      "id": "TC-005",
+      "classification": "PROUVE",
+      "scope": "decompiled-static-field-initializer",
+      "symbol": "TimeControl.forcedTimeScale",
+      "value": -1,
+      "sourceLines": [
+        22,
+        22
+      ],
+      "runtimeValidated": false
+    },
+    {
+      "id": "TC-006",
+      "classification": "PROUVE",
+      "scope": "decompiled-private-constant",
+      "symbol": "TimeControl.referenceFixedDeltaTime",
+      "value": 0.016666666666666666,
+      "expression": "1/60",
+      "sourceLines": [
+        24,
+        24
+      ],
+      "runtimeValidated": false
+    }
+  ],
+  "observations": [],
+  "unknowns": [
+    {
+      "id": "TC-U01",
+      "classification": "INCONNU",
+      "question": "TimeControl calculates Time.timeScale how, in which update phase and using which inputs?",
+      "requiredSource": "TimeControl methods after line 25 + native runtime trace"
+    },
+    {
+      "id": "TC-U02",
+      "classification": "INCONNU",
+      "question": "Do scene/prefab serialized values override the field initializers in active gameplay?",
+      "requiredSource": "scene/prefab component serialized instance and runtime confirmation"
+    },
+    {
+      "id": "TC-U03",
+      "classification": "INCONNU",
+      "question": "What is the meaning and priority of forcedTimeScale = -1 in actual execution?",
+      "requiredSource": "writes, reads, branches and runtime transitions"
+    },
+    {
+      "id": "TC-U04",
+      "classification": "INCONNU",
+      "question": "What are the camera axis mapping, rotation coefficients, clamps and smoothing?",
+      "requiredSource": "camera controller implementation, serialized values and mouse/controller observations"
+    },
+    {
+      "id": "TC-U05",
+      "classification": "INCONNU",
+      "question": "Which input actions (move, look, attack, reload, jump, pause) accelerate world time, by how much and with what interpolation?",
+      "requiredSource": "time shifter implementations, input pipeline, fixed-step and native trace"
+    }
+  ]
+}
