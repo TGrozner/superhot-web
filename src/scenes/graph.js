@@ -119,8 +119,10 @@ export function buildSceneGraph(nodes, { coordinates = 'web' } = {}) {
     try {
       const node = byId.get(id);
       const parent = node.parentId == null ? null : visit(node.parentId, depth + 1);
-      const sourceMatrix = multiplyMatrices(parent?.sourceMatrix ?? identity(), composeLocalMatrix(node.transform));
-      const worldMatrix = coordinates === 'unity' ? mirrorZ(sourceMatrix) : sourceMatrix;
+      // A graph is a construction-time snapshot: child matrices and cached bounds
+      // must not drift when callers edit values exposed by a previous result.
+      const sourceMatrix = Object.freeze(multiplyMatrices(parent?.sourceMatrix ?? identity(), composeLocalMatrix(node.transform)));
+      const worldMatrix = coordinates === 'unity' ? Object.freeze(mirrorZ(sourceMatrix)) : sourceMatrix;
       let bounds = null, primitive = null;
       const authoredPrimitive = node.primitive;
       if (authoredPrimitive != null) {
@@ -130,14 +132,19 @@ export function buildSceneGraph(nodes, { coordinates = 'web' } = {}) {
         // Snapshot the three size components once and keep that packet stable.
         const authoredSize = authoredPrimitive.size;
         const size = { x: authoredSize?.x, y: authoredSize?.y, z: authoredSize?.z };
-        bounds = boxBounds(worldMatrix, size);
+        const calculatedBounds = boxBounds(worldMatrix, size);
+        bounds = Object.freeze({
+          center: Object.freeze(calculatedBounds.center),
+          halfExtents: Object.freeze(calculatedBounds.halfExtents),
+          radius: calculatedBounds.radius,
+        });
         primitive = Object.freeze({ kind: 'box', size: Object.freeze(size) });
       }
-      const result = {
+      const result = Object.freeze({
         id, parentId: node.parentId ?? null, sourceMatrix, worldMatrix, bounds,
         primitive, material: node.material ?? 'chalk',
         visible: node.visible !== false && (parent?.visible ?? true),
-      };
+      });
       resolved.set(id, result);
       return result;
     } finally { visiting.delete(id); }
