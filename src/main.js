@@ -481,7 +481,9 @@ function drawBullet(bullet) {
 function render() {
   const cam={...state.camera};
   if(state.screen==='playing') cam.y+=Math.sin(state.walkCycle)*.012;
-  renderer.begin(cam);
+  // Private source #41: build28 serializes fog OFF. Runtime MCD frame is still unobserved.
+  // All other modes preserve the generated Web fog profile.
+  renderer.begin(cam, containersPreviewEnabled ? { fogStrength: 0 } : undefined);
   if (!containersPreviewEnabled) {
     for(const object of state.objects) {
       renderer.box(object.x,object.y,object.z,object.w,object.h,object.d,object.color);
