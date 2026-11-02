@@ -248,3 +248,120 @@ export function mcdSourceCameraInputDelta({
   }
   return result;
 }
+
+
+/**
+ * SOURCE-QUALIFIED tick gate for the delivered MCD SHInputCamera.GetInput,
+ * separate from the PROVISIONAL Web mouse path above.
+ *
+ * PRIVATE PRIMARY EVIDENCE (Steam MCD build 20299547):
+ * - research #119, artifact 13154428045, InputSystem/SHInput.cs:84-99:
+ *   Reset assigns ulong.MaxValue; Update refreshes the keyboard flag by
+ *   ActiveDevice.Name.Contains("Keyboard/Mouse") BEFORE comparing CurrentTick.
+ * - research #114, artifact 13150786099, SHInputCamera.cs:25-34:
+ *   GetInput only proceeds after Init set wasInit.
+ * - research #107, artifact 13143742282, SHInputCamera.cs:35-69:
+ *   an uninitialized read returns zero; same tick returns cached data;
+ *   a new tick sums devices, using EXACT device names for keyboard/pad and
+ *   EXACT active-device name for the global unscaled-dt multiplier.
+ *
+ * This adapter uses explicit ulong BigInt ticks and externally supplied
+ * effective sensitivities, device axes, and unscaledDeltaTime. It is NOT
+ * a browser event adapter. The native InputManager.CurrentTick schedule,
+ * actual CameraLook parent/config, device names, rebinds and frame phases in
+ * Containers remain UNKNOWN. No default runtime MCD values are invented.
+ */
+export const MCD_SOURCE_INPUT_TICK_SENTINEL = (1n << 64n) - 1n;
+const MCD_SOURCE_KEYBOARD_MOUSE_NAME = 'Keyboard/Mouse';
+
+export function createMcdSourceCameraTickState({ wasInit = false } = {}) {
+  if (typeof wasInit !== 'boolean') throw new TypeError('wasInit must be explicit boolean');
+  // SHInputCamera.data is a default Vector2 until a successful GetInput.
+  return {
+    wasInit,
+    lastInputReadTimestamp: MCD_SOURCE_INPUT_TICK_SENTINEL,
+    keyboard: false,
+    data: { x: 0, y: 0 },
+  };
+}
+
+/** Models SHInput.Reset only. It does NOT clear the cached camera data. */
+export function resetMcdSourceCameraTick(state) {
+  if (!state || typeof state !== 'object') throw new TypeError('camera state required');
+  return { ...state, lastInputReadTimestamp: MCD_SOURCE_INPUT_TICK_SENTINEL };
+}
+
+/**
+ * Pure single-call GetInput intent. 'wasInit' represents actual caller Init;
+ * this function never simulates CameraLook.Start or registers a fake camera.
+ * 'keyboard' mirrors the inherited SHInput.Update flag (substring match),
+ * whereas device sampling uses the STRICT equality required by GetInput.
+ * The branch takes place BEFORE reading devices or deltas on a cached tick.
+ */
+export function readMcdSourceCameraTick(state, {
+  currentTick,
+  activeDeviceName,
+  devices,
+  mouseSensitivityX,
+  mouseSensitivityY,
+  gamepadSensitivityX,
+  gamepadSensitivityY,
+  deadzone,
+  exponent,
+  unscaledDeltaTime,
+} = {}) {
+  if (!state || typeof state !== 'object' || typeof state.wasInit !== 'boolean'
+      || typeof state.lastInputReadTimestamp !== 'bigint'
+      || !Number.isFinite(state.data?.x) || !Number.isFinite(state.data?.y)) {
+    throw new TypeError('valid camera tick state required');
+  }
+  // SHInputCamera.GetInput exits before calling its inherited Update.
+  if (!state.wasInit) {
+    return {
+      state: { ...state },
+      data: { x: 0, y: 0 },
+      readNewInput: false,
+      reason: 'not_initialized',
+    };
+  }
+  if (typeof currentTick !== 'bigint' || currentTick < 0n
+      || currentTick > MCD_SOURCE_INPUT_TICK_SENTINEL) {
+    throw new RangeError('currentTick must be a uint64 BigInt');
+  }
+  if (typeof activeDeviceName !== 'string') {
+    throw new TypeError('activeDeviceName must be a string');
+  }
+  // Native SHInput.Update refreshes this flag even if CurrentTick has not
+  // advanced. GetInput's device routing instead uses exact name equality.
+  const inheritedKeyboard = activeDeviceName.includes(MCD_SOURCE_KEYBOARD_MOUSE_NAME);
+  const updated = { ...state, keyboard: inheritedKeyboard };
+  if (currentTick === state.lastInputReadTimestamp) {
+    return {
+      state: updated,
+      data: { ...state.data },
+      readNewInput: false,
+      reason: 'cached_tick',
+    };
+  }
+  if (!Array.isArray(devices)) throw new TypeError('devices must be explicit');
+  const classified = devices.map(device => {
+    if (typeof device?.name !== 'string') throw new TypeError('device.name must be a string');
+    return {
+      isKeyboardMouse: device.name === MCD_SOURCE_KEYBOARD_MOUSE_NAME,
+      rightStickX: device.rightStickX,
+      rightStickY: device.rightStickY,
+    };
+  });
+  const data = mcdSourceCameraInputDelta({
+    devices: classified,
+    activeDeviceIsKeyboardMouse: activeDeviceName === MCD_SOURCE_KEYBOARD_MOUSE_NAME,
+    mouseSensitivityX, mouseSensitivityY, gamepadSensitivityX,
+    gamepadSensitivityY, deadzone, exponent, unscaledDeltaTime,
+  });
+  return {
+    state: { ...updated, lastInputReadTimestamp: currentTick, data: { ...data } },
+    data: { ...data },
+    readNewInput: true,
+    reason: 'new_tick',
+  };
+}

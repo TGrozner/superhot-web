@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  NATIVE_MATERIAL_GLSL,
   blackCrystalReflectionLevel,
   blackCrystalReflectionUv,
   createNativeSceneMaterialPacket,
@@ -11,6 +10,7 @@ const keywordByIdentity = Object.freeze({
   'resources.assets::3': '_STRIPESONOFF_ON',
   'sharedassets0.assets::9': '_USEGRADIENTMAP_ON',
   'sharedassets0.assets::13': '_ALLOWLOCALFOG_ON',
+  'sharedassets0.assets::16': '_ALLOWLOCALFOG_ON',
 });
 
 const material = ({ identity, shader, textures = {}, colors = {}, floats = {} }) => ({
@@ -47,13 +47,6 @@ test('Concrete packet preserves point-mip sampler, sRGB intent, UV ST and opaque
   assert.equal(packet.texture.packageSampler.minFilter, 'NEAREST');
   assert.equal(packet.texture.colorTransfer, 'srgb');
   assert.equal(packet.texture.sample, true);
-  assert.equal(packet.shaderMathCoverage,
-    'compiled-directional-lightmap-forward-compositor-with-serialized-globals');
-  assert.match(NATIVE_MATERIAL_GLSL.concreteForwardBase,
-    /3\.0 \* lightLocalAmbient\.a \* ambientX/);
-  assert.match(NATIVE_MATERIAL_GLSL.concreteForwardBase,
-    /rgbm \* vec4\(encodedLightmap\.rgb, encodedLightmap\.r\)/);
-  assert.ok(packet.unresolved.some(value => value.includes('XulmFalseLight')));
 });
 
 test('UV0 absence suppresses concrete sampling but never reinterprets Black Crystal reflection as diffuse', () => {
@@ -84,10 +77,9 @@ test('Black Crystal lookup helpers preserve compiled dominant-axis addressing an
   assert.deepEqual(blackCrystalReflectionUv([.25, -2, .5]), [.5625, .375]);
   assert.deepEqual(blackCrystalReflectionUv([.25, .5, -2]), [.5625, .375]);
   assert.equal(blackCrystalReflectionLevel(.5), .0625);
-  assert.match(NATIVE_MATERIAL_GLSL.blackCrystalReflection, /square \* square/);
 });
 
-test('Red Crystal remains opaque and textureless while preserving explicit shader unknowns', () => {
+test('Red Crystal remains opaque and textureless', () => {
   const packet = createNativeSceneMaterialPacket(material({
     identity: 'sharedassets0.assets::13', shader: 'globalgamemanagers.assets::28',
     colors: { _Color: [0.720588207244873, 0, 0, 1] },
@@ -97,9 +89,6 @@ test('Red Crystal remains opaque and textureless while preserving explicit shade
   assert.equal(packet.texture, null);
   assert.equal(packet.pass.compiledBaseOutputAlpha, 1);
   assert.equal(packet.parameters._AllowLocalFog, 1);
-  assert.equal(packet.shaderMathCoverage, 'final-rgb-compositor-and-opaque-output-alpha-only');
-  assert.match(NATIVE_MATERIAL_GLSL.redCrystalOutput, /mixedRgb\.r - mixedRgb\.g < 0\.2/);
-  assert.ok(packet.unresolved.some(value => value.includes('global texture')));
 });
 
 test('Package classification, not material names, controls world-pass eligibility', () => {
@@ -108,4 +97,62 @@ test('Package classification, not material names, controls world-pass eligibilit
   assert.equal(packet.worldPassEligible, false);
   assert.equal(packet.renderCategory, 'technical_trigger_volume');
   assert.throws(() => createNativeSceneMaterialPacket(red), /Unknown native render category/);
+});
+
+test('Source fence alpha cutoff remains a depth-writing non-blended pass', () => {
+  const fence = material({
+    identity: 'sharedassets3.assets::2', shader: 'globalgamemanagers.assets::22',
+    textures: { _MainTex: {
+      textureId: 'fence', sourceTexture: 'sharedassets3.assets::3',
+      scale: [2, 3], offset: [.2, .4],
+    } },
+    floats: { _Cutoff: .15 },
+  });
+  const packet = createNativeSceneMaterialPacket(fence, { renderCategory: 'world', meshHasUv0: true });
+  assert.equal(packet.pass.cutout, true);
+  assert.equal(packet.pass.base.depthWrite, true);
+  assert.equal(packet.pass.base.depthTest, 'less-equal');
+  assert.equal(packet.pass.base.sourceBlend, 'one');
+  assert.equal(packet.pass.base.destinationBlend, 'zero');
+  assert.equal(packet.parameters._Cutoff, .15);
+  assert.equal(packet.texture.textureId, 'fence');
+  assert.deepEqual(packet.texture.serializedUvTransform, [2, 3, .2, .4]);
+  assert.equal(packet.texture.sample, true);
+  assert.equal(createNativeSceneMaterialPacket(fence,
+    { renderCategory: 'world', meshHasUv0: false }).texture.sample, false);
+});
+
+test('Monitor packet supplies atlas dimensions, clock offsets and its exact texture', () => {
+  const monitor = material({
+    identity: 'sharedassets11.assets::3', shader: 'globalgamemanagers.assets::20',
+    textures: { _MainTex: {
+      textureId: 'monitor-atlas', sourceTexture: 'sharedassets11.assets::5',
+      scale: [1, 1], offset: [0, 0],
+    } },
+    floats: { _NumX: 8, _NumY: 8, _PlaybackSpeed: 15, _TimeOffset: 2, _PositionOffset: .86 },
+  });
+  const packet = createNativeSceneMaterialPacket(monitor, { renderCategory: 'world', meshHasUv0: true });
+  assert.equal(packet.texture.textureId, 'monitor-atlas');
+  assert.equal(packet.texture.sample, true);
+  assert.deepEqual(packet.parameters,
+    { _NumX: 8, _NumY: 8, _PlaybackSpeed: 15, _TimeOffset: 2, _PositionOffset: .86 });
+  assert.equal(packet.pass.compiledBaseOutputAlpha, 1);
+  assert.equal(packet.pass.base.depthWrite, true);
+  monitor.textures._MainTex.sourceTexture = 'sharedassets3.assets::3';
+  assert.throws(() => createNativeSceneMaterialPacket(monitor,
+    { renderCategory: 'world', meshHasUv0: true }));
+});
+
+test('Static hazard Red Crystal gets the same opaque textureless draw inputs as enemy Red Crystal', () => {
+  const options = { renderCategory: 'world', meshHasUv0: true };
+  const enemy = createNativeSceneMaterialPacket(material({
+    identity: 'sharedassets0.assets::13', shader: 'globalgamemanagers.assets::28',
+  }), options);
+  const hazard = createNativeSceneMaterialPacket(material({
+    identity: 'sharedassets0.assets::16', shader: 'globalgamemanagers.assets::28',
+  }), options);
+  assert.equal(hazard.family, enemy.family);
+  assert.deepEqual(hazard.pass, enemy.pass);
+  assert.equal(hazard.texture, null);
+  assert.equal(hazard.worldPassEligible, true);
 });

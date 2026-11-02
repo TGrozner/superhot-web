@@ -1,6 +1,108 @@
 # SH-15 — Comparaison visuelle MCD ↔ Web (protocole, **pas** un certificat 1:1)
 
-**État courant :** six paires native/Web de personnages isolés ont été capturées et comparées ; les résultats et leurs limites figurent dans « Vérifications effectivement observées ». Aucune paire complète de gameplay n'établit la fidélité1:1. La cible est SUPERHOT: MIND CONTROL DELETE (MCD), Containers/buildIndex28. Les sections d'audit initial ci-dessous sont historiques.
+**État courant :** le localhost configuré charge désormais Dojo (`SHRL_Dojo2`, buildIndex10), identifié et capturé dans le replay natif laissé par le propriétaire. Les six paires de personnages isolés ci-dessous restent des références distinctes. Aucune paire complète de gameplay n'établit la fidélité1:1. La cible est SUPERHOT: MIND CONTROL DELETE ; les audits initiaux de Containers/buildIndex28 sont historiques.
+
+## P0 actuel — capture Web d'une frame réellement exécutée (SH-15 #125, révision 2)
+
+Les notes historiques **après #98** plus bas ne décrivent plus le mode racine actuel.
+Sur `main` au 02/11/2026, `/` peut charger un **package original privé via loopback** :
+`metrics.mode === 'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'`, avec 68 meshes,
+360 instances, 17 textures et environ 185037 triangles soumis lors du smoke
+Chromium *rapporté*, et non une mesure d'écart par rapport à une frame native de
+Containers. Les compteurs servent à qualifier un rendu Web, pas une fidélité de
+shaders ou de physique. Le fallback sans package garde un mode distinct.
+
+### Correctif de provenance pixel et mode opératoire
+
+Le précédent `canvas.toBlob()` était **asynchrone** sur un canvas WebGL
+constamment redessiné : un `frameId` enregistré avant l'encodage pouvait ne
+pas être celui des pixels. La version SH-15 ajoute maintenant le chemin strict
+`WebGL2.readPixels` **synchrone**, appelé dans le rAF suivant *après* une
+nouvelle frame terminée par l'application, avec comparaison de `frameId`,
+`activeScreen` et `worldClock` autour du readback. Si le rendu du jeu n'a pas
+progressé pendant ce rAF, s'il laisse un FBO hors écran lié, si les dimensions
+réelles divergent, si l'API retourne une erreur, ou si l'image est uniforme,
+la capture échoue explicitement. Aucun fallback silencieux vers `canvas.toBlob`.
+
+Les pixels RGBA WebGL proviennent du coin **bas gauche** : un flip vertical
+transforme les lignes, puis on les copie vers un canvas 2D privé stable et on
+encode un PNG sRGB. Pendant l'encodage asynchrone, l'application peut continuer
+à dessiner sans altérer la copie figée. Le PNG contient `SH15Capture` et les
+empreintes SHA256 du **PNG brut** (`rawCanvasSha256`) et du tampon RGBA figé
+(`rawFrameRgbaSha256`). Les octets d'image ne sont **pas** publiés ni uploadés.
+
+**Procédure reproductible, machine du propriétaire uniquement :**
+
+1. Démarrer `npm start` et ouvrir `http://localhost:4173/` dans Chrome/Edge.
+   Charger le package local via la route localhost privée. Fixer le viewport
+   **1920×1080**, DPR **1** et faire disparaître les contrôles/overlays de la
+   zone canvas. Ne pas redimensionner la capture.
+2. Choisir **au préalable** une caméra connue et reproductible dans le repère
+   Web, avec `{x,y,z,yaw,pitch}`. Ne pas copier un frame aléatoire pour feindre
+   une correspondance. Garder le même état d'ennemi et même phase.
+3. Dans DevTools sur la page, lire `window.__superhotGetRenderedFrameSnapshot()`
+   et `window.__superhotSceneMetrics`, vérifier `activeScreen:'playing'` et
+   `mode:'CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY'`.
+4. Capturer **après** un frame GPU réellement complété :
+
+```js
+const { captureContainersWeb } = await import('/scripts/visual-web-capture.mjs');
+const receipt = await captureContainersWeb({
+  expectedCamera: {x: X_VERIFIE, y: Y_VERIFIE, z: Z_VERIFIE,
+                   yaw: YAW_VERIFIE, pitch: PITCH_VERIFIE},
+  expectedScreen: 'playing', strictViewport: true,
+  webCommit: 'REMPLACER_PAR_SHA_GIT_REEL',
+});
+console.log(receipt.captureMethod, receipt.frameId, receipt.rawFrameRgbaSha256);
+```
+
+Les valeurs en majuscules sont **des espaces réservés** ; les remplacer par
+des nombres effectivement retenus, pas par des chaînes, et le SHA par le commit
+de la version ouverte. La sortie attendue est
+`captureMethod:'WEBGL2_READ_PIXELS_SYNCHRONOUS_COMPLETED_FRAME'`, un
+`frameId>0` vérifié, un fichier PNG local non uniforme et `nativeCameraMatched:false`.
+L'absence de screenshot dans l'environnement SH-15 **n'est pas corrigée** par
+la réussite des tests Node.
+
+5. Capturer **MCD exécuté** dans la même scène build28 et pose de caméra
+   native **réellement active**, après conversion explicitement prouvée des axes
+   et unités; relever état, temps d'animation, projection, FOV, near/far et
+   résolution. Garder le PNG, les données de pose et matrices **dans le privé**.
+6. Fournir les deux `manifest.json` privés `schemaVersion:1`, leurs masques
+   de silhouette construits de manière identique, et lancer
+   `node scripts/visual-compare.mjs --native <privé>/native/manifest.json
+   --web <privé>/web/manifest.json --out <privé>/aggregate.json`.
+   Une matrice incohérente ou une phase différente doit donner
+   **UNREGISTERED**, pas un score. Aucun PNG/objet natif dans une PR.
+
+### Les trois plus grands écarts ou manques VISUELS à SH-05
+
+**P1 — acteur isolé, apparence :** les *quatre comparaisons déjà consignées* dans
+ce document donnent un écart RGB moyen sur le masque union de **0.0940–0.1022**,
+et une apparence rouge cristallin/éclairage Web encore simplifiée. Mesure limitée
+aux poses idle/walk/hit isolées, pas une couleur moyenne de la scène.
+
+**P1 — acteur isolé, contours :** silhouette IoU **0.9554–0.9615** et décalage
+de centroïde **0.63–0.81 px**, dans le protocole 960×540 cité plus bas.
+L'antialiasing peut contribuer, mais cette décomposition n'est **pas mesurée**.
+
+**P0 — scène et caméra actives :** **aucune** frame native Containers complète
+appariée à une frame Web complète avec le même état, la même caméra active,
+les mêmes lightmaps et le même rendu final. Il n'existe donc **aucun** RGB MAE
+ni IoU de la scène et aucun classement quantifié des écarts du niveau. SH-05
+doit d'abord fournir ce couple privé de vues et les matrices réellement
+utilisées; SH-15 établira alors les trois écarts *mesurés* de la scène.
+
+**Contrat SH-05 exact :** conserver `__superhotGetRenderedFrameSnapshot()` avec
+`{frameId,activeScreen,camera:{x,y,z,yaw,pitch},projection:{verticalScale,
+near,far,aspect,viewProjection:[16]},worldClock,generatedManifest,
+totalWebGLDrawCalls,nativeScene}`, cohérent avec la frame dessinée; exposer
+`__superhotSceneMetrics` avec `browserMeasured:true` et le mode **exact** ;
+laisser `canvas#scene` avec son framebuffer par défaut après rendu. SH-15
+ne modifie ni `src/main.js`, ni `src/renderer.js`, ni les tests SH-10.
+Le flux `readPixels` ne fait aucun fetch privé supplémentaire.
+
+---
 
 ## Les trois priorités visuelles à SH-05 — mise à jour après #98
 
@@ -80,18 +182,34 @@ node scripts/visual-framing.mjs --web-frame private/frame.json --native-vfov 60.
 
 Le descripteur contient le numéro de frame, la caméra, le champ `projection` et la matrice `viewProjection` effectivement envoyée au GPU. L'analyse calcule FOV, near/far et taille idéale projetée ; son verdict `PROJECTION_..._NO_PIXEL_MEASUREMENT` reste structurel, pas une comparaison d'images.
 
-Containers utilise la projection sérialisée 60.0000267° / near0.03 / far1000. Sa position de départ vient d'un point de départ auteur ; le transform sérialisé de la caméra, situé hors du niveau sous Core Mechanics, n'est pas ajouté à ce point. Ce choix Web ne prouve pas la sélection aléatoire faite par le jeu natif.
+La scène sélectionnée conserve ses caméras sérialisées. Si le paquet fournit une `entryCamera` observée, sa transformation et sa projection déterminent la vue d'entrée. Le Dojo utilise ainsi une caméra du replay, sans confondre ce point de vue avec un point de départ aléatoire ou l'état initial d'une nouvelle partie.
 
 ## Capture Web actuelle, sans flags
 
-1. Lancer `npm start`, ouvrir **http://localhost:4173/** et attendre le chargement des originaux configurés. La scène complète remplace le précédent aperçu de quatre cargos.
-2. Pour une capture, conserver une caméra fixe et relever `window.__superhotGetRenderedFrameSnapshot()`. Passer sa caméra exacte et son `activeScreen` à `captureContainersWeb({expectedCamera,expectedScreen,webCommit,strictViewport})`, importé depuis `/scripts/visual-web-capture.mjs`. Le mode strict demande un canvas1920×1080 et DPR1.
-3. Le script vérifie la caméra et la phase pendant l'encodage PNG. Il conserve projection, horloge et compteurs de la frame lorsque disponibles. Le dernier draw ennemi n'est **pas** la pose de tous les acteurs. L'horloge du monde peut avancer : aucune correspondance de pose native n'en est déduite.
+1. Lancer `npm start`, ouvrir **http://localhost:4173/** et attendre le chargement de la scène sélectionnée dans la configuration privée. Le choix courant du propriétaire est Dojo, sans paramètre d'URL.
+2. Choisir indépendamment la pose de référence (par exemple la caméra observée du paquet privé), puis passer cette caméra exacte et la phase attendue à `captureContainersWeb({expectedCamera,expectedScreen,webCommit,strictViewport})`, importé depuis `/scripts/visual-web-capture.mjs`. Le mode strict demande un canvas1920×1080 et DPR1.
+3. Le script lit synchroniquement les pixels GPU et la description de la même frame terminée, puis encode cette image figée en PNG. Il conserve projection, horloge et compteurs. Le dernier draw ennemi n'est pas la pose de tous les acteurs ; aucune correspondance temporelle avec le natif n'en est déduite.
 4. `downloadRequested` indique une demande de téléchargement, pas un fichier effectivement enregistré. Les images, modèles, données de pose et références originales restent privés.
 
 ## Vérifications effectivement observées
 
-La racine a été exercée dans Chromium/WebGL2 avec360 instances de décor,185037 triangles,68 meshes,21 textures, personnage original skinné et pistolet original. Marche, pause, tir, lancer et impact ont été exercés ; les contrôles de scénario ne prouvent pas un parcours natif. Le décor compte121 compositions Concrete MAIN sourcées et239 draws génériques. Les chemins BC3 à12 mips et PNG de repli sans S3TC ont tous deux été observés sans erreur GL.
+### Dojo observé dans le replay
+
+La lecture native a identifié la scène10. Une capture produite par Unity et deux inventaires de renderers/colliders ont été conservés en privé. Le second inventaire inclut les copies du replay dans `DontDestroyOnLoad` : les objets originaux déplacés vers layer25 ne sont pas supprimés au motif que le replay les masque.
+
+Après intégration du readback GPU de SH-15, une capture Web réelle a été encodée en mémoire à1200×675, DPR1.25, avec l'identité Dojo/build10 et la caméra attendue issue du paquet privé. Aucun téléchargement n'a été demandé, aucune erreur GL ou navigateur n'a été observée. Cette capture non stricte vérifie le chemin d'acquisition, pas une comparaison pixel native/Web.
+
+Le paquet applique uniquement21 exclusions de renderers de configuration de map appariés sans ambiguïté, et42 exclusions de colliders correspondants. Les états sérialisés et les observations sont conservés séparément. La vue Web charge178 draws de décor,49820 triangles,20 meshes,17 textures et312 BoxColliders ; l'atlas BC3 de4096² utilise ses13 mips. Le rendu observé compte141 compositions Concrete complètes,22 BlackCrystal et15 compositions partielles.
+
+La racine, le déplacement, l'inspection du personnage avec son arme, puis coup de poing→récupération du pistolet→tir5→4→lancer ont été exercés sans erreur GL. La prise de souris était une précondition simulée pour les scénarios de combat, qui utilisaient les vrais gestionnaires DOM. Les personnages prennent maintenant la direction lumineuse de level10, pas celle de Containers. Le brouillard de sol Concrete a été vérifié sur GPU désactivé, au centre et hors de sa hauteur d'effet.
+
+Le départ sans arme est le comportement source de base ; les modifications de partie et l'inventaire du replay ne sont pas reproduits. Les ennemis, leur chronologie et les débris restent une simulation Web. Les captures ne sont pas une paire quantitative enregistrée : instant, post-traitement, HUD et densité de pixels diffèrent encore.
+
+### Lot précédent — Containers
+
+La précédente racine avait été exercée avec272 draws de décor et549 colliders après retrait des marqueurs de spawn, des barrières désactivées de NODE6C et de81 fragments de classeurs cachés par l'initialisation source. Les objets intacts étaient conservés. Les chemins BC3 à12 mips et PNG sans S3TC avaient été observés dans ce lot ; ce dernier résultat ne qualifie pas à lui seul le repli PNG du nouveau Dojo.
+
+### Références isolées de personnages
 
 Six références isolées ont été rendues dans le moteur MCD original : idle0, walk0.25, walk0.75, hit0.25, fire0.25 et punch0.5, à960×540, caméra(0,1.15,4), avec les mêmes matrices de vue/projection. La référence utilise `SkinnedMeshRenderer.BakeMesh` et les matériaux originaux. Le Web utilise son véritable pass de skinning GPU et le shader Red Crystal reconstruit, sans redimensionnement, antialiasing désactivé. Le temps du shader Web est fixé à0 ; la phase globale native et son état lumineux ne sont pas enregistrés dans ces références. Les images et le rapport `native-web-red-crystal-comparison-v1.json` restent privés.
 
@@ -124,4 +242,103 @@ Le saut de caméra y mentionné a depuis été corrigé et vérifié dans le nav
 
 **Top 3 à SH-05, ordre d'action sans faux chiffres d'image :** (1) obtenir la capture Web réelle HUD-off, contrôles locaux de mesh6/mesh7 et journal de métriques `2 fichiers/4 draws` ; puis la capture MCD **avec caméra active et même pose/état** pour un vrai delta RGB/IoU ; (2) corriger le saut de caméra Web prédictible de **9.2 unités** avant toute capture reproductible en mouvement ; (3) calibrer la perspective Web théorique **64.66037°** vs caméra Unity *sérialisée* **60.00003°** (et near/far), puis couvrir les autres meshes/matériaux avant d'attribuer des écarts de couleur. **Aucune différence de pixels native/Web observée** et aucune parité 1:1 revendiquée.
 
-**Blocage matériel de cette session :** la passerelle navigateur utilisateur n'a pas de contexte/extension accessible. Un essai **isolé** de Chromium headless depuis cet environnement contre un petit serveur HTTP local *synthétique* a répondu `net::ERR_BLOCKED_BY_ADMINISTRATOR` sur `Page.navigate` ; **aucune capture de l'application réelle n'a été obtenue**. Ni l'essai synthétique ni le succès des tests Node ne doivent être présentés comme une image MCD/Web.
+**Incident historique du lot initial :** la passerelle navigateur de cet environnement n'avait pas de contexte accessible ; son essai isolé de Chromium contre un serveur synthétique avait répondu `net::ERR_BLOCKED_BY_ADMINISTRATOR`. Cet essai n'avait produit aucune capture de l'application réelle et ne constitue pas une preuve visuelle. Ce blocage ancien est distinct des captures Dojo effectivement obtenues ci-dessus.
+
+
+## 2026-11-02 — P0 : ne PAS apparier le fallback Z et le package original X sans conversion
+
+**Source indépendante :** [SH-04 #4](https://github.com/TGrozner/superhot-web/issues/4) et [SH-05 #5](https://github.com/TGrozner/superhot-web/issues/5) ont établi une divergence *de convention*, non une erreur numérique de moteur. Le fallback AABB `containers-build28.js` stocke des centres **déjà Z-réfléchis** et les transmet au graphe avec `coordinates:'web'`, donc **pas** de `mirrorZ` supplémentaire à cette étape. À l'inverse, le package original `native-scene-local.js` exige `browserWorld=H_X M_Unity H_X` où `H_X=diag(-1,1,1,1)`. La voie générique `graph.js:mirrorZ` est `H_Z M_Unity H_Z`, `H_Z=diag(1,1,-1,1)`, mais les proxies préconvertis ne l'appellent pas.
+
+Pour un **même point natif identifié** : `p_package=R p_fallback`, `R=H_X H_Z=diag(-1,1,-1,1)`, soit une rotation de 180° autour de Y. Pour une **même matrice Unity complète et effectivement liée à la source**, `M_package=R M_fallback R`. La transformation complète ne peut **PAS** être reconstruite à partir de l'AABB du proxy. Ne pas appliquer R une deuxième fois au package **déjà** converti. Et **ne pas** inventer une pose native MCD depuis la caméra démo ou sa valeur `yaw` uniquement : la caméra doit être prouvée active puis convertie via sa matrice complète.
+
+Exemple source-derived **de convention, pas d'observation pixel** : le centre fallback `cargo-22 (17.45, 2.575, 13.975)` correspond à `(-17.45,2.575,-13.975)` dans le package. Une comparaison naïve sans R conclurait à **44.712554 unités d'erreur de position**, entièrement artificielles. Ce nombre n'est **pas** une erreur visible mesurée en image : il démontre que le protocole pourrait disqualifier à tort une scène correcte.
+
+Le module SH-15 autonome `scripts/visual-coordinate-frames.mjs` fournit un **précontrôle**, sans image ni source originale embarquée. Dans un répertoire privé, établir des paires réellement identiques par `owner,path_id`, sans mélanger les visuels AABB avec de vraies matrices. JSON minimal **fictif** pour illustrer l'interface, avec un point source déjà connu :
+
+```json
+{
+  "schemaVersion": 1,
+  "contract": "CONTAINERS_FALLBACK_Z_TO_PACKAGE_X",
+  "pairs": [
+    {
+      "sourceKey": "SOURCE_KEY_PRIVEE_ET_QUALIFIEE",
+      "kind": "serialized-object",
+      "fallback": {
+        "coordinates": "fallback-z-reflected",
+        "position": [17.45, 2.575, 13.975]
+      },
+      "package": {
+        "coordinates": "package-x-reflected",
+        "position": [-17.45, 2.575, -13.975]
+      }
+    }
+  ]
+}
+```
+
+```bash
+node scripts/visual-coordinate-frames.mjs --pairs /private/containers/qualified-coordinate-pairs.json
+node --test tests/visual-coordinate-frames.test.mjs
+```
+
+Seules les valeurs **agrégées** `p95UnconvertedPositionDeltaWorldUnits`, `p95ConvertedPositionDeltaWorldUnits`, `completeMatrixPairs` et le verdict `SOURCE_POINT_FRAME_CONSISTENT_NOT_PIXEL_PARITY` sont imprimés ; ni identifiant ni matrice ni chemin privé ne sortent. Une erreur > tolérance donne le verdict `SOURCE_POINT_FRAME_MISMATCH_BLOCKS_PIXEL_REGISTRATION` et exit 2. Les matrices ne sont acceptées **que** quand les deux transformations originales complètes sont établies ; les centres de boîtes générées permettent un test **de point uniquement**. Aucun résultat d'image/pixel/matériau/silhouette ne découle de ce précontrôle.
+
+**Contrat d'intégration exact SH-05 :** exporter, dans le diagnostic **privé** owner-local, une liste de paires `{sourceKey,kind,fallback,package}` uniquement pour des **identités source communes** ; qualifier le repère de chaque extrémité ; fournir les matrices des deux côtés seulement si les deux sont complètes et attestées (ajouter `matrixSource:'complete-serialized-transform'` ou `'executed-camera-transform'`). Exécuter ce précontrôle local **avant** les manifestes de `visual-compare.mjs`, puis utiliser la caméra effectivement rendue issue de `__superhotGetRenderedFrameSnapshot()` et la caméra native exécutée pour une vraie paire de PNG. Le précontrôle n'exige ni nouveau query corpus ni changement de `main/renderer/levels`.
+
+**Classement VISUEL actuel, sans extrapolation :** (1) matériau/éclairage d'acteur isolé, RGB MAE masque union **0.0940–0.1022** *dans les quatre anciennes paires uniquement* ; (2) silhouette acteur isolé, IoU **0.9554–0.9615**, centros **0.63–0.81 px** *dans ces mêmes paires* ; (3) rendu scène Containers complet **non mesuré**, faute de paire native/Web authentifiée avec caméra active. La divergence de repère démontrée ici est un **risque de faux appariement**, pas un quatrième résultat visuel observé. La parité globale 1:1 reste **non vérifiée**.
+
+
+## SH-15 — scorecard spatial PRIVÉ des écarts réellement visibles (2 novembre 2026)
+
+**Nouveau module réservé :** `scripts/visual-region-scorecard.mjs`, tests `tests/visual-region-scorecard.test.mjs`. Il ne substitue ni le test gameplay SH-10, ni le comparateur global `visual-compare.mjs`, ni l'intégration SH-05. Il corrige un défaut d'interprétation important d'un simple RGB MAE : la comparaison brute confond les **différences de géométrie/silhouette** (pixels du fond à la place de l'objet) avec les différences de **matériau/éclairage** sur l'objet réellement visible. Le module rapporte les deux séparément pour chaque région **appariée à une identité de source**, sans fabriquer de masque ou de capture.
+
+**Préconditions strictes :** deux manifestes déjà compatibles avec `visual-compare.mjs`, exactement le même `scene.id/buildIndex/stateId`, même viewport sRGB HUD-off, matrices `viewMatrix` et `projectionMatrix` équivalentes dans `matched-web`. La conversion de repère d'objets se fait *avant* ces manifestes avec `visual-coordinate-frames.mjs` ; **ne jamais** considérer la caméra Unity sérialisée comme une caméra native exécutée. Les masques locaux sont des PNG gris 8 bits aux dimensions des images, **un masque par côté** et par zone, où intensité >=128 sélectionne le sujet. Les régions identifiées par `actor`, `cargo`, `floor`, `architecture`, `shadow` exigent `sourceObjectId` présent **dans les deux** manifestes; `background` et `lighting` peuvent être des zones non associées à un objet. Le script refuse les masques vides, colorés, dépareillés et un même fichier masque natif/Web. Les fichiers restent sur le poste privé.
+
+Fichier de régions **fictif**, à créer avec ses propres captures privées et identités communes (l'exemple ne contient aucun ID original) :
+
+```json
+{
+  "schemaVersion": 1,
+  "regions": [
+    {"kind":"actor","slot":0,"sourceObjectId":"PRIVATE_MATCHED_ACTOR_ID","nativeMask":"actor-native.png","webMask":"actor-web.png"},
+    {"kind":"cargo","slot":0,"sourceObjectId":"PRIVATE_MATCHED_CARGO_ID","nativeMask":"cargo-native.png","webMask":"cargo-web.png"},
+    {"kind":"lighting","slot":0,"nativeMask":"lights-native.png","webMask":"lights-web.png"}
+  ]
+}
+```
+
+Les PNG de masques ci-dessus sont **relatifs au dossier du manifeste de leur côté**, pas au dossier du fichier régions. Commande entièrement hors ligne :
+
+```sh
+node scripts/visual-coordinate-frames.mjs --pairs /private/scene/source-pairs.json
+node scripts/visual-region-scorecard.mjs --native /private/scene/native.json --web /private/scene/web.json --regions /private/scene/regions.json --out /private/scene/visual-regions-report.json
+```
+
+Le rapport agrégé comporte pour chaque `kind/slot` : paires d'objets présentes, erreur de translation dans le repère déjà aligné, aire native/Web, IoU et distance des centroïdes en pixels ; `materialIntersection.rgbMae01` et luminance **uniquement sur les pixels où les DEUX masques montrent l'objet** ; `silhouetteUnion.rgbMae01` sur l'union, qui comprend donc erreurs de contours et pixels du fond. Si l'intersection est vide, `materialIntersection=null` : ne jamais affirmer que deux matériaux ont été comparés. Les trois classements `topMaterialColorDifferences`, `topSilhouetteDifferences` et `topUnionColorDifferences` sont **séparés** car MAE RGB et (1−IoU) ne constituent pas une échelle unique de gravité perceptive. Aucune image, chemin privé, ID objet ou matrice native n'est contenu dans la sortie. L'exit code 2 marque les erreurs et les couples NON ENREGISTRÉS : sans registration, aucun pixel n'est lu.
+
+**Contrat SH-05 exact :** produire pour la scène Containers/build28 une véritable paire **HUD off** PNG Web `captureContainersWeb` (lecture GPU sur frame identifiée), PNG MCD issu d'un **render exécuté**, matrice active native convertie vers la même convention que Web, FOV/aspect/near/far, `stateId` attesté pour les deux frames et manifestes avec quelques **identités de GameObjects communes**. Fournir pour chaque zone des masques **provenant de ces deux vraies captures**, pas un contour généré que l'on prétendrait original. Faire tourner le scorecard sur la machine privée ; partager seulement les **trois plus grands écarts réellement observés** avec métrique, zone, méthode et provenance. Les anciennes quatre paires d'acteur isolé (IoU 0.9554–0.9615 et RGB union 0.0940–0.1022, telles que rapportées dans la documentation précédente) ne sont PAS une mesure de la scène Containers entière. **Pas de seuil 1:1** proclamé sur ces valeurs.
+
+**État du présent cycle :** le connecteur Browser refuse le contexte utilisateur (absence d'extension du navigateur d'origine). Les `result.json` privés existants de research **#8–#15** ont été téléchargés et inspectés, sans nouvelle demande au corpus : #10 contient **5 lignes de schéma SQLite, pas de capture**, #15 une lecture **110 lignes d'une spécification caméra, pas de caméra exécutée/capture**, les autres sont des lectures de spécifications, code ou contrats. Aucun de ces huit artifacts ne contient une paire de PNG MCD/Web identifiables. Les **tests synthétiques du module ne sont pas une observation visuelle réelle** ; aucune nouvelle erreur RGB/IoU Containers n'est mesurée. Avant toute généralisation 1:1, la paire caméra/état natif exécutée reste indispensable.
+
+
+### SH-15 — état visuel prioritaire au 2 novembre 2026, après six comparaisons SH-05
+
+Le `main` relu contient désormais le rapport **six** acteurs isolés idle/walk/hit/fire/punch rendu par SH-05 ; il **remplace comme référence récente** l'ancien rapport de quatre poses, mais AA, Red Crystal et protocole ont changé : **aucune amélioration quantitative causale ne peut être attribuée** à un correctif isolé. IoU rapportée **0.99172–0.99880**, centres **0.00697–0.23010 pixel**, erreur RGB moyenne normalisée **0.07162–0.08074**. La présente lane n'a pas relu les images natives ni `native-web-red-crystal-comparison-v1.json` privés ; ce sont **des mesures publiées par SH-05**, pas une nouvelle observation SH-15. Les images restent privées.
+
+**Trois écarts VISUELS à corriger/qualifier par SH-05 :** (1) **matériau/éclairage Red Crystal isolé**, erreur RGB **0.07162–0.08074** selon pose (lumières/phases temporelles ne sont pas appariées) ; (2) **contour/silhouette isolée**, point le plus faible `hit0.25` IoU **0.99172**, centroïde **0.23010 px** ; (3) **occlusion, sols, lumière/ombres et post-traitement de toute la scène Containers**, **aucune** paire native/Web world-run appariée avec caméra exécutée — erreur RGB/IoU globale **inconnue**. Le nouveau scorecard par régions ne remplacera le point (3) qu'après capture et masques réellement obtenus. Parité MCD 1:1 **non vérifiée**.
+
+
+## SH-15 — P0: rank real *screen-space impact* without mislabeling pose as material (2026-11-02)
+
+The region scorecard now separates **visible footprint** from **relative error rate**. On genuine owner-private matched PNGs, two additional independent top-three lists are produced:
+
+- `topAbsoluteSilhouetteDifferences`: per-region **symmetric-difference pixel count** (mask native XOR mask Web). Large objects with many genuinely displaced pixels rise above tiny objects with poor IoU but negligible image footprint.
+- `topScreenWeightedUnionColorDifferences`: per-region `silhouetteUnion.rgbMae01 × unionPixels / (viewportWidth × viewportHeight)`. This is the fraction-weighted RGB contribution of **that one region** to the whole viewport. Overlapping regions are not additive, and this is **not** a perceptual SSIM score or a substitute for the exact global RGB metric.
+
+Per-region output adds `symmetricDifferencePixels`, `sharedFractionOfSmallerMask`, `screenWeightedUnionRgbMae01`, `sourcePoseAligned`, `sourceMaxNonTranslationCoefficientDelta`, `materialMeasurementStatus`. The report adds `sourcePoseMismatchCount`. Existing normalized `topMaterialColorDifferences`, `topSilhouetteDifferences`, and `topUnionColorDifferences` remain for independent diagnostic use.
+
+**Material provenance gate:** common source IDs alone cannot prove the surfaces were rendered at the same pose. After prior frame conversion and camera registration, a matched object's *full* 4×4 world matrices must agree within `1e-3` (world translation Euclidean and all nontranslation coefficients maximum); otherwise material-intersection RGB is **suppressed**, with `BLOCKED_SOURCE_POSE_MISMATCH`. The silhouette/union differences remain observable, classified as a possible pose/geometry/occlusion gap rather than claimed shader error. Even with aligned matrices, if the binary masks overlap by **<50% of the smaller visible area**, intersection RGB is suppressed with `BLOCKED_LOW_SHARED_SILHOUETTE_COVERAGE`: a tiny shared sliver is not a representative material sample. No shared pixels gives `NO_SHARED_SURFACE`. Eligible regions are marked `COMPARABLE_INTERSECTION_RGB`. This conservative overlap threshold is a **measurement policy**, not a source-derived MCD constant. Skin/bone pose differences can persist despite an aligned root matrix; do not interpret `sourcePoseAligned:true` as proof of identical vertex skinning.
+
+**SH-05 wiring contract:** Do **not** change `main.js`, `renderer.js`, `levels.js` or create dummy native frames. Capture an actually rendered same-tick native camera and a same-scene Web GPU framebuffer as described above; provide private scene manifests with the real same-source object 4×4 matrices in a common coordinate frame plus per-source grayscale silhouette masks. Run existing `scripts/visual-coordinate-frames.mjs` first and then `scripts/visual-region-scorecard.mjs` locally. Share only the three highest *actual measured* screen-area, silhouette and mutually-visible material deficits, explicitly marking source-pose-mismatched regions as **not material-comparable**. SH-10 still owns gameplay acceptance. Old static `~60°` Camera7605 must not stand in for an executed native camera: SH-01's more recent private hierarchy evidence #129/#130 distinguishes `CameraLook18825` player branch from the `StandardCamera7605` branch under `CameraEffectManager`.
+
+**Evidence boundary this cycle:** re-opened the eight original private artifacts research #8–#15 and inspected each real `result.json` (read operations with validated SHA of the returned text for #8/#9/#11–#15; #10 = 5 SQLite schema rows, `truncated:false`). These are source/metadata reads, not a synchronized native MCD frame. Browser tab access returned `Browser access requires the originating browser context`; no browser image, active native camera or Containers full-scene matched PNG was captured or scored. New tests use exclusively synthetic PNGs and matrices. Therefore this feature improves **classification of future real visual differences**, not measured MCD/Web fidelity today.

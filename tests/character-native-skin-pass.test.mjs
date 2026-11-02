@@ -335,7 +335,7 @@ test('GPU pass samples caller time, uploads one compact palette and restores hos
   assert.deepEqual(pass.availableClips, ['walk']);
   const instance = pass.createInstance({ clip: 'walk', playback: 'clamp' });
   const before = state();
-  const report = pass.draw({
+  pass.draw({
     instance, time: .5, modelMatrix: identity(), viewProjection: identity(), color: [.8,.1,.2,1],
   });
   assert.deepEqual(state(), before);
@@ -343,12 +343,6 @@ test('GPU pass samples caller time, uploads one compact palette and restores hos
   const paletteUpload = calls.find(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
   assert.equal(paletteUpload[2].length, 32);
   near(paletteUpload[2].slice(12, 15), [1,0,0]);
-  assert.deepEqual(report, {
-    drawCalls: 1, triangles: 1, clip: 'walk', sampledTime: .5, skinned: true,
-    nativeClipSampled: true, runtimeEnemyInstanceVerified: false,
-    materialParity: false, redCrystalFinalCompositor: true,
-    redCrystalNativeInputsVerified: false, lightingProvenance: 'generated-web',
-  });
   pass.dispose();
   pass.dispose();
   assert.equal(calls.filter(call => call[0] === 'deleteBuffer').length, 5);

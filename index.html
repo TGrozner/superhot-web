@@ -71,12 +71,12 @@
     <aside id="scene-controls" style="position:absolute;top:12px;right:12px;z-index:5;max-width:min(350px,90vw);max-height:calc(100% - 24px);overflow:auto;padding:12px;background:rgba(242,247,250,.95);border:1px solid #9aabb4;font:12px/1.5 ui-monospace,monospace;color:#23313a;">
       <label for="scene-mode">Vue</label>
       <select id="scene-mode">
-        <option value="original">Containers · originaux locaux</option>
+        <option value="original">Scène originale locale</option>
         <option value="prototype">Anciennes salles de démonstration</option>
         <option value="synthetic">Scène de contrôle générée</option>
       </select>
       <div id="private-mesh-controls" hidden>
-        <strong style="display:block;margin-top:10px">CONTAINERS · MODÈLES ORIGINAUX</strong>
+        <strong id="native-scene-title" style="display:block;margin-top:10px">SCÈNE LOCALE · MODÈLES ORIGINAUX</strong>
         <output id="local-assets-status" role="status" style="display:block;margin:6px 0">Chargement automatique des originaux locaux…</output>
         <label for="private-enemy-variant">Personnage</label>
         <select id="private-enemy-variant">
@@ -85,9 +85,9 @@
         </select>
         <output id="private-enemy-status" role="status" aria-live="polite" style="display:block;margin-top:6px">Aucun modèle ennemi local chargé.</output>
         <p style="margin:6px 0">Modèles, poses et sons issus du jeu original. Rendu, combats et débris encore en reconstruction ; fidélité 1:1 non validée. Échap libère la souris.</p>
-        <button id="play-original" type="button">Jouer dans Containers</button>
+        <button id="play-original" type="button">Jouer dans la scène locale</button>
         <button id="frame-private-enemy" type="button" disabled>Cadrer le modèle</button>
-        <button id="frame-containers" type="button">Vue des conteneurs</button>
+        <button id="frame-containers" type="button">Vue de la scène</button>
         <label for="private-animation" style="display:block;margin-top:6px">Inspecter une animation originale</label>
         <select id="private-animation" disabled>
           <option value="idle">Repos</option>

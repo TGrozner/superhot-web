@@ -178,7 +178,7 @@ function prepareLightmaps(values, textures) {
 }
 
 function prepareConcreteLighting(source, textures) {
-  if (!source || source.schema !== 'containers-build28-concrete-main-forward-v1' ||
+  if (!source || source.schema !== 'mcd-concrete-main-forward-v1' ||
       source.sourceMaterial !== 'resources.assets::3' ||
       source.sourceShader !== 'globalgamemanagers.assets::25' ||
       source.variant !== 'FORWARDBASE DIRECTIONAL LIGHTMAP_ON') {
@@ -217,7 +217,8 @@ function prepareConcreteLighting(source, textures) {
   }
   if (preparedGlobals.localFogScale <= 0 ||
       preparedGlobals.localShowFog !== 1 ||
-      preparedGlobals.localShowGroundFog !== 0) {
+      ![0, 1].includes(preparedGlobals.localShowGroundFog) ||
+      (preparedGlobals.localShowGroundFog === 1 && preparedGlobals.localGroundFogScale <= 0)) {
     throw new RangeError('Concrete lighting fog contract differs');
   }
   return Object.freeze({
@@ -278,6 +279,16 @@ export function prepareNativeScene(scenePackage) {
   if (!coordinates || Object.entries(COORDINATES).some(([key, value]) => coordinates[key] !== value)) {
     throw new TypeError('Native scene package coordinate contract differs');
   }
+  const source = scenePackage.source;
+  if (!source || !Number.isSafeInteger(source.sceneBuildIndex) || source.sceneBuildIndex < 0 ||
+      typeof source.scenePath !== 'string' || !source.scenePath.endsWith('.unity') ||
+      typeof source.serializedOwner !== 'string' || !source.serializedOwner.length) {
+    throw new TypeError('Native scene package requires its source scene identity');
+  }
+  const initialEquipment = scenePackage.initialEquipment;
+  if (typeof initialEquipment?.armed !== 'boolean') {
+    throw new TypeError('Native scene package requires source initial equipment');
+  }
 
   const sourceMeshes = uniqueMap(scenePackage.meshes, 'meshes');
   const meshes = new Map();
@@ -291,6 +302,7 @@ export function prepareNativeScene(scenePackage) {
   if (activeCameras.length !== 1) {
     throw new RangeError('Native scene package must have exactly one initial active camera');
   }
+  const entryCamera = scenePackage.entryCamera == null ? null : prepareCamera(scenePackage.entryCamera);
 
   const instances = [];
   const instanceMap = new Map();
@@ -329,22 +341,62 @@ export function prepareNativeScene(scenePackage) {
   }
 
   const pistolSource = scenePackage.pistol;
-  const pistolInstanceId = sourceId(pistolSource?.instanceId, 'pistol instanceId');
-  const pistolMeshId = sourceId(pistolSource?.meshId, 'pistol meshId');
-  const pistolInstance = instanceMap.get(pistolInstanceId);
-  const pistolMesh = meshes.get(pistolMeshId);
-  if (!pistolInstance || !pistolMesh || pistolInstance.meshId !== pistolMeshId) {
-    throw new Error('Pistol source instance/mesh is not in the prepared world pass');
+  let pistol = null;
+  if (pistolSource != null) {
+    const pistolInstanceId = sourceId(pistolSource.instanceId, 'pistol instanceId');
+    const pistolMeshId = sourceId(pistolSource.meshId, 'pistol meshId');
+    const pistolInstance = instanceMap.get(pistolInstanceId);
+    const pistolMesh = meshes.get(pistolMeshId);
+    if (!pistolInstance || !pistolMesh || pistolInstance.meshId !== pistolMeshId) {
+      throw new Error('Pistol source instance/mesh is not in the prepared world pass');
+    }
+    const pistolMatrices = attachmentMatrices(pistolSource);
+    pistol = Object.freeze({
+      source: pistolSource,
+      instance: pistolInstance,
+      mesh: pistolMesh,
+      model: pistolMatrices.model,
+      normal: pistolMatrices.normal,
+      mirrored: pistolMatrices.mirrored,
+    });
   }
-  const pistolMatrices = attachmentMatrices(pistolSource);
-  const pistol = Object.freeze({
-    source: pistolSource,
-    instance: pistolInstance,
-    mesh: pistolMesh,
-    model: pistolMatrices.model,
-    normal: pistolMatrices.normal,
-    mirrored: pistolMatrices.mirrored,
+
+  function prepareWeapon(source, label) {
+    const meshId = sourceId(source.meshId, label + ' meshId');
+    const mesh = meshes.get(meshId);
+    if (!mesh) throw new Error(label + ' references a missing mesh');
+    const draws = sourceList(source.draws, label + ' draws').map(draw => {
+      const materialId = sourceId(draw.materialId, label + ' materialId');
+      const range = mesh.ranges.get(draw.sourceSubmesh);
+      if (!materialMap.has(materialId) || !range) {
+        throw new Error(label + ' references a missing material or submesh');
+      }
+      return Object.freeze({ meshId, range, materialId });
+    });
+    if (!draws.length) throw new RangeError(label + ' has no draws');
+    return {
+      meshId, draws: Object.freeze(draws),
+      localMatrix: meshModelMatrices(source.localMatrix).model,
+      source,
+    };
+  }
+  const worldPistol = scenePackage.worldPistol == null ? null : Object.freeze({
+    ...prepareWeapon(scenePackage.worldPistol, 'world pistol'),
+    enemyLocalMatrix: meshModelMatrices(scenePackage.worldPistol.enemyLocalMatrix).model,
   });
+  let firstPersonPistol = null;
+  if (scenePackage.firstPersonPistol) {
+    const source = scenePackage.firstPersonPistol;
+    const fov = source.projection?.verticalFovDegrees;
+    if (!Number.isFinite(fov) || fov <= 0 || fov >= 180) {
+      throw new RangeError('First-person pistol requires its source projection');
+    }
+    firstPersonPistol = Object.freeze({
+      ...prepareWeapon(source, 'first-person pistol'),
+      handPosition: finiteVector(source.handPosition, 3, 'first-person pistol hand position'),
+      projection: Object.freeze({ ...source.projection }),
+    });
+  }
 
   return Object.freeze({
     meshes,
@@ -356,12 +408,16 @@ export function prepareNativeScene(scenePackage) {
     lightmapByIndex: lightmaps.byIndex,
     concreteLighting,
     pistol,
-    camera: activeCameras[0],
+    worldPistol,
+    firstPersonPistol,
+    initialEquipment: Object.freeze({ ...initialEquipment }),
+    camera: entryCamera ?? activeCameras[0],
+    entryCamera,
     cameras: Object.freeze(cameras),
     anchors: scenePackage.anchors,
     colliders: scenePackage.colliders,
     layers: scenePackage.layers,
-    source: scenePackage.source,
+    source: Object.freeze({ ...source }),
     coordinateSpace: coordinates,
   });
 }

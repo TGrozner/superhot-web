@@ -12,7 +12,7 @@ Open the published GitHub Pages URL once Pages is enabled. On Windows, unzip the
 npm start
 ```
 
-Then visit **http://localhost:4173/**, with no query parameters. On the owner's configured machine, Containers opens with original local scenery, textures, an original pistol and skinned EnemyMerged characters. Click **Jouer dans Containers** to start the Web encounter. **Cadrer le modèle** isolates the character for inspection. Original data is **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
+Then visit **http://localhost:4173/**, with no query parameters. On the owner's configured machine, the selected private scene currently opens **Dojo (`SHRL_Dojo2`, build index 10)** with original local scenery and textures, from the viewpoint observed in the running replay. Click **Jouer dans SHRL_Dojo2** to start the Web encounter. The source equipment baseline is unarmed; common original pistol models remain available for enemy weapons and pickups. **Cadrer le modèle** isolates the character for inspection. Original data is **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
 
 The visible **Vue** menu also offers **Anciennes salles de démonstration** and **Scène de contrôle générée**. These retain their generated geometry. There are no URL feature flags. Original geometry and sampled animations do not imply native gameplay, physics, lighting or shader parity.
 
@@ -20,10 +20,13 @@ The visible **Vue** menu also offers **Anciennes salles de démonstration** and 
 
 The ignored `private/browser-assets.json` maps `mesh6`, `mesh7`, `texture`,
 `enemyMerged`, `enemyHeadless`, `enemyRig`, `enemyHeadlessRig`, `scenePackage`,
-and numbered `sceneTexture_NNN` IDs to relative paths inside `private/`.
+numbered `sceneTexture_NNN` IDs, `sceneLightmap_000`, `sceneLightmapBc3`,
+and the `sceneConcrete*` textures to relative paths inside `private/`.
 The rig JSON contains original geometry, skin weights, inverse binds, a 62-bone
 hierarchy and native sampled local poses. The gzip scene package contains
-source-qualified geometry, submeshes, materials, placements and collider records.
+source-qualified geometry, submeshes, materials, placements and collider records,
+scene identity, initial equipment, lightmap dimensions/mips and an optional observed
+entry camera. Captured map-variant exclusions retain their separate runtime provenance.
 Only configured, recognized IDs are exposed through `/local-assets/<id>`, on
 `127.0.0.1`; host and same-origin checks reject cross-site access. The private
 directory itself is not served. Restart `npm start` after changing this map.
@@ -49,7 +52,7 @@ upload them. The generated playable prototype remains available in **Vue**.
 | Escape | Pause / release mouse |
 | Enter | Start / restart on menu |
 
-**Time scales with movement, aiming, shooting and reloading.** Native sampled idle/walk/hit poses advance on the Web world clock and freeze during pause. Containers uses authored spawn candidates with Web encounter timing and axis-aligned collider approximations—not the original spawning system or PhysX. A hit plays the original reaction and creates Web debris; native ragdoll death is not reproduced. The older generated rooms retain their own prototype rules.
+**Time scales with movement, aiming and shooting.** Native sampled poses advance on the Web world clock and freeze during pause. The source-selected scene uses authored spawn candidates with Web encounter timing and axis-aligned collider approximations—not the original spawning system or PhysX. Death freezes the pose and creates Web debris; native ragdoll death is not reproduced. The older generated rooms retain their own prototype rules.
 
 ## Files
 
