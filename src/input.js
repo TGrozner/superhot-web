@@ -76,6 +76,9 @@ export function movementStep(keys, yaw, dt, rules = PROTOTYPE_INPUT_RULES) {
   const sprinting = anyPressed(keys, SPRINT);
   const speed = sprinting ? rules.sprintSpeed : rules.walkSpeed;
   if (!Number.isFinite(speed)) throw new RangeError('movement speed must be finite');
+  // PROVISIONAL WEB API: speed is a nonnegative magnitude, never a direction.
+  // Check even while idle so malformed selected rules cannot escape unnoticed.
+  if (speed < 0) throw new RangeError('movement speed must be nonnegative');
   if (!axes.moving) return { ...axes, sprinting, speed, dx: 0, dz: 0 };
   const inverse = 1 / Math.hypot(axes.forward, axes.horizontal);
   const sx = Math.sin(yaw) * axes.forward + Math.cos(yaw) * axes.horizontal;
