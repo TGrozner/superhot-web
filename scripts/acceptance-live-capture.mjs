@@ -361,7 +361,9 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       ready=await cdp.eval("document.readyState==='complete'&&!!document.querySelector('#scene')");
       if(ready)break;await sleep(100);
     }if(!ready)throw Error('Web game canvas missing');
-    await cdp.eval("document.querySelector('#start-button')?.click()");await sleep(300);
+    // Current full-source homepage starts already playing. Clicking Start would
+    // reset the scene and request pointer lock, destabilizing the capture.
+    await cdp.eval("if(document.querySelector('#hud')?.hidden!==false)document.querySelector('#start-button')?.click()");await sleep(300);
     const observation="(()=>{const c=document.querySelector('#scene'),r=c.getBoundingClientRect(),g=c.getContext('webgl2');return {playing:document.querySelector('#hud')?.hidden===false,webgl2:!!g,rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:c.width,height:c.height,dpr:devicePixelRatio},room:document.querySelector('#room-name')?.textContent?.trim(),performance:window.__superhotSceneMetrics||null,rendered:typeof window.__superhotGetRenderedFrameSnapshot==='function'?window.__superhotGetRenderedFrameSnapshot():null,hook:typeof window.__sh10AcceptanceSnapshot==='function'?window.__sh10AcceptanceSnapshot():null};})()";
     const first=await cdp.eval(observation);if(!first?.playing||!first?.webgl2)throw Error('Active WebGL2 game not observed');
     if(privateFiles.some(Boolean) || requireEnemy || requireOriginalScene){
