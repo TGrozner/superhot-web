@@ -7,9 +7,18 @@ const checkFinite = (value, label) => {
     throw new TypeError(`${label} must be finite`);
   }
 };
-const checkVector = (vector, label) => {
+const AXES = ['x', 'y', 'z'];
+const snapshotVector = (vector, label) => {
   if (!vector || typeof vector !== 'object') throw new TypeError(`${label} must be a vector`);
-  for (const axis of ['x', 'y', 'z']) checkFinite(vector[axis], `${label}.${axis}`);
+  // Validate the very same finite coordinates used for the calculation.
+  // Caller-authored getters must not alter a burst or a frame mid-step.
+  const snapshot = {};
+  for (const axis of AXES) {
+    const component = vector[axis];
+    checkFinite(component, `${label}.${axis}`);
+    snapshot[axis] = component;
+  }
+  return snapshot;
 };
 
 function seededRandom(seed) {
@@ -30,7 +39,7 @@ function seededRandom(seed) {
 export function createProceduralBurst({
   origin, seed, count, minSpeed, maxSpeed, minLifetime, maxLifetime,
 }) {
-  checkVector(origin, 'origin');
+  const originSnapshot = snapshotVector(origin, 'origin');
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xFFFFFFFF) {
     throw new RangeError('seed must be an unsigned 32-bit integer');
   }
@@ -55,7 +64,7 @@ export function createProceduralBurst({
     const lifetime = minLifetime + random() * (maxLifetime - minLifetime);
     fragments.push({
       id,
-      position: { ...origin },
+      position: { ...originSnapshot },
       velocity: {
         x: Math.cos(angle) * radius * speed,
         y: y * speed,
@@ -74,31 +83,32 @@ export function createProceduralBurst({
  */
 export function advanceFragment(fragment, dt, acceleration = { x: 0, y: 0, z: 0 }) {
   if (!fragment || typeof fragment !== 'object') throw new TypeError('fragment must be an object');
-  checkVector(fragment.position, 'fragment.position');
-  checkVector(fragment.velocity, 'fragment.velocity');
-  checkVector(acceleration, 'acceleration');
-  checkFinite(fragment.age, 'fragment.age');
-  checkFinite(fragment.lifetime, 'fragment.lifetime');
+  const { position: sourcePosition, velocity: sourceVelocity, age, lifetime, ...metadata } = fragment;
+  const positionSnapshot = snapshotVector(sourcePosition, 'fragment.position');
+  const velocitySnapshot = snapshotVector(sourceVelocity, 'fragment.velocity');
+  const accelerationSnapshot = snapshotVector(acceleration, 'acceleration');
+  checkFinite(age, 'fragment.age');
+  checkFinite(lifetime, 'fragment.lifetime');
   checkFinite(dt, 'dt');
   if (dt < 0) throw new RangeError('dt must be non-negative');
-  if (fragment.lifetime <= 0 || fragment.age < 0 || fragment.age > fragment.lifetime) {
+  if (lifetime <= 0 || age < 0 || age > lifetime) {
     throw new RangeError('fragment age or lifetime invalid');
   }
-  const remaining = fragment.lifetime - fragment.age;
+  const remaining = lifetime - age;
   const step = Math.min(dt, remaining);
   const position = {}, velocity = {};
-  for (const axis of ['x', 'y', 'z']) {
-    position[axis] = fragment.position[axis] + fragment.velocity[axis] * step +
+  for (const axis of AXES) {
+    position[axis] = positionSnapshot[axis] + velocitySnapshot[axis] * step +
       // Halve time before multiplying: a * dt * dt can overflow even when
       // the quadratic displacement and final velocity are representable.
-      acceleration[axis] * (step / 2) * step;
-    velocity[axis] = fragment.velocity[axis] + acceleration[axis] * step;
+      accelerationSnapshot[axis] * (step / 2) * step;
+    velocity[axis] = velocitySnapshot[axis] + accelerationSnapshot[axis] * step;
     if (!Number.isFinite(position[axis]) || !Number.isFinite(velocity[axis])) {
       throw new RangeError('particle integration overflow');
     }
   }
-  const age = Math.min(fragment.lifetime, fragment.age + step);
-  return { ...fragment, position, velocity, age, alive: age < fragment.lifetime };
+  const nextAge = Math.min(lifetime, age + step);
+  return { ...metadata, position, velocity, age: nextAge, lifetime, alive: nextAge < lifetime };
 }
 
 /** Retain only particles still alive after the step. Input stays unchanged. */
@@ -108,7 +118,7 @@ export function advanceFragments(fragments, dt, acceleration = { x: 0, y: 0, z: 
   // frame. Otherwise validity unexpectedly depends on burst size.
   checkFinite(dt, 'dt');
   if (dt < 0) throw new RangeError('dt must be non-negative');
-  checkVector(acceleration, 'acceleration');
-  return fragments.map((item) => advanceFragment(item, dt, acceleration))
+  const accelerationSnapshot = snapshotVector(acceleration, 'acceleration');
+  return fragments.map((item) => advanceFragment(item, dt, accelerationSnapshot))
     .filter((item) => item.alive);
 }
