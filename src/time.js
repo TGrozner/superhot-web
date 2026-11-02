@@ -504,14 +504,19 @@ const sourceWorldQuaternion = (rotation) => {
 };
 
 /** Starting this model means CameraLookTimeControl.Start has been invoked. */
-export function createMcdSourceLookTimeshiftState({ cameraWorldRotation } = {}) {
+export function createMcdSourceLookTimeshiftState({ cameraWorldRotation, currentTimeModifier } = {}) {
+  // Start receives a shifter from TimeControl; its initial modifier is NOT
+  // established by CameraLookTimeControl.cs, so the caller must supply it.
+  if (!Number.isFinite(currentTimeModifier)) {
+    throw new TypeError('initial shifter modifier must be explicitly supplied');
+  }
   return {
     previousWorldRotation: sourceWorldQuaternion(cameraWorldRotation),
     warmupUpdatesRemaining: 10,
     lastTimeMeasuredDeltaA: 0,
     rotationAccumulated: 0,
     timeShiftBuffer: 0,
-    currentTimeModifier: 0,
+    currentTimeModifier,
   };
 }
 
