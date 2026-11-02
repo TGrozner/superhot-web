@@ -281,3 +281,118 @@ export function containersBuild28CargoMaterialBinding(rendererPathId) {
     }):null,
   });
 }
+
+
+/**
+ * P0 source-qualified RED CRYSTAL ENEMY, unrelated to Concrete cargo material.
+ *
+ * Native metadata was inspected inside PRIVATE Actions result.json:
+ * #93 artifact 13139554254: renderers 4748/4749 -> meshes 284/285,
+ * material (0,13), 60/59 bones, enabled, lightmap index 65535.
+ * #95 artifact 13141157351: serialized Material13, authored shader inputs.
+ * #98 artifact 13141163607: shader owner qualified to globalgamemanagers:28.
+ * #88/#90: independently checked OBJ triangles/positions (private bytes).
+ *
+ * No Unity shader pass, final fragments, animated pose or runtime instance
+ * was observed. The color below is a *DIAGNOSTIC WEB INPUT*, not final MCD RGB.
+ */
+const ENEMY_RED_CRYSTAL_SOURCE=Object.freeze({
+  material:Object.freeze({
+    owner:'sharedassets0.assets',pathId:13,
+    name:'MAIN RedCrystalNuEnemyMaterial',
+    rendererReference:Object.freeze({fileId:0,pathId:13}),
+    serializedTextureEnvironmentCount:0,
+  }),
+  shader:Object.freeze({
+    owner:'globalgamemanagers.assets',pathId:28,
+    name:'XULM FULLFORWARD/Red Crystal',
+    materialReference:Object.freeze({fileId:1,pathId:28}),
+    serializedKeyword:'_ALLOWLOCALFOG_ON',
+    actualPassAndVariantVerified:false,
+  }),
+  shaderInputs:Object.freeze({
+    _Color:Object.freeze([0.720588207244873,0,0,1]),
+    _EmissionColor:Object.freeze([0.5220588445663452,0,0,1]),
+    _FogColor:Object.freeze([0.6838235259056091,0,0,1]),
+    _Alpha:0,
+    _IsEnemy:1,
+    _AllowLocalFog:1,
+    _FogDistance:5,
+    _FogLength:7,
+  }),
+  sourceEvidence:'private research #93/13139554254, #95/13141157351, #98/13141163607',
+  status:'unity-serialized-owner-qualified-params-no-render-pass',
+  webShadingReady:false,
+  runtimeNativePixelsVerified:false,
+  nativeTexturePixelsAvailable:false,
+  nativeSurfaceAlphaKnown:false,
+  nativeLocalFogPixelsKnown:false,
+});
+
+const ENEMY_RED_CRYSTAL_RENDERERS=Object.freeze([
+  Object.freeze({
+    rendererPathId:4748,meshPathId:284,meshName:'EnemyMerged',
+    objGroup:'EnemyMerged_0',sourceVertexCount:5237,
+    sourceTriangleCount:2254,rootBonePathId:2257,boneCount:60,
+  }),
+  Object.freeze({
+    rendererPathId:4749,meshPathId:285,meshName:'EnemyMergedHeadless',
+    objGroup:'EnemyMergedHeadless_0',sourceVertexCount:4895,
+    sourceTriangleCount:2132,rootBonePathId:2257,boneCount:59,
+  }),
+]);
+
+/**
+ * Resolves an exact enemy SkinnedMeshRenderer -> native material owner, while
+ * retaining static-only OBJ and missing skinning/lightmap/pass limitations.
+ */
+export function enemyRedCrystalMaterialBinding(rendererPathId) {
+  int(rendererPathId,'rendererPathId',1);
+  const r=ENEMY_RED_CRYSTAL_RENDERERS.find(x=>x.rendererPathId===rendererPathId);
+  if(!r) throw new RangeError('No proved EnemyMerged material binding for renderer '+rendererPathId);
+  return Object.freeze({
+    sourceOwner:'sharedassets0.assets',rendererPathId,rendererEnabled:true,
+    mesh:Object.freeze({
+      owner:'sharedassets0.assets',pathId:r.meshPathId,name:r.meshName,
+      objGroup:r.objGroup,sourceVertexCount:r.sourceVertexCount,
+      sourceTriangleCount:r.sourceTriangleCount,
+      staticObjOnly:true,skinWeightsAvailable:false,poseProven:false,
+    }),
+    materialSlot:0,materialSource:ENEMY_RED_CRYSTAL_SOURCE,
+    lightmapIndexSerialized:65535,lightmapSamplingEnabled:false,
+    rootBonePathId:r.rootBonePathId,boneCount:r.boneCount,
+    castShadowsSerialized:true,receiveShadowsSerialized:true,
+    runtimeScenePresenceVerified:false,
+  });
+}
+
+/**
+ * Deliberately show a visible source-derived RED diagnostic when SH-05 draws
+ * a privately selected static EnemyMerged OBJ. This forwards raw authored
+ * _Color RGB to the CURRENT WEB shader as if normalized display sRGB.
+ * That transfer function, emission, shading, and Unity color management are
+ * not proven. In particular, material _Alpha=0 must NOT hide this geometry.
+ *
+ * Do NOT use this packet for the concrete cargos, source-pixel comparisons,
+ * actual XULM shader emulation, or a native-fidelity assertion.
+ */
+export function enemyRedCrystalDiagnosticWebPacket(rendererPathId) {
+  const binding=enemyRedCrystalMaterialBinding(rendererPathId);
+  const nativeParameter=binding.materialSource.shaderInputs._Color;
+  const color=Object.freeze([nativeParameter[0],nativeParameter[1],nativeParameter[2],1]);
+  const colorHex='#'+color.slice(0,3)
+    .map(x=>Math.round(Math.max(0,Math.min(1,x))*255).toString(16).padStart(2,'0'))
+    .join('');
+  return Object.freeze({
+    rendererPathId,mesh:binding.mesh,color,colorHex,
+    colorEncoding:'display-srgb-diagnostic-assumption',
+    colorProvenance:'native-serialized-color-parameter-web-diagnostic-NOT-MCD-fragments',
+    fallbackUsed:true,
+    sourceMaterial:binding.materialSource.material,
+    sourceShader:binding.materialSource.shader,
+    sourceLightmapIndex:65535,lightmapSamplingEnabled:false,
+    shaderPassVerified:false,nativeRenderedColorKnown:false,
+    localFogProvenance:'_ALLOWLOCALFOG_ON-serialized-shader-branch-unverified',
+    webAlphaOverride:'opaque-diagnostic-only-not-_Alpha-mapping',
+  });
+}
