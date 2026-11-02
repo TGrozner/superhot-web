@@ -1,5 +1,6 @@
 import { cameraAxes } from './math.js';
 import { uploadIndexedMesh } from './render/gpu-mesh.js';
+import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
 import { createGeneratedLighting, lightingUniformPacket } from './render/lighting-model.js';
 
 // Legacy Web fog is generated, not MCD. SH-13 owns the source-qualified lighting model.
@@ -194,6 +195,7 @@ export function createRenderer(canvas) {
   gl.disable(gl.CULL_FACE);
   const colorCache=new Map();
   const privateMeshes = new Map();
+  let localEnemyStaticPass = null;
   // No asset bytes are included or fetched: uploads originate from local File inputs.
   const identity4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   const identity3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
@@ -282,8 +284,32 @@ export function createRenderer(canvas) {
     drawCalls++;
     return true;
   }
+  // SH-05 diagnostic only: an authenticated, owner-selected private EnemyMerged
+  // OBJ is uploaded to the existing shader/context. It is never a gameplay
+  // enemy, does not affect hitboxes, and contains no verified skin/pose.
+  function replaceLocalEnemyStaticMesh(receipt) {
+    if (receipt?.owner !== 'sharedassets0.assets' || receipt?.meshPathId !== 284 ||
+        receipt?.geometryProvenance !== 'private-owner-qualified-export-OBJ-geometry-only') {
+      throw new TypeError('Require a qualified, locally selected EnemyMerged export');
+    }
+    // Keep the previous GPU pass if the new upload/validation fails.
+    const replacement = createEnemyStaticIndexedPass(gl, program, uniforms, receipt);
+    localEnemyStaticPass?.dispose();
+    localEnemyStaticPass = replacement;
+    return { sourceOwner: receipt.owner, sourceMeshPathId: receipt.meshPathId };
+  }
+  function drawLocalEnemyStaticDiagnostic(worldMatrix) {
+    if (!localEnemyStaticPass) return {
+      drawCalls: 0, triangles: 0, staticMesh: true,
+      nativeEnemySpawnVerified: false, nativeMaterialVerified: false,
+    };
+    const result = localEnemyStaticPass.draw(worldMatrix);
+    drawCalls += result.drawCalls;
+    return result;
+  }
   return {
     begin,draw,affineBox,replacePrivateMesh,drawPrivateMesh,
+    replaceLocalEnemyStaticMesh,drawLocalEnemyStaticDiagnostic,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,
