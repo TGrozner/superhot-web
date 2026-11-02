@@ -410,3 +410,20 @@ The release target is now **MCD `SHRL_Dojo2`, build index 10, serialized owner `
 - #166 (SH-01) CameraAngle world quaternion: Containers-static only; not evidence that Dojo's active camera invokes that producer. Its documentation does not block current Dojo playability.
 
 **Outstanding actual acceptance:** public Node/static checks cannot certify a complete Dojo victory, real body hit, actual GPU images or matched MCD pixels. SH-05 must explicitly preserve the stable Dojo baseline and choose merge order; Thomas alone performs the final owner-local test.
+
+
+## Dojo/build10 final-composition observation (SH-16 recovery)
+
+After SH-05 has loaded an authorized local `SHRL_Dojo2/build10/level10` package, the browser's **composite viewport** contains DOM HUD sprites over the WebGL canvas. A WebGL2 `readPixels` capture of `canvas#scene` alone **excludes the HUD**. The existing SH-10 `acceptance-dojo-playthrough.mjs` remains the owner of victory/restart validation; this integration check only observes the Dojo source-HUD seam and optional hands draw report.
+
+The first-person hands adapter recovered in #188 can sample source poses, but a merged module is not proof the runtime calls it. `src/renderer.js` and `src/main.js` are reserved to SH-05. When that work is ready, a browser-side, non-mutating receipt may be collected from DevTools:
+
+```js
+const mod = await import('/scripts/integration-dojo-visible.mjs');
+const receipt = mod.collectDojoVisibleComposition();
+console.log(receipt);
+```
+
+`DOJO_HUD_DOM_PRESENT_HANDS_GPU_UNOBSERVED` means the Dojo identity, playing frame and source-glyph DOM classes/masks are present, **not** that the PNG sprite decoded or pixels matched MCD. After SH-05 exposes a real **same-frame** `frame.nativeHands = {handsDrawCalls,handsTriangles,sourcePoseSampled}`, `DOJO_HUD_DOM_AND_HANDS_APP_REPORTED_NO_PIXEL_PROOF` is available; these values remain self-reported telemetry, not a GPU observation. A full-viewport browser screenshot and separate native screenshot matched by camera, state and time are still required for pixel measurements. The collector does not fetch original bytes, create files, or transmit data.
+
+Hosted Node CI runs `tests/integration-dojo-visible.test.mjs` with authored DOM and frame fixtures; it **never opens the owner's browser**, verifies private assets, proves gameplay completion, or establishes 1:1 fidelity. No Containers/build28 gate is applied to this Dojo-specific check.
