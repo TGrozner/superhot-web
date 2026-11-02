@@ -67,6 +67,12 @@ export function sampleLinearScalar(keyframes, time) {
     else high = mid;
   }
   const left = keyframes[low], right = keyframes[high];
-  const fraction = (time - left.time) / (right.time - left.time);
-  return left.value + fraction * (right.value - left.value);
+  // Stay finite when two valid extreme timestamps span more than Number.MAX_VALUE.
+  // This is numerical robustness for our Web scaffold, not a Unity curve rule.
+  const span = right.time - left.time;
+  const fraction = Number.isFinite(span)
+    ? (time - left.time) / span
+    : (time / 2 - left.time / 2) / (right.time / 2 - left.time / 2);
+  // Avoid overflowing the difference between opposite-sign finite values.
+  return (1 - fraction) * left.value + fraction * right.value;
 }
