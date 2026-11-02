@@ -297,3 +297,107 @@ cargo hull+artificial ribs after successfully checking and uploading its group.
 Record `locallyLoadedSourceGroups`, triangle/draw-call totals and a real GPU
 screenshot. SH-15 still needs matched active-native camera/render captures;
 do not claim a 1:1 scene from successful unit tests.
+
+
+## SH-12 P0 next visible target — entire local OBJ for EnemyMerged (2026-11-02)
+
+The original group-selecting `parseObjGroupsIntoIndexedMesh(text,['2_24','2_47'],opts)`
+**remains unchanged** for the existing Containers cargo pipeline (#102 merged).
+The browser integrator (#5/SH-05) now needs a **complete local enemy OBJ**:
+the `parseEntireObjIntoIndexedMesh(text, options?)` entry point intentionally
+does **not** require knowing any source `g` label. It consumes **all** triangular
+`f v/vt/vn` faces, with both one-based and negative relative indexes,
+preserves split UV0/normal seams, and returns one source-neutral indexed
+vertex/index buffer. If `g` labels exist, it preserves each contiguous group
+run as a range; if no `g` exists, it produces one range with
+`groupName: null`. It never derives native Material from `g` or `usemtl`.
+
+**Primary private metadata, re-inspected from `result.json`**:
+`superhot-research#81` artifact `13140480419` returned four rows,
+`truncated=false`. Mesh owner `sharedassets0.assets`, PathID `284` =
+`EnemyMerged`, **5,237 serialized vertices**, one submesh,
+`converted_obj` UnityPy export; PathID `285` =
+`EnemyMergedHeadless`, **4,895 serialized vertices**, one submesh,
+also `converted_obj`. Both report positions, normals, UV0 and faces,
+X-mirrored UnityPy conversion, **no skin, animation or weights in OBJ**.
+Different owner `resources.assets` PathID 284/285 refers to *glass shards*,
+not the enemy. These source facts do **not** establish the exact decompressed
+OBJ face count, group syntax, a runtime visible enemy, bone pose,
+source->Web handedness, or original material/shader. No private OBJ bytes, paths,
+texture bytes or runtime captures were copied into this public codebase.
+
+### Exact SH-05 browser + WebGL2 handoff — only SH-05 modifies shared files
+
+In SH-05's existing `?scene=containers` local File picker, after reading the
+**privately owned, user-selected** `.obj.gz` as text with the existing
+`readLocalObjFile(file)` helper (no HTTP upload):
+
+```js
+import { parseEntireObjIntoIndexedMesh, meshModelMatrices } from './render/mesh-format.js';
+import { uploadIndexedMesh } from './render/gpu-mesh.js';
+
+// Example ONLY: double reflection matches the previous Containers Web preview.
+// SH-05/SH-04 must confirm the actual enemy OBJ->Web signs and final winding.
+// Do not blindly force this conversion on all exports.
+const decoded = parseEntireObjIntoIndexedMesh(authorizedLocalObjText, {
+  axisSigns: independentlyVerifiedObjToWebSigns, // e.g. [-1,1,-1]
+  winding: independentlyVerifiedTriangleWinding, // 'keep' or 'flip'
+  // Independent source gates are OPTIONAL until real OBJ table/face counts verified:
+  // expectedSourcePositionCount: knownObjPositionTableCount,
+  // expectedTriangles: knownObjTriangleCount,
+  // expectedPositionRefs: knownDistinctReferencedPositions,
+  // expectedBounds: {min:[...],max:[...],tolerance:1e-5},
+});
+const uploaded = uploadIndexedMesh(gl, program, decoded.mesh);
+// In renderer.begin(camera), with a VERIFIED Web-space instance/prefab transform:
+const { model, normal, mirrored } = meshModelMatrices(verifiedEnemyWebModelMatrix);
+gl.uniform1i(uniforms.uUseAffine, 1);
+gl.uniformMatrix4fv(uniforms.uAffineModel, false, model);
+gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
+// SH-05/SH-13 bind a clearly labeled SYNTHETIC DIAGNOSTIC material,
+// never treat OBJ 'usemtl' as Unity material provenance.
+// If CULL_FACE is used, account for `mirrored` + explicit parsed winding.
+for (const range of decoded.drawRanges) {
+  uploaded.draw(range);
+  drawCalls++;
+}
+// Dispose uploaded GPU buffers when the file changes or the context is destroyed.
+```
+
+Return packet fields: `{mesh,drawRanges,sourcePositionCount,
+sourcePositionRefs,sourceTriangleCount,groupRunCount,windingFlipped,world,
+geometryProvenance,materialBindingsResolved:false,skinningAvailable:false}`.
+`mesh` is the canonical 32-byte interleaved
+`position.xyz|normal.xyz|uv0.xy` indexed WebGL2 payload.
+`drawRanges` are `{firstIndex,indexCount,groupName}` with **no materialSlot**;
+`uploadIndexedMesh(...).draw(range)` uses the actual index element size for
+byte offsets, and `drawElements(TRIANGLES,...)`.
+`sourcePositionCount` records the raw OBJ v-table count, distinct from the
+GPU vertex count after UV/normal seam duplication. A count of 5,237 from
+serialized metadata is not automatically asserted to match the exporter text;
+verify its v-table length independently before enabling that gate.
+
+The existing SH-13 UV2/lightmap contract is NOT implemented by an OBJ UV0
+parser: absence of independently recovered UV2 means
+**lightmapSamplingEnabled=false**. There are no bindposes, bone weights, skin
+deformations, valid native enemy spawn, headless swap, or animations in this
+module. The OBJ is suitable for a **static geometry diagnostic** only; SH-14
+owns rig/proxy and SH-06 animation, while SH-05 exclusively owns
+`src/main.js`, `src/renderer.js`, `src/levels.js`.
+
+### Tangible acceptance gates
+
+`tests/render-mesh-entire-obj.test.mjs` uses an original asymmetric,
+noncuboid wedge (no commercial vertices): verifies ungrouped source, optional
+multiword groups, UV/normal seam splitting, negative relative indices,
+axis-reflected normals, wrong source count/bounds rejection, inverse-transpose
+matrix, and mocked GPU **two real indexed draw ranges** at uint16 byte offsets
+0 and 6. These tests are a **CPU + WebGL2 API mock**, not a real browser frame.
+
+Next gate by SH-05: load either local `EnemyMerged` or `EnemyMergedHeadless`
+OBJ into Containers with an explicitly labeled **static/unrigged native-source
+mesh**, record successful GPU upload/draw counters, shader/culling diagnostics,
+render a browser screenshot with a deliberate and independently qualified
+placement, and send SH-15 a same-camera original/Web comparison request.
+Do not claim a native pose, material, draw, or 1:1 before those observations.
+No new corpus query is required for this parser.
