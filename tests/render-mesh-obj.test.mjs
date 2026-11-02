@@ -43,7 +43,9 @@ test('source-qualified OBJ groups build indexed triangles with exact draw ranges
   ]);
   assert.equal(out.groupEvidence[0].distinctPositionRefs, 5);
   assert.equal(out.groupEvidence[0].triangleCount, 2);
-  assert.deepEqual(out.groupEvidence[0].bounds, { min: [-3, 0, 0], max: [0, 2, 1] });
+  assert.deepEqual(out.groupEvidence[0].bounds.min, [-3, 0, 0]);
+  assert.ok(Math.abs(out.groupEvidence[0].bounds.max[0]) === 0, 'negative signed zero is a valid mirrored bound');
+  assert.deepEqual(out.groupEvidence[0].bounds.max.slice(1), [2, 1]);
   assert.equal(out.windingFlipped, true);
 });
 
