@@ -43,8 +43,8 @@ test('TimeControl declared numeric defaults are exact; execution remains unresol
   assert.equal(fields['TimeControl.forcedTimeScale'].value, -1);
   assert.equal(fields['TimeControl.referenceFixedDeltaTime'].expression, '1/60');
   assert.ok(Math.abs(fields['TimeControl.referenceFixedDeltaTime'].value - 1/60) < Number.EPSILON);
-  assert.ok(evidence.unknowns.some(u=>/Time\\.timeScale/.test(u.question)));
-  assert.ok(evidence.unknowns.some(u=>/scene\\/prefab/.test(u.question)));
+  assert.ok(evidence.unknowns.some(u=>u.question.includes('Time.timeScale')));
+  assert.ok(evidence.unknowns.some(u=>u.question.includes('scene/prefab')));
   assert.ok(evidence.unknowns.some(u=>/camera/.test(u.question)));
 });
 
