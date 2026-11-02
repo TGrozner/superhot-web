@@ -3,8 +3,15 @@
  * Build 20299547 / Assembly-CSharp SHA-256
  * ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257.
  * Private research #113: AudioManager.cs:579-612; #89: PejAiBody.cs:565-602.
+ * #120: AudioGameObjectResources.cs:35; #121: AudioPrefab.cs:1-6.
  * Public logic only: no native code, clip, prefab, or waveform.
  */
+// Source initializer: new AudioPrefab("EnemyShatter", 5). This is a
+// declared pool size, NOT proof the runtime actually loaded that pool.
+export const MCD_ENEMY_SHATTER_PREFAB = Object.freeze({
+  name: 'EnemyShatter', declaredPoolSize: 5,
+});
+
 export const MCD_PREFAB_SOUND_RESULT = Object.freeze({
   EMPTY_EFFECT: 'empty-effect',
   PLAY_REQUEST: 'audio-prefab-play-request',
@@ -75,19 +82,19 @@ export function planMcdAudioPrefabPlay({
 
 /**
  * PejAiBody.Kill calls the AudioPrefab overload after Controller.Kill.
- * The argument is AudioGameObjectResources.EnemyShatter, whose .Name and pool
- * availability are NOT inferred from its symbolic field identifier.
+ * Source-verified AudioGameObjectResources.EnemyShatter has name EnemyShatter
+ * and declared pool size 5. Whether the pool exists at runtime is UNKNOWN.
  * This composes the original body-dead early exit with the sound-call site.
  */
 export function planMcdBodyKillShatterPrefab({
-  controllerAlreadyDead, bodyWorldPosition, resolvedPrefabName,
+  controllerAlreadyDead, bodyWorldPosition,
   poolExists, reused, pitchBeforeRequest,
 } = {}) {
   boolean(controllerAlreadyDead, 'controllerAlreadyDead');
   if (controllerAlreadyDead) return null;
   const origin = position3(bodyWorldPosition);
   return planMcdAudioPrefabPlay({
-    prefabName: resolvedPrefabName, poolExists, reused,
+    prefabName: MCD_ENEMY_SHATTER_PREFAB.name, poolExists, reused,
     position: {x: origin.x, y: origin.y + 1.5, z: origin.z},
     pitchBeforeRequest,
     pitchRandomization: 0,
