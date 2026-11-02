@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { NATIVE_MATERIAL_GLSL } from '../src/render/native-material.js';
 import {
   createNativeSkinPass, loadNativeSkinPackage, sampleNativeSkinPalette,
 } from '../src/characters/native-skin-pass.js';
@@ -170,6 +171,26 @@ function mockGl({ uniformLimit = 256 } = {}) {
   return { gl, calls, state: () => ({ vao, arrayBuffer, program, winding }) };
 }
 
+test('animated skin shader incorporates bounded shared Red Crystal output math', () => {
+  const { gl, calls } = mockGl();
+  const sources = [];
+  const original = gl.shaderSource;
+  gl.shaderSource = (shader, text) => { sources.push([shader.kind, text]); original(shader, text); };
+  const pass = createNativeSkinPass(gl, sourcePackage());
+  const fragment = sources.find(([kind]) => kind === gl.FRAGMENT_SHADER)?.[1];
+  assert.ok(fragment?.includes(NATIVE_MATERIAL_GLSL.redCrystalOutput));
+  assert.match(fragment, /nativeRedCrystalFinalOutput\\(webProceduralRgb, vec4\\(0\\.0\\), vec3\\(0\\.0\\)\\)/);
+  assert.doesNotMatch(fragment, /uNativeOverlay|uNativeAdditive|sampler2D/);
+  const instance = pass.createInstance({ clip: 'walk', playback: 'clamp' });
+  const report = pass.draw({ instance, time: .5,
+    modelMatrix: identity(), viewProjection: identity(), color: [.8,.1,.2,1] });
+  assert.equal(report.redCrystalFinalCompositor, true);
+  assert.equal(report.redCrystalNativeInputsVerified, false);
+  assert.equal(report.materialParity, false);
+  assert.equal(calls.filter(([kind]) => kind === 'draw').length, 1);
+  pass.dispose();
+});
+
 test('GPU pass samples caller time, uploads one compact palette and restores host draw state', () => {
   const { gl, calls, state } = mockGl();
   const pass = createNativeSkinPass(gl, sourcePackage());
@@ -189,7 +210,8 @@ test('GPU pass samples caller time, uploads one compact palette and restores hos
   assert.deepEqual(report, {
     drawCalls: 1, triangles: 1, clip: 'walk', sampledTime: .5, skinned: true,
     nativeClipSampled: true, runtimeEnemyInstanceVerified: false,
-    materialParity: false, lightingProvenance: 'generated-web',
+    materialParity: false, redCrystalFinalCompositor: true,
+    redCrystalNativeInputsVerified: false, lightingProvenance: 'generated-web',
   });
   pass.dispose();
   pass.dispose();
