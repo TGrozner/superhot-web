@@ -566,3 +566,69 @@ Use `src/main.js` only in lane SH-05 after code review; do not wire a
 default enemy shotgun or invent a player damage outcome. A measured
 native `pelletCount != 6` falsifies the six-shot scenario for that enemy,
 not the source formula. Audio producer calls must not be labeled audible.
+
+
+## SH-03 — enemy bullet → CustomCollider/PlayerController kill request (2026-11-02)
+
+**PROUVÉ — source MCD statique, PAS observé en jeu :** build Steam
+`20299547`, Unity `2018.4.14f1`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Lecture privée PRIMAIRE `superhot-research#102`, run `41444508326`,
+artifact `13141705847`, fichier
+`managed/Assembly-CSharp/Bullet.cs:180–324`, SHA-256 de la tranche UTF-8
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`.
+Aucun code C# ni donnée propriétaire n'est recopié ici.
+
+- `Bullet.FixedUpdate:184–215` neutralise temporairement la propre couche
+  du projectile, balaie le déplacement échantillonné avec un
+  `SphereCastNonAlloc` de rayon **0,02**, ignores triggers, traite un buffer
+  de contacts triés par son comparateur, puis restaure/nettoie l'état. Il
+  s'agit d'une phase séparée de `Bullet.Update`. L'ordre exact du
+  comparateur, les masks sérialisés, les contacts et le résultat PhysX
+  ne sont pas inférés par les tests Node.
+- `Bullet.HandleCollision:231–281` ignore les colliders explicitement exclus
+  **avant** l'appel d'alerte ; pour les autres il demande une alerte avec
+  paramètres `(5, 0.05, 2)`, puis traite les layers. Un contact
+  `Environment/Smashers` retourne handled après appel à son handler.
+  Un contact `CustomCollider` ne demande
+  `PlayerActions.CURRENT.Kill` que si **`!firedByPlayer`** ET si un
+  `PlayerController` parent a été trouvé. La position transmise est
+  `bullet.transform.position - normalized(velocity) * 5` et les trois
+  options `switchToBlack/hardKill/forceKill` sont `false`.
+  Un tag `EnemyBullet` n'est pas une preuve du booléen `firedByPlayer`.
+- La boucle de `FixedUpdate:198–207` s'arrête si
+  `(HandleCollision == true && !sniperBullet) || destroyed`. Un sniper
+  peut poursuivre après un handler *uniquement* si le projectile reste vivant.
+  Les couches `Enemies`, `DeadEnemies`, `Pickups`, `Glass` et
+  `Bullets` ont d'autres branches qui ne sont PAS couvertes par le
+  nouveau planificateur borné.
+
+**WEB PROVISOIRE :** `src/combat/incoming-bullet-contacts.js` accepte
+uniquement des contacts déjà triés, les flags explicites
+`firedByPlayer` / `sniperBullet`, les gardes ignoré/parent contrôleur
+et les vecteurs du projectile. Il produit des **demandes d'effets**,
+jamais un vrai `PlayerActions.Kill`. Une couche non implémentée ou un
+état de destruction sniper inconnu renvoie un blocage explicite.
+`tests/combat-incoming-bullet-contacts.test.mjs` inclut un scénario
+**synthétique** IA shotgun différé → projectile → translation Update →
+contact FixedUpdate déjà injecté → demande kill-player, ainsi qu'un mur
+antérieur, un collider ignoré, un projectile joueur et des branches
+non prouvées. Les positions, pelletCount=1, horloge et hit buffer de ce
+scénario sont inventés comme fixtures de test, PAS des observations Containers.
+
+**INCONNU / critères de réfutation :** arme/IA réellement chargées dans
+Containers (owner/path_id, vitesse et nombre de pellets actifs), provenance
+du booléen `firedByPlayer` après pooling/mods, filtres de layers, ordre
+effectif des contacts PhysX, présence et activation du collider joueur,
+timings et animation de mort, comportement audio et trace de tirs natifs.
+Une exécution native horodatée avec tir ennemi, SphereCast effectif,
+ordre des collisions et appel de `PlayerActions.Kill` doit précéder toute
+revendication de parité.
+
+**Correction de lecture inter-lanes (SH-06) :** `PejAiBody.Kill` et
+`PejAiController.Kill` ne déclenchent **pas directement**
+`PejAiAnimator.Kill`; le chemin `AddBlowForce` l'appelle séparément
+(sources privées #86/#87/#89). La mention historique du ragdoll dans le
+rapport initial ne prouve donc PAS une animation automatique après
+chaque balle. SH-05 décide seul du câblage dans `src/main.js`, après
+un contact browser vérifié et une preuve native d'instance/phase.
