@@ -20,8 +20,12 @@ export function traceFlowScenario(events, ruleOverrides = {}) {
   const initial = createFlowState(rules);
   let state = initial;
   const steps = [];
+  // Freeze the authored sequence membership before user-defined event getters
+  // can append/remove entries during replay. Event payloads are still captured
+  // per step immediately before the reducer consumes them.
+  const authoredEvents = events.slice();
 
-  for (const [index, event] of events.entries()) {
+  for (const [index, event] of authoredEvents.entries()) {
     // Record precisely what the reducer consumes. Re-reading a caller-owned
     // getter after reduceFlow could otherwise falsify the diagnostic trace.
     if (!event || typeof event !== 'object') throw new TypeError('Flow event must be an object');
