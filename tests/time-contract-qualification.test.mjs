@@ -58,12 +58,24 @@ const alignedInitialContext = (nativeTrace, webTrace) =>
 // All fields below must come from separately inspected evidence, not a handoff.
 const assessComparisonReadiness = ({ declaration, method, binding, nativeTrace, webTrace }) => {
   const missing = [];
-  if (declaration?.classification !== 'PROUVE' || declaration.runtimeValidated !== false) {
-    missing.push('primary-declaration');
-  }
+  // This gate currently targets TC-004 only. A different proven initializer,
+  // or an altered copy of TC-004, cannot silently substitute for that claim.
+  const canonical = evidence.claims.find((claim) => claim.id === 'TC-004');
+  const declaredOwner = canonical.symbol.slice(0, canonical.symbol.lastIndexOf('.'));
+  const matchesDeclaration = declaration?.classification === 'PROUVE'
+    && declaration.runtimeValidated === false
+    && declaration.id === canonical.id
+    && declaration.symbol === canonical.symbol
+    && declaration.scope === canonical.scope
+    && declaration.value === canonical.value
+    && Array.isArray(declaration.sourceLines)
+    && declaration.sourceLines.length === canonical.sourceLines.length
+    && declaration.sourceLines.every((line, index) => line === canonical.sourceLines[index]);
+  if (!matchesDeclaration) missing.push('primary-declaration');
   // Source identity is a consistency check, not evidence the method was executed.
-  if (!nonBlank(method?.type) || !nonBlank(method?.name)
-    || !nonBlank(method?.sourcePath)
+  // For TC-004, neither an unrelated class nor another file supports TimeControl.
+  if (method?.type !== declaredOwner || !nonBlank(method?.name)
+    || method?.sourcePath !== evidence.source.sourcePath
     || method.assemblySha256 !== evidence.secondaryReport.source.assemblyCSharpSha256
     || !Array.isArray(method.sourceLines) || method.sourceLines.length !== 2
     || !method.sourceLines.every(Number.isInteger)
@@ -383,4 +395,35 @@ test('TC-Q22: whitespace-only observable or scenario labels are not evidence', (
   assert.equal(result.status, 'INCONNU');
   assert.deepEqual(result.missing, ['native-measurement', 'web-measurement']);
   assert.equal(result.parityCertified, false);
+});
+
+
+test('TC-Q23: a different or altered initializer cannot borrow the primary declaration', () => {
+  for (const alteration of [
+    { id: 'TC-001' },
+    { symbol: 'AnotherComponent.fixedTimestepDenominator' },
+    { value: 120 },
+    { sourceLines: [14, 14] },
+  ]) {
+    const candidate = comparisonFixture();
+    candidate.declaration = { ...candidate.declaration, ...alteration };
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['primary-declaration']);
+    assert.equal(result.parityCertified, false);
+  }
+});
+
+test('TC-Q24: another class or source file cannot stand in for the TimeControl method', () => {
+  for (const alteration of [
+    { type: 'UnrelatedComponent' },
+    { sourcePath: 'decompiled/Other.decompiled.cs' },
+  ]) {
+    const candidate = comparisonFixture();
+    candidate.method = { ...candidate.method, ...alteration };
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['method-body']);
+    assert.equal(result.parityCertified, false);
+  }
 });
