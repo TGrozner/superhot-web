@@ -31,6 +31,17 @@ function checkedClock(value) {
   return value;
 }
 
+// A dispatch callback may throw a value whose message getter or string
+// conversion itself throws. Reporting failure must not abort later deliveries.
+// Web prototype policy; not a claim about native MCD exception handling.
+function safeDispatchErrorMessage(error) {
+  try {
+    return String(error?.message ?? error);
+  } catch {
+    return 'unprintable sound dispatch error';
+  }
+}
+
 /**
  * @param {object} options
  * @param {(event: object) => boolean|void} options.dispatch
@@ -118,7 +129,7 @@ export function createSoundTimeline({ dispatch, maxPending = 1024 } = {}) {
     } catch (error) {
       failed++;
       // The event is consumed, never retried automatically: avoid doubled sound.
-      failures.push(Object.freeze({ id: event.id, message: String(error?.message ?? error) }));
+      failures.push(Object.freeze({ id: event.id, message: safeDispatchErrorMessage(error) }));
     }
   }
 
