@@ -64,3 +64,32 @@ test('existing synchronous prototype audio contract remains unchanged', () => {
   assert.equal(timeline.stats().rejected, 1);
   assert.equal(timeline.stats().failed, 0);
 });
+
+test('unprintable dispatch diagnostic does not abort later eligible events', () => {
+  const calls = [];
+  const opaque = { get message() { throw new Error('unreadable message'); } };
+  const timeline = createSoundTimeline({
+    dispatch({ name }) {
+      calls.push(name);
+      if (name === 'opaque') throw opaque;
+      return true;
+    },
+  });
+  timeline.enqueue(event('opaque'));
+  timeline.enqueue(event('good'));
+  assert.equal(timeline.flushDue(), 2);
+  assert.deepEqual(calls, ['opaque', 'good']);
+  assert.equal(timeline.stats().failed, 1);
+  assert.equal(timeline.stats().accepted, 1);
+  assert.equal(timeline.getFailures()[0].message, 'unprintable sound dispatch error');
+});
+
+test('unprintable string conversion records only one failure', () => {
+  const opaque = { message: { toString() { throw new Error('conversion failed'); } } };
+  const timeline = createSoundTimeline({ dispatch: () => { throw opaque; } });
+  timeline.enqueue(event('opaque'));
+  assert.equal(timeline.flushDue(), 1);
+  assert.equal(timeline.flushDue(), 0);
+  assert.equal(timeline.stats().failed, 1);
+  assert.equal(timeline.getFailures()[0].message, 'unprintable sound dispatch error');
+});
