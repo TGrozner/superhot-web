@@ -1,3 +1,6 @@
+import { buildSceneGraph } from './scenes/graph.js';
+import { planSceneDraws } from './visual/scene-plan.js';
+
 /** Original procedural-looking environments; no material extracted from any game. */
 const column = (x, z, h = 5) => ({ x, z, y: h / 2, w: 1.1, h, d: 1.1, color: '#d3dce2', solid: true });
 const plinth = (x, z, w = 2.6, d = 2.1, h = 1.5) => ({ x, z, y: h / 2, w, h, d, color: '#d6dfe5', solid: true });
@@ -83,3 +86,94 @@ export const buildStaticGeometry = (level) => {
   objects.push(...level.obstacles);
   return objects;
 };
+
+
+/**
+ * SH-05 opt-in rendering fixture. Every object/material below is newly generated:
+ * NOT Containers, NOT a recovered MCD scene, and intentionally visual-only.
+ * The independent graph owner (#4) can later supply verified scene nodes.
+ */
+export function buildSyntheticManifest() {
+  const yaw = 0.27, tilt = 0.17;
+  const nodes = [
+    {
+      id: 'demo-root',
+      transform: {
+        position: { x: 0, y: 0, z: -10 },
+        rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+        scale: { x: 1.28, y: 1, z: 0.82 },
+      },
+    },
+    {
+      id: 'demo-left-support', parentId: 'demo-root',
+      transform: { position: { x: -4.4, y: 2.15, z: 0 } },
+      primitive: { kind: 'box', size: { x: 0.9, y: 4.3, z: 1.1 } },
+      material: 'steel',
+    },
+    {
+      id: 'demo-right-support', parentId: 'demo-root',
+      transform: { position: { x: 4.4, y: 2.15, z: 0 } },
+      primitive: { kind: 'box', size: { x: 0.9, y: 4.3, z: 1.1 } },
+      material: 'steel',
+    },
+    {
+      id: 'demo-angled-lintel', parentId: 'demo-root',
+      transform: {
+        position: { x: 0, y: 4.3, z: 0 },
+        rotation: { x: 0, y: 0, z: Math.sin(tilt / 2), w: Math.cos(tilt / 2) },
+      },
+      primitive: { kind: 'box', size: { x: 9.8, y: 0.65, z: 0.95 } },
+      material: 'glass',
+    },
+    {
+      id: 'demo-inner-prism', parentId: 'demo-root',
+      transform: {
+        position: { x: 0, y: 1.9, z: -2.1 },
+        rotation: { x: 0, y: Math.sin(Math.PI / 8), z: 0, w: Math.cos(Math.PI / 8) },
+        scale: { x: 1, y: 1.15, z: 1 },
+      },
+      primitive: { kind: 'box', size: { x: 1.7, y: 1.7, z: 1.7 } },
+      material: 'red',
+    },
+    {
+      id: 'demo-beam', parentId: 'demo-root',
+      transform: { position: { x: 0, y: 0.95, z: -3.8 } },
+      primitive: { kind: 'box', size: { x: 7, y: 0.26, z: 0.9 } },
+      material: 'porcelain',
+    },
+    {
+      id: 'demo-floor-inlay',
+      transform: { position: { x: 0, y: 0.035, z: -6 } },
+      primitive: { kind: 'box', size: { x: 4, y: 0.05, z: 4 } },
+      material: 'chalk',
+    },
+  ];
+  return buildSceneGraph(nodes, { coordinates: 'web' });
+}
+
+/**
+ * Source-neutral graph -> culling -> actual WebGL renderer.
+ * NEVER flatten a rotated, sheared or reflected matrix to legacy box args.
+ */
+export function drawGeneratedManifest(renderer, graph, camera, options = {}) {
+  const plan = planSceneDraws(graph, camera, options);
+  const nodes = new Map(graph.map((node) => [node.id, node]));
+  let affineDraws = 0, legacyDraws = 0;
+  for (const packet of plan.packets) {
+    if (packet.legacyBoxArgs) {
+      renderer.box(...packet.legacyBoxArgs);
+      legacyDraws++;
+    } else {
+      renderer.affineBox(packet.matrix, nodes.get(packet.id).primitive.size, packet.color);
+      affineDraws++;
+    }
+  }
+  return {
+    objects: graph.filter((node) => Boolean(node.primitive) && node.visible).length,
+    visible: plan.packets.length,
+    culled: plan.culled,
+    hidden: plan.hidden,
+    affineDraws,
+    legacyDraws,
+  };
+}

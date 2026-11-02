@@ -1,6 +1,6 @@
 import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
-import { LEVELS, buildStaticGeometry } from './levels.js';
+import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest } from './levels.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -21,6 +21,13 @@ catch (error) {
 }
 const RED = '#d51e3b', RED_LIGHT = '#f43c53', RED_DARK = '#9c152e';
 const BLACK = '#202932', METAL = '#394650', GUN = '#0d171e';
+// Opt-in only: ?scene=synthetic. This is NOT a reconstructed MCD level.
+const syntheticManifestEnabled = new URLSearchParams(window.location.search).get('scene') === 'synthetic';
+const syntheticManifest = syntheticManifestEnabled ? buildSyntheticManifest() : null;
+if (syntheticManifestEnabled) document.title += ' — SYNTHETIC SCENE (NOT MCD)';
+let manifestStats = null;
+const measuredFrameMs = [];
+let metricsNextAt = 0;
 const keys = new Set();
 const rand = (min, max) => min + Math.random() * (max - min);
 const vec = (x, y, z) => ({ x, y, z });
@@ -67,7 +74,8 @@ function loadLevel(index) {
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   $('room-name').textContent = `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
-  $('stage-banner').textContent = `${String(index + 1).padStart(2, '0')} — ${state.level.name}`;
+  $('stage-banner').textContent = `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
+    (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
 }
 
 function resetGame() {
@@ -460,6 +468,11 @@ function render() {
   for(const object of state.objects) {
     renderer.box(object.x,object.y,object.z,object.w,object.h,object.d,object.color);
   }
+  if (syntheticManifest) {
+    manifestStats = drawGeneratedManifest(renderer, syntheticManifest, cam, {
+      aspect: canvas.width / Math.max(1, canvas.height),
+    });
+  }
   for(const drop of state.drops) drawPickup(drop);
   for(const enemy of state.enemies) if(enemy.alive) drawEnemy(enemy);
   for(const bullet of state.bullets) drawBullet(bullet);
@@ -472,9 +485,27 @@ loadLevel(0);
 setScreen('menu');
 let last=performance.now();
 function frame(now) {
-  const dt=Math.min(.05,Math.max(0,(now-last)/1000));last=now;
+  const frameMs = Math.max(0, now - last);
+  const dt=Math.min(.05,frameMs/1000);last=now;
+  if (syntheticManifest && frameMs > 0) {
+    measuredFrameMs.push(frameMs);
+    if (measuredFrameMs.length > 240) measuredFrameMs.shift();
+  }
   if(state.screen==='playing') update(dt);
   render();
+  if (syntheticManifest && now >= metricsNextAt && measuredFrameMs.length) {
+    metricsNextAt = now + 1000;
+    const sorted = [...measuredFrameMs].sort((a, b) => a - b);
+    const at = (p) => sorted[Math.ceil(sorted.length * p) - 1];
+    window.__superhotSceneMetrics = Object.freeze({
+      mode: 'SYNTHETIC_NOT_MCD', matchedNativeScene: false,
+      activeScreen: state.screen, samples: sorted.length,
+      p95FrameMs: at(.95), fpsAtP95FrameMs: 1000 / at(.95),
+      p95Fps: 1000 / at(.05),
+      generatedManifest: manifestStats, totalWebGLDrawCalls: renderer.getDrawCalls(),
+      browserMeasured: true,
+    });
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
