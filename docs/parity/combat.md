@@ -533,7 +533,7 @@ New, deduplicated private reads (no original code or asset published):
   The globally relative order of all Unity Update/FixedUpdate methods is
   not established by this local call chain.
 
-**WEB IMPLEMENTATION, NOT MCD 1:1:** `planEnemyShotgunAttack` also requires explicit `alreadyDeferred`: a failed readiness check must preserve a prior pending event, since the native method does not clear its flag on that path. `src/combat/enemy-shotgun.js` adds
+**WEB IMPLEMENTATION, NOT MCD 1:1:** `planEnemyShotgunAttack` also requires explicit `alreadyDeferred`: a failed readiness check must preserve a prior pending event, since the native method does not clear its flag on that path. Its `setShootHappenedTrue`, `setReloadedFalse` and `resetAttackDelayRequested` booleans denote **conditional assignments/calls**, not authoritative values of persistent native fields on a non-ready Attack. `src/combat/enemy-shotgun.js` adds
 `planEnemyShotgunAttack` (one readiness-gated request) and
 `planEnemyShotgunLateVolley` (post-pose candidate spawns, explicitly
 injected active `pelletCount`, projectile speed, aim, muzzle and random
