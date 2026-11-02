@@ -23,6 +23,10 @@ const CLASSES = new Set([
   'actor', 'cargo', 'floor', 'architecture', 'background', 'shadow', 'lighting',
 ]);
 const MAX_PIXELS = 8_000_000;
+// Source/world-matrix difference larger than numerical export noise is a pose
+// mismatch: color error must not be attributed to a material in that case.
+const SOURCE_POSE_MATRIX_TOLERANCE = 1e-3;
+const MIN_MATERIAL_SHARED_AREA_FRACTION = 0.5;
 
 function invalid(message) { throw new Error('SH-15 region scorecard: ' + message); }
 function jsonFile(path, label) {
@@ -74,7 +78,8 @@ function requireRegions(document) {
   }
 }
 function requireSourceMatch(region, native, web) {
-  if (!region.sourceObjectId) return { paired: false, translationErrorWorldUnits: null };
+  if (!region.sourceObjectId) return { paired: false, translationErrorWorldUnits: null,
+    maxNonTranslationCoefficientDelta: null, poseAligned: null };
   const a = native.objects.find(object => object.id === region.sourceObjectId);
   const b = web.objects.find(object => object.id === region.sourceObjectId);
   if (!a || !b) invalid('Region sourceObjectId is not paired in both capture manifests');
@@ -84,7 +89,15 @@ function requireSourceMatch(region, native, web) {
     a.worldMatrix[14] - b.worldMatrix[14],
   );
   if (!Number.isFinite(translationErrorWorldUnits)) invalid('Invalid matched source translation');
-  return { paired: true, translationErrorWorldUnits };
+  let maxNonTranslationCoefficientDelta = 0;
+  for (const i of [0,1,2,3,4,5,6,7,8,9,10,11,15]) {
+    maxNonTranslationCoefficientDelta = Math.max(maxNonTranslationCoefficientDelta,
+      Math.abs(a.worldMatrix[i] - b.worldMatrix[i]));
+  }
+  const poseAligned = translationErrorWorldUnits <= SOURCE_POSE_MATRIX_TOLERANCE &&
+    maxNonTranslationCoefficientDelta <= SOURCE_POSE_MATRIX_TOLERANCE;
+  return { paired: true, translationErrorWorldUnits,
+    maxNonTranslationCoefficientDelta, poseAligned };
 }
 function checkGrayscaleMask(mask, name) {
   for (let p = 0; p < mask.rgb.length; p += 3) {
@@ -140,6 +153,8 @@ export function measureRegisteredRegion(nativeImage, webImage, nativeMask, webMa
     webAreaPixels: shape.webArea,
     intersectionPixels: shape.intersection,
     unionPixels: shape.union,
+    symmetricDifferencePixels: shape.union - shape.intersection,
+    sharedFractionOfSmallerMask: shape.intersection / Math.min(shape.nativeArea, shape.webArea),
     silhouetteIou: shape.iou,
     centroidDistancePx: shape.centroidDistancePx,
     materialIntersection: compactPixelMetrics(nativeImage, webImage, intersection),
@@ -172,11 +187,16 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
     nativeWebPairVerifiedOneToOne: false,
     method: 'EXPLICIT_GRAYSCALE_MASKS_THRESHOLD_128_INTERSECTION_AND_UNION_RGB',
     regions: [], topMaterialColorDifferences: [], topSilhouetteDifferences: [],
-    topUnionColorDifferences: [], global: null,
+    topUnionColorDifferences: [], topScreenWeightedUnionColorDifferences: [],
+    topAbsoluteSilhouetteDifferences: [], sourcePoseMismatchCount: 0,
+    sourcePoseMatrixTolerance: SOURCE_POSE_MATRIX_TOLERANCE,
+    materialSharedAreaThreshold: MIN_MATERIAL_SHARED_AREA_FRACTION, global: null,
     limitations: [
       'Only regions declared by owner; unmasked geometry and occlusion remain unscored',
       'Captures and native execution are not independently authenticated',
       'Screenshots must have matching active camera, projection, scene and state',
+      'Material RGB is excluded when source world matrices differ or masks share less than half the smaller silhouette',
+      'Screen-weighted region ranks can overlap and must not be summed as global image error',
       'No 1:1 inference or overall gameplay acceptance',
     ],
   };
@@ -195,11 +215,28 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
         resolve(dirname(resolve(webPath)), region.webMask)) {
       invalid('Native and Web region masks must refer to different files');
     }
+    const measured = measureRegisteredRegion(n, w, nm, wm);
+    const materialMeasurementStatus = !measured.intersectionPixels
+      ? 'NO_SHARED_SURFACE'
+      : source.poseAligned === false
+        ? 'BLOCKED_SOURCE_POSE_MISMATCH'
+        : measured.sharedFractionOfSmallerMask < MIN_MATERIAL_SHARED_AREA_FRACTION
+          ? 'BLOCKED_LOW_SHARED_SILHOUETTE_COVERAGE'
+          : 'COMPARABLE_INTERSECTION_RGB';
+    if (source.poseAligned === false) header.sourcePoseMismatchCount++;
+    if (materialMeasurementStatus !== 'COMPARABLE_INTERSECTION_RGB') {
+      measured.materialIntersection = null;
+    }
     header.regions.push({
       kind: region.kind, slot: region.slot,
       sourceObjectPaired: source.paired,
       sourceTranslationDeltaWorldUnits: source.translationErrorWorldUnits,
-      ...measureRegisteredRegion(n, w, nm, wm),
+      sourceMaxNonTranslationCoefficientDelta: source.maxNonTranslationCoefficientDelta,
+      sourcePoseAligned: source.poseAligned,
+      materialMeasurementStatus,
+      screenWeightedUnionRgbMae01: measured.silhouetteUnion.rgbMae01 *
+        measured.unionPixels / (n.width * n.height),
+      ...measured,
     });
   }
   header.topMaterialColorDifferences = rank(header.regions,
@@ -207,6 +244,13 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
   header.topSilhouetteDifferences = rank(header.regions, r => r.silhouetteIou, false);
   header.topUnionColorDifferences = rank(header.regions,
     r => r.silhouetteUnion.rgbMae01);
+  // Pixel-weighted priorities answer a distinct practical question: what
+  // actually occupies the most erroneous screen area? Ratios alone over-rank
+  // tiny regions with severe relative error.
+  header.topScreenWeightedUnionColorDifferences = rank(header.regions,
+    r => r.screenWeightedUnionRgbMae01);
+  header.topAbsoluteSilhouetteDifferences = rank(header.regions,
+    r => r.symmetricDifferencePixels);
   return header;
 }
 function cli(args) {
