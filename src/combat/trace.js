@@ -3,6 +3,11 @@ import { dot3, subtract3 } from '../math.js';
 // Numerical tie tolerance; collision priorities are provisional Web rules, NOT native MCD evidence.
 export const IMPACT_EPSILON = 1e-9;
 
+// Read externally supplied coordinates once; do not validate one set of getter
+// values and then trace a different set. This is Web determinism, not MCD data.
+const snapshotPoint = (point) => point !== null && typeof point === 'object'
+  ? { x: point.x, y: point.y, z: point.z } : null;
+
 const isFinitePoint = (point) => point !== null && typeof point === 'object' &&
   ['x', 'y', 'z'].every((axis) => Number.isFinite(point[axis]));
 
@@ -118,7 +123,8 @@ function pointAtFraction(start, end, fraction) {
  * @returns {null|{kind:'solid'|'target',index:number,entity:object,t:number,point:object}}
  */
 export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
-  if (!isFinitePoint(start) || !isFinitePoint(end)) {
+  const from = snapshotPoint(start), to = snapshotPoint(end);
+  if (!isFinitePoint(from) || !isFinitePoint(to)) {
     throw new TypeError('Segment endpoints must be finite 3D points');
   }
   if (!Array.isArray(solids) || !Array.isArray(targets)) {
@@ -134,25 +140,27 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
 
   for (let i = 0; i < solids.length; i++) {
     const solid = solids[i];
-    if (!isFinitePoint(solid?.min) || !isFinitePoint(solid?.max)) {
+    const min = snapshotPoint(solid?.min), max = snapshotPoint(solid?.max);
+    if (!isFinitePoint(min) || !isFinitePoint(max)) {
       throw new TypeError('Every solid needs finite min/max points');
     }
-    if (['x', 'y', 'z'].some((axis) => solid.min[axis] > solid.max[axis])) {
+    if (['x', 'y', 'z'].some((axis) => min[axis] > max[axis])) {
       throw new RangeError('Every solid needs min <= max on every axis');
     }
-    consider(sweptBoxFraction(start, end, solid.min, solid.max), 'solid', solid, i);
+    consider(sweptBoxFraction(from, to, min, max), 'solid', solid, i);
   }
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
-    if (!isFinitePoint(target?.center) || !Number.isFinite(target?.radius) || target.radius < 0) {
+    const center = snapshotPoint(target?.center), radius = target?.radius;
+    if (!isFinitePoint(center) || !Number.isFinite(radius) || radius < 0) {
       throw new TypeError('Every target needs a finite center and nonnegative radius');
     }
-    consider(sweptSphereFraction(start, end, target.center, target.radius), 'target', target, i);
+    consider(sweptSphereFraction(from, to, center, radius), 'target', target, i);
   }
 
   if (closest === null) return null;
   return {
     ...closest,
-    point: pointAtFraction(start, end, closest.t),
+    point: pointAtFraction(from, to, closest.t),
   };
 }
