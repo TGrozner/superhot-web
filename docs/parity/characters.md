@@ -187,3 +187,63 @@ The calculation is `skin_i = posedBoneInMeshLocalSpace_i × inverseBind_i`, `p' 
 **SH-05 exact integration handoff:** Continue showing the already-merged #114 **STATIC** local EnemyMerged OBJ in `?scene=containers` immediately; **do not gate the first native-geometry screenshot on skins**. No SH-05 shared files have been touched by SH-14. When authentic weights and poses exist, accept `frame.mesh` as SH-12 indexed data and update the existing WebGL2 vertex buffer per frame (`DYNAMIC_DRAW/bufferSubData` on cached GPU resources rather than rebuilding VBO/EBO every tick). Reuse host `renderer.begin(camera)`, `aPosition`/`aNormal`/UV32B layout, source-derived static mesh as safe fallback, and original root model-to-world once. SH-06 alone supplies clip/time/pose; SH-03 owns hit/collisions. Telemetry must separate **verified private static mesh**, **algorithmic source-neutral deform**, and **runtime-sampled native pose**. No 1:1 claim before original/Web synchronized screenshots and bone/hit comparisons.
 
 **One exact native blocker for next research cycle:** decode the **compressed** `m_CompressedMesh` skin weight and bone-index encoding (or alternate vertex stream weight channels) for Mesh284/285, including ordering correspondence with exported OBJ vertices; determine the actual bone transform chain and map bindposes to runtime-sampled pose. Existing #104 proves their serialized presence/counts, **not usable per-vertex influence values**. No new private request should repeat #104.
+
+
+## SH-14 — verified OBJ-source-position → WebGL2 skin-slot permutation (2026-11-02)
+
+**P0 finding, based on a fresh direct reinspection of PRIVATE \`result.json\`, not merely workflow status.** Reused [research #88](https://github.com/TGrozner/superhot-research/issues/88), artifact \`13139108195\`, and [research #90](https://github.com/TGrozner/superhot-research/issues/90), artifact \`13140612009\`, with compressed exported objects read only in the private analysis environment. Both \`result.json\` payloads were \`operation=bytes\` with complete base64 gzip, SHA-256 matches their already published metadata receipts (no new corpus issue, no new runner requests). The original OBJ text and all original vertex/faces stay private. Also rechecked [research #104](https://github.com/TGrozner/superhot-research/issues/104), artifact \`13141584125\`: two complete DB rows, no truncation, **60/59** serialized bindpose counts and \`m_CompressedMesh.m_Weights\` object existence only; this is not a decompressed weight stream or a runtime pose.
+
+**Crucial interoperability defect:** SH-12's \`parseObjGroupsIntoIndexedMesh\` numbers GPU vertices in **first-seen triangle-corner order**, NOT in the original Wavefront \`v\` declaration order. This is a completely deterministic fact about the existing Web implementation, independently rechecked against each original private OBJ's \`f v/vt/vn\` records:
+
+| Private owner-qualified OBJ | Declared OBJ positions | Distinct referenced positions | Web unique corner vertices | GPU index identical to OBJ position index | Different index (requires remap) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| \`sharedassets0.assets:284\` EnemyMerged | 5237 | 5237 | 5237 | **2225** | **3012** |
+| \`sharedassets0.assets:285\` Headless | 4895 | 4895 | 4895 | **2103** | **2792** |
+
+All **6,762** merged face corners and **6,396** headless face corners have exact positive, matching \`v/vt/vn\` numeric indices. There are no unreferenced OBJ positions and no UV/normal seam-induced GPU duplicates **in these exact two exports**. Even so, most GPU slots are **permuted**. Feeding an eventual original source-vertex weight array directly to \`createIndexedSkinBinding({mesh:receipt.mesh,...})\` based only on equal vertex counts would bind the wrong weight *slots* for 3,012/5,237 and 2,792/4,895 GPU vertices. This does NOT prove that the associated weight values differ; it proves index correspondence is incorrect without permutation. One must still verify privately that the original Unity per-vertex weight order equals the OBJ exported \`v\` order.
+
+### New PURE module, no gameplay modifications
+
+\`src/characters/obj-skin-map.js\` exports:
+
+- \`createObjSkinVertexMap({objText,mesh,groupName,sourcePositionCount,axisSigns:[-1,1,-1],winding:'keep'})\`: produces \`sourceVertexForGpu\` in the same first-use order as SH-12. Strictly validates every face index, GPU triangle order, exact float32 positions/normals/UVs and input source-position count. The canonical full local OBJ MUST be supplied by the owner, not copied into the repo. This map is **not** a Unity original-vertex index proof.
+- \`remapObjPositionSkinInfluences(map,sourceBoneIndices,sourceBoneWeights)\`: duplicates/remaps four per-position influences into **SH-12 GPU order**, including authored fixture UV seams; returns arrays directly consumable by the merged \`createIndexedSkinBinding\` CPU solver. No weights, bone names, matrices, clips or poses are inferred.
+- Newly authored **non-cuboid two-triangle fixture** tests assert source→GPU reordering, seam duplication, correctly deformed geometry when passed to the existing LBS solver, and hard fail on index/attribute drift. These tests contain no MCD values.
+
+**SH-05 exact static→animated handoff (no shared-file changes here):**
+
+\`\`\`js
+import {
+  createObjSkinVertexMap, remapObjPositionSkinInfluences,
+} from './characters/obj-skin-map.js';
+import {
+  createIndexedSkinBinding, skinIndexedCharacter,
+} from './characters/skinning.js';
+
+// Only AFTER the owner supplies the SAME local, digest-checked OBJ text as the
+// already-loaded static enemy receipt AND private/native source weights
+// independently qualified as matching the OBJ 'v' declaration order:
+const sourceMap = createObjSkinVertexMap({
+  objText: ownerLocalDecodedObjText,  // never upload / store / publish
+  mesh: staticReceipt.mesh,
+  groupName: staticReceipt.variant === 'merged'
+    ? 'EnemyMerged_0' : 'EnemyMergedHeadless_0',
+  sourcePositionCount: staticReceipt.variant === 'merged' ? 5237 : 4895,
+  axisSigns: [-1,1,-1],
+  winding: 'keep',
+});
+const remapped = remapObjPositionSkinInfluences(
+  sourceMap, verifiedSourcePositionBoneIndices, verifiedSourcePositionBoneWeights,
+);
+const binding = createIndexedSkinBinding({
+  mesh: staticReceipt.mesh,
+  boneIds: verifiedOrderedOwnerQualifiedBoneIds,
+  inverseBindMatrices: independentlyQualifiedWebMeshLocalBinds,
+  boneIndices: remapped.boneIndices, boneWeights: remapped.boneWeights,
+});
+const posed = skinIndexedCharacter(binding, verifiedPoseByBoneId);
+// SH-05/isolated GPU worker owns dynamic VBO upload. SH-06 owns timeline/pose.
+// SH-03 owns hit; DO NOT create native hitboxes from a skin mesh.
+\`\`\`
+
+**Hard gates:** source weights compressed format, original Unity→OBJ \`v\` correspondence, actual numerical bindposes in Web basis, source hierarchy/palette and time-sampled native pose are still unproven. **Do not postpone the existing real STATIC EnemyMerged Containers capture** while solving these. New mapping has no browser GPU screenshot and is NOT a runtime-native animation or a 1:1 claim. Native resource IDs and aggregate counts are safe metadata; original buffers remain private.
