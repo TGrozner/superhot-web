@@ -8,9 +8,10 @@ import { spawnSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
 import { embedWebCaptureMetadata } from '../scripts/visual-web-capture.mjs';
 import {
-  matricesFromWebFrame, verifyOriginalWebPngDigest, preparePrivateWebManifest,
+  matricesFromWebFrame, verifyOriginalWebPngDigest, verifySavedWebPixelDigest,
+  preparePrivateWebManifest,
 } from '../scripts/visual-web-manifest.mjs';
-import { registration } from '../scripts/visual-compare.mjs';
+import { decodePng, registration } from '../scripts/visual-compare.mjs';
 
 // Entirely synthetic PNG and matrices; never place proprietary MCD assets in CI.
 const PNG_MAGIC=Buffer.from([137,80,78,71,13,10,26,10]);
@@ -49,6 +50,13 @@ function sourceWebProjection(cam=camera,proj=projection){
 const observed={...projection,viewProjection:sourceWebProjection()};
 function metadata(base, overrides={}){
   const sha=createHash('sha256').update(base).digest('hex');
+  const decoded=decodePng(base);
+  const rgba=Buffer.alloc(decoded.width*decoded.height*4);
+  for(let i=0,j=0;i<decoded.rgb.length;i+=3,j+=4){
+    rgba[j]=decoded.rgb[i];rgba[j+1]=decoded.rgb[i+1];
+    rgba[j+2]=decoded.rgb[i+2];rgba[j+3]=255;
+  }
+  const rawRgbaSha=createHash('sha256').update(rgba).digest('hex');
   return {
     schemaVersion:1,origin:'web',status:'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING',
     captureMethod:'WEBGL2_READ_PIXELS_SYNCHRONOUS_COMPLETED_FRAME',
@@ -57,7 +65,7 @@ function metadata(base, overrides={}){
     geometryProvenance:'RENDERED_FRAME_COUNTERS',
     activeScreen:'playing',frameId:20,worldClock:0.25,
     webCommit:'aabbccdd',rawCanvasSha256:sha,
-    rawFrameRgbaSha256:'9'.repeat(64),
+    rawFrameRgbaSha256:rawRgbaSha,
     nativeCameraMatched:false,nativeWorldPoseMatched:false,pixelComparisonPerformed:false,
     nativeScene:{source:{scenePath:'Assets/Scenes/SHRL_Dojo2.unity',
       sceneBuildIndex:10,serializedOwner:'level10'},meshes:20,instances:178,textures:17},
@@ -92,6 +100,8 @@ test('real encoded Web-only PNG receipt becomes private camera-registered Web ma
   assert.deepEqual(manifest.objects,[]);
   assert.equal(receipt.sourceWorldRendered,true);
   assert.equal(receipt.pngDigestVerified,true);
+  assert.equal(receipt.encodedWebPixelFidelityVerified,true);
+  assert.equal(manifest.evidence.encodedWebPixelFidelityVerified,true);
   assert.equal(receipt.nativeFrameAuthenticated,false);
   assert.equal(receipt.pixelComparisonPerformed,false);
   assert.equal(manifest.evidence.stateIdOwnerSuppliedNotProven,true);
@@ -116,6 +126,26 @@ test('signed metadata cannot be transplanted onto another valid PNG without SHA 
   const transplanted=Buffer.from(embedWebCaptureMetadata(baseB,meta));
   assert.throws(()=>preparePrivateWebManifest(transplanted,options),/disagree/);
 });
+test('PNG decoder pixel bytes must match synchronous WebGL2 readPixels SHA, not just PNG blob SHA',()=>{
+  const original=png();
+  const expected=metadata(original).rawFrameRgbaSha256;
+  assert.equal(verifySavedWebPixelDigest(decodePng(original),expected).decodedFrameRgbaSha256,expected);
+  assert.throws(()=>verifySavedWebPixelDigest(decodePng(original),'f'.repeat(64)),/pixels differ/);
+  const changed=png([0,16,31, 200,100,0, 4,55,252, 24,200,6]);
+  assert.throws(()=>verifySavedWebPixelDigest(decodePng(changed),expected),/pixels differ/);
+});
+
+test('wrong frozen-frame RGBA digest rejects an otherwise authentic PNG receipt',()=>{
+  const wrong=signed(undefined,{rawFrameRgbaSha256:'a'.repeat(64)});
+  const actual=metadata(png()).rawFrameRgbaSha256;
+  assert.notEqual(actual,'a'.repeat(64));
+  assert.throws(()=>preparePrivateWebManifest(wrong,options),/pixels differ/);
+  const alteredColor=signed([0,16,32, 200,100,0, 4,55,253, 24,200,6],{
+    rawFrameRgbaSha256:actual,
+  });
+  assert.throws(()=>preparePrivateWebManifest(alteredColor,options),/pixels differ/);
+});
+
 test('fallback/Dojo identity confusion and incomplete capture evidence fail closed',()=>{
   for(const mutation of [
     {mode:'CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME'},
