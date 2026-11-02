@@ -78,6 +78,12 @@ export function boxBounds(matrix, size) {
   for (let i = 0; i < 16; i++) {
     if (!Number.isFinite(matrix[i])) throw new RangeError('Box bounds requires finite matrix entries');
   }
+  // The center/extent formula below applies only to affine transforms.
+  // Projective matrices require a homogeneous divide per vertex; treating
+  // them as affine can produce bounds that exclude transformed geometry.
+  if (matrix[3] !== 0 || matrix[7] !== 0 || matrix[11] !== 0 || matrix[15] !== 1) {
+    throw new TypeError('Box bounds requires an affine matrix with homogeneous row [0,0,0,1]');
+  }
   const dimensions = finiteVector(size, ['x', 'y', 'z'], 'box size');
   if ([dimensions.x, dimensions.y, dimensions.z].some((v) => v < 0)) throw new RangeError('Box size must be nonnegative');
   const half = [dimensions.x / 2, dimensions.y / 2, dimensions.z / 2];
