@@ -195,7 +195,7 @@ const sourceLightNonnegative = (value, label) => {
   return value;
 };
 
-const sourceSpotlight = (spotlight, doorId) => {
+const sourceSpotlight = (spotlight, doorId, rendererId) => {
   const position = sourceLightVec3(spotlight?.position, doorId + ' spotlight.position');
   const direction = unit(sourceLightVec3(spotlight?.direction, doorId + ' spotlight.direction'));
   const right = unit(sourceLightVec3(spotlight?.right, doorId + ' spotlight.right'));
@@ -224,7 +224,7 @@ const sourceSpotlight = (spotlight, doorId) => {
     tanHalfAngle: Math.tan(halfAngleRadians),
     cullingMask: cullingMask >>> 0,
     cookieTextureId: spotlight.cookieTextureId,
-    rendererId: spotlight.rendererId ?? null,
+    rendererId: rendererId ?? null,
     provenance: 'source-door-warning-serialized-packet',
     shaderParity: 'unverified-web-cookie-preview',
   });
@@ -262,23 +262,26 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
       continue;
     }
     if (!packet.active) continue;
-    if (packet.falseLight?.enabled && packet.falseLight.slot >= 0 &&
-        packet.falseLight.intensity > 0) {
+    if (packet.falseLight?.enabled && packet.falseLight.slot >= 0) {
+      const intensity = sourceLightNonnegative(packet.falseLight.intensity,
+        id + ' falseLight.intensity');
       const slot = packet.falseLight.slot;
       if (!Number.isInteger(slot) || slot > 2 || occupiedSlots.has(slot)) {
         throw new RangeError(id + ' invalid or duplicate source false-light slot');
       }
-      occupiedSlots.add(slot);
-      falseLights.push(Object.freeze({
-        doorId: id, slot,
-        position: sourceLightVec3(packet.falseLight.position, id + ' falseLight.position'),
-        intensity: sourceLightNonnegative(packet.falseLight.intensity,
-          id + ' falseLight.intensity'),
-        shaderParity: 'unverified-no-false-light-composition',
-      }));
+      if (intensity > 0) {
+        occupiedSlots.add(slot);
+        falseLights.push(Object.freeze({
+          doorId: id, slot,
+          position: sourceLightVec3(packet.falseLight.position, id + ' falseLight.position'),
+          intensity,
+          shaderParity: 'unverified-no-false-light-composition',
+        }));
+      }
     }
-    if (!packet.spotlight?.enabled || !(packet.spotlight.range > 0)) continue;
-    const spotlight = sourceSpotlight(packet.spotlight, id);
+    if (!packet.spotlight?.enabled) continue;
+    const spotlight = sourceSpotlight(packet.spotlight, id, packet.rendererId);
+    if (!(spotlight.range > 0)) continue;
     if (((spotlight.cullingMask >>> 0) & (1 << meshLayer)) === 0) {
       omissions.push(Object.freeze({ id, reason: 'source-spotlight-layer-mask' }));
       continue;
