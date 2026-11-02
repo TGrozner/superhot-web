@@ -882,3 +882,62 @@ de `onBulletSpawnController`, transformation finale muzzle et succès de
 et sa chaîne `OnRun → Weapon.Attack → deferredBulletSpawn → LateUpdate → Bullet`,
 puis comparer le contact et la réaction sur la même scène source. Pas de raccord
 dans `src/main.js` avec des paramètres par défaut non vérifiés.
+
+## SH-03 — GunPejAiWeapon base gun: no pre-spawn wall veto (2026-11-02)
+
+**PROUVÉ — code C# statique, PAS instance Containers exécutée.** Corpus
+privé `TGrozner/superhot-research#71`, run `41439732334`, artifact
+`13138660437` relu directement (`managed/Assembly-CSharp/GunPejAiWeapon.cs:17–116`,
+SHA-256 UTF-8 `2b8166a7ce25e3e93ad163c96326690853cc8244a937b4e5d3166f0ca3754989`; 
+`result.json` SHA-256 `3b131b8ebed57a3625fa3359f6a4500603b67ead70a8ccf1303fd34abb371065`).
+Build Steam MCD `20299547`, Assembly SHA256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Contrôle croisé primaire : `PejAiController.cs:996–1082` research #140,
+artifact `13169030963` (SHA texte `3eb02696085f21386521dc93a88ab271894ed065d9e30bafd4f3acbbc826eb11`),
+`Bullet.cs:180–324` research #102 artifact `13141705847` (SHA texte
+`db8afed911d821ef53acab8b072c736a63cad3779a663a771b1ed292f3e83d74`).
+Aucun original ou sortie privée n'est inclus dans le dépôt public.
+
+**PROUVÉ — séparation des phases (méthodes, pas cadence runtime)** :
+`GunAttackBehaviour.OnRun` peut *demander* `Weapon.Attack`. Dans
+`GunPejAiWeapon.Attack`, la readiness est revérifiée. Si elle est positive,
+`Shoot` met en attente un spawn, demande **dès ce moment** `FireSfx` avec
+argument 0.4 (ni clip ni volume audible garanti), signale shoot/callback,
+réinitialise le délai et alerte rayon 10. À `UpdateDeferredBulletSpawn`,
+`SpawnBulletLate` calcule l'orientation avec le *muzzle tardif* et appelle
+`Pooler.GetObject(bulletPrefab)` ; si aucun objet n'est retourné, aucun
+projectile n'est activé mais le pending est effacé au retour normal.
+Si l'objet existe, lancement, identité, owner, ignore collider conditionnel,
+flash conditionnel et activation sont demandés. **Aucun test de segment
+muzzle→target / occlusion avant Pooler** n'apparaît dans cette chaîne.
+Collision ultérieure qualifiée séparément par `Bullet.FixedUpdate`.
+
+**WEB-OBSERVÉ — divergence directement perceptible** : dans
+`src/main.js:1171–1175` sur `main@2297ccb6548004d02261615676d7d23466032016`,
+le rendu consomme `pendingShot` puis supprime **balle et son** lorsque
+`nativeSegmentHit(nativeShotCollision, shot.position, shot.target)`
+retourne une collision avec un mur. Ce n'est pas le garde de
+`GunPejAiWeapon` natif : l'obstacle devrait être traité en aval par
+le projectile simulé, sans prétendre reproduire PhysX/Pooler.
+
+**Livraison source-gated** : `src/combat/enemy-gun-late-spawn.js` est un
+planificateur pur du **base GunPejAiWeapon uniquement** ; le
+`ShotGunPejAiWeapon` possède un autre contrat (`enemy-shotgun.js`).
+Les tests couvrent FireSfx avant pool, pending après pool miss, absence
+de veto mural, phase tardive, muzzle, flags source et valeurs inconnues.
+Les `launchRequested` et `fireSfxCallRequested` ne sont ni une balle
+observée ni une audition réelle.
+
+**Raccord réservé SH-05 #5** : sur une vraie instance Containers/build28,
+qualifier type exact d'arme, `GunAttack`/readiness, phase
+`UpdateDeferredBulletSpawn` après pose, socket muzzle, Pooler et colliders.
+Pour l'arme base ainsi prouvée, supprimer seulement le **veto
+muzzle→target** de `main.js:1173` ; garder le test de collision
+sur la trajectoire via `closestImpact` (actuellement Web synthétique).
+Déclencher l'intention FireSfx au `Shoot` et non uniquement au rendu
+de la balle, sans affirmer une audition. Scénario réfutable :
+un ennemi armé tire vers le joueur avec un mur entre les deux ;
+la requête arme et SFX peuvent précéder un **projectile arrêté par le
+mur**, tandis que le Web actuel ne produit aucun projectile.
+Pooler/pertes de shot, PhysX, ordre des phases et instance runtime
+demeurent **INCONNUS** jusqu'à trace native et browser appariés.
