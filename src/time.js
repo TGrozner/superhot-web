@@ -4,6 +4,10 @@
  * PROVENANCE: superhot-web/src/main.js at 9f01f92411b4e125b2c992deee53602a8c67c416
  * STATUS: PROVISIONAL. These numbers are the existing Web prototype, NOT
  * verified SUPERHOT: MIND CONTROL DELETE mechanics. SH-01 owns native parity.
+ * SH-01 PR #12 proves only MCD TimeControl DECLARATIONS (e.g. minTimescale
+ * initializer 0.01 and fixedTimestepDenominator initializer 60), not active
+ * serialized overrides, update phase, or runtime law. Do not transplant them
+ * here until an executable native contract has been independently verified.
  *
  * Call stepTime only for an active simulation tick. The optional paused flag
  * freezes all time domains and activity decay when a caller needs a pure
