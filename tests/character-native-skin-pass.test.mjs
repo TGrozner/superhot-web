@@ -179,7 +179,7 @@ test('animated skin shader incorporates bounded shared Red Crystal output math',
   const pass = createNativeSkinPass(gl, sourcePackage());
   const fragment = sources.find(([kind]) => kind === gl.FRAGMENT_SHADER)?.[1];
   assert.ok(fragment?.includes(NATIVE_MATERIAL_GLSL.redCrystalOutput));
-  assert.match(fragment, /nativeRedCrystalFinalOutput\\(webProceduralRgb, vec4\\(0\\.0\\), vec3\\(0\\.0\\)\\)/);
+  assert.ok(fragment.includes('nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0))'));
   assert.doesNotMatch(fragment, /uNativeOverlay|uNativeAdditive|sampler2D/);
   const instance = pass.createInstance({ clip: 'walk', playback: 'clamp' });
   const report = pass.draw({ instance, time: .5,
