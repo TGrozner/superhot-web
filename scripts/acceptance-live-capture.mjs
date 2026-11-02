@@ -11,6 +11,7 @@ import { dirname, resolve, relative, isAbsolute, join, basename } from 'node:pat
 import { inflateSync } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { framePairAlignment } from './acceptance-frame-alignment.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const isInside = (p, base = ROOT) => { const d = relative(base, resolve(p)); return !d || (!d.startsWith('..') && !isAbsolute(d)); };
@@ -317,6 +318,15 @@ export function compare(web, native, opts = {}) {
   if(reasons.length) return outcome;
   const pose=maxCameraDiff(web.camera,native.camera);
   if(pose.position>tolerances.cameraPosition || pose.angle>tolerances.cameraAngle || pose.fov>tolerances.cameraFov) return {...outcome,status:'NON_COMPARABLE_CAMERA_POSE',camera:pose};
+  // Each real browser PNG is bracketed by TWO rendered camera/projection snapshots.
+  // A native comparison must have a runtime-observed camera/projection for
+  // EACH corresponding MCD screenshot; otherwise identical pixels/labels can
+  // conceal different viewpoints. This is preflight, never a 1:1 certificate.
+  const frameAlignment=framePairAlignment(web,native,tolerances);
+  if(frameAlignment.status==='INCONNU')return {...outcome,reasons:[...reasons,...frameAlignment.reasons],frameAlignment};
+  if(frameAlignment.status==='NON_COMPARABLE_CAMERA_POSE')
+    return {...outcome,status:'NON_COMPARABLE_CAMERA_POSE',
+      reasons:[...reasons,...frameAlignment.exceeded],camera:pose,frameAlignment};
   const load=(m,path)=>{
     const base=realpathSync(dirname(resolve(path)));
     return m.frames.map(f=>{
@@ -372,7 +382,7 @@ export function compare(web, native, opts = {}) {
   return {...outcome,
     status:exceeded.length?'MEASURED_VISIBLE_GAP':
       unobservable.length?'INCONNU':'OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED',
-    reasons:[...reasons,...unobservable],camera:pose,timingErrorsMs:drift,exceeded};
+    reasons:[...reasons,...unobservable],camera:pose,frameAlignment,timingErrorsMs:drift,exceeded};
 }
 
 class Devtools {
