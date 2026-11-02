@@ -364,3 +364,42 @@ must verify the recovered archive (without re-running its extractor), integrate
 the shared hook on a green baseline, and provide Thomas a localhost hand+katana
 idle/swing pair to test. Comparing native/Web frames at matched camera,
 time, action and joint poses is still required; **no 1:1 claim**.
+
+## SH-14 — OBJ declaration-order to SH-12 GPU skin-slot permutation (PR #134)
+
+This **source-neutral compatibility path** applies only when SH-12 has decoded
+an OBJ into first-used-face-corner vertex order. It must **not** be applied to
+the direct Unity-order animated EnemyMerged/Headless skin packages already used
+by `native-skin-pass.js`; those retain their original ordered vertices and
+bone weights. Dojo/build10 remains the visual integration priority.
+
+The earlier PRIVATE research receipts cited in PR #134 (research #88 artifact
+`13139108195`, #90 artifact `13140612009`, and #104 artifact `13141584125`)
+record an OBJ/GPU permutation of 3,012 out of 5,237 positions for EnemyMerged
+(`sharedassets0.assets:284`), and 2,792 out of 4,895 for Headless
+(`:285`). Prior proof documents identical referenced OBJ position counts and
+face-corner ordering, but **does not prove Unity native vertex indices equal
+OBJ declaration-order indices**. These source receipts were documented in the
+existing PR; no new original bytes or `result.json` were obtained this cycle.
+
+`src/characters/obj-skin-map.js` implements
+`createObjSkinVertexMap({objText,mesh,groupName,sourcePositionCount,axisSigns,winding})`:
+validate every triangle corner, attribute layout and index correspondence
+against the actual SH-12 decoded mesh, then return `sourceVertexForGpu`.
+`remapObjPositionSkinInfluences(map,sourceBoneIndices,sourceBoneWeights)`
+projects four per-position influences into the indexed GPU order, duplicating
+values where UV/normal seams generate multiple GPU vertices. Synthetic
+non-cuboid tests deform the actual mapped indexed mesh through the existing
+`createIndexedSkinBinding`/`skinIndexedCharacter` CPU path. No copied
+commercial mesh, rigs, decoded source shader, pose, or asset is committed.
+
+**SH-05 integration gate:** keep using the already working animated native
+package unchanged. Only invoke this remap for a separately verified, exported
+OBJ source whose weights are *independently proven to correspond to OBJ `v`
+declaration order*. Use the exact decoded source OBJ (private, digest-checked),
+SH-12 `mesh`, source-position count, axis signs and winding; fail closed on
+ordering drift. Pass output weight arrays to `createIndexedSkinBinding` only
+after independent native palette, inverse binds, and posed-bone matrices are
+verified in the same mesh-local coordinate frame. SH-03 owns hitboxes and
+SH-06 the timeline. This module is **not** a runnable native animation or
+Dojo visual-parity measurement; do not replace the current direct GPU skin pass.
