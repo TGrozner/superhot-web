@@ -7,6 +7,9 @@ in vec3 aNormal;
 uniform vec3 uTranslate;
 uniform vec3 uScale;
 uniform vec3 uRotate;
+uniform int uUseAffine;
+uniform mat4 uAffineModel;
+uniform mat3 uAffineNormal;
 uniform vec3 uCamPos;
 uniform vec3 uRight;
 uniform vec3 uUp;
@@ -25,14 +28,18 @@ vec3 rotate3(vec3 p) {
   return vec3(a*p.x-b*p.y, b*p.x+a*p.y, p.z);
 }
 void main() {
-  vec3 world = rotate3(aPosition * uScale) + uTranslate;
+  vec3 world = uUseAffine == 1
+    ? (uAffineModel * vec4(aPosition, 1.0)).xyz
+    : rotate3(aPosition * uScale) + uTranslate;
   vec3 rel = world - uCamPos;
   vec3 cam = vec3(dot(rel, uRight), dot(rel, uUp), dot(rel, uForward));
   float f = 1.58;
   float near = .045, far = 120.0;
   gl_Position = vec4(cam.x * f / uProjection.x, cam.y * f,
     cam.z * (far+near) / (far-near) - 2.0 * far * near / (far-near), cam.z);
-  vec3 normal = normalize(rotate3(aNormal));
+  vec3 normal = normalize(uUseAffine == 1
+    ? uAffineNormal * aNormal
+    : rotate3(aNormal));
   float illumination = 0.64 + 0.36 * max(dot(normal, normalize(vec3(-.55,.90,.42))), 0.0);
   vColor = uColor.rgb * illumination;
   vFog = clamp((distance(world, uCamPos) - 14.0) / 56.0, 0.0, 1.0);
@@ -101,6 +108,55 @@ function colorToRgba(color, alpha=1) {
   return [((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255,alpha];
 }
 
+/**
+ * Matrix packets are column-major. This right-multiplies a source-neutral
+ * affine world matrix by a generated primitive's local dimensions.
+ * The translation stays in world units and rotations/shears are preserved.
+ */
+export function boxModelMatrix(world, size) {
+  if (!world || world.length !== 16 || [...world].some((n) => !Number.isFinite(n)) ||
+      world[3] !== 0 || world[7] !== 0 || world[11] !== 0 || world[15] !== 1) {
+    throw new TypeError('Generated mesh requires a finite affine 4x4 matrix');
+  }
+  if (!size || !['x', 'y', 'z'].every((axis) =>
+    Number.isFinite(size[axis]) && size[axis] > 0)) {
+    throw new RangeError('Generated box dimensions must be finite and positive');
+  }
+  const matrix = Array.from(world);
+  for (const [axis, component] of ['x', 'y', 'z'].entries()) {
+    for (let row = 0; row < 3; row++) matrix[axis * 4 + row] *= size[component];
+  }
+  if (matrix.some((n) => !Number.isFinite(Math.fround(n)))) {
+    throw new RangeError('Generated model matrix exceeds WebGL2 float32');
+  }
+  return matrix;
+}
+
+/** Inverse transpose of the affine 3x3: correct normals under shear/reflection. */
+export function normalMatrixFromAffine(matrix) {
+  if (!matrix || matrix.length !== 16 || [...matrix].some((n) => !Number.isFinite(n))) {
+    throw new TypeError('Normal matrix requires finite 4x4 values');
+  }
+  const a = [matrix[0], matrix[1], matrix[2]];
+  const b = [matrix[4], matrix[5], matrix[6]];
+  const c = [matrix[8], matrix[9], matrix[10]];
+  const cross = (x, y) => [
+    x[1] * y[2] - x[2] * y[1],
+    x[2] * y[0] - x[0] * y[2],
+    x[0] * y[1] - x[1] * y[0],
+  ];
+  const n0 = cross(b, c), n1 = cross(c, a), n2 = cross(a, b);
+  const determinant = a[0] * n0[0] + a[1] * n0[1] + a[2] * n0[2];
+  if (!Number.isFinite(determinant) || determinant === 0) {
+    throw new RangeError('Singular or overflowing affine normal matrix');
+  }
+  const values = [...n0, ...n1, ...n2].map((v) => v / determinant);
+  if (values.some((n) => !Number.isFinite(Math.fround(n)))) {
+    throw new RangeError('Normal matrix exceeds WebGL2 float32');
+  }
+  return values;
+}
+
 export function createRenderer(canvas) {
   const gl=canvas.getContext('webgl2',{antialias:true,powerPreference:'high-performance',alpha:false});
   if (!gl) throw new Error('WebGL 2 indisponible. Essaie une version récente de Chrome, Edge ou Firefox.');
@@ -111,7 +167,7 @@ export function createRenderer(canvas) {
   if (!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program)||'Shader link failed');
   gl.useProgram(program);
   const uniforms={};
-  for (const key of ['uTranslate','uScale','uRotate','uCamPos','uRight','uUp','uForward','uColor','uProjection']) {
+  for (const key of ['uTranslate','uScale','uRotate','uUseAffine','uAffineModel','uAffineNormal','uCamPos','uRight','uUp','uForward','uColor','uProjection']) {
     uniforms[key]=gl.getUniformLocation(program,key);
   }
   const meshes={};
@@ -152,6 +208,7 @@ export function createRenderer(canvas) {
   function draw(mesh,x,y,z,sx,sy,sz,color,rx=0,ry=0,rz=0,alpha=1) {
     const obj=meshes[mesh];
     if (!obj) throw new Error('Unknown mesh: '+mesh);
+    gl.uniform1i(uniforms.uUseAffine,0);
     gl.uniform3f(uniforms.uTranslate,x,y,z);
     gl.uniform3f(uniforms.uScale,sx,sy,sz);
     gl.uniform3f(uniforms.uRotate,rx,ry,rz);
@@ -162,8 +219,22 @@ export function createRenderer(canvas) {
     gl.drawArrays(gl.TRIANGLES,0,obj.count);
     drawCalls++;
   }
+  function affineBox(worldMatrix, size, color, alpha=1) {
+    const obj=meshes.box;
+    const model=boxModelMatrix(worldMatrix,size);
+    const normal=normalMatrixFromAffine(model);
+    if (!colorCache.has(color)) colorCache.set(color,colorToRgba(color));
+    const rgba=colorCache.get(color);
+    gl.uniform1i(uniforms.uUseAffine,1);
+    gl.uniformMatrix4fv(uniforms.uAffineModel,false,new Float32Array(model));
+    gl.uniformMatrix3fv(uniforms.uAffineNormal,false,new Float32Array(normal));
+    gl.uniform4f(uniforms.uColor,rgba[0],rgba[1],rgba[2],alpha);
+    gl.bindVertexArray(obj.vao);
+    gl.drawArrays(gl.TRIANGLES,0,obj.count);
+    drawCalls++;
+  }
   return {
-    begin,draw,
+    begin,draw,affineBox,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,
