@@ -460,7 +460,12 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       }
       if(proof?.reasons?.length)throw Error('Local Web draw prerequisite not verified: '+proof.reasons.join(','));
     }
-    mkdirSync(out,{recursive:true});const frames=[];const begin=Date.now();
+    mkdirSync(out,{recursive:true});
+    // Resolve an output symlink BEFORE writing any source-derived PNG. It must
+    // not end up inside the public Git checkout even if the lexical path is /tmp.
+    const captureRoot=realpathSync(out);
+    if(isInside(captureRoot))throw Error('Capture output resolves inside public checkout');
+    const frames=[];const begin=Date.now();
     const snap=async(name)=>{
       const state=await cdp.eval(observation),rect=state.rect;
       if(!state.playing)throw Error('Gameplay not active');
@@ -485,7 +490,7 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
         if(evidence.reasons.length)throw Error('After PNG lacks rendered source frame: '+evidence.reasons.join(','));
       }
       const buf=Buffer.from(result.data,'base64'),image=decodePng(buf),file=name+'.png';
-      writeFileSync(join(out,file),buf);
+      writeFileSync(join(captureRoot,file),buf,{flag:'wx'});
       frames.push({
         file,tMs:Date.now()-begin,phase:'displayed-frame-window',width:image.width,height:image.height,
         sha256:hash(buf),renderFrameIdBefore:before.frameId,renderFrameIdAfter:after.frameId,
@@ -506,8 +511,8 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
       throw Error('KeyW stimulus produced no newer rendered frame');
     // Browser-only compositor pixel change. No native reference is inferred.
     const webOnlyPixelVariation=metrics(
-      decodePng(readFileSync(join(out,frames[0].file))),
-      decodePng(readFileSync(join(out,frames[1].file))));
+      decodePng(readFileSync(join(captureRoot,frames[0].file))),
+      decodePng(readFileSync(join(captureRoot,frames[1].file))));
     const hook=after.hook,scene=hook?.scene?.binding==='ACTIVE_SCENE_PROVEN'?hook.scene:{key:null,binding:'WEB_PROXY_OR_UNKNOWN',room:after.room};
     const manifest={schemaVersion:1,captureKind:'ACTUAL_BROWSER_CDP_PNG',scene,camera:cameraOK(hook?.camera)?hook.camera:null,
       coordinateFrameId:hook?.coordinateFrameId||null,stimulusId:'IDLE_THEN_KEYW_'+holdMs+'MS',initialStateId:hook?.initialStateId||null,
@@ -518,7 +523,7 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
         (privateFiles.some(Boolean)||requireEnemy)?localMeshDrawEvidence(after.performance,{requireEnemy}):
         {status:'WEB_CARGO_DRAW_NOT_REQUIRED',nativeParityCertified:false},
       notes:'Web actual CDP PNG pixels bracketed by changing Web frame IDs, not single-frame/native evidence; local source OBJ draws and static enemy do NOT establish original MCD parity.'};
-    writeFileSync(join(out,'web-capture.json'),JSON.stringify(manifest,null,2)+'\n');return manifest;
+    writeFileSync(join(captureRoot,'web-capture.json'),JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});return manifest;
   }finally{if(cdp)cdp.ws.close();child.kill();await sleep(200);rmSync(profile,{recursive:true,force:true,maxRetries:3});}
 }
 
