@@ -5,7 +5,7 @@ import {
   assessNativeWorldBrowserFrame,
   auditNativeWorldStaticWiring,
   assessNativeElevatedPlatformBindings, projectPreparedColliderRoi,
-  assessPreparedColliderActivation,
+  assessPreparedColliderActivation, assessNativeWorldEncounterTrace,
 } from '../scripts/integration-native-world.mjs';
 
 const sampleSource = () => ({
@@ -308,4 +308,88 @@ test('SH16 fails closed on unqualified, malformed or foreign source activation d
   assert.throws(() => assessPreparedColliderActivation({
     prepared: { colliders: [{ id: 'a', isTrigger: false }, { id: 'a', isTrigger: false }] },
   }), /unique ID/);
+});
+
+
+function browserEncounterTraceFixture() {
+  const earlier = syntheticBrowserEvidence();
+  earlier.metrics.enemies = [{ alive: true }, { alive: true }];
+  earlier.frame.frameId = 10;
+  earlier.frame.worldClock = 1;
+  earlier.frame.gameplay = { nativeClock: true, ammo: 5, weapon: true };
+  const later = structuredClone(earlier);
+  later.frame.frameId = 16;
+  later.frame.worldClock = 1.3;
+  later.frame.gameplay.ammo = 4;
+  later.metrics.enemies[0].alive = false;
+  return {
+    samples: [earlier, later],
+    sourceBudget: summarizePreparedNativeWorld(sampleSource()),
+  };
+}
+
+test('SH16 vertical receipt requires actual prepared source budget, not hardcoded 68/360 counts', () => {
+  const fixture = browserEncounterTraceFixture();
+  assert.equal(assessNativeWorldEncounterTrace({
+    samples: fixture.samples,
+  }).status, 'EXACT_OWNER_LOCAL_SOURCE_BUDGET_REQUIRED');
+  assert.equal(assessNativeWorldEncounterTrace({
+    sourceBudget: fixture.sourceBudget, samples: [],
+  }).status, 'REQUIRE_TWO_TO_64_CONSECUTIVE_BROWSER_SAMPLES');
+});
+
+test('SH16 reports an app-only world→skinned actor→ammo→Web defeat candidate, NEVER a native collision', () => {
+  const report = assessNativeWorldEncounterTrace(browserEncounterTraceFixture());
+  assert.equal(report.status, 'WEB_WORLD_ACTOR_AMMO_AND_ASYNC_DEFEAT_SEQUENCE_ONLY');
+  assert.equal(report.sourceWorld.trianglesPerFrame, 3);
+  assert.equal(report.sourceWorld.drawCallsPerFrame, 2);
+  assert.deepEqual(report.actor.lastActorSkinnedSubmissionSamples, [0, 1]);
+  assert.deepEqual(report.webCombat.ammoDecreaseCandidateSamples, [1]);
+  assert.deepEqual(report.webCombat.asyncAliveToDeadCandidates, [{ sample: 1, enemyIndex: 0 }]);
+  assert.equal(report.actor.identityOfDamagedBodyPartKnown, false);
+  assert.equal(report.webCombat.sameProjectileToBodyPartCausalityProven, false);
+  assert.equal(report.matchedNativeGameplayPixels, false);
+  assert.equal(report.nativeParityVerdict, 'UNASSESSED');
+});
+
+test('SH16 rejects late world-frame counter drift instead of conflating two scenes', () => {
+  const fixture = browserEncounterTraceFixture();
+  fixture.samples[1].frame.generatedManifest.triangles++;
+  assert.equal(assessNativeWorldEncounterTrace(fixture).status, 'SOURCE_WORLD_FRAME_GATE_FAILED');
+  const stable = browserEncounterTraceFixture();
+  stable.samples[1].frame.nativeScene.instances = 3;
+  assert.equal(assessNativeWorldEncounterTrace(stable).status, 'SOURCE_WORLD_FRAME_GATE_FAILED');
+});
+
+test('SH16 refuses reset, reversed chronology and out-of-game native clock samples', () => {
+  const fixture = browserEncounterTraceFixture();
+  fixture.samples[1].frame.frameId = 9;
+  assert.equal(assessNativeWorldEncounterTrace(fixture).status, 'NON_MONOTONIC_FRAME_OR_WORLD_CLOCK');
+  const reset = browserEncounterTraceFixture();
+  reset.samples[1].frame.worldClock = 0;
+  assert.equal(assessNativeWorldEncounterTrace(reset).status, 'NON_MONOTONIC_FRAME_OR_WORLD_CLOCK');
+  const paused = browserEncounterTraceFixture();
+  paused.samples[1].frame.gameplay.nativeClock = false;
+  assert.equal(assessNativeWorldEncounterTrace(paused).status, 'PLAYING_NATIVE_CLOCK_AND_WEAPON_STATE_REQUIRED');
+});
+
+test('SH16 does not count throwing an empty gun or ammo reload as a native bullet hit', () => {
+  const fixture = browserEncounterTraceFixture();
+  fixture.samples[1].frame.gameplay.weapon = false;
+  assert.equal(assessNativeWorldEncounterTrace(fixture).status, 'NO_AMMO_DECREASE_CANDIDATE');
+  const reload = browserEncounterTraceFixture();
+  reload.samples[1].frame.gameplay.ammo = 6;
+  assert.equal(assessNativeWorldEncounterTrace(reload).status, 'NO_AMMO_DECREASE_CANDIDATE');
+});
+
+test('SH16 does not infer source-native damage from an isolated target death or unverified skin', () => {
+  const fixture = browserEncounterTraceFixture();
+  fixture.samples[1].metrics.enemies[0].alive = true;
+  assert.equal(assessNativeWorldEncounterTrace(fixture).status, 'NO_ASYNC_WEB_ENEMY_DEFEAT_TRANSITION');
+  const actor = browserEncounterTraceFixture();
+  for (const sample of actor.samples) sample.frame.nativeEnemy = null;
+  assert.equal(assessNativeWorldEncounterTrace(actor).status, 'NO_SKINNED_ACTOR_SUBMITTED_IN_WORLD_TRACE');
+  const stale = browserEncounterTraceFixture();
+  stale.samples[0].metrics.enemies[0].alive = false;
+  assert.equal(assessNativeWorldEncounterTrace(stale).status, 'NO_ASYNC_WEB_ENEMY_DEFEAT_TRANSITION');
 });
