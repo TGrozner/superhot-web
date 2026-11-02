@@ -366,7 +366,11 @@ export function auditNativeWorldStaticWiring(root = ROOT) {
       renderer.includes('function replaceNativeWorld(') &&
       renderer.includes('function drawNativeWorld()'),
     worldDrawUsesSourceSubmeshRanges: world.includes('meshes.get(draw.meshId).draw(draw.range)'),
-    skinnedActorRenderRouted: main.includes('renderer.drawNativeSkin(actorMatrix, clip, time)') &&
+    // Current actor draw uses the active animation.state and options packet.
+    // The old literal "...actorMatrix, clip, time)" was obsolete and silently
+    // marked an actually connected character draw as absent.
+    skinnedActorRenderRouted:
+      /renderer\\.drawNativeSkin\\(\\s*actorMatrix\\s*,\\s*animation\\.state\\s*,\\s*time\\s*,/.test(main) &&
       renderer.includes('function drawNativeSkin(') &&
       skin.includes('export function createNativeSkinPass('),
     sourceCameraProjectionRouted: main.includes('projection: nativeScene?.camera.projection'),
