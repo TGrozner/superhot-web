@@ -118,3 +118,47 @@ draw calls ou de fidélité visuelle sans cette mesure.
 Cette préparation est un **contrat de rendu autonome** ; les données réelles de
 scène et les mesures natives sont toujours `INCONNUES`. Les comparaisons
 avec les 354+ tests Node Web verts restent strictement côté prototype.
+
+
+## Containers/build28 — preview WebGL2 de volumes dérivés (SH-04 → SH-05)
+
+Nouvelle URL **opt-in** : `http://localhost:4173/?scene=containers`.
+Le serveur reste `npm start`. L'ancien mode sans querystring demeure
+inchangé et `?scene=synthetic` reste disponible indépendamment.
+
+**PROUVÉ en statique, pas en exécution native :** SH-04 a relié cinq objets
+cargo `level28` avec MeshRenderer/BoxCollider activés et leurs
+transformations dans le corpus privé de MCD build `20299547` (artifacts des
+issues privées #16/#20/#27/#30/#32/#37/#39). Le code public ne reproduit que
+des **AABB arrondies et réfléchies de colliders**, jamais les vrais meshes,
+matériaux, couleurs ou shaders. `src/scenes/containers-build28.js` ajoute
+40 nervures et un sol **purement inventés** : 46 primitives au maximum, avec
+culling avant les draw calls.
+
+**Raccord visible :** `main.js → drawContainersBuild28Preview() →
+createContainersBuild28DrawPlan() → renderer.box()`. La caméra initiale de
+preview est également **inventée** : elle vise le groupe depuis
+`CONTAINERS_BUILD28_DEMO_CAMERA`. On voit les cinq enveloppes de cargo,
+dont une surélevée, sans charger les assets commerciaux. L'UI annonce
+« COLLIDER PROXY · NOT MCD GAMEPLAY ». Dans ce mode, les trois salles,
+ennemis et obstacles **inventés** sont masqués et ne participent plus aux
+contacts, mais aucun collider MCD n'a été intégré au gameplay non plus.
+Cette vue est une **visite visuelle**, sans adversaires/progression ni
+équivalence de physique/collision, pas une reproduction jouable 1:1.
+
+À relever **en navigateur** après ouverture de la preview :
+`window.__superhotSceneMetrics` (mode
+`CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME`, objets=46, enveloppes natives
+dérivées=5, `visible`, `culled`, `legacyDraws`, total draw calls et
+`p95FrameMs`). Ajouter capture, résolution, navigateur, GPU et l'angle
+effectif avant d'avancer un FPS ou un gain graphique. **À la date de ce PR,
+ni capture navigateur ni p95 GPU/rAF mesuré ne sont disponibles** : seuls
+les tests Node de plan et de dispatch ont été soumis.
+
+`node --test tests/parity-containers-preview.test.mjs` couvre le raccord,
+la non-publication des assets, le culling et l'exclusion des niveaux Web
+inventés. Même si la CI est verte, cela ne prouve **ni la couleur des vrais
+containers, ni la silhouette mesh, ni l'échelle de la caméra native**, ni
+l'exécution en jeu de l'instance sérialisée. La suite exige une comparaison
+visuelle avec caméra native réellement observée et, séparément, une
+reconstruction physique autorisée/sourcée.
