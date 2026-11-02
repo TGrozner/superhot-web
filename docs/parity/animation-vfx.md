@@ -2,6 +2,18 @@
 
 **Périmètre :** SUPERHOT: MIND CONTROL DELETE (Steam app `690040`), pas SUPERHOT 2016. Ce document accompagne les primitives Web indépendantes. Il ne constitue **pas** une certification de parité native.
 
+
+## SH-06 — réaction avec force avant mort (preuve native 2026-11-02)
+
+**PROUVÉ — code natif statique, non observé dans une partie Containers.** MCD build `20299547`. `PejAiController.AddBlowForce` est lu dans la source privée [research #87](https://github.com/TGrozner/superhot-research/issues/87), artifact `13139513073` (`PejAiController.cs:5835–5849`, SHA du texte `a9d6ba64589baabde7a908eacece546fde248fd23a0eda6c5b69f053fe846ebc`), puis sa continuation [research #123](https://github.com/TGrozner/superhot-research/issues/123), run `41476466212`, artifact `13157108175` (`PejAiController.cs:5840–5939`, SHA256 du texte `b1e3f974e4f171684e4180a372de6774225c0d09d1817f7ee2affffa71b5f0e7`). La source complète reste privée.
+
+**Chemin de méthode PROUVÉ :** si l'Animator existe, le contrôleur prend le premier Rigidbody de la partie demandée (Head par défaut), **appelle `_animator.Kill()`**, abandonne son arme, récupère ou ajoute `ConstantForce`, puis choisit la direction locale `normalize(Random.Range(-0.15, 0.15), Random.Range(-0.25, 0.25), 1)`. Il applique la partie linéaire de la matrice `StandardCameraTransform.localToWorldMatrix` à cette direction, multiplie par la force reçue et active le composant. Si **`blowInterval > 0`**, il demande de désactiver la force et de remettre son vecteur à zéro après le délai, via `DelayedInvokeMarshal` avec `isRealtime:false`; sans Animator, il retourne null. **`KillWithBlowForce`** appelle cette méthode, puis demande `Invoke("Kill", blowInterval)` même si l'Animator est absent. Une demande d'Invoke n'est pas la preuve d'un callback exécuté à l'écran.
+
+**Contrat Web pur :** `src/animation/enemy-blow-force-plan.js` exporte `planPejAiAddBlowForce` et `planPejAiKillWithBlowForce`. Les deux n'émettent que les commandes natives demandées après **invocation confirmée de cette méthode précise**. L'instance de caméra (basis), les deux tirages RNG, la force, l'intervalle, la partie touchée et la présence d'Animator/ConstantForce sont fournis par l'appelant : aucun spawn, impact, pose ni hasard MCD inventé. `tests/animation-enemy-blow-force-plan.test.mjs` couvre ordre Animator→arme→force→timer, transformation directionnelle, absence d'Animator, intervalle nul/négatif et garde des données inconnues. La simulation PhysX des rigidbodies et la lecture de leur état ne sont **pas** implémentées.
+
+**INCONNU — conditions d'activation et résultat visible :** callsite réel d'un hit Containers vers `AddBlowForce` ou `KillWithBlowForce`, valeur active de `force`/intervalle, matrice caméra à l'instant de l'impact, samples RNG, présence des parties/rigidbodies, cinématique PhysX et effet rendu. L'assemblage `Body.Kill → Controller.Kill` **ne suffit pas** à établir ce chemin : il n'appelle pas directement Animator.Kill (research #87/#89). Le module doit rester non raccordé à `src/main.js` sans trace indépendante du callsite. **Scénario de réfutation :** une mort Containers traverse uniquement `PejAiBody.Kill` sans `AddBlowForce`; la force et les commandes d'Animator.Kill ne doivent alors pas être émises. Une trace positive doit enregistrer ID de contrôleur, méthode appelée, arguments, samples caméra et moment de désactivation avant test visuel.
+
+
 ## Preuves disponibles au 2026-11-02
 
 | Statut | Assertion précise | Source et limite |
