@@ -25,7 +25,9 @@ const row = (gameObjectId, filterId, meshId, rendererId, submesh = null, measure
     material: Object.freeze({ fileId: 5, pathId: 3, resolved: false }),
     publicDrawable: false });
 
-/** Unknown submesh values are NULL intentionally, never inferred from adjacent ranges. */
+/** Static batch submesh IDs verified for all six active serialized renderers.
+ * Private indexed query #68, artifact 13136407658 (mesh + renderer joined).
+ * These IDs do not prove runtime visibility or public drawable permission. */
 export const BINDINGS = Object.freeze([
   row(336, 10570, 6, 7837, 47, Object.freeze({
     indexCount: 4638,
@@ -37,10 +39,34 @@ export const BINDINGS = Object.freeze([
     center: Object.freeze([17.474998474121094, 5.72499942779541, -15.800012588500977]),
     extents: Object.freeze([4.10500431060791, 1.5989494323730469, 1.500011920928955]),
   })),
-  row(461, 10674, 7, 7941),
-  row(673, 10856, 7, 8123),
-  row(839, 11005, 6, 8272),
-  row(1003, 11150, 6, 8417),
+  row(461, 10674, 7, 7941, 46, Object.freeze({ indexCount: 4638,
+    center: Object.freeze([4.575000762939453, 2.5749993324279785, -15.900012969970703]),
+    extents: Object.freeze([4.10500431060791, 1.5989494323730469, 1.500011920928955]),
+  })),
+  row(673, 10856, 7, 8123, 77, Object.freeze({ indexCount: 4638,
+    center: Object.freeze([14.5, 2.5749990940093994, -16.82499885559082]),
+    extents: Object.freeze([1.5, 1.5989491939544678, 4.104999542236328]),
+  })),
+  row(839, 11005, 6, 8272, 24, Object.freeze({ indexCount: 4638,
+    center: Object.freeze([10.100000381469727, 2.5749988555908203, -18.475000381469727]),
+    extents: Object.freeze([1.5, 1.5989489555358887, 4.105000019073486]),
+  })),
+  row(1003, 11150, 6, 8417, 32, Object.freeze({ indexCount: 4638,
+    center: Object.freeze([16.05000114440918, 2.5249998569488525, 11.225001335144043]),
+    extents: Object.freeze([1.5, 1.5989497900009155, 4.104999542236328]),
+  })),
+]);
+
+/** Private UnityPy OBJ group-to-renderer linkage, NOT a distributed asset.
+ * Private #63 verified OBJ group AABBs; #68 proves renderer static-submesh IDs.
+ * Two groups are near-congruent after center subtraction (~1.1e-6 max error).
+ * Coordinates: OBJ -> generated Web proxy flips X and Z; culling still unverified.
+ */
+export const OBJ_GROUP_BINDINGS = Object.freeze([
+  Object.freeze({ owner: 'level28', meshId: 6, objGroup: 24, gameObjectId: 839,
+    rendererId: 8272, proxyHullId: 'cargo-7', proof: 'GO_BOUND', publicDrawable: false }),
+  Object.freeze({ owner: 'level28', meshId: 6, objGroup: 47, gameObjectId: 336,
+    rendererId: 7837, proxyHullId: 'cargo-22', proof: 'GO_BOUND', publicDrawable: false }),
 ]);
 
 /** Web mirror convention is a PROXY transform, not a runtime native camera proof. */
@@ -64,5 +90,7 @@ export function reportMeshReadiness() {
       publicDrawable: false,
     };
   });
-  return { sourceSha256: SOURCE.sha256, rows, webMeshReady: false };
+  return { sourceSha256: SOURCE.sha256, rows,
+    sourceBoundObjGroups: OBJ_GROUP_BINDINGS.map((group) => group.objGroup),
+    webMeshReady: false };
 }
