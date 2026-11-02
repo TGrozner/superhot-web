@@ -1,7 +1,7 @@
 import { composeLocalMatrix, multiplyMatrices } from '../scenes/graph.js';
 import { meshModelMatrices } from '../render/mesh-format.js';
 
-const IDENTITY = Object.freeze([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+const IDENTITY = Object.freeze([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const isId = (id) => typeof id === 'string' && id.length > 0;
 const finiteMatrix = (m) => m && m.length === 16 && Array.from(m).every(Number.isFinite);
 
