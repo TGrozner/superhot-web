@@ -362,8 +362,8 @@ export function mcdSourcePlayerTimeTargets({
  * PROUVÉ as delivered code (not observed gameplay): private research #101,
  * artifact 13141298923, PlayerController.cs:452 (Steam MCD 20299547).
  * Quaternion is the caller-supplied Unity direction.rotation (x,y,z,w),
- * velocity is the locally computed pre-constraint velocity in Unity units,
- * scaledDeltaTime is the observed Unity Time.deltaTime in seconds.
+ * velocity is the caller-supplied pre-constraint velocity in Unity units,
+ * scaledDeltaTime is caller-supplied Unity Time.deltaTime in seconds.
  * The native method later modifies this delta for optional lock/offset then
  * calls CharacterController.Move; collisions and those guards are NOT here.
  * No inference from TimeControl.LateUpdate's latest write to the dt of the
