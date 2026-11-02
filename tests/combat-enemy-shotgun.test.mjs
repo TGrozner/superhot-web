@@ -13,7 +13,8 @@ const fixture = (patch = {}) => ({
 test('AI shotgun queues only if IsAttackReady and carries seen state even when blocked', () => {
   assert.deepEqual(planEnemyShotgunAttack({ isAttackReady: false, haveBeenSeen: true, alreadyDeferred: false }), {
     shooterHaveBeenSeen: true, deferredBulletSpawn: false,
-    shootHappened: false, soundCallRequested: false,
+    setShootHappenedTrue: false, setReloadedFalse: false,
+    resetAttackDelayRequested: false, soundCallRequested: false,
     onBulletSpawnRequested: false, alertRadius: null,
   });
   const pending = planEnemyShotgunAttack({
@@ -23,7 +24,8 @@ test('AI shotgun queues only if IsAttackReady and carries seen state even when b
   assert.equal(pending.soundCallRequested, false);
   assert.deepEqual(planEnemyShotgunAttack({ isAttackReady: true, haveBeenSeen: false, alreadyDeferred: false }), {
     shooterHaveBeenSeen: false, deferredBulletSpawn: true,
-    shootHappened: true, soundCallRequested: true,
+    setShootHappenedTrue: true, setReloadedFalse: true,
+    resetAttackDelayRequested: true, soundCallRequested: true,
     onBulletSpawnRequested: true, alertRadius: 5,
   });
 });
