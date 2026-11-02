@@ -10,6 +10,16 @@ const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const finiteVec3 = (v) => v != null && ['x', 'y', 'z'].every((key) => Number.isFinite(v[key]));
 // WebGL2 uniforms use float32: finite JS doubles can still become Infinity.
 const finiteFloat32 = (value) => Number.isFinite(value) && Number.isFinite(Math.fround(value));
+// WebGL2 shader operates on float32 uniforms: a finite uniform may still
+// swallow a camera/mesh offset or collapse both generated box faces.
+const AXES = ['x', 'y', 'z'];
+const losesCameraOffset = (matrix, camera) => AXES.some((axis, i) =>
+  matrix[12 + i] !== camera[axis] && Math.fround(matrix[12 + i]) === Math.fround(camera[axis]));
+const collapsesLegacyAxis = (position, length) => {
+  if (!(length > 0)) return false; // Deliberately degenerate generated box.
+  const center = Math.fround(position), half = Math.fround(length / 2);
+  return Math.fround(center - half) === Math.fround(center + half);
+};
 
 /** Conservative sphere/frustum test: only definitely invisible objects are culled. */
 export function isBoundsVisible(bounds, camera, {
@@ -69,8 +79,18 @@ export function planSceneDraws(graph, camera, options = {}) {
     // the legacy packet additionally needs float32 box uniforms. Prevent
     // implicit JS-double -> GPU-float conversion from introducing Infinity.
     const uniformNumbers = [...m, s.x, s.y, s.z, ...(legacyBoxArgs?.slice(0, 6) ?? [])];
+    // renderer.begin uploads camera uniforms before it can draw a packet.
+    if (!AXES.every((axis) => finiteFloat32(camera[axis]))) {
+      throw new RangeError('Visible scene camera exceeds WebGL2 float32 uniform range');
+    }
     if (!uniformNumbers.every(finiteFloat32)) {
       throw new RangeError('Visible scene packet exceeds WebGL2 float32 uniform range');
+    }
+    if (losesCameraOffset(m, camera)) {
+      throw new RangeError('Visible scene packet loses camera-relative position in WebGL2 float32');
+    }
+    if (legacyBoxArgs && AXES.some((_, i) => collapsesLegacyAxis(legacyBoxArgs[i], legacyBoxArgs[i + 3]))) {
+      throw new RangeError('Visible generated box collapses along an axis in WebGL2 float32');
     }
     packets.push({
       id: item.id, mesh: 'box', color, matrix: m.slice(), bounds: item.bounds,
