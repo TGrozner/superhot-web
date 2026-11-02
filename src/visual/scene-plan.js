@@ -38,11 +38,16 @@ export function planSceneDraws(graph, camera, options = {}) {
     if (!color) throw new TypeError('Unknown generated material: ' + item.material);
     const m = item.worldMatrix, s = item.primitive.size;
     const diagonal = [1, 2, 4, 6, 8, 9].every((i) => Math.abs(m[i]) < 1e-7);
+    // The legacy vertex shader applies uScale to positions but does not transform
+    // normals by its sign. Reflections (and degenerate scales) need an affine
+    // renderer with a correct normal matrix; routing them to renderer.box()
+    // produces incorrect lighting even though their bounds remain valid.
+    const legacySafe = diagonal && [0, 5, 10].every((i) => m[i] > 0);
     packets.push({
       id: item.id, mesh: 'box', color, matrix: m.slice(), bounds: item.bounds,
       // Legacy WebGL2 renderer accepts only translate + axis-aligned signed scales.
       // Rotated/sheared meshes MUST NOT be silently flattened to an AABB.
-      legacyBoxArgs: diagonal ? [m[12], m[13], m[14], m[0]*s.x, m[5]*s.y, m[10]*s.z, color] : null,
+      legacyBoxArgs: legacySafe ? [m[12], m[13], m[14], m[0]*s.x, m[5]*s.y, m[10]*s.z, color] : null,
     });
   }
   // Group by material to reduce CPU state changes. This is not GPU instancing.
