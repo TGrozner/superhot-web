@@ -1,4 +1,5 @@
 import { createGeneratedLighting, lightingUniformPacket } from '../render/lighting-model.js';
+import { NATIVE_MATERIAL_GLSL } from '../render/native-material.js';
 
 const INFLUENCES_PER_VERTEX = 4;
 const MAX_VERTICES = 1_000_000;
@@ -31,13 +32,17 @@ void main() {
   gl_Position = uViewProjection * world;
 }`;
 
+// The recovered final compositor lacks native procedural/overlay/additive inputs.
+// Do not fabricate them: use the current Web-lit RGB and explicit zero signals.
 const fragmentShader = `#version 300 es
 precision highp float;
 in float vLight;
 uniform vec4 uColor;
 out vec4 fragColor;
+${NATIVE_MATERIAL_GLSL.redCrystalOutput}
 void main() {
-  fragColor = vec4(uColor.rgb * vLight, uColor.a);
+  vec3 webProceduralRgb = uColor.rgb * vLight;
+  fragColor = nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0));
 }`;
 
 function numericArray(value, length, label) {
@@ -579,7 +584,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       drawCalls: 1, triangles: loaded.mesh.indexCount / 3,
       clip: instance.clip, sampledTime: time, skinned: true,
       nativeClipSampled: true, runtimeEnemyInstanceVerified: false,
-      materialParity: false, lightingProvenance: light.source,
+      materialParity: false, redCrystalFinalCompositor: true,
+      redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
     });
   }
 
