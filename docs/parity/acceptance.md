@@ -1,5 +1,85 @@
 # SH-10 — MCD acceptance matrix (source-qualified, not 1:1)
 
+
+## CURRENT P0 visual gate — playable Containers main after SH-05 #128 (2 November 2026)
+
+**Supersedes the historical #98/#105 two/four-draw notes below.** The
+public homepage / now starts a **playable Web fallback** for Containers, not
+the native game. Five level28 source-derived collider AABBs connect to a Web
+solver; locally selected source-converted cargo produces **six** indexed
+submissions from **two** source files: Mesh6 group47 ×3 placements and Mesh7
+three independent ranges (48/46/77), for **9,276** submitted source-derived
+triangles. This is not an authentic native frame, shader, collision or pose.
+Authenticated local EnemyMerged pathID284 (2,254 triangles) or Headless
+pathID285 (2,132) can appear as **one static shootable Web fallback**; this
+does NOT verify an MCD spawn, rig, skin, AI, material or animation.
+
+**Manual Chromium/WebGL2 gate, NOT standard CI:** with the original files
+already available through the owner's private loopback allowlist:
+
+    node scripts/acceptance-live-capture.mjs --capture-web \
+      --url http://127.0.0.1:4173/ \
+      --out /tmp/sh10-containers-capture \
+      --require-enemy
+
+Or select all three authorized local private exports via CDP (no upload):
+
+    node scripts/acceptance-live-capture.mjs --capture-web \
+      --url http://127.0.0.1:4173/ \
+      --out /tmp/sh10-containers-capture \
+      --mesh6 /private/Mesh6.obj.gz --mesh7 /private/Mesh7.obj.gz \
+      --enemy /private/EnemyMerged.obj.gz --enemy-variant merged
+
+The Web-evidence gate requires the exact main #128 mode
+CONTAINERS_SOURCE_GEOMETRY_WEB_GAMEPLAY_FALLBACK_NOT_MCD,
+activeScreen=playing, browserMeasured=true and matchedNativeScene=false.
+It requires two local cargo source groups and the app's reported
+sourceQualifiedMesh6DrawPackets=3, verifiedLocalMesh7RangeDraws=3,
+privateIndexedDraws=6, convertedTrianglesDrawn=9276, five connected
+Web fallback collider AABBs, sampled positive p95 frame duration and at
+least six app-reported WebGL2 draws. hiddenByPrivateMesh is recorded
+but its value depends on camera culling; **zero is allowed**.
+
+With --enemy or --require-enemy, the gate additionally needs exact
+source owner/path/triangle evidence (sharedassets0.assets:284/2254 or
+:285/2132), at least one app-reported indexed enemy draw, shootable
+Web fallback and explicit false flags for native enemy spawn and
+skin parity. All counters are app reports, NOT independent GPU readback.
+
+The saved CDP PNGs are genuine **browser screenshot pixels** when actually
+run. Two render-frame IDs bracket each screenshot using main's read-only
+__superhotGetRenderedFrameSnapshot hook; it verifies a NEW rendered frame
+after a bounded 300 ms KeyW stimulus. Bracketing does **not** identify one
+exact original/native frame or prove scene/camera equivalence.
+The optional __sh10AcceptanceSnapshot hook is still not a substitute for
+a source-qualified **active native** scene, frame, time scale or camera.
+Original-vs-Web comparison remains **INCONNU** until the paired original
+PNG/pose/stimulus/frame-phase and operator thresholds exist privately.
+
+### Three first VISIBLE convergence criteria and owners
+
+| Priority | Current Web proof and gap | Native qualification | Owner/convergence |
+| --- | --- | --- | --- |
+| **P0.1 scene/camera** | Default Web Containers fallback, rendered Web frameId/pose and source-converted colliders, but no active native scene/FOV/spawn/pose pairing. | HANDOFF build28 binding is a report, not an original frame trace. | SH-04 + SH-05: align actual scene instance, camera position, yaw/pitch/FOV, viewport, initial state and frame phase; SH-15 independently captures. **NON-COMPARABLE** now. |
+| **P0.2 shape/position** | Six cargo indexed submissions, and one local original static enemy if loaded; no authenticated original counterpart. | Mesh/owner/path exports are source-qualified; native runtime visibility, skin/pose and pixel bounds are not. | SH-05 + SH-14/15: two actual Web PNGs with cargo+enemy and two legitimate private MCD PNGs from the identical angle/scene/stimulus; compare missing objects, centroids (px) and contour F1. **INCONNU** now. |
+| **P0.3 light/color/time** | Web material/light plus timed KeyW frame brackets, but native shader, exposure and time domain not matched. | Concrete source Point/Repeat sampler, Containers 120 denominator and time reports are not observed original GPU/runtime frames. | SH-13/15 + SH-01/02/03 + SH-05: same source material, two-frame delta, ROI chroma/luminance and time-domain agreement, with operator thresholds based on original samples. **INCONNU** now. |
+
+The existing five cases R=Replay (profile) vs Web reload, Containers
+physics denominator 120 vs 60 class initializer, max/cap/override time,
+player Time.deltaTime and Update/FixedUpdate/LateUpdate projectiles
+remain explicitly **PROVISIONAL**. No disagreement with a secondary
+handoff is a measured refutation of original MCD runtime behavior.
+The deliberately nonzero manual acceptance-report --gate stays **OUT OF CI**.
+
+**Execution status:** new fixtures for updated counters were exercised in
+an isolated V8 check, not a Chromium session. No genuine Web game screenshot
+or paired MCD original capture was executed here; earlier local Chromium
+navigation was denied by ERR_BLOCKED_BY_ADMINISTRATOR. Do not report 1:1
+or a quantitative original pixel verdict from these fixtures.
+
+---
+
+
 Target: **SUPERHOT: MIND CONTROL DELETE** (Steam AppID 690040, build 20299547,
 Unity 2018.4.14f1), **not** the original SUPERHOT. Source of the currently
 recoverable native summary: PRIVATE TGrozner/superhot-research issue #2,
@@ -14,8 +94,8 @@ trace. Primary public SH-01 evidence independently covers only the
 TimeControl.fixedTimestepDenominator **field initializer 60**, not the value of
 an active Containers component. HANDOFF.md reports **120** for the Containers
 instance, but that scene binding and runtime assignment have not been independently
-reviewed by SH-10. The public Web game uses its own three generated levels;
-none is certified as Containers. Zero paired native/Web runtime measurements
+reviewed by SH-10. At the original #74 cut, the Web exposed three generated levels. SH-05 #128
+has since connected a playable Containers Web fallback, NOT native parity. Zero paired native/Web runtime measurements
 are currently available. No proprietary assets, code excerpts, or original
 game binaries are included in this harness.
 
