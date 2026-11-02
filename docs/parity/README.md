@@ -78,7 +78,7 @@ seulement ensuite proposer des métriques supplémentaires de parité mesurable.
 ## Intégration verticale WebGL2 — fixture **SYNTHETIC / NOT MCD**
 
 Le rendu expérimental est activé **uniquement** par `?scene=synthetic`
-(exemple en local : `http://localhost:3013/?scene=synthetic`, adapter le port du
+(exemple en local : `http://localhost:4173/?scene=synthetic`, adapter le port du
 serveur). Sans ce paramètre, la progression, la géométrie et les draw calls
 hérités restent inchangés.
 
