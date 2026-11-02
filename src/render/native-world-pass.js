@@ -53,12 +53,12 @@ void main() {
   if (uTextured == 1) {
     if (uMode == 2) {
       albedo.rgb = nativeConcreteMainTextureFactor(uTexture, vUV * uST.xy + uST.zw,
-        vSeam, vSeamOverride, vNormal.y, uMainTexIsZacieki);
+        vSeam, vSeamOverride, n.y, uMainTexIsZacieki);
     } else albedo = texture(uTexture, vUV * uST.xy + uST.zw);
   }
   float light = 0.64 + 0.36 * max(dot(n, normalize(vec3(-0.55, 0.9, 0.42))), 0.0);
   vec3 rgb = albedo.rgb * uColor.rgb * light;
-  outColor = vec4(rgb, uColor.a * albedo.a);
+  // Native compiled forward-base materials are opaque; serialized _Alpha\n  // is a shader parameter, not framebuffer blending opacity.\n  outColor = vec4(rgb, uMode == 2 ? 1.0 : uColor.a * albedo.a);
 }`;
 
 function shader(gl, type, source) {
