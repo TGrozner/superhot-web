@@ -91,12 +91,21 @@ export function stepTime(state, {
   if (!state || typeof state !== 'object') throw new TypeError('state is required');
   requireFinite(dt, 'dt');
   if (dt < 0) throw new RangeError('dt must be nonnegative');
-  const { timeScale, lookActivity, shotPulse, realClock, worldClock } = state;
+  // Snapshot state once. The caller may expose accessor properties: validating
+  // one read and then spreading the original object would read them a second
+  // time after validation. Keep supplementary fields without rereading clocks.
+  // PROVISIONAL WEB integrity rule, not a native SUPERHOT MCD time contract.
+  const {
+    timeScale, lookActivity, shotPulse, realClock, worldClock, ...otherState
+  } = state;
+  const stateSnapshot = {
+    ...otherState, timeScale, lookActivity, shotPulse, realClock, worldClock,
+  };
   for (const [name, value] of Object.entries({timeScale, lookActivity, shotPulse, realClock, worldClock})) {
     requireFinite(value, name);
   }
   if (paused) {
-    return { ...state, targetScale: timeScale, realDelta: 0, worldDelta: 0 };
+    return { ...stateSnapshot, targetScale: timeScale, realDelta: 0, worldDelta: 0 };
   }
   // Negative rates turn decay into growth or smoothing into reverse time.
   // Reject malformed WEB rules before computing an active tick; the pause path
@@ -124,7 +133,7 @@ export function stepTime(state, {
     throw new RangeError('worldClock cannot represent this step');
   }
   return {
-    ...state,
+    ...stateSnapshot,
     timeScale: nextScale,
     lookActivity: nextLook,
     shotPulse: nextShot,
