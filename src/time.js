@@ -67,6 +67,8 @@ export function getTargetTimeScale({ moving = false, lookActivity = 0, shotPulse
  * choose target; exponentially smooth scale using real dt; advance the
  * world by dt * the NEW scale. This last right-endpoint integration means
  * worldClock is not perfectly invariant to dt subdivision. The scale is.
+ * Finite input clocks can overflow when advanced; these Web-only guards
+ * reject nonfinite results instead of poisoning subsequent frames.
  *
  * `paused` means the caller has interrupted gameplay (e.g. focus or pointer
  * lock loss). It freezes both clocks, pulses, and the scale. Browser event
@@ -92,15 +94,17 @@ export function stepTime(state, {
   const nextShot = Math.max(0, shotPulse - dt * rules.shotDecayRate);
   const targetScale = getTargetTimeScale({ moving, lookActivity: nextLook, shotPulse: nextShot, reloading }, rules);
   const blend = 1 - Math.exp(-rules.smoothingRate * dt);
-  const nextScale = timeScale + (targetScale - timeScale) * blend;
-  const worldDelta = dt * nextScale;
+  const nextScale = requireFinite(timeScale + (targetScale - timeScale) * blend, 'next timeScale');
+  const worldDelta = requireFinite(dt * nextScale, 'worldDelta');
+  const nextRealClock = requireFinite(realClock + dt, 'next realClock');
+  const nextWorldClock = requireFinite(worldClock + worldDelta, 'next worldClock');
   return {
     ...state,
     timeScale: nextScale,
     lookActivity: nextLook,
     shotPulse: nextShot,
-    realClock: realClock + dt,
-    worldClock: worldClock + worldDelta,
+    realClock: nextRealClock,
+    worldClock: nextWorldClock,
     targetScale,
     realDelta: dt,
     worldDelta,

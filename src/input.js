@@ -5,6 +5,8 @@
  *
  * Browser event listeners, focus and pointer-lock acquisition are intentionally
  * not executed here. `KeyboardEvent.code` values are physical-key codes.
+ * Web-only numeric guards reject overflowing outputs without changing
+ * the prototype's movement or camera coefficients.
  * SH-01's secondary MCD research handoff reports R = Replay (not reload);
  * its active input dispatcher still needs primary verification. `KeyR` below
  * deliberately retains the WEB PROTOTYPE's reload key until that contract is
@@ -77,7 +79,12 @@ export function movementStep(keys, yaw, dt, rules = PROTOTYPE_INPUT_RULES) {
   const inverse = 1 / Math.hypot(axes.forward, axes.horizontal);
   const sx = Math.sin(yaw) * axes.forward + Math.cos(yaw) * axes.horizontal;
   const sz = -Math.cos(yaw) * axes.forward + Math.sin(yaw) * axes.horizontal;
-  return { ...axes, sprinting, speed, dx: sx * inverse * speed * dt, dz: sz * inverse * speed * dt };
+  const dx = sx * inverse * speed * dt;
+  const dz = sz * inverse * speed * dt;
+  if (!Number.isFinite(dx) || !Number.isFinite(dz)) {
+    throw new RangeError('movement displacement must be finite');
+  }
+  return { ...axes, sprinting, speed, dx, dz };
 }
 
 /**
@@ -114,8 +121,10 @@ export function applyMouseLook({ yaw, pitch, movementX, movementY }, rules = PRO
   for (const [name, value] of Object.entries({yaw, pitch, movementX, movementY})) {
     if (!Number.isFinite(value)) throw new RangeError(`${name} must be finite`);
   }
+  const nextYaw = yaw + movementX * rules.mouseSensitivity;
+  if (!Number.isFinite(nextYaw)) throw new RangeError('yaw must remain finite');
   return {
-    yaw: yaw + movementX * rules.mouseSensitivity,
+    yaw: nextYaw,
     pitch: clamp(pitch - movementY * rules.mouseSensitivity, -rules.pitchLimit, rules.pitchLimit),
     lookActivity: clamp(
       Math.hypot(movementX, movementY) / rules.lookActivityDivisor,
