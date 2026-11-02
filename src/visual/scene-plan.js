@@ -79,11 +79,12 @@ export function planSceneDraws(graph, camera, options = {}) {
     // the legacy packet additionally needs float32 box uniforms. Prevent
     // implicit JS-double -> GPU-float conversion from introducing Infinity.
     const uniformNumbers = [...m, s.x, s.y, s.z, ...(legacyBoxArgs?.slice(0, 6) ?? [])];
-    if (!uniformNumbers.every(finiteFloat32)) {
-      throw new RangeError('Visible scene packet exceeds WebGL2 float32 uniform range');
-    }
+    // renderer.begin uploads camera uniforms before it can draw a packet.
     if (!AXES.every((axis) => finiteFloat32(camera[axis]))) {
       throw new RangeError('Visible scene camera exceeds WebGL2 float32 uniform range');
+    }
+    if (!uniformNumbers.every(finiteFloat32)) {
+      throw new RangeError('Visible scene packet exceeds WebGL2 float32 uniform range');
     }
     if (losesCameraOffset(m, camera)) {
       throw new RangeError('Visible scene packet loses camera-relative position in WebGL2 float32');
