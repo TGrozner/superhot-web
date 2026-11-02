@@ -84,5 +84,6 @@ test('CLI emits a parseable snapshot equivalent to the module API', () => {
     cwd: root,
     encoding: 'utf8',
   });
-  assert.deepEqual(JSON.parse(stdout), report);
+  // JSON deliberately normalizes negative zero; compare the serialized wire format.
+  assert.deepEqual(JSON.parse(stdout), JSON.parse(JSON.stringify(report)));
 });
