@@ -225,3 +225,76 @@ SH-05 issue #5 must coordinate the render hookup and the private scene
 handoff before anyone promotes a pixel delta from NON-COMPARABLE to
 measured native-vs-Web evidence. No runtime source or original asset may be
 changed as part of this gate.
+
+
+## SH-10 follow-up — real Containers Web route, still NO paired native frame
+
+**Verification 2026-11-02 (~11:20 UTC), status INCONNU/NOT CERTIFIED:**
+
+- The statement above that the Web has *only* THE ATRIUM/THE CROSSING/THE GALLERY
+  is now **stale**. Main has a real opt-in browser route
+  \`?scene=containers\` (#88; SH-05), drawing SH-04 build28 **collider
+  AABB proxy** shapes via WebGL2. Its label explicitly says
+  \`CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME\`; it does not establish
+  a matched active MCD scene. Current preview clears both
+  \`state.solids=[]\` and \`state.enemies=[]\`; there is no claimed native
+  interaction, collision, weapon/projectile or player acceptance.
+- \`window.__superhotSceneMetrics\` is **read-only browser telemetry**
+  when a preview is actually running: mode, matchedNativeScene=false, p95
+  frame time / FPS and draw calls. It is not an active camera pose trace.
+  SH-05 needs an independent read-only camera/scene/time snapshot before
+  a native/Web pixel comparison becomes admissible.
+- SH-12 indexed GPU modules (#87/#93) and SH-13 serialized material/fog
+  contracts (#89/#92) exist, but no proof currently shows a **native mesh**
+  or original texture/shader being rendered by the main browser path.
+  SH-04/SH-11 identified candidate native cargo OBJ exports in
+  private corpus #59/#63, not publishable here and not a Web draw.
+  Native build28 RenderSettings \`m_Fog=false\` (#41) while Web generated
+  renderer fog remains on unless SH-05 deliberately wires the serialized
+  fog-off uniform. Treat this as a specific **SERIALIZED-vs-WEB-source
+  candidate gap**, not a measured native runtime color delta.
+- SH-01's private #62 gives an **observed qualitative** native Containers
+  movement after 0.35s of D and Escape pause, but does not provide
+  camera XYZ/yaw/pitch/FOV, timeScale or paired pixels. No exact
+  position, physics denominator or timed projectile parity follows.
+  A recovered \`PlayerController\` with \`m_Enabled=0\` in serialized
+  level28 (#38) specifically prevents promotion of its \`Update\` body
+  to an *active-runtime* movement proof without an enable trace.
+- The only verified Chromium exercise in SH-10's isolated environment
+  rechecked a **locally served synthetic WebGL2 fixture**, HTTP 200,
+  then CDP navigation failed with \`net::ERR_BLOCKED_BY_ADMINISTRATOR\`.
+  This is a browser-environment block, **not a crash/render verdict for
+  superhot-web**. The standalone (not committed) PNG/diff prototype's
+  four Node synthetic tests pass; no actual superhot-web screenshot and
+  **no native MCD PNG** were acquired or manufactured.
+
+**Visual acceptance matrix, pending native frame pairing:**
+
+| Criterion / owner | Web present | Native/reference present | Current honest status | Convergence condition |
+| --- | --- | --- | --- | --- |
+| Same scene + camera / SH-04, SH-05 | Containers AABB proxy, demo camera, no active native binding | Native build28 serialization and OBJ metadata, no matched runtime pose | **INCONNU / NON-COMPARABLE** | Active scene identity + camera position/orientation/FOV/viewport + phase from *both* executions |
+| Position + silhouettes / SH-11, SH-12, SH-05 | Drawn boxes, not original meshes | Mesh metadata/private OBJ, no paired PNG | **INCONNU / NON-COMPARABLE** | Native and Web screenshot pair, ROI mapping, position px and edge-F1 scores; no proxy mislabeled as original |
+| Color + light / SH-13, SH-05 | Generated color/shader/fog; contract exists but integration unverified | Serialized fog off, lighting/color at runtime unknown | **SERIALIZED SOURCE GAP; pixel delta INCONNU** | Show fog-off before/after **browser** frames first; compare to original only at matched camera/lighting |
+| Time variation + playable response / SH-01, SH-02, SH-03, SH-05 | Screenshot automation ready off-repo; no executed game frame here | Qualitative D/Escape, no per-frame native trace | **INCONNU** | Identical initial state/stimulus and paired frame timestamps/Update/FixedUpdate/LateUpdate; screenshot plus event trace |
+
+**Minimal read-only browser adapter requested from SH-05** (not a SH-10 edit):
+\`window.__sh10AcceptanceSnapshot()\` returns an immutable snapshot with
+\`scene:{key,binding}\`, \`camera:{source:'RUNTIME_OBSERVED',x,y,z,yaw,pitch,fovYDegrees}\`,
+\`coordinateFrameId\`, \`initialStateId\`, \`timeScale\`, and frame phase.
+No claim \`ACTIVE_SCENE_PROVEN\` for a collider preview. This is only
+an instrumentation contract, not a request to add guessed behavior.
+
+**Private comparison input** must be independently acquired MCD 20299547
+native PNGs outside the public checkout plus an attested capture manifest,
+matching initial state, scene, pose, dimensions and 2 frame phases. Reject
+missing/mismatched provenance as \`INCONNU\`, not \`REFUTED\`; compare ROI center
+(px), edge F1, chroma L1, luminance, temporal luma change, pose and timing
+only after matching the context. Thresholds remain operator-local and
+versioned, never invented. A result within thresholds would be
+\`OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED\`, **never 1:1 proven**.
+
+Existing source-only R/reload, Containers denominator 120 vs initializer
+60, max/cap/override, player Time.deltaTime and projectile phase tests
+remain **PROVISIONAL**. SH-10 will not duplicate other agents'
+private corpus requests or edit any shared runtime module. No new failing
+gate is added to GitHub Actions.
