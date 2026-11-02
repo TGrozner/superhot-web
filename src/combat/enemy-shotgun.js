@@ -24,15 +24,16 @@ const normalize = v => {
  * ShotGunPejAiWeapon.Attack:39-56; readiness is computed by the caller.
  * The attack target argument does not determine spread: the late pose does.
  * Returned flags denote calls/assignments, not heard audio or spawned bullets.
- * This function models one Attack invocation, not persistent component state.
+ * Caller supplies any previously queued shot; non-ready Attack preserves it.
  */
-export function planEnemyShotgunAttack({ isAttackReady, haveBeenSeen }) {
-  if (typeof isAttackReady !== 'boolean' || typeof haveBeenSeen !== 'boolean') {
-    throw new TypeError('isAttackReady and haveBeenSeen must be explicit booleans');
+export function planEnemyShotgunAttack({ isAttackReady, haveBeenSeen, alreadyDeferred }) {
+  if (typeof isAttackReady !== 'boolean' || typeof haveBeenSeen !== 'boolean' ||
+      typeof alreadyDeferred !== 'boolean') {
+    throw new TypeError('isAttackReady, haveBeenSeen and alreadyDeferred must be explicit booleans');
   }
   return {
     shooterHaveBeenSeen: haveBeenSeen,
-    deferredBulletSpawn: isAttackReady,
+    deferredBulletSpawn: alreadyDeferred || isAttackReady,
     shootHappened: isAttackReady,
     soundCallRequested: isAttackReady,
     onBulletSpawnRequested: isAttackReady,
