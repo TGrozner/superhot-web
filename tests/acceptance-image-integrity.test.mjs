@@ -190,3 +190,32 @@ test('unqualified HUD or canvas surface cannot become a measured MCD renderer ga
     assert.ok(frame.reasons.includes('WEB_CANVAS_SURFACE_UNVERIFIED'));
   }finally{rmSync(f.dir,{recursive:true,force:true});}
 });
+
+test('independent capture clocks: constant timestamp offset is not a rendering gap',()=>{
+  const f=fixture();
+  try {
+    // Synthetic identical pixels and equal inter-PNG cadence. The native
+    // capture was simply initiated 41 ms later on its independent clock.
+    const shifted={...f.native,frames:f.native.frames.map(frame=>({...frame,tMs:frame.tMs+41}))};
+    const result=compare(f.web,shifted,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(result.status,'OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED');
+    assert.equal(result.intervalErrorMs,0);
+    assert.deepEqual(result.captureIntervalsMs,{web:355,native:355});
+    assert.equal(result.nativeParityCertified,false);
+  }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
+
+test('unmatched capture cadence is NON_COMPARABLE before evaluating native/Web pixels',()=>{
+  const f=fixture();
+  try {
+    const shifted={...f.native,frames:f.native.frames.map((frame,i)=>({
+      ...frame,tMs:frame.tMs+(i?91:0),
+    }))};
+    const result=compare(f.web,shifted,{webPath:f.webPath,nativePath:f.nativePath,thresholds:limits});
+    assert.equal(result.status,'NON_COMPARABLE_CAPTURE_INTERVAL');
+    assert.equal(result.intervalErrorMs,91);
+    assert.deepEqual(result.regions,[]);
+    assert.ok(result.reasons.includes('CAPTURE_INTERVAL_UNPAIRED'));
+    assert.equal(result.nativeParityCertified,false);
+  }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
