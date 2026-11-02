@@ -68,6 +68,17 @@
       </div>
       <div class="menu-bottom">UNE EXPÉRIENCE ORIGINALE INSPIRÉE DES FPS À MANIPULATION TEMPORELLE. AUCUN ASSET COMMERCIAL UTILISÉ.</div>
     </div>
+    <aside id="private-mesh-controls" hidden style="position:absolute;top:12px;left:12px;z-index:5;max-width:min(350px,90vw);padding:12px;background:rgba(242,247,250,.95);border:1px solid #9aabb4;font:12px/1.5 ui-monospace,monospace;color:#23313a;">
+      <strong>CONTAINERS · LOCAL OBJ PREVIEW</strong>
+      <p style="margin:6px 0">Choisis tes exports OBJ ou OBJ.gz locaux. Ils restent dans ton navigateur, sans upload. Matériaux synthétiques ; aucune parité graphique revendiquée.</p>
+      <label style="display:block">Mesh level28:6 — groupe 47
+        <input id="private-mesh6" type="file" accept=".obj,.gz,.obj.gz" style="display:block;max-width:100%" />
+      </label>
+      <label style="display:block;margin-top:5px">Mesh level28:7 — groupe 48
+        <input id="private-mesh7" type="file" accept=".obj,.gz,.obj.gz" style="display:block;max-width:100%" />
+      </label>
+      <output id="private-mesh-status" aria-live="polite" style="display:block;margin-top:6px">Aucun mesh local chargé ; affichage des proxies.</output>
+    </aside>
     <div id="error" role="alert" hidden></div>
   </main>
   <script type="module" src="./src/main.js"></script>

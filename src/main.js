@@ -2,6 +2,7 @@ import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
 import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
+import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -27,6 +28,39 @@ const syntheticManifestEnabled = new URLSearchParams(window.location.search).get
 const syntheticManifest = syntheticManifestEnabled ? buildSyntheticManifest() : null;
 const containersPreviewEnabled = new URLSearchParams(window.location.search).get('scene') === 'containers';
 const visualPreviewEnabled = syntheticManifestEnabled || containersPreviewEnabled;
+// These slots are populated ONLY from user-selected local files in the browser.
+// Nothing is fetched or persisted, and no original game asset is in the repo.
+const localNativeMeshes = new Set();
+const localMeshPreviewSpec = Object.freeze([
+  { inputId: 'private-mesh6', slot: 'mesh6', groupIndex: 47,
+    proxyId: 'cargo-22', center: [17.45, 2.575, 13.975] },
+  { inputId: 'private-mesh7', slot: 'mesh7', groupIndex: 48,
+    proxyId: 'cargo-upper', center: [17.475, 5.725, 15.8] },
+]);
+if (containersPreviewEnabled) {
+  $('private-mesh-controls').hidden = false;
+  for (const spec of localMeshPreviewSpec) {
+    $(spec.inputId).addEventListener('change', async () => {
+      const file = $(spec.inputId).files?.[0];
+      if (!file) return;
+      const status = $('private-mesh-status');
+      status.textContent = 'Chargement local et vérification du groupe ' + spec.groupIndex + '…';
+      try {
+        const source = await readLocalObjFile(file);
+        const { mesh } = parseLocalObjGroup(source, {
+          groupIndex: spec.groupIndex, expectedTriangles: 1546, expectedCenter: spec.center,
+        });
+        renderer.replacePrivateMesh(spec.slot, mesh);
+        localNativeMeshes.add(spec.slot);
+        status.textContent = localNativeMeshes.size + '/2 meshes locaux · '
+          + mesh.triangleCount + ' triangles sur le groupe ' + spec.groupIndex
+          + ' · matériaux provisoires · pas de comparaison native';
+      } catch (error) {
+        status.textContent = 'Échec ' + spec.slot + ' : ' + error.message;
+      }
+    });
+  }
+}
 if (syntheticManifestEnabled) document.title += ' — SYNTHETIC SCENE (NOT MCD)';
 if (containersPreviewEnabled) document.title += ' — CONTAINERS COLLIDER PROXY (NOT MCD GAMEPLAY)';
 let manifestStats = null;
@@ -492,7 +526,21 @@ function render() {
   if (containersPreviewEnabled) {
     manifestStats = drawContainersBuild28Preview(renderer, cam, {
       aspect: canvas.width / Math.max(1, canvas.height),
+      omitCargoIds: localMeshPreviewSpec
+        .filter((spec) => localNativeMeshes.has(spec.slot)).map((spec) => spec.proxyId),
     });
+    let privateIndexedDraws = 0;
+    for (const spec of localMeshPreviewSpec) {
+      if (localNativeMeshes.has(spec.slot) &&
+          renderer.drawPrivateMesh(spec.slot, spec.slot === 'mesh6' ? '#485761' : '#f6f8f9')) {
+        privateIndexedDraws++;
+      }
+    }
+    manifestStats = {
+      ...manifestStats,
+      privateIndexedDraws, localFilePreviewOnly: true,
+      nativeMeshMatch: false, // no runtime material, camera or pixel parity established
+    };
   }
   if (syntheticManifest) {
     manifestStats = drawGeneratedManifest(renderer, syntheticManifest, cam, {
@@ -531,7 +579,10 @@ function frame(now) {
       activeScreen: state.screen, samples: sorted.length,
       p95FrameMs: at(.95), fpsAtP95FrameMs: 1000 / at(.95),
       p95Fps: 1000 / at(.05),
-      generatedManifest: manifestStats, totalWebGLDrawCalls: renderer.getDrawCalls(),
+      generatedManifest: manifestStats,
+      locallyLoadedSourceGroups: localNativeMeshes.size,
+      localFilesStayInBrowser: true,
+      totalWebGLDrawCalls: renderer.getDrawCalls(),
       browserMeasured: true,
     });
   }

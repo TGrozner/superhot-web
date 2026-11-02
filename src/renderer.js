@@ -1,4 +1,5 @@
 import { cameraAxes } from './math.js';
+import { uploadIndexedMesh } from './render/gpu-mesh.js';
 import { createGeneratedLighting, lightingUniformPacket } from './render/lighting-model.js';
 
 // Legacy Web fog is generated, not MCD. SH-13 owns the source-qualified lighting model.
@@ -192,6 +193,10 @@ export function createRenderer(canvas) {
   gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
   gl.disable(gl.CULL_FACE);
   const colorCache=new Map();
+  const privateMeshes = new Map();
+  // No asset bytes are included or fetched: uploads originate from local File inputs.
+  const identity4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  const identity3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
   let drawCalls=0;
   function begin(camera, { fogStrength = GENERATED_FOG_STRENGTH } = {}) {
     if (!Number.isFinite(fogStrength) || fogStrength < 0 || fogStrength > 1) {
@@ -242,8 +247,29 @@ export function createRenderer(canvas) {
     gl.drawArrays(gl.TRIANGLES,0,obj.count);
     drawCalls++;
   }
+  function replacePrivateMesh(slot, sourceMesh) {
+    if (slot !== 'mesh6' && slot !== 'mesh7') throw new RangeError('Unsupported private mesh slot');
+    // Upload first, then dispose previous mesh: failed loads do not destroy preview.
+    const uploaded = uploadIndexedMesh(gl, program, sourceMesh);
+    privateMeshes.get(slot)?.dispose();
+    privateMeshes.set(slot, uploaded);
+    return { triangles: uploaded.triangleCount, bounds: uploaded.bounds };
+  }
+  function drawPrivateMesh(slot, color) {
+    const mesh = privateMeshes.get(slot);
+    if (!mesh) return false;
+    if (!colorCache.has(color)) colorCache.set(color, colorToRgba(color));
+    const rgba = colorCache.get(color);
+    gl.uniform1i(uniforms.uUseAffine, 1);
+    gl.uniformMatrix4fv(uniforms.uAffineModel, false, identity4);
+    gl.uniformMatrix3fv(uniforms.uAffineNormal, false, identity3);
+    gl.uniform4f(uniforms.uColor, rgba[0], rgba[1], rgba[2], 1);
+    mesh.draw();
+    drawCalls++;
+    return true;
+  }
   return {
-    begin,draw,affineBox,
+    begin,draw,affineBox,replacePrivateMesh,drawPrivateMesh,
     box: (...args)=>draw('box',...args),
     shard: (...args)=>draw('shard',...args),
     getDrawCalls:()=>drawCalls,
