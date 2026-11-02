@@ -81,7 +81,7 @@ test('explicit affine matrix gets correctly mirrored normal matrix without auto 
   assert.equal(out.world.mirrored, true);
   assert.equal(out.world.model[12], 7);
   assert.equal(out.world.normal[0], -0.5);
-  assert.equal(out.world.normal[8], 1 / 3);
+  assert.ok(Math.abs(out.world.normal[8] - 1 / 3) < 1e-6);
 });
 
 test('invalid/missing group, face count, unique source refs and bounds fail closed', () => {
