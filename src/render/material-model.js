@@ -416,3 +416,47 @@ export function enemyRedCrystalDiagnosticWebPacket(rendererPathId) {
     webAlphaOverride:'opaque-diagnostic-only-not-_Alpha-mapping',
   });
 }
+
+
+/**
+ * Diagnostic-only decoding boundary for the exact PRIVATE RGB24 mip chain:
+ * resources.assets:248 / resources.assets.resS offset59500780 size65535.
+ * No asset bytes are distributed by this module. SH-05 may pass an exact
+ * user-selected File.slice(start,end) ArrayBuffer to this pure function.
+ *
+ * First 128x128xRGB24 bytes form mip0 according to the serialized format and
+ * exact 65535-byte eight-mip size. Byte order is preserved RGB->RGBA with
+ * alpha 255; no gamma conversion, shader replication or vertical flip is
+ * applied. UV orientation, filtering, sampler state, postprocessing and
+ * native pixel colors remain unverified. SH-05 must label the experiment.
+ */
+export function decodeContainersConcreteRgb24Mip0(streamBytes) {
+  const meta=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeStream;
+  const bytes=streamBytes instanceof Uint8Array?streamBytes:
+    streamBytes instanceof ArrayBuffer?new Uint8Array(streamBytes):null;
+  if(!bytes) throw new TypeError('Native diffuse bytes must be Uint8Array or ArrayBuffer');
+  if(bytes.byteLength!==meta.sourceByteCount){
+    throw new RangeError('Exact source RGB24 eight-mip byte range required');
+  }
+  if(meta.unityFormatId!==3||meta.width!==128||meta.height!==128||meta.mipCount!==8){
+    throw new Error('Unrecognized serialized RGB24 layout');
+  }
+  const count=meta.width*meta.height;
+  const rgba=new Uint8Array(count*4);
+  for(let i=0;i<count;i++){
+    rgba[4*i]=bytes[3*i];
+    rgba[4*i+1]=bytes[3*i+1];
+    rgba[4*i+2]=bytes[3*i+2];
+    rgba[4*i+3]=255; // RGB24 has no source alpha; NOT material._Alpha.
+  }
+  return Object.freeze({
+    width:meta.width,height:meta.height,pixelsRgba:rgba,
+    sourceTexture:Object.freeze({owner:meta.owner,pathId:meta.pathId}),
+    uvScale:CONTAINERS_CONCRETE_SOURCE.mainTexture.uvScale,
+    uvOffset:CONTAINERS_CONCRETE_SOURCE.mainTexture.uvOffset,
+    provenance:'private-file-RGB24-mip0-EXPERIMENT-not-Unity-shader-parity',
+    sourceMipsIncludedInInput:meta.mipCount,mipsDecoded:1,
+    originVerified:false,colorTransferVerified:false,
+    shaderPassVerified:false,lightmapSamplingEnabled:false,
+  });
+}
