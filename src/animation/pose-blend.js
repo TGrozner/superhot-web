@@ -12,20 +12,28 @@ function requireFinite(value, name) {
   }
 }
 
-function requireVector(value, name, axes) {
+function readVector(value, name, axes) {
   if (!value || typeof value !== 'object') {
     throw new TypeError(`${name} must be an object`);
   }
-  for (const axis of axes) requireFinite(value[axis], `${name}.${axis}`);
+  // Read each caller-supplied value exactly once. Otherwise mutable getters
+  // can return a different value during blending than during validation.
+  const snapshot = {};
+  for (const axis of axes) {
+    const component = value[axis];
+    requireFinite(component, `${name}.${axis}`);
+    snapshot[axis] = component;
+  }
+  return snapshot;
 }
 
 function normalizeQuaternion(rotation, name) {
-  requireVector(rotation, name, ROTATION_AXES);
-  const norm = Math.hypot(rotation.x, rotation.y, rotation.z, rotation.w);
+  const snapshot = readVector(rotation, name, ROTATION_AXES);
+  const norm = Math.hypot(...ROTATION_AXES.map((axis) => snapshot[axis]));
   if (!Number.isFinite(norm) || norm <= 0) {
     throw new RangeError(`${name} must have a finite, nonzero norm`);
   }
-  return ROTATION_AXES.map((axis) => rotation[axis] / norm);
+  return ROTATION_AXES.map((axis) => snapshot[axis] / norm);
 }
 
 function readPose(pose, label) {
@@ -34,13 +42,17 @@ function readPose(pose, label) {
   }
   const result = new Map();
   for (const [index, bone] of pose.entries()) {
-    if (!bone || typeof bone !== 'object' || typeof bone.id !== 'string' || bone.id.length === 0) {
+    if (!bone || typeof bone !== 'object') {
       throw new TypeError(`${label}[${index}] must have a non-empty string id`);
     }
-    if (result.has(bone.id)) throw new RangeError(`${label} has duplicate bone id ${bone.id}`);
-    requireVector(bone.position, `${label}[${index}].position`, AXES);
+    const id = bone.id;
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new TypeError(`${label}[${index}] must have a non-empty string id`);
+    }
+    if (result.has(id)) throw new RangeError(`${label} has duplicate bone id ${id}`);
+    const position = readVector(bone.position, `${label}[${index}].position`, AXES);
     const rotation = normalizeQuaternion(bone.rotation, `${label}[${index}].rotation`);
-    result.set(bone.id, { position: bone.position, rotation });
+    result.set(id, { position, rotation });
   }
   return result;
 }
