@@ -1,4 +1,4 @@
-import { createContainersBuild28DrawPlan, createContainersBuild28Nodes } from './scenes/containers-build28.js';
+import { CONTAINERS_BUILD28_HULLS, createContainersBuild28DrawPlan, createContainersBuild28Nodes } from './scenes/containers-build28.js';
 import { buildSceneGraph } from './scenes/graph.js';
 import { planSceneDraws } from './visual/scene-plan.js';
 
@@ -58,6 +58,30 @@ export const LEVELS = [
     ],
   },
 ];
+
+/** SH-05 temporary playable spawn; intentionally NOT a native Containers player pose. */
+export const CONTAINERS_WEB_FALLBACK_SPAWN = Object.freeze({
+  x: 11, y: 2.65, z: 28, yaw: 0, pitch: -0.05,
+});
+
+/** Source-derived serialized BoxCollider envelopes, NOT recovered PhysX broadphase. */
+export function buildContainersCollisionSolids() {
+  return CONTAINERS_BUILD28_HULLS.map(({ id, center: [x, y, z], size: [w, h, d] }) => ({
+    id, x, y, z, w, h, d,
+    min: { x: x - w / 2, y: y - h / 2, z: z - d / 2 },
+    max: { x: x + w / 2, y: y + h / 2, z: z + d / 2 },
+    provenance: 'serialized-level28-BoxCollider-AABB-Web-fallback',
+  }));
+}
+
+/** Upper stacked cargos must not become invisible floor-level 2D walls. */
+export function containersWalkSolids(solids, eyeY) {
+  if (!Array.isArray(solids) || !Number.isFinite(eyeY)) {
+    throw new TypeError('Expected collision solids and finite camera eye height');
+  }
+  const feet = eyeY - 1.65, head = eyeY + 0.10; // temporary Web body, NOT native capsule
+  return solids.filter(solid => solid.min.y <= head && solid.max.y >= feet);
+}
 
 const WALL_COLOR = '#dee5e9';
 export const buildStaticGeometry = (level) => {
@@ -189,7 +213,7 @@ export function drawContainersBuild28Preview(renderer, camera, options = {}) {
   const { omitCargoIds = [], ...planOptions } = options;
   const omitted = new Set(omitCargoIds);
   for (const id of omitted) {
-    if (id !== 'cargo-22' && id !== 'cargo-upper' && id !== 'cargo-7') throw new RangeError('Unknown source-matched cargo proxy');
+    if (!CONTAINERS_BUILD28_HULLS.some(hull => hull.id === id)) throw new RangeError('Unknown source-matched cargo proxy');
   }
   const plan = createContainersBuild28DrawPlan(camera, planOptions);
   const graphNodes = createContainersBuild28Nodes();
