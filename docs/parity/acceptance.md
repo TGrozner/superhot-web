@@ -1,5 +1,63 @@
 # SH-10 — MCD acceptance matrix (source-qualified, not 1:1)
 
+## P0 — per-frame camera/projection gate, before claiming a visible delta (2 Nov 2026)
+
+The comparison previously checked **only top-level** camera, scene and FOV.
+That can incorrectly call a changing/shifting camera a *renderer silhouette or
+lighting difference*, even if the PNG bytes are valid. With two frames, a
+single camera stamp is insufficient. The new fail-closed preflight
+[`scripts/acceptance-frame-alignment.mjs`](../../scripts/acceptance-frame-alignment.mjs)
+is called by `compare` **before** reading/score-comparing private PNGs.
+This is a pixel-comparison **validity** improvement, not a native finding.
+
+Each Web frame already carries the **observed** `renderedCameraBefore/After`
+and `renderedProjectionBefore/After` from the real Web render snapshots
+bracketing its CDP screenshot. For **each** matched original MCD PNG, its
+PRIVATE operator manifest must now separately provide:
+
+- `frames[i].camera`: numerical `x,y,z,yaw,pitch` plus
+  `source:'RUNTIME_OBSERVED'`; an asset's serialized starting pose is **not**
+  an active screenshot camera.
+- `frames[i].projection`: actual camera `verticalScale,near,far,aspect`
+  plus `source:'RUNTIME_OBSERVED'`; serialized FOV 60 from research #126
+  does **not** by itself satisfy the requirement.
+- Operator thresholds must additionally specify finite nonnegative
+  `projectionNear`, `projectionFar` and `projectionAspect`, along with
+  `cameraPosition` (world units), `cameraAngle` (radians) and `cameraFov`
+  (degrees). **No defaults** or invented native tolerances.
+
+The preflight compares *both sides* of each Web screenshot bracket to the
+same native-frame observation, checks bracket drift, FOV derived from
+projection verticalScale, clipping planes and aspect against the declared
+viewport. Circular yaw distance avoids a false 2π-angle jump.
+Missing active original camera/projection/threshold => `INCONNU`, not
+`MEASURED_VISIBLE_GAP`. Mismatched second-frame pose, FOV or projection =>
+`NON_COMPARABLE_CAMERA_POSE`, **not** an asserted renderer mismatch.
+Only verified frame alignment allows the existing ROI position/edge,
+chroma/luminance and two-frame time metrics. Even passing all thresholds
+returns `OPERATOR_THRESHOLDS_MET_NOT_CERTIFIED`, **never** native 1:1.
+
+**Focused real Node validation:** 7/7 synthetic frame-alignment cases passed
+in an isolated Linux sandbox (no original executable/asset), including
+second-frame camera drift, during-screenshot drift, near/far/FOV/aspect,
+unobserved native projection, missing tolerances and yaw wrap. This
+does not validate Chromium, the integrated Node suite, or native/Web capture.
+Existing PNG integrity tests now supply *synthetic* per-frame metadata and
+assert the comparison refuses camera mismatch / serialized-only projection.
+
+**Updated 3 first VISIBLE convergence gates to SH-05 (#5):** (1) SH-04/05/15
+provide a true original **active frame-specific** scene, camera, FOV, clip
+planes, viewport, phase and Web render brackets; (2) SH-05/12/14/15 obtain
+private original+Web Containers images at those two aligned instants and
+measure missing objects, position and edges; (3) SH-01/02/03/05/13/15
+measure RGB/luma/material/light/time evolution under an identically
+recorded stimulus. The generated Web shader/directional light and its
+Web gameplay clock/colliders remain **unmatched to executed native MCD**.
+Do not create an original-reference manifest from the recovered asset FOV,
+nor treat a mesh/skin draw receipt as a native-gameplay comparison.
+No new private corpus query, no CI red gate, no shared runtime edits.
+
+
 ## P0 UPDATE — full source Containers now on main (SH-05 a30a575, 2026-11-02)
 
 **This section supersedes the fallback-only 6-cargo gate immediately below for the
