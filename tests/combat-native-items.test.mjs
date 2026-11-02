@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem,
   advanceNativeItems, nativeItemDraws, getNativeItemPosition } from '../src/combat/native-items.js';
 import { prepareNativeCollision } from '../src/scenes/native-collision.js';
+import { advanceGunPickupShardRuntime } from '../src/vfx/gun-pickup-shatter.js';
 
 // Synthetic affine fixtures, not original game meshes, prefab data or exported scenes.
 const matrix = (x = 0, y = 0, z = 0) => [1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1];
