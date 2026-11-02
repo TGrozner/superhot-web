@@ -9,7 +9,7 @@ const DOJO_RIG = Object.freeze({
   rendererPathId: 6378, weaponBoneTransformPathId: 2896,
 });
 
-function requireDojoRig(rig, loaded) {
+function requireDojoRig(rig, loaded, weaponBoneIndex = loaded.weaponAttachment?.bone) {
   if (!rig || typeof rig !== 'object' || Array.isArray(rig)) {
     throw new TypeError('Dojo first-person rig identity must be explicit');
   }
@@ -18,8 +18,9 @@ function requireDojoRig(rig, loaded) {
       throw new Error('Dojo first-person source identity mismatch: ' + key);
     }
   }
-  if (!loaded.weaponAttachment || typeof rig.weaponBoneName !== 'string' ||
-      rig.weaponBoneName !== loaded.bones[loaded.weaponAttachment.bone].name) {
+  if (!Number.isInteger(weaponBoneIndex) || weaponBoneIndex < 0 ||
+      weaponBoneIndex >= loaded.bones.length || typeof rig.weaponBoneName !== 'string' ||
+      rig.weaponBoneName !== loaded.bones[weaponBoneIndex].name) {
     throw new Error('Dojo weapon-bone socket must match a sampled hands bone');
   }
   if (typeof rig.provenance !== 'string' || !rig.provenance.length) {
@@ -71,15 +72,33 @@ function affine(value, label) {
  * unchanged. This is not a reconstructed source hands material.
  */
 export function createDojoPlayerAnimationPass(gl, {
-  sourcePackage, rig, clips, lighting,
+  sourcePackage, playerPacket = null, rig, clips, lighting,
 } = {}) {
-  const loaded = loadNativeSkinPackage(sourcePackage);
-  requireDojoRig(rig, loaded);
+  // The archived Dojo player-animation extraction has packet.skin and
+  // packet.weaponBone, NOT skin.weaponAttachment (the EnemyMerged format).
+  // Keep the older direct attachment path for existing source packages.
+  if (playerPacket !== null && (
+      playerPacket?.schemaVersion !== 1 || !playerPacket.skin ||
+      !Array.isArray(playerPacket.states) || !playerPacket.profiles ||
+      !Number.isInteger(playerPacket.weaponBone))) {
+    throw new TypeError('Original Dojo scene playerAnimation packet required');
+  }
+  if (playerPacket !== null && sourcePackage != null && sourcePackage !== playerPacket.skin) {
+    throw new TypeError('Dojo player skin package mismatch');
+  }
+  const sourceSkin = playerPacket?.skin ?? sourcePackage;
+  const loaded = loadNativeSkinPackage(sourceSkin);
+  const weaponBoneIndex = playerPacket?.weaponBone ?? loaded.weaponAttachment?.bone;
+  if (playerPacket && loaded.weaponAttachment &&
+      loaded.weaponAttachment.bone !== playerPacket.weaponBone) {
+    throw new Error('Conflicting Dojo source weapon-bone attachments');
+  }
+  requireDojoRig(rig, loaded, weaponBoneIndex);
   const names = sourceClipBindings(clips, loaded);
 
   const diagnosticPackage = loaded.mesh.hasSourceUV0
-    ? { ...sourcePackage, mesh: { ...sourcePackage.mesh, uv0: undefined } }
-    : sourcePackage;
+    ? { ...sourceSkin, mesh: { ...sourceSkin.mesh, uv0: undefined } }
+    : sourceSkin;
   const pass = createNativeSkinPass(gl, diagnosticPackage, { lighting });
   let held;
   let swing;
@@ -91,34 +110,84 @@ export function createDojoPlayerAnimationPass(gl, {
     throw error;
   }
 
+  const sourceInstances = new Map([
+    [names.held + '/loop', held],
+    [names.swing + '/clamp', swing],
+  ]);
+  function sourceInstance(clip, playback) {
+    const key = clip + '/' + playback;
+    let instance = sourceInstances.get(key);
+    if (!instance) {
+      instance = pass.createInstance({ clip, playback });
+      sourceInstances.set(key, instance);
+    }
+    return instance;
+  }
+
   let disposed = false;
   function draw({
     heldItem, phase, sourceClipTime, modelMatrix, viewProjection,
     cameraPosition, shaderTime, color, katanaMeshLocalMatrix = null,
+    descriptor = null,
   } = {}) {
     if (disposed) throw new Error('Disposed Dojo player animation pass');
     // Dojo's source pistol has no held hands. Do not add fabricated hands.
     if (heldItem?.isKatana !== true) return null;
-    if (phase !== 'held' && phase !== 'swing') {
-      throw new TypeError('Dojo katana phase must be held or swing');
-    }
-    if (!Number.isFinite(sourceClipTime) || sourceClipTime < 0) {
-      throw new TypeError('Dojo clip time must be nonnegative source clip seconds');
+    let instance;
+    let sampleTime;
+    let transition = null;
+    if (descriptor === null) {
+      if (phase !== 'held' && phase !== 'swing') {
+        throw new TypeError('Dojo katana phase must be held or swing');
+      }
+      if (!Number.isFinite(sourceClipTime) || sourceClipTime < 0) {
+        throw new TypeError('Dojo clip time must be nonnegative source clip seconds');
+      }
+      instance = phase === 'held' ? held : swing;
+      sampleTime = sourceClipTime;
+    } else {
+      // Accept ONLY source-controller sample descriptors accompanied by the
+      // recovered packet; never derive a fictitious animation from attack delay.
+      if (!playerPacket) throw new TypeError('Dojo source pose descriptor requires playerAnimation packet');
+      if (!descriptor || typeof descriptor !== 'object' ||
+          typeof descriptor.clip !== 'string' ||
+          (descriptor.playback !== 'loop' && descriptor.playback !== 'clamp') ||
+          !Number.isFinite(descriptor.time) || descriptor.time < 0) {
+        throw new TypeError('Dojo source pose descriptor requires clip, playback and nonnegative time');
+      }
+      instance = sourceInstance(descriptor.clip, descriptor.playback);
+      sampleTime = descriptor.time;
+      if (descriptor.transition != null) {
+        const from = descriptor.transition;
+        if (!from || typeof from.fromClip !== 'string' ||
+            (from.fromPlayback !== 'loop' && from.fromPlayback !== 'clamp') ||
+            !Number.isFinite(from.fromTime) || !Number.isFinite(from.elapsed) ||
+            from.elapsed < 0) {
+          throw new TypeError('Dojo source transition requires fromClip/fromTime/fromPlayback/elapsed');
+        }
+        transition = {
+          from: sourceInstance(from.fromClip, from.fromPlayback),
+          fromTime: from.fromTime, elapsed: from.elapsed,
+        };
+      }
     }
     // No camera-relative magic offsets: owner SH-05 supplies the source
     // first-person renderer model matrix, same one used for both frames.
     affine(modelMatrix, 'hands modelMatrix');
     if (katanaMeshLocalMatrix != null) affine(katanaMeshLocalMatrix, 'katana mesh localMatrix');
     const report = pass.draw({
-      instance: phase === 'held' ? held : swing,
-      time: sourceClipTime, modelMatrix, viewProjection,
+      instance, time: sampleTime, modelMatrix, viewProjection, transition,
       cameraPosition, shaderTime, color,
     });
-    if (!report.weaponAttachmentMatrix) {
-      throw new Error('Dojo sampled weapon-bone socket is unavailable');
-    }
-    // The skin pass reuses its scratch array on the next draw. Copy now.
-    const weaponBoneWorldMatrix = new Float32Array(report.weaponAttachmentMatrix);
+    // A real scene playerAnimation packet supplies weaponBone separately.
+    // This is the global posed bone, NOT a skin palette/inverse-bind matrix.
+    const socket = report.weaponAttachmentMatrix ?? (playerPacket
+      ? multiplyMatrices(modelMatrix, report.boneModelMatrices.subarray(
+        weaponBoneIndex * 16, weaponBoneIndex * 16 + 16))
+      : null);
+    if (!socket) throw new Error('Dojo sampled weapon-bone socket is unavailable');
+    // The skin pass reuses its scratch arrays on the next draw. Copy now.
+    const weaponBoneWorldMatrix = new Float32Array(socket);
     const katanaModelMatrix = katanaMeshLocalMatrix == null ? null
       : new Float32Array(multiplyMatrices(weaponBoneWorldMatrix, katanaMeshLocalMatrix));
 
