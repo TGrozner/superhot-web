@@ -481,13 +481,26 @@ The PRIVATE existing artifacts were reused without a new bridge request:
   run `41463176601`, artifact `13148839109`,
   `managed/Assembly-CSharp/AudioManager.cs:579–612`,
   UTF-8 excerpt SHA-256 `0f5ace43712f182a9961ce6088bfc50f03580d7c433a28bae5a9f189b7be0b89`.
+- **NEW** Research [#120](https://github.com/TGrozner/superhot-research/issues/120),
+  run `41470731503`, artifact `13154468332`,
+  `AudioGameObjectResources.cs:1–46`, excerpt SHA-256
+  `2c5a4f14fe7747063cd86b4a402d19550d5a7cf81f8cdd471794753046255ef5`.
+- **NEW** Research [#121](https://github.com/TGrozner/superhot-research/issues/121),
+  run `41470858938`, artifact `13154858152`,
+  `AudioPrefab.cs:1–6`, excerpt SHA-256
+  `783adfce973e033b8c22b27a82eae8112080d023277423d1289c76444fbd5112`.
 
 **Native call chain:** `PejAiBody.Kill` immediately returns if
 `controller.IsDead` at entry. On the remaining path it invokes
 `controller.Kill` and then requests
 `AudioManager.PlayPrefabSound(AudioGameObjectResources.EnemyShatter, …)`
 at the enemy's world position with **Y+1.5 Unity units**. This is the
-**`AudioPrefab` overload**, not `PlayClip(AudioClip,…)`. Consequently the
+**`AudioPrefab` overload**, not `PlayClip(AudioClip,…)`. The native field
+`AudioGameObjectResources.EnemyShatter` is constructed with **Name
+`EnemyShatter` and declared PoolSize `5`**; the `AudioPrefab` constructor
+confirms the two argument meanings. This is a **declaration**, not proof that
+the five pooled audio objects or their clips exist in a running Containers
+scene. Consequently the
 `PlayClip` null-channel / matching-clip cooldown rules in the previous section
 **must not be copied** to this request.
 
@@ -505,25 +518,27 @@ waveform or audible result has been directly observed.
 
 **PROUVÉ — isolated Web plan:** `src/sound/mcd-prefab-sound-intent.js`
 exposes `planMcdAudioPrefabPlay` and the Kill call-site-specific
-`planMcdBodyKillShatterPrefab`. They require external facts for
-`AudioPrefab.Name`, pool existence, pooled source reuse and previous pitch.
+`planMcdBodyKillShatterPrefab`. The generic overload requires the caller-supplied `AudioPrefab.Name`;
+the body-Kill path now uses the **source-proven** `EnemyShatter` name
+automatically. Both require external runtime facts for pool existence,
+pooled source reuse and previous pitch.
 No sound is emitted, no original prefab is stored and no guessed MCD
-clip is selected. `tests/sound-mcd-prefab-intent.test.mjs` covers ten
+clip is selected. `tests/sound-mcd-prefab-intent.test.mjs` covers eleven
 source-bounded cases; finite-number checks and immutable output are Web
 boundary policy, not claims about managed code exception behavior.
 
 **INCONNU — blocking actual sound:** whether the currently shootable
 Containers Web enemy goes through the native `PejAiBody.Kill` route,
-which `AudioPrefab.Name` is bound to `EnemyShatter`, whether that pool is
-populated at runtime, the source's underlying clips, mixer, attenuation,
+whether the source-declared `EnemyShatter` pool is
+actually populated at runtime, the source's underlying clips, mixer, attenuation,
 browser AudioContext readiness, or any speaker output. A requested
 `AudioSource.Play` is **not** a measured audible sound. No native/browser
 paired trace, source media, or commercial asset is published.
 
 **SH-05 integration handoff:** wire only when the body-Kill path is
 source-qualified (do not assume every prototype `killEnemy` means
-`PejAiBody.Kill`). Feed the enemy's real source position and resolved
-prefab/pool facts; ignore `null` or `empty-effect` outcomes. A permitted
+`PejAiBody.Kill`). Feed the enemy's real source position and observed
+pool state; ignore `null` or `empty-effect` outcomes. A permitted
 replacement may call an explicitly labeled **generated Web shatter** cue,
 but that requires a user-resumed AudioContext and an actual non-silent
 browser waveform/speaker verification before claiming audibility. Continue
