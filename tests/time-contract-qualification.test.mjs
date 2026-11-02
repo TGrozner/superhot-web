@@ -8,6 +8,8 @@ const evidence = JSON.parse(await readFile(
 ));
 
 const sha256 = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+const commitSha = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
+const nonBlank = (value) => typeof value === 'string' && value.trim().length > 0;
 const validTrace = (trace) => trace?.unit === 'seconds'
   && typeof trace.valueUnit === 'string' && trace.valueUnit.length > 0
   && Array.isArray(trace.samples)
@@ -38,22 +40,27 @@ const assessComparisonReadiness = ({ declaration, method, binding, nativeTrace, 
   if (declaration?.classification !== 'PROUVE' || declaration.runtimeValidated !== false) {
     missing.push('primary-declaration');
   }
-  if (!method?.type || !method?.name || !sha256(method.assemblySha256)
+  // Source identity is a consistency check, not evidence the method was executed.
+  if (!nonBlank(method?.type) || !nonBlank(method?.name)
+    || !nonBlank(method?.sourcePath)
+    || method.assemblySha256 !== evidence.secondaryReport.source.assemblyCSharpSha256
     || !Array.isArray(method.sourceLines) || method.sourceLines.length !== 2
-    || !method.sourceLines.every(Number.isInteger)) {
+    || !method.sourceLines.every(Number.isInteger)
+    || method.sourceLines[0] < 1 || method.sourceLines[1] < method.sourceLines[0]) {
     missing.push('method-body');
   }
-  if (!binding?.owner || !/^-?\d+$/.test(String(binding.pathId ?? ''))
-    || !binding?.scene) {
+  if (!nonBlank(binding?.owner) || !/^-?\d+$/.test(String(binding.pathId ?? ''))
+    || !nonBlank(binding?.scene)) {
     missing.push('active-scene-binding');
   }
   const nativeWellFormed = validTrace(nativeTrace);
   const webWellFormed = validTrace(webTrace);
-  if (!nativeWellFormed || !nativeTrace?.build || !nativeTrace?.scene
-    || nativeTrace.scene !== binding?.scene) {
+  if (!nativeWellFormed
+    || nativeTrace?.build !== evidence.secondaryReport.source.steamBuild
+    || !nonBlank(nativeTrace?.scene) || nativeTrace.scene !== binding?.scene) {
     missing.push('native-measurement');
   }
-  if (!webWellFormed || !webTrace?.commit
+  if (!webWellFormed || !commitSha(webTrace?.commit)
     || nativeTrace?.valueUnit !== webTrace?.valueUnit) {
     missing.push('web-measurement');
   }
@@ -86,12 +93,14 @@ const comparisonFixture = () => {
     method: {
       type: 'TimeControl',
       name: 'FixedUpdate',
+      sourcePath: evidence.source.sourcePath,
       assemblySha256: evidence.secondaryReport.source.assemblyCSharpSha256,
       sourceLines: [25, 30],
     },
     binding: { scene: 'synthetic-scene', owner: 'synthetic-owner', pathId: '42' },
-    nativeTrace: { ...trace, build: 'synthetic-build', scene: 'synthetic-scene' },
-    webTrace: { ...trace, commit: 'synthetic-web-commit' },
+    // Fabricated metadata deliberately mimics build IDs: admission is NOT authentication.
+    nativeTrace: { ...trace, build: evidence.secondaryReport.source.steamBuild, scene: 'synthetic-scene' },
+    webTrace: { ...trace, commit: 'f'.repeat(40) },
   };
 };
 
@@ -127,7 +136,7 @@ test('TC-Q02: a secondary handoff is not a method body or a runtime sample', () 
 test('TC-Q03: uncalibrated or unordered timestamps cannot become an observation', () => {
   const candidate = {
     declaration,
-    method: { type: 'TimeControl', name: 'FixedUpdate', assemblySha256: evidence.secondaryReport.source.assemblyCSharpSha256, sourceLines: [25, 30] },
+    method: { type: 'TimeControl', name: 'FixedUpdate', sourcePath: evidence.source.sourcePath, assemblySha256: evidence.secondaryReport.source.assemblyCSharpSha256, sourceLines: [25, 30] },
     binding: { scene: 'fixture', owner: 'fixture', pathId: '42' },
     nativeTrace: { build: 'fixture', scene: 'fixture', unit: 'frames', valueUnit: 'seconds-per-step', samples: [{ t: 0, value: 60 }, { t: 1, value: 120 }] },
     webTrace: { commit: 'fixture', unit: 'seconds', valueUnit: 'seconds-per-step', samples: [{ t: 1, value: 60 }, { t: 1, value: 120 }] },
@@ -195,4 +204,62 @@ test('TC-Q09: event-relative recording windows must be aligned, even with valid 
     assert.deepEqual(result.missing, ['matched-time-window']);
     assert.equal(result.parityCertified, false);
   }
+});
+
+test('TC-Q10: reversed, zero or fractional source line ranges are not method evidence', () => {
+  for (const sourceLines of [[30, 25], [0, 25], [1.5, 25]]) {
+    const candidate = comparisonFixture();
+    candidate.method.sourceLines = sourceLines;
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['method-body']);
+    assert.equal(result.parityCertified, false);
+  }
+});
+
+test('TC-Q11: a plausible but different assembly SHA cannot identify the target method', () => {
+  const candidate = comparisonFixture();
+  candidate.method.assemblySha256 = '0'.repeat(64);
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['method-body']);
+  assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q12: source build and native trace build must agree', () => {
+  const candidate = comparisonFixture();
+  candidate.nativeTrace.build = 'different-MCD-build';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['native-measurement']);
+  assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q13: missing or blank method path cannot identify source lines', () => {
+  for (const sourcePath of [undefined, '   ']) {
+    const candidate = comparisonFixture();
+    candidate.method.sourcePath = sourcePath;
+    const result = assessComparisonReadiness(candidate);
+    assert.equal(result.status, 'INCONNU');
+    assert.deepEqual(result.missing, ['method-body']);
+    assert.equal(result.parityCertified, false);
+  }
+});
+
+test('TC-Q14: Web measurement requires a concrete commit SHA, not a free-form label', () => {
+  const candidate = comparisonFixture();
+  candidate.webTrace.commit = 'synthetic-web-commit';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['web-measurement']);
+  assert.equal(result.parityCertified, false);
+});
+
+test('TC-Q15: blank binding identity cannot designate the active scene component', () => {
+  const candidate = comparisonFixture();
+  candidate.binding.owner = '   ';
+  const result = assessComparisonReadiness(candidate);
+  assert.equal(result.status, 'INCONNU');
+  assert.deepEqual(result.missing, ['active-scene-binding']);
+  assert.equal(result.parityCertified, false);
 });
