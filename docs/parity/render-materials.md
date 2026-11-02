@@ -118,3 +118,47 @@ different colors, strengths, culling masks and baked/dynamic markings.
 Do **not** simply sum their intensities: transforms, layer masks, GI
 bakes, probes, actual active state and color pipeline are not established
 at runtime.
+
+
+## P0 source-addressable bindings for the two local Containers OBJ groups (2026-11-02)
+
+SH-13 re-opened **actual private `result.json`**, not workflow green status:
+
+- **#32**, artifact `13134550402`: `level28` MeshRenderer `7837` (GO336) and `7940` (GO459) each have one material reference **(fileID=5,pathID=3)**, are serialized enabled, receive shadows, cast-shadows enum 1, and have **`m_LightmapIndex=0`** with *different* `m_LightmapTilingOffset`.
+- **#68**, artifact `13136407658`: GO336→renderer7837→Mesh6 static submesh **47** and GO459→renderer7940→Mesh7 static submesh **48**, each **4,638 indices / 1,546 triangles**.
+- **#41**, artifact `13134492119`: scene LightmapSettings `level28:18622` serializes atlas slot 0 reference **(fileID=9,pathID=2)**, with no directional lightmap and no shadowmask. This is an *index+pointer*, NOT decoded lightmap texels, and does not prove visible runtime bake.
+- **#50**, artifact `13134569214`: rendering closure material/property inventory and owner-qualified links exist in the **private** corpus, but the specific `level28:7837 → (5,3) → target_owner` edge has not yet been retrieved. No material(3) under another scene may be relabeled as the cargo material.
+- **#67**, artifact `13136407236`: first 32 lines of the 37.8 MB `rendering/closure/rendering-links.json` proved the schema, but not the cargo's edge. **#72**, run `41439740776`, artifact `13137548726`, extends *only* to lines 33–1032. This read showed a distinct owner-qualified `level28` RenderSettings cubemap link but **not** renderer7837's material. No duplicate scan.
+
+Precise atlas placement for the first two source-matched cargo submeshes:
+
+| GO / renderer | Static mesh:group | Serialized UV2 lightmap ST (scaleX,scaleY,offsetX,offsetY) |
+| --- | --- | --- |
+| 336 / 7837 | level28:6 / 47 | (0.15870319306850433, 0.15870319306850433, 0.7985754013061523, -0.00025011622346937656) |
+| 459 / 7940 | level28:7 / 48 | (0.15870319306850433, 0.15870319306850433, -0.00025011622346937656, 0.6481873989105225) |
+
+**New concrete API, only owner files changed:**
+
+```js
+import {
+  containersBuild28CargoMaterialBinding,
+  createGeneratedMaterial, materialDrawPacket, transformLightmapUV,
+} from './render/material-model.js';
+
+const source = containersBuild28CargoMaterialBinding(7837);
+// source.geometry: {owner:'level28',meshPathId:6,staticSubmesh:47,indexCount:4638,triangleCount:1546}
+// source.material.materialReference: {fileId:5,pathId:3}, with owner UNKNOWN
+// source.material.lightmap: {index:0,tilingOffset:[...],textureResolved:false}
+// source.bakedLightmap.atlasReference: {fileId:9,pathId:2}; samplingAuthorized:false
+const diagnostic = materialDrawPacket(source.material,{
+  fallback:createGeneratedMaterial({id:'cargo-web-fallback',color:'#485761'}),
+}); // colorProvenance='generated-fallback-not-mcd'; lightmapSamplingEnabled=false
+```
+
+**SH-12 exact interface requirement (do not edit SH-12 files here):** source OBJ adapter `position/normal/uv0` does **not** expose the separately authored **UV2/lightmap channel**. The source mesh stream layout and actual UV2 bytes must be verified privately; provide source-qualified `uv2:Float32Array` aligned per rendered vertex, or fail closed on baked-lightmap sampling. `uv2Atlas=(uv2*ST.xy)+ST.zw` only after atlas `fileID9:pathID2` is owner-resolved, decoded, authorized and gamma/linear encoding verified. A Web material shader must distinguish albedo/uv0 from the baked texture/uv2. Do not infer UV2=UV0 or bake directly from `m_LightmapIndex`.
+
+**SH-05 integration contract (owner of `src/main.js`, `src/renderer.js`, `src/levels.js`):** on opt-in `?scene=containers` and **only** after exact local OBJ group acceptance, match each indexed draw to `source.geometry.meshPathId/staticSubmesh`. Keep `materialDrawPacket`'s explicit generated fallback; instrument `materialReference=(5,3)`, `nativeMaterialOwner=null`, `lightmapAtlas=(9,2)`, UV2+texels unavailable, rather than presenting a placeholder as the MCD material. Existing fog hook **already merged** via #95 (`fogStrength=0` for build28 only); do not rewrite it. SH-15 should capture paired same-camera frames and measure actual visual deltas once source material & bake are available.
+
+**Blocking native evidence:** full owner-qualified `level28:7837:m_Materials[0] → (5,3)` edge, linked `Material.m_Shader`, `m_SavedProperties` _Color/_MainTex with per-property scale/offset, all Texture2D payload locations/color encodings, `LightmapSettings` (9,2) resolved texture bytes, and UV2 buffer channel/stride. Exposure and runtime GI still UNKNOWN. Serialized `ambientIntensity=0` cannot override SH/probes/lightmap (do not force black), and four red type0 spotlights at intensity30 have layer mask 256 only (do not apply indiscriminately to cargo).
+
+This change is a **real, joined source identity and lightmap-placement contract**, not a measured appearance fix: no new native/Web screenshot or proof of 1:1.
