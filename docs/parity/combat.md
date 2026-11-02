@@ -748,3 +748,66 @@ réfutable consiste à capturer deux bullets d'une même arme, puis de
 deux armes distinctes, relever les deux `parentWeaponId`, vérifier les
 demandes `SliceInHalf`, et refaire le même ordre de contacts et de
 destruction dans le Web. Aucun asset/code décompilé n'est publié.
+
+## SH-03 — PejAiController visibility: source-backed, not sight-by-distance (2026-11-02)
+
+**PROUVÉ — méthode C# statique, PAS frame de gameplay exécutée.**
+MCD Steam build `20299547`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Relectures PRIVÉES bornées via la passerelle, sans copie du C# dans ce dépôt :
+[research #134](https://github.com/TGrozner/superhot-research/issues/134),
+artifact `13164851813`, `PejAiController.cs:4383–4458`,
+SHA-256 du texte `aa08174c1bcc58da0d9217ea8cdedafb7e9eadd4b96f363031fec6391e090233` ;
+[research #135](https://github.com/TGrozner/superhot-research/issues/135),
+artifact `13164687081`, `PejAiController.cs:4459–4550`,
+SHA-256 `d87e07c3e2f12495d3be78abdb06a1fd4b82d4e831c784fe99969c8c759e15a9`.
+Contraste [research #133](https://github.com/TGrozner/superhot-research/issues/133),
+artifact `13163638635`, `AIEnvironment.cs:219–245`,
+SHA-256 `9791f6e263c9083ca24ab20c3189cae7d04e4ecf133a66c576ad1881af3877b1`.
+
+**Point de confusion évité :** `AIEnvironment.IsPlayerInSight` raycaste
+pour la navigation/probes ; ce n'est **pas** la méthode de visibilité du
+contrôleur qui viserait le joueur. `PejAiController.CanSeeTarget` exécute
+`SphereCastNonAlloc` rayon **0,2** depuis les yeux, le long de la direction
+normalisée vers la cible, limité par `sightDistance` et
+`eyesightLayerMask`. Ses propres colliders passent temporairement en layer
+2, puis retrouvent leur couche. Sur plusieurs hits, la méthode choisit
+**la distance minimale**, pas le premier ordre du buffer. Le hit doit être
+la transform cible exacte, ou un `PejAiBodyPart` dont le contrôleur pointe
+sur cette transform quand `isTargetEnemy` est vrai. Une collision sur un
+simple enfant du joueur n'est **pas** qualifiée dans ce chemin. Hors mode
+`disregardSightAngle`, l'angle avec `_eyes.forward` doit satisfaire à la
+fois dot>=0 et angle<=`SightAngle`. Avec zéro hit, la méthode renvoie
+false **avant** d'écrire le cache. Si `cache` est activé, un résultat
+encore frais est réutilisé selon `Time.timeSinceLevelLoad` et
+`CanSeeCacheRefreshTime` (expiration strictement `>`).
+
+**PROUVÉ — wrappers distincts :** `CanSeePlayer` rafraîchit
+`_currentCanSeeAfterGlow` lors d'une visibilité directe, et sinon utilise
+son compte à rebours positif ; `CanSeePlayer360` peut réutiliser cet
+afterglow sans le réinitialiser. Les variantes pour hotswitch ont d'autres
+gardes : pas d'afterglow, et seul le mode non-360 admet le bypass spécifique
+à l'AddictMind en hotswitch. Le fait qu'une méthode renvoie true **ne
+prouve pas un tir** : l'arbre de comportement, le readiness de l'arme,
+l'animation et l'IK restent des étapes séparées.
+
+**Livraison Web (générique, PAS PhysX)** :
+`src/combat/ai-visibility.js` expose un planificateur de cast et un
+classificateur des hits source-qualifiés, plus la décision d'afterglow.
+L'absence de vrai SphereCast renvoie `visible:null`, jamais un
+fallback inventé. `tests/combat-ai-visibility.test.mjs` couvre notamment
+mur plus proche que joueur, cible/partie corporelle, angle, 360, cache,
+afterglow et valeurs manquantes. Ces fixtures **synthétiques** ne sont pas
+des traces de Containers.
+
+**INCONNU et bloqueur SH-05 :** objets `Player`/`_eyes` réellement
+instanciés dans Containers, `sightDistance`, `SightAngle`,
+`eyesightLayerMask`, `CanSeeCacheRefreshTime`, buffer/hits PhysX,
+phase `CanSeeTarget` effectivement appelée, état afterglow, archetype,
+conditions qui rendent `GunAttack` actif, tirs et réactions observés.
+Le prototype public se déplace/tire encore selon distance/timer : raccorder
+un cast Web **qualifié** uniquement après obtention des vraies couches,
+masks et volumes, et comparaison d'une poursuite/tir de l'autre côté
+d'un obstacle dans les deux jeux. Ne pas transformer les valeurs par
+défaut d'une classe en paramètres natifs actifs. Aucun fichier SH-05
+n'est modifié par ce lot.
