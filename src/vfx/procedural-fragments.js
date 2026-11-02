@@ -102,8 +102,13 @@ export function advanceFragment(fragment, dt, acceleration = { x: 0, y: 0, z: 0 
 }
 
 /** Retain only particles still alive after the step. Input stays unchanged. */
-export function advanceFragments(fragments, dt, acceleration) {
+export function advanceFragments(fragments, dt, acceleration = { x: 0, y: 0, z: 0 }) {
   if (!Array.isArray(fragments)) throw new TypeError('fragments must be an array');
+  // A zero-particle frame must reject malformed inputs just like a populated
+  // frame. Otherwise validity unexpectedly depends on burst size.
+  checkFinite(dt, 'dt');
+  if (dt < 0) throw new RangeError('dt must be non-negative');
+  checkVector(acceleration, 'acceleration');
   return fragments.map((item) => advanceFragment(item, dt, acceleration))
     .filter((item) => item.alive);
 }
