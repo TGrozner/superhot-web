@@ -32,6 +32,13 @@ With `--require-enemy`, it requires source-qualified
 `sharedassets0.assets:284/2254` or `:285/2132`, a nonzero skinned
 Web draw and the explicit native-spawn-UNVERIFIED flag. These checks
 run again **before both** PNG captures to reject a partly loaded scene.
+The gate also inspects the **last completed rendered-frame snapshot both
+before and after each CDP screenshot**, independently of 1-second metrics:
+68/360/17 source counts, nonzero world pass, finite camera and actual
+projection (vertical scale/near/far/aspect), plus the GPU skinned-enemy
+submission if requested. The PNG stores the bracketed frame IDs, cameras,
+projections and bounded scene counts; the screenshot is **not** claimed to
+correspond to a single native MCD frame.
 The normal capture then saves two actual Chromium PNGs (idle, after
 KeyW), SHA-256, camera poses and render-frame brackets, and a Web-only
 pixel-change metric. The gate never calls the MCD executable, and
