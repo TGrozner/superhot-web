@@ -31,7 +31,10 @@ export function inspectDojoCaptureReadiness() {
   if (!frame) reasons.push('RENDERED_FRAME_UNAVAILABLE');
   else {
     const source = frame.nativeScene?.source, g = frame.gameplay;
-    if (!/(?:^|[\\/])SHRL_Dojo2(?:\\.unity)?$/i.test(source?.scenePath ?? '') ||
+    const sceneName = typeof source?.scenePath === 'string'
+      ? source.scenePath.replaceAll(String.fromCharCode(92), '/').split('/').at(-1).toLowerCase()
+      : null;
+    if (sceneName !== 'shrl_dojo2.unity' ||
         source?.sceneBuildIndex !== 10 || source?.serializedOwner !== 'level10') {
       reasons.push('WRONG_OR_MISSING_DOJO_BUILD10');
     }
