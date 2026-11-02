@@ -2,6 +2,9 @@
 
 **État : inventaire de preuves partielles, pas un contrat de parité exécutable.** 2026-11-02. La cible est **SUPERHOT: MIND CONTROL DELETE** (Steam app 690040), pas le jeu SUPERHOT original. Les affirmations sont classées PROUVÉ (déclaration décompilée), OBSERVÉ (exécution native), INCONNU. Ce dépôt public ne reproduit pas le code décompilé ni les assets originaux.
 
+
+> **Mise à jour P0 — 2 novembre 2026 :** les issues privées #6 (artifact `13134400167`), #13 (`13134370412`) et #15 (`13133497389`) ont maintenant réussi. Le corps `TimeControl.Awake/LateUpdate/GetAggregateTargetTimescale` est relu directement en #13 ; la scène `level28` et ses liens temps/caméra sont contre-lus par SQL indexé en #38 (`13134630168`) ; les méthodes caméra le sont en #40 (`13133293284`). **Le 60 de l'initialiseur n'est pas le 120 sérialisé de `TimeControl18679` dans Containers.** Aucun échantillonnage temporel ni test 1:1 natif n'est démontré. Le compte rendu dans [SH-01 #1](https://github.com/TGrozner/superhot-web/issues/1#issuecomment-6575143801) donne les méthodes, SHA, limites et réfutations. Les indications « en attente » ci-dessous décrivent des contrôles historiques, non le statut actuel.
+
 ## Provenance et périmètre
 
 - Corpus **privé** `TGrozner/superhot-research`, commit `be6d535e608f66c93db3acc422385035d1281063`, passerelle en lecture seule.
@@ -12,9 +15,9 @@
 ## Passerelle privée réellement opérationnelle — contrôle du 2 novembre 2026
 
 - **PROUVÉ — transport, pas comportement MCD :** `TGrozner/superhot-research/.github/workflows/corpus-issue.yml` (blob Git `34a5c0daae3d238c41414279221b639a1be25cff`) reçoit les issues privées à titre préfixé `[corpus-query]`, avec corps JSON brut, puis sollicite le runner `superhot-local` en **lecture seule**. La transmission a effectivement réussi pour [l'issue privée #2](https://github.com/TGrozner/superhot-research/issues/2), run `41424396779`, artifact privé `13131037087`. Le `result.json` téléchargé contient `HANDOFF.md:1–104` ; SHA-256 **du texte retourné** recalculé : `6acfa468377373c1c3118e3eee599b115a2105bd01f6845bc18d745986d8bea3`. **C'est un handoff secondaire, non une contre-lecture des méthodes exécutées.**
-- **OBSERVÉ — transport et état de file uniquement :** [l'issue privée SH-01 #6](https://github.com/TGrozner/superhot-research/issues/6), créée le `2026-11-02T09:59:04Z`, demande `read spec/time-input-camera.md start=1 count=160`. Au contrôle effectué vers 10:05 UTC, **aucun commentaire SUCCESS/FAILED ni artifact annoncé dans cette issue** ; demande **en attente**, résultat non présumé. Ne pas créer d'issue identique ni de rafale de requêtes tant que celle-ci attend. D'autres lanes attendent également ce runner.
+- **OBSERVÉ — transport et état de file uniquement :** [l'issue privée SH-01 #6](https://github.com/TGrozner/superhot-research/issues/6), créée le `2026-11-02T09:59:04Z`, demande `read spec/time-input-camera.md start=1 count=160`. Au contrôle effectué vers 10:05 UTC, **aucun commentaire au contrôle historique** ; issue #6 depuis résolue avec artifact `13134400167`. Ne pas créer d'issue identique ni de rafale de requêtes tant que celle-ci attend. D'autres lanes attendent également ce runner.
 - **INCONNU — jeu natif :** aucune méthode de calcul du temps, instance sérialisée réellement active, liaison effective des touches ou contrôleur caméra n'est nouvellement prouvée par ces messages. La valeur `120` de Containers et `R → Replay` restent rapportées, non vérifiées par SH-01 sur une source primaire. Pour les éprouver : inspecter les corps/métadonnées CIL, le binding `(owner,path_id)`, puis des traces horodatées annotées en unité, horloge, phase et build. Une branche active contradictoire ou une autre instance réfute l'hypothèse.
-- **Après résolution de #6, sans doublon :** requêtes `read` privées **séquentielles et bornées** pour `decompiled/TimeControl.decompiled.cs:26+160`, `runtime/observations.json:1+250` et `spec/player-camera-bindings.json:1+250`, dans cet ordre à réévaluer suivant les chemins/méthodes réellement cités par le rapport. Aucun binaire, code décompilé ou asset ne doit sortir du dépôt privé.
+- **État post-réponse #6 :** #13 a déjà couvert le corps TimeControl ; restent les observations natives horodatées et les liaisons actives. Les requêtes historiques étaient `read` privées **séquentielles et bornées** pour `decompiled/TimeControl.decompiled.cs:26+160`, `runtime/observations.json:1+250` et `spec/player-camera-bindings.json:1+250`, dans cet ordre à réévaluer suivant les chemins/méthodes réellement cités par le rapport. Aucun binaire, code décompilé ou asset ne doit sortir du dépôt privé.
 
 ## PROUVÉ — uniquement comme déclaration / constante décompilée
 
@@ -76,7 +79,7 @@ Au commit Web initial `9f01f92411b4e125b2c992deee53602a8c67c416`, `src/main.js` 
 
 ### Requêtes privées manquantes (ordre de priorité)
 
-La requête `spec/time-input-camera.md:1+160` est **déjà en attente** dans l’issue privée #6 via `corpus-issue.yml`. Les exemples ci-dessous décrivent les **lectures suivantes, non encore envoyées** : ouvrir une seule issue privée `[corpus-query]` à la fois, avec corps JSON strict, **après** le résultat précédent ; l’ancien obstacle `workflow_dispatch` ne s’applique plus.
+La requête `spec/time-input-camera.md:1+160` est **déjà en attente** dans l’issue privée #6 via `corpus-issue.yml`. Les exemples ci-dessous sont **historiques : la lecture TimeControl #13 est déjà terminée** : ouvrir une seule issue privée `[corpus-query]` à la fois, avec corps JSON strict, **après** le résultat précédent ; l’ancien obstacle `workflow_dispatch` ne s’applique plus.
 
 ```json
 {"operation":"read","path":"decompiled/TimeControl.decompiled.cs","start":26,"count":160}
@@ -166,7 +169,7 @@ La demande minimale reste quatre lectures privées `read` (séparées, sans scan
 
 **Provenance des questions (pas des réponses runtime)** : `decompiled/TimeControl.decompiled.cs:16` (TC-004, initialiseur `60`, run privé `41367755041`, artifact `13108091209`, SHA-256 du texte `2dd2d1465e860ce6f69b0cd652550bd7ff4bbe25d1ba56e579d8a1207281a596`) et `HANDOFF.md:72–74` (TC-R02 à TC-R04, rapport secondaire, run `41368361512`, artifact `13108420851`, MCD build `20299547` rapporté). Le rapport de scène Containers avec instance `120` reste **INCONNU** comme propriété runtime tant que `(owner,path_id)`, sérialisation active et méthode exécutée ne sont pas contre-lus. **OBSERVÉ natif quantitatif : aucun** à partir des artifacts consultés.
 
-**Lectures privées minimales encore nécessaires, sans scan ni copie publique** : quatre appels `corpus-query` `read` séparés : `decompiled/TimeControl.decompiled.cs` ligne 26, 160 lignes ; `spec/time-input-camera.md` ligne 1, 600 lignes ; `runtime/observations.json` ligne 1, 250 lignes ; `spec/player-camera-bindings.json` ligne 1, 250 lignes. Le déclencheur par issue privée est opérationnel : **la première lecture de rapport est déjà demandée en #6**, sans résultat à ce contrôle ; les trois autres lectures ne sont pas lancées.
+**Lectures privées minimales encore nécessaires, sans scan ni copie publique** : quatre appels `corpus-query` `read` séparés : `decompiled/TimeControl.decompiled.cs` ligne 26, 160 lignes ; `spec/time-input-camera.md` ligne 1, 600 lignes ; `runtime/observations.json` ligne 1, 250 lignes ; `spec/player-camera-bindings.json` ligne 1, 250 lignes. Le déclencheur par issue privée est opérationnel : **la première lecture de rapport est déjà demandée en #6**, sans résultat à ce contrôle ; le corps TimeControl (#13) est désormais lu, et l'index caméra a été demandé en #24.
 
 
 ## Provenance de l'horloge et phase de capture (SH-01, TC-Q19 à TC-Q22)
