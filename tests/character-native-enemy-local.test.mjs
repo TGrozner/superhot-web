@@ -21,6 +21,7 @@ const evidence = Object.freeze({
   webBounds: { min: [-1, 0, 0], max: [0, 1, 0] },
 });
 
+
 test('strict OBJ group binds to SH-12 indexed non-cuboid pipeline without claiming skin', () => {
   const source = decodeSourceNeutralEnemyObj(fakeObj, evidence);
   assert.equal(source.mesh.indexCount, 3);

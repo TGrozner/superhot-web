@@ -1,10 +1,8 @@
 # SH-13 — Materials and lighting: source-aware Web contracts
 
-**Status (2026-11-02):** pure, testable contracts for generated Web material
+**Status (2026-11-02):** owner-qualified source metadata for six genuine Containers renderers, plus pure contracts for generated Web material
 colors, lightmap UV2 transforms, directional/ambient shading, linear fog,
-exposure and color-space experiments. **No native MCD material color,
-shader, texture, lightmap image, lighting/fog, exposure or postprocessing
-has been reproduced or visually validated.** New modules are not yet wired
+exposure and color-space experiments. **The native material, shader and texture references are now owner-resolved (#75/#85); their executable shader/pixel payloads, runtime selection and resulting MCD surface appearance remain UNVERIFIED. No native material shading, lightmap image, exposure or postprocessing has been reproduced or visually validated.** New modules are not yet wired
 into the browser renderer. SH-05 owns that integration.
 
 ## Evidence boundary: Containers build28
@@ -162,3 +160,61 @@ const diagnostic = materialDrawPacket(source.material,{
 **Blocking native evidence:** full owner-qualified `level28:7837:m_Materials[0] → (5,3)` edge, linked `Material.m_Shader`, `m_SavedProperties` _Color/_MainTex with per-property scale/offset, all Texture2D payload locations/color encodings, `LightmapSettings` (9,2) resolved texture bytes, and UV2 buffer channel/stride. Exposure and runtime GI still UNKNOWN. Serialized `ambientIntensity=0` cannot override SH/probes/lightmap (do not force black), and four red type0 spotlights at intensity30 have layer mask 256 only (do not apply indiscriminately to cargo).
 
 This change is a **real, joined source identity and lightmap-placement contract**, not a measured appearance fix: no new native/Web screenshot or proof of 1:1.
+
+
+## 2026-11-02 — P0 **RESOLVED owner-qualified six-Renderer material identity** (supersedes the older unresolved-owner sections above)
+
+This is a **new factual source resolution**, not a browser visual delta. The older statements that `fileID5:pathID3` has an unknown target are now historical, superseded by direct evidence below.
+
+**Private `result.json` files actually inspected:** research [#73](https://github.com/TGrozner/superhot-research/issues/73) artifact `13137943790`, [#75](https://github.com/TGrozner/superhot-research/issues/75) artifact `13137203925` (six rows, `truncated=false`), and [#85](https://github.com/TGrozner/superhot-research/issues/85) run `41441833067`, artifact `13140636598` (`query`, one row, `truncated=false`). Previous artifacts #41, #50, #67 and #72 were re-read before asking #85; no duplicate query for the already-resolved pointer was made.
+
+### Exact dependency chain
+
+| Source field | Verified native target | Evidence and exact status |
+| --- | --- | --- |
+| `level28:7837/7940/7941/8123/8272/8417 $.m_Materials[0]` | `(fileID5,pathID3) → resources.assets:3` | #75, six `pointers.status=resolved`, external row `resources.assets` |
+| `resources.assets:3 Material` | `CONCRETE MAIN 0.2 doublebeton porowaty 0.2` | #75 + #85: Unity serialized Material object; **not a GPU surface** |
+| `Material.m_Shader=(fileID1,pathID25)` | `globalgamemanagers.assets:25 Shader`, name **`XULM FULLFORWARD/Concrete 2019 MAIN`** | #85 joined resolved `pointers`, **no shipped variant selected/decoded for this draw** |
+| `m_SavedProperties.m_TexEnvs[0]._MainTex=(fileID0,pathID248)` | `resources.assets:248 Texture2D`, name `doublebeton_diffuse-barcodezacieki` | #85 pointer resolved; UV0 scale **(0.10000000149, 0.10000000149)** and offset **(0,0)**; **no texels/format/encoding** |
+| `level28:18622 LightmapSettings.m_Lightmaps[0].m_Lightmap=(fileID9,pathID2)` | `sharedassets28.assets:2 Texture2D` named `Lightmap-0_comp_light` | #85 link resolved; **no decoded atlas pixels or UV2 channel** |
+
+**Source shader settings** from `resources.assets:3`: `m_ShaderKeywords=_STRIPESONOFF_ON`, `m_LightmapFlags=5`, `m_EnableInstancingVariants=true`, `m_DoubleSidedGI=false`, `m_CustomRenderQueue=-1`. Serialized float fields include `_Alpha=0.25`, `_DIFFUSE=0.5`, `_Emmisive=0.5`, `_RAMP_POWER=0.7200000286`, `_RAMP_SIZE=4.1599998474`, `_StripesOnOff=1`, `_SPEC_INTENSITY=0`; `_Color=(1,1,1,1)`, `_TINT=(1,0.80689638853,0,1)`, plus `_ShadowColor`, `_HighlightColor`, `_LocalAmbient`. **These are authored serialized inputs, not a claim that the rendered material is white/yellow, alpha blended, or uses standard Lambert illumination.** A proprietary `XULM` shader, keyword/stage selection, textures, lightmaps and Unity color pipeline determine the actual pixels.
+
+All six Renderer→Mesh→submesh static bindings remain as independently proved by private #68:
+
+| GO → Renderer | Mesh ID : submesh | Material | Verified UV2 atlas ST? |
+| --- | --- | --- | --- |
+| 336 → 7837 | 6 : 47 | resources.assets:3 | Yes: (0.1587031931, 0.1587031931, 0.7985754013, −0.0002501162) |
+| 459 → 7940 | 7 : 48 | resources.assets:3 | Yes: (0.1587031931, 0.1587031931, −0.0002501162, 0.6481873989) |
+| 461 → 7941 | 7 : 46 | resources.assets:3 | Not independently obtained |
+| 673 → 8123 | 7 : 77 | resources.assets:3 | Not independently obtained |
+| 839 → 8272 | 6 : 24 | resources.assets:3 | Not independently obtained |
+| 1003 → 8417 | 6 : 32 | resources.assets:3 | Not independently obtained |
+
+Every row has **4,638 source indices / 1,546 triangles**, serialized enabled. Scene runtime visible/selected state is still not proved by this static extraction. UV2 for the last four must not be guessed.
+
+### SH-12 exact API boundary (no edits to SH-12-owned files)
+
+```js
+import {
+  containersBuild28CargoMaterialBinding,
+  containersBuild28ConcreteMaterialSource,
+} from './render/material-model.js';
+const b = containersBuild28CargoMaterialBinding(7837);
+const src = containersBuild28ConcreteMaterialSource();
+
+b.geometry; // {owner:'level28',meshPathId:6,staticSubmesh:47,indexCount:4638,triangleCount:1546}
+b.nativeMaterialOwner; // 'resources.assets' (PROVED owner)
+b.material.materialAsset; // {owner:'resources.assets',pathId:3,name,evidence,...}
+src.shader; // {owner:'globalgamemanagers.assets',pathId:25,name:'XULM ...',nativeShaderProgramDecoded:false}
+src.mainTexture; // {owner:'resources.assets',pathId:248,property:'_MainTex',uvScale:[.1,.1],...}
+src.lightmapTexture; // {targetOwner:'sharedassets28.assets',targetPathId:2,...imagePixelsDecoded:false}
+```
+
+**Transport requirements:** preserve per-draw `rendererPathId`, `materialSlot=0`, exact Mesh:submesh identity, and `uv0` (the decoded texture sample coordinate will be `uv0 * mainTexture.uvScale + mainTexture.uvOffset` **when pixels/shader become available**). Do **not** use `_Color` as final display RGB, `_Alpha` as physical opacity, or UV0 as baked UV2. If UV2 source bytes arrive, carry a distinct vertex channel and apply each verified ST *only after* atlas owner/texels/encoding are resolved. No prefab enemy material may be inferred from cargo `resources.assets:3`.
+
+### SH-05 exact integration contract (exclusive `main.js` / `renderer.js` / `levels.js`)
+
+Use `containersBuild28CargoMaterialBinding(rendererPathId)` to log **source-resolved identity** on the local `?scene=containers` group draw, and `materialDrawPacket(b.material,{fallback:createGeneratedMaterial(...)})` for the **unchanged visibly generated color** until source shader+texture pixels can be loaded privately and used in a verified renderer. The packet now carries `materialAsset` (the source identity), while `colorProvenance='generated-fallback-not-mcd'`, `lightmapSamplingEnabled=false`, and `nativeMaterialMetadata.webShadingReady=false` remain explicit. Existing source-backed scene `fogStrength=0` from #95 is unchanged; ambient/GI, exposure, tonemap and dynamic point/spot light selection remain **unknown**, not auto-applied.
+
+**P0 requested measurable next delta:** obtain *privately* actual `resources.assets:248` texels (source channel/format/encoding, stream locator), `globalgamemanagers.assets:25` shader variant/pass state or readable stage algorithm, and `sharedassets28.assets:2` lightmap pixels/UV2. Then build a local-only resource bridge and collect native/Web paired frames in SH-15. The next measurable target is source-textured container surfaces **versus** the current generated flat Web fallback, with pixel statistics at the same camera—not another synthetic test count. If only the references are present, keep the current visible fallback. One bounded private #85 query was used this cycle, no new runner or public source bytes.
