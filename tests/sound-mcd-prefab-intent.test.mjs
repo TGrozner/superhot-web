@@ -51,13 +51,13 @@ test('pitch zero warns but does not prevent Play', () => {
   assert.equal(result.status, MCD_PREFAB_SOUND_RESULT.PLAY_REQUEST);
 });
 
-test('body already dead never requests enemy shatter prefab', () => {
-  assert.equal(planMcdBodyKillShatterPrefab({bodyAlreadyDead: true}), null);
+test('controller already dead never requests enemy shatter prefab', () => {
+  assert.equal(planMcdBodyKillShatterPrefab({controllerAlreadyDead: true}), null);
 });
 
 test('body kill sends enemy shatter to position lifted 1.5 Unity units', () => {
   const result = planMcdBodyKillShatterPrefab({
-    bodyAlreadyDead: false, bodyWorldPosition: {x: 3, y: -2, z: 9},
+    controllerAlreadyDead: false, bodyWorldPosition: {x: 3, y: -2, z: 9},
     resolvedPrefabName: 'resolved-enemy-shatter', poolExists: true,
     reused: false, pitchBeforeRequest: 0.85,
   });
@@ -69,7 +69,7 @@ test('body kill sends enemy shatter to position lifted 1.5 Unity units', () => {
 
 test('missing enemy shatter pool yields empty effect, not a played sound', () => {
   const result = planMcdBodyKillShatterPrefab({
-    bodyAlreadyDead: false, bodyWorldPosition: {x: 0, y: 0, z: 0},
+    controllerAlreadyDead: false, bodyWorldPosition: {x: 0, y: 0, z: 0},
     resolvedPrefabName: 'unknown-prefab-name', poolExists: false,
   });
   assert.equal(result.status, MCD_PREFAB_SOUND_RESULT.EMPTY_EFFECT);
