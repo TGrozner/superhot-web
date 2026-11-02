@@ -269,3 +269,36 @@ a native firing proof. The narrow read-only private request remains
 `spec/combat/combat-specification.md` lines 1–200 via the authorized gateway;
 its `workflow_dispatch` action is not exposed by this connector.
 No original resources are copied. SH-05 alone owns browser integration.
+
+
+## SH-03 trace-input snapshot regression — 2026-11-02 (WEB only)
+
+**PROUVÉ dans la source Web antérieure** : `src/combat/trace.js` blob
+`85abd605e99821fe4013106c112c8040567fbafb` validait les coordonnées
+des extrémités et des volumes avec `isFinitePoint`, puis relisait
+`start/end`, `solid.min/max` et `target.center/radius` pendant les
+intersections. Des getters changeants pouvaient donc remplacer une valeur
+validée par une valeur non finie, différente, ou déplacer artificiellement
+une collision. Ce constat concerne uniquement la cohérence des entrées du
+prototype JavaScript.
+
+**WEB-PROVISIONAL correctif** : `firstImpact()` recopie exactement une fois
+chaque composante d'extrémité, borne et centre, et chaque rayon, avant de
+valider et d'utiliser ces instantanés pour les intersections et le point
+d'impact. Il continue de renvoyer les entités originales (identité conservée)
+et conserve priorités, tolérance `IMPACT_EPSILON`, rayons et fonctions de
+balayage précédentes. Aucun changement de règle d'IA, dégâts, arme, tir,
+scheduling, couche de collision ou valeur native.
+
+**Régression** : `tests/combat-trace-snapshot.test.mjs` contient cinq
+scénarios synthétiques (extrémités, AABB, sphère, getters imbriqués,
+validation d'une première valeur invalide). La CI complète et le résultat
+avant/après doivent être relevés sur la PR avant d'affirmer une validation.
+
+**MCD INCONNU** : aucune méthode Unity, instance de prefab, projectile,
+hitbox, ou observation de dégâts/IA supplémentaire n'est prouvée ici.
+Le rapport primaire privé `spec/combat/combat-specification.md:1-200`
+nécessite toujours la passerelle `corpus-query` avec `workflow_dispatch`,
+non exposée par cette connexion. Ne copier ni données du corpus privé ni
+assets natifs dans le dépôt public. SH-05 est seul propriétaire de
+l'intégration `src/main.js` et des mesures de parité.
