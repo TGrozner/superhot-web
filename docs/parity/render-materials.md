@@ -362,3 +362,59 @@ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,sampler.maxLevel);
 **SH-12 boundary:** keep original OBJ mesh UV0 and submesh separation. These RGB24 mip levels are diffuse UV0; they do not supply baked UV2 or solve the unrelated BC3 lightmap. `sharedassets28.assets:2` is DXT5 with 12 source mips, but its texels, RGBM/XULM interpretation, UV2 and bake/lighting remain separate, so no fake lightmap sample is permitted.
 
 **Measurement request for SH-05 / SH-15:** with the owner's PRIVATE `.resS` and authorized OBJ, run a fixed Containers camera 1920×1080 DPR1; screenshot A with current trilinear/generated mips and B with exact source mips plus Point sampler, same RGB transfer choice. Compute changed-pixel fraction and MAE over cargo pixels and compare p95 frame time; log sampler settings and GPU draw count. Then compare against an actual MCD native frame **only after matching native camera/pose/material**. Until GPU A/B is executed, this remains a concrete, source-proved sampler mismatch plus an analytic synthetic demonstration, **not a measured visual result**. No second bridge request is necessary.
+
+
+### P0 native build28 BC3 lightmap atlas — original compressed pixels, local only (2026-11-02)
+
+**Actual primary source re-read, no duplicate bridge request:** private research [#41](https://github.com/TGrozner/superhot-research/issues/41), artifact `13134492119` original `result.json`: `level28:18511` RenderSettings has `m_Fog=false`; `level28:18622` lightmap slot0 points through owner-qualified `fileID=9,pathID=2`. Private [#50](https://github.com/TGrozner/superhot-research/issues/50) artifact `13134569214` original `result.json` was READ: rendering/closure/README.md, first 150 lines; its pass-program map, cubemap streams and material closure do not themselves establish pixel parity. Private [#85](https://github.com/TGrozner/superhot-research/issues/85) artifact `13140636598` actual `result.json` closes the material and lightmap owner-qualified pointers; [#100](https://github.com/TGrozner/superhot-research/issues/100) artifact `13141079714` actual `result.json`, **2 rows, truncated=false**, provides source `Texture2D` fields and compressed stream range. All four existing requests were reused, **none rerun**.
+
+**Exact source-proved atlas descriptor:** `sharedassets28.assets:2 Lightmap-0_comp_light`, 2048×2048, Unity TextureFormat `12` = DXT5/BC3, `m_MipCount=12`, source file `sharedassets28.assets.resS` offset **0**, length **5,592,432 bytes**. Serialized `m_TextureSettings`: **FilterMode=1 Bilinear**, **WrapU=1 / WrapV=1 Clamp**, `m_Aniso=3`, `m_MipBias=0`, `m_StreamingMipmaps=true`, `m_ColorSpace=1`. Unlike the Concrete diffuse `resources.assets:248` (Point/Repeat, RGB24), lightmap source filtering is Bilinear/Clamp. These are **authored Texture2D fields**, not verified effective original runtime device settings. Note that Unity source's `m_ColorSpace=1` does not by itself establish XULM's texture sampling, RGBM reconstruction, gamma or exposure.
+
+**New strictly local source-block API** in `src/render/material-model.js`:
+
+```js
+import {
+  containersBuild28ConcreteMaterialSource,
+  sliceContainersBuild28LightmapBc3Mips,
+  containersBuild28LightmapBc3GpuPacket,
+} from './render/material-model.js';
+
+// SH-05-only File API: owner-selected ORIGINAL sharedassets28.assets.resS.
+// No HTTP fetch, upload, local storage or committed game asset.
+const meta=containersBuild28ConcreteMaterialSource().lightmapTexture.nativeStream;
+if(localResSFile.size<meta.sourceByteOffset+meta.sourceByteCount) {
+  throw new RangeError('Original local lightmap resS is truncated');
+}
+const raw=await localResSFile.slice(
+  meta.sourceByteOffset,meta.sourceByteOffset+meta.sourceByteCount,
+).arrayBuffer();
+const originalBlocks=sliceContainersBuild28LightmapBc3Mips(raw);
+// originalBlocks.levels: 12 Uint8Array views, exact BC3 blocks,
+// mip0 2048x2048/4194304 bytes; mip11 1x1/16 bytes.
+// All 12 compressed levels sum to exactly 5592432 bytes.
+// No original pixels are present in code or public tests.
+
+const diagnostic=containersBuild28LightmapBc3GpuPacket({
+  colorTransfer:'unorm-diagnostic', // ALTERNATE: 'srgb-diagnostic'
+  mipLevels:12,
+});
+const extension=gl.getExtension(diagnostic.extensionName);
+if(!extension) throw new Error('BC3 extension unavailable, no fake fallback');
+const texture=gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D,texture);
+for(const mip of originalBlocks.levels) {
+  gl.compressedTexImage2D(gl.TEXTURE_2D,mip.level,
+    extension[diagnostic.internalFormatName],
+    mip.width,mip.height,0,mip.compressedBytes);
+}
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl[diagnostic.minFilter]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl[diagnostic.magFilter]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl[diagnostic.wrapS]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl[diagnostic.wrapT]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,diagnostic.maxLevel);
+// NO gl.generateMipmap(): original BC3 chain is already complete.
+```
+
+**Visual P0 integration priority:** The preceding code allows SH-05 to display a **diagnostic local atlas** (e.g., opt-in 2D quad using 0–1 atlas UVs), compare with an sRGB-hypothesis atlas, then measure real browser pixel differences before claiming results. Do **NOT** apply atlas to cargo UV0 as if it were authored baked illumination. For GI on the original Containers geometry, **SH-12 must produce exact native UV2 channels** per Mesh6/7 submesh and **SH-13 needs the native XULM lightmap decode/color transfer**; `lightmapST` exists only for renderer7837 and7940 in the current contract, and missing ST for the other four must not be fabricated. The private DXT5 bytes are not the missing UV2; source metadata alone is not original GPU shading.
+
+**SH-12 exact interface:** retain `{owner,meshPathId,staticSubmesh,drawRange}` and source-qualified UV0 for Concrete diffuse. Add a *separate* verified `uv2` stream and its coordinate convention (if/when source proof exists), preserving `rendererPathId`; no substitution by UV0. **SH-05 only:** optionally present the raw BC3 local atlas diagnostic and give SH-15 same-camera screenshots/real draw counters and p95; existing flat/trilinear Concrete PNG preview is **not** native Point shader rendering. The shipped original XULM program, exact bake encoding, GPU runtime activation and matched MCD-vs-Web frame remain **UNVERIFIED**. This new source-block capability has no demonstrated cargo frame delta until SH-05 wires it; Node unit tests only validate exact source-format memory boundaries.
