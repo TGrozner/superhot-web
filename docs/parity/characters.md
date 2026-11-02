@@ -142,3 +142,48 @@ const nativeEnemyMetrics = renderer.drawLocalEnemyDiagnostic(diagnosticWebWorldM
 Show the text **`STATIC SOURCE-EXPORTED ENEMY · DIAGNOSTIC POSITION · NOT MCD SPAWN / MATERIAL / ANIMATION`** in the browser. Telemetry fields should separately report `sourceMeshOwner='sharedassets0.assets'`, `sourceMeshPathID=284|285`, `nativeIndexedDrawCalls`, `nativeStaticTriangleCount`, `nativeEnemySpawnVerified=false`, `skinAnimationVerified=false`. No native gameplay hit test should use this stand-in; SH-03 owns combat and SH-06 owns evaluated animation.
 
 **Visual acceptance requires** a real user-selected local OBJ loaded in a WebGL2 browser, an actual frame with **nonzero** enemy indexed draws and screenshot, correct front-face/normal orientation, then a matching native MCD capture and matched camera/scale/material checks. Until that exists, **1:1 is unmeasured**. Full animated original 60/59-bone rig requires owner-qualified ordered `m_Bones`, Mesh `m_BindPose`, per-vertex bone weights/indices, Avatar632 resolution, SH-06 clip/retarget pose and verified runtime instantiation — still OPEN. One static mesh cannot legitimately be presented as skinned just by moving its root.
+
+## SH-14: source-qualified serialized skin/bind matrices, NOT live pose (2026-11-02)
+
+**New bounded private query:** [research #104](https://github.com/TGrozner/superhot-research/issues/104), run `41447003094`, artifact `13141584125`. Its `result.json` was inspected directly: **two joined rows, no error, `truncated=false`**. The query selected only exact owner `sharedassets0.assets`, Mesh IDs 284/285 and matching SkinnedMeshRenderer IDs 4748/4749. No earlier query was duplicated; OBJ assets, original matrices and ordered full bone arrays stay private.
+
+| Serialized metadata proved | EnemyMerged Mesh284 / SMR4748 | EnemyMergedHeadless Mesh285 / SMR4749 |
+|---|---:|---:|
+| Vertex count | 5,237 | 4,895 |
+| Ordered `m_Bones` array | 60 refs (all unique) | 59 refs (all unique) |
+| `Mesh.m_BindPose` array | **60 matrices** | **59 matrices** |
+| Bone-name hashes | 60 | 59 |
+| Same-owner root bone | Transform 2257 | Transform 2257 |
+| `Mesh.m_BoneWeights` / `Mesh.m_Skin` JSON | absent / absent | absent / absent |
+| `Mesh.m_CompressedMesh.m_Weights` | present as **object, not decoded** | present as **object, not decoded** |
+| `Mesh.m_VertexData.m_Channels` | serialized array | serialized array |
+
+The headless ordered `m_Bones` list is exactly the 60-bone merged list with one reference **`sharedassets0.assets:Transform1939` removed at zero-based index 17**, with the other 59 refs in the same order. This is a **structural comparison, not proof of that bone's anatomical identity or runtime removal**. Serialized bindpose matrices contain `e00…e33` fields; their full numeric contents, Unity-to-Web basis conversion, bind/pose multiplication and per-vertex matching remain **unverified**. Do not equate equal counts with executable skinning. Animator4659, Avatar632 and Controller638 are serialized prefab references, not a sampled native clip/pose. Rendering `m_Enabled=1` of both SMRs from #93 is separate from the serialized disabled Animator.
+
+### Working pure geometry deformation engine, strictly source-neutral
+
+New `src/characters/skinning.js` exports `createIndexedSkinBinding()` and `skinIndexedCharacter()`: CPU **linear-blend skinning of real indexed triangle geometry**, using SH-12's `defineIndexedMesh` canonical interleaved 32-byte vertex layout. It is **not** another procedural enemy mesh or animation. Caller supplies *all* bone mapping and 4 influences per vertex. No fallback/invented weights, clips, transforms, hitboxes or source bytes.
+
+```js
+import { createIndexedSkinBinding, skinIndexedCharacter } from './characters/skinning.js';
+
+// This input is BLOCKED for native EnemyMerged until private source skin weights,
+// bone order and full bindpose coordinate conversion have been validated.
+const binding = createIndexedSkinBinding({
+  mesh: localEnemyReceipt.mesh, // SH-12-compatible indexed OBJ mesh
+  boneIds: verifiedBoneIdsInRendererOrder, // 60 or 59 owner-qualified
+  inverseBindMatrices: verifiedInverseBindsInWebMeshLocal,
+  boneIndices: verifiedFourIndicesPerVertex, // length vertexCount*4
+  boneWeights: verifiedFourNormalizedWeightsPerVertex, // same length
+});
+// SH-06 must supply the ACTUAL pose, bone matrices already Web mesh-local:
+const frame = skinIndexedCharacter(binding, verifiedPoseByBoneId);
+// frame.mesh = NEW SH-12 mesh with deformed pos/normals + unchanged UV/indices.
+// frame.nativePoseVerified remains false: the caller must prove native execution.
+```
+
+The calculation is `skin_i = posedBoneInMeshLocalSpace_i × inverseBind_i`, `p' = Σ weight_j * (skin_j * p)`; normals use per-influence inverse-transpose and are normalized. The solver rejects singular/invalid matrices, missing bone matrices, invalid indices/weights, non-unit weight sums and degenerate normals. Triangles/UVs stay intact, deformed bounds recalculate, and there are no geometry or shader assets bundled. **Web RH mesh-local basis must be proven identical across OBJ positions, bindposes and sampled bones**; do not transpose Unity `eij` or mirror axes speculatively. Apply root world matrix only at draw time, not twice. `tests/character-skinning.test.mjs` uses only a newly-authored 3-vertex non-cube triangle with two bones, including 50/50 blending, inverse bind cancellation and nonuniform-scale normals.
+
+**SH-05 exact integration handoff:** Continue showing the already-merged #114 **STATIC** local EnemyMerged OBJ in `?scene=containers` immediately; **do not gate the first native-geometry screenshot on skins**. No SH-05 shared files have been touched by SH-14. When authentic weights and poses exist, accept `frame.mesh` as SH-12 indexed data and update the existing WebGL2 vertex buffer per frame (`DYNAMIC_DRAW/bufferSubData` on cached GPU resources rather than rebuilding VBO/EBO every tick). Reuse host `renderer.begin(camera)`, `aPosition`/`aNormal`/UV32B layout, source-derived static mesh as safe fallback, and original root model-to-world once. SH-06 alone supplies clip/time/pose; SH-03 owns hit/collisions. Telemetry must separate **verified private static mesh**, **algorithmic source-neutral deform**, and **runtime-sampled native pose**. No 1:1 claim before original/Web synchronized screenshots and bone/hit comparisons.
+
+**One exact native blocker for next research cycle:** decode the **compressed** `m_CompressedMesh` skin weight and bone-index encoding (or alternate vertex stream weight channels) for Mesh284/285, including ordering correspondence with exported OBJ vertices; determine the actual bone transform chain and map bindposes to runtime-sampled pose. Existing #104 proves their serialized presence/counts, **not usable per-vertex influence values**. No new private request should repeat #104.
