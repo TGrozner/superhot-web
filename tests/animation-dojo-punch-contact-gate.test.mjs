@@ -162,7 +162,7 @@ test('attaching after Start without its event does not manufacture an active gat
 });
 
 test('invalid state/clip/contact timestamps fail rather than guess', () => {
-  assert.throws(() => begin(undefined), /initialClipTime/);
+  assert.throws(() => createDojoPunchContactGate({ attackerId: 'enemy-1', strikeId: 'punch-1' }), /initialClipTime/);
   assert.throws(() => createDojoPunchContactGate(), /attackerId/);
   assert.throws(() => step(begin(), Infinity), /currentClipTime/);
   assert.throws(() => step(begin(), 0.6, hit(NaN)), /contact.clipTime/);
