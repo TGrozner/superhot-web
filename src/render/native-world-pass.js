@@ -40,12 +40,15 @@ out vec4 outColor;
 ${NATIVE_MATERIAL_GLSL.blackCrystalReflection}
 ${NATIVE_MATERIAL_GLSL.concreteMainTexture}
 void main() {
-  vec3 n = uHasNormals == 1 ? normalize(vNormal) : normalize(cross(dFdx(vWorld), dFdy(vWorld)));
-  if (dot(n, uCamera - vWorld) < 0.0) n = -n;
+  // Unity's Concrete seam and diffuse inputs use the geometric world normal:
+  // unlike reflection facing, they must not change as the camera moves.
+  vec3 worldNormal = uHasNormals == 1 ? normalize(vNormal) : normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+  vec3 reflectionNormal = worldNormal;
+  if (dot(reflectionNormal, uCamera - vWorld) < 0.0) reflectionNormal = -reflectionNormal;
   // The reflection address/power are recovered; the direction and illumination
   // here remain Web reconstruction, not the native shader's full varying path.
   if (uMode == 1 && uTextured == 1) {
-    float level = nativeBlackCrystalReflectionLevel(uTexture, reflect(normalize(vWorld - uCamera), n));
+    float level = nativeBlackCrystalReflectionLevel(uTexture, reflect(normalize(vWorld - uCamera), reflectionNormal));
     outColor = vec4(vec3(level), 1.0);
     return;
   }
@@ -53,10 +56,10 @@ void main() {
   if (uTextured == 1) {
     if (uMode == 2) {
       albedo.rgb = nativeConcreteMainTextureFactor(uTexture, vUV * uST.xy + uST.zw,
-        vSeam, vSeamOverride, n.y, uMainTexIsZacieki);
+        vSeam, vSeamOverride, worldNormal.y, uMainTexIsZacieki);
     } else albedo = texture(uTexture, vUV * uST.xy + uST.zw);
   }
-  float light = 0.64 + 0.36 * max(dot(n, normalize(vec3(-0.55, 0.9, 0.42))), 0.0);
+  float light = 0.64 + 0.36 * max(dot(worldNormal, normalize(vec3(-0.55, 0.9, 0.42))), 0.0);
   vec3 rgb = albedo.rgb * uColor.rgb * light;
   // Native compiled forward-base materials are opaque; serialized _Alpha\n  // is a shader parameter, not framebuffer blending opacity.\n  outColor = vec4(rgb, uMode == 2 ? 1.0 : uColor.a * albedo.a);
 }`;
