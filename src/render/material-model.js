@@ -104,3 +104,78 @@ export function transformLightmapUV(uv2,lightmap){
   const [sx,sy,ox,oy]=lightmap.tilingOffset;
   return Object.freeze([finite(u*sx+ox,'lightmap U'),finite(v*sy+oy,'lightmap V')]);
 }
+
+
+/**
+ * P0 Containers/build28 exact serialized bindings for the two meshes currently
+ * selectable through the local-only OBJ browser preview. These are reference
+ * and atlas-placement records, NOT decoded game colors, textures or shaders.
+ *
+ * Primary private evidence: #32 / 13134550402 (both MeshRenderer records),
+ * #41 / 13134492119 (LightmapSettings index 0), and
+ * #68 / 13136407658 (MeshRenderer -> static submesh).
+ * Source is Unity 2018.4.14f1 serialized level28, NOT runtime frame state.
+ */
+const CONTAINERS_BUILD28_CARGO_BINDINGS = Object.freeze([
+  Object.freeze({
+    gameObjectPathId:336,rendererPathId:7837,
+    meshPathId:6,staticSubmesh:47,indexCount:4638,
+    lightmapST:Object.freeze([
+      0.15870319306850433,0.15870319306850433,
+      0.7985754013061523,-0.00025011622346937656,
+    ]),
+  }),
+  Object.freeze({
+    gameObjectPathId:459,rendererPathId:7940,
+    meshPathId:7,staticSubmesh:48,indexCount:4638,
+    lightmapST:Object.freeze([
+      0.15870319306850433,0.15870319306850433,
+      -0.00025011622346937656,0.6481873989105225,
+    ]),
+  }),
+]);
+
+/**
+ * Returns a source-addressable join key and exact serialized UV2 atlas ST
+ * for ONE of the two currently previewable cargo MeshRenderers.
+ *
+ * The Web OBJ adapter currently exposes uv0, not the native baked UV2 data.
+ * The atlas ref (level28 LightmapSettings index 0 -> fileID9:pathID2) does
+ * not contain/authorize decoded texels; sampling remains explicitly disabled.
+ * No guessed material owner or texture payload is manufactured.
+ */
+export function containersBuild28CargoMaterialBinding(rendererPathId) {
+  int(rendererPathId,'rendererPathId',1);
+  const row=CONTAINERS_BUILD28_CARGO_BINDINGS.find(
+    entry=>entry.rendererPathId===rendererPathId,
+  );
+  if(!row) throw new RangeError('No proved Containers/build28 cargo material binding for renderer '+rendererPathId);
+  const material=createSerializedMaterialSlot({
+    id:'level28:MeshRenderer:'+row.rendererPathId+':material0',
+    owner:'level28',rendererPathId:row.rendererPathId,slot:0,
+    materialReference:{fileId:5,pathId:3},
+    rendererEnabled:true,receiveShadows:true,castShadows:1,
+    lightmapIndex:0,lightmapTilingOffset:[...row.lightmapST],
+    evidence:'private #32 artifact 13134550402, #41 artifact 13134492119, #68 artifact 13136407658',
+  });
+  return Object.freeze({
+    scene:'Containers/build28',sourceOwner:'level28',
+    gameObjectPathId:row.gameObjectPathId,
+    rendererPathId:row.rendererPathId,
+    geometry:Object.freeze({
+      owner:'level28',meshPathId:row.meshPathId,
+      staticSubmesh:row.staticSubmesh,
+      indexCount:row.indexCount,triangleCount:row.indexCount/3,
+    }),
+    material,
+    nativeMaterialOwner:null,
+    bakedLightmap:Object.freeze({
+      index:0,sceneSettingsPathId:18622,
+      atlasReference:Object.freeze({fileId:9,pathId:2}),
+      atlasTextureResolved:false,
+      webObjUv2Ready:false,
+      samplingAuthorized:false,
+      provenance:'unity-serialized-reference-only',
+    }),
+  });
+}
