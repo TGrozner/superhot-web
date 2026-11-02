@@ -49,8 +49,21 @@ function sweptSphereFraction(start, end, center, radius) {
   const b = dot3(offset, delta);
   const disc = b * b - a * c;
   if (a > 0 && c > 0 && [a, c, b, disc].every(Number.isFinite)) {
-    if (disc < 0) return null;
-    const t = (-b - Math.sqrt(disc)) / a;
+    // The direct discriminant loses near-tangent separation through subtraction.
+    // Compute the perpendicular closest approach before classifying a hit.
+    const closestT = -b / a;
+    const closestDistance = Math.hypot(
+      offset.x + delta.x * closestT,
+      offset.y + delta.y * closestT,
+      offset.z + delta.z * closestT,
+    );
+    if (closestDistance > radius) return null;
+    // Factor before taking the root: (radius²-distance²) may underflow
+    // even when the dimensionless chord fraction is representable.
+    const halfChord = radius === 0 ? 0 : (radius / Math.sqrt(a)) *
+      Math.sqrt(((radius - closestDistance) / radius) *
+        ((radius + closestDistance) / radius));
+    const t = closestT - halfChord;
     return t >= 0 && t <= 1 ? t : null;
   }
   const axes = ['x', 'y', 'z'];

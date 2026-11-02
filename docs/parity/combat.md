@@ -213,3 +213,35 @@ combat reference remains the *secondary* `HANDOFF.md` from workflow run
 request remains `{"operation":"read","path":"spec/combat/combat-specification.md","start":1,"count":200}`.
 No original assets or private reports are copied here. SH-05 alone owns
 `src/main.js` integration.
+
+## SH-03 near-tangent numerical regression — 2026-11-02 (Web only)
+
+**PROUVÉ — prototype Web**: `src/combat/trace.js`, pre-change Git blob
+`77e716f83417a78f771f4de9c3a86eb4f3cd4627`, computes a quadratic
+discriminant as `b*b - a*c`. At ordinary finite scale, a line from
+`(0,0,0)` to `(100,0,0)` with a unit sphere centered at
+`(50, 1+1e-14, 0)` falsely yielded an impact at `t=0.5`: subtraction
+erased the slight exterior separation. Centering at `y=1-1e-14`
+likewise yielded `t=0.5` rather than an entry before closest approach.
+An `1e-100`-scale crossing with radius `1e-101` yielded `t=0.5`
+instead of `0.45`. Three of five regression tests failed on the
+unmodified pure module under Node **22.16.0** in an isolated reproduction.
+
+**PROUVÉ — Web proposed fix**: the finite ordinary branch now checks
+the perpendicular closest approach and computes the half-chord using
+dimensionless radius ratios to avoid cancellation and squared underflow.
+`tests/combat-near-tangent.test.mjs` covers a just-outside miss, an exact
+tangent, a just-inside entry, a small-scale crossing, and ordinary/near-end/
+away controls. In the same isolated reproduction all **5/5** tests pass,
+`node --check src/combat/trace.js` passes. Full repository CI must
+be verified independently on the PR head; these numbers are **not** native
+combat observation or proof of browser WebGL performance.
+
+**INCONNU — MCD**: Unity sphere colliders, real weapon/projectile size,
+physics layer/ordering, damage/AI, runtime scheduling, and any native
+tangency convention. No original Unity code, assets, scan or native runtime
+observation is included. Private primary read remains blocked until
+an authorized `superhot-research` workflow dispatcher executes only
+`{"operation":"read","path":"spec/combat/combat-specification.md","start":1,"count":200}`
+and returns the result privately. SH-05 exclusively owns `src/main.js`
+integration; numerical correctness is not a 1:1 MCD claim.
