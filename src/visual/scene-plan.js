@@ -49,10 +49,14 @@ export function planSceneDraws(graph, camera, options = {}) {
   for (const item of graph) {
     if (!item.primitive || !item.visible) { hidden++; continue; }
     if (!isBoundsVisible(item.bounds, camera, options)) { culled++; continue; }
-    const color = GENERATED_PALETTE[item.material];
+    const color = typeof item.material === 'string' && Object.hasOwn(GENERATED_PALETTE, item.material)
+      ? GENERATED_PALETTE[item.material] : null;
     if (!color) throw new TypeError('Unknown generated material: ' + item.material);
     const m = item.worldMatrix, s = item.primitive.size;
-    const diagonal = [1, 2, 4, 6, 8, 9].every((i) => Math.abs(m[i]) < 1e-7);
+    // The legacy renderer has no off-diagonal uniforms. Even a tiny nonzero
+    // rotation/shear can produce visible displacement on a large primitive.
+    // Never silently flatten a transform using an arbitrary absolute epsilon.
+    const diagonal = [1, 2, 4, 6, 8, 9].every((i) => m[i] === 0);
     // The legacy vertex shader applies uScale to positions but does not transform
     // normals by its sign. Reflections (and degenerate scales) need an affine
     // renderer with a correct normal matrix; routing them to renderer.box()
