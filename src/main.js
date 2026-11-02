@@ -4,6 +4,7 @@ import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManif
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
 import { planLocalMesh6Draws } from './scenes/containers-mesh6-local-plan.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
+import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +33,21 @@ const visualPreviewEnabled = syntheticManifestEnabled || containersPreviewEnable
 // These slots are populated ONLY from user-selected local files in the browser.
 // Nothing is fetched or persisted, and no original game asset is in the repo.
 const localNativeMeshes = new Set();
+let localPrivateTexture = null;
+let privateTextureGeneration = 0;
+let localNativeEnemy = null;
+let nativeEnemyGeneration = 0;
+let nativeEnemyStats = null;
+let previewCameraY = CONTAINERS_BUILD28_DEMO_CAMERA.y;
+// Inspection placement only: neither a native spawn nor an animated enemy.
+const enemyInspectionMatrix = new Float32Array([
+  1,0,0,0, 0,1,0,0, 0,0,1,0, 11,.97,24,1,
+]);
+function frameLocalEnemy() {
+  state.camera = { x: 11, y: enemyInspectionMatrix[13] + 1.15, z: 28, yaw: 0, pitch: -.04 };
+  previewCameraY = state.camera.y;
+  state.hop = 0; state.verticalSpeed = 0;
+}
 const localMeshPreviewSpec = Object.freeze([
   { inputId: 'private-mesh6', slot: 'mesh6', groupIndex: 47,
     proxyId: 'cargo-22', center: [17.45, 2.575, 13.975] },
@@ -40,6 +56,79 @@ const localMeshPreviewSpec = Object.freeze([
 ]);
 if (containersPreviewEnabled) {
   $('private-mesh-controls').hidden = false;
+  // File controls must not trigger gameplay keyboard/mouse shortcuts.
+  for (const eventName of ['keydown', 'mousedown']) {
+    $('private-mesh-controls').addEventListener(eventName, event => event.stopPropagation());
+  }
+  const enemyInput = $('private-enemy');
+  const enemyStatus = $('private-enemy-status');
+  const enemySummary = () => localNativeEnemy
+    ? `${localNativeEnemy.variant === 'merged' ? 'EnemyMerged' : 'EnemyMergedHeadless'} original chargé · ${localNativeEnemy.triangles} triangles · pose statique, placement de visite, shader Web.`
+    : 'Aucun modèle ennemi local chargé.';
+  enemyInput.addEventListener('change', async () => {
+    const generation = ++nativeEnemyGeneration;
+    const file = enemyInput.files?.[0];
+    if (!file) { enemyStatus.textContent = enemySummary(); return; }
+    const variant = $('private-enemy-variant').value;
+    enemyStatus.textContent = 'Vérification et chargement du modèle original…';
+    try {
+      const receipt = await loadNativeEnemyObj(file, { variant });
+      if (generation !== nativeEnemyGeneration) return;
+      renderer.acceptLocalEnemyReceipt(receipt);
+      localNativeEnemy = Object.freeze({
+        owner: receipt.owner, meshPathId: receipt.meshPathId,
+        variant: receipt.variant, triangles: receipt.mesh.triangleCount,
+      });
+      $('frame-private-enemy').disabled = false;
+      enemyStatus.textContent = enemySummary();
+      frameLocalEnemy();
+    } catch (error) {
+      if (generation === nativeEnemyGeneration) {
+        enemyStatus.textContent = `Échec du modèle : ${error.message} ${enemySummary()}`;
+      }
+    }
+  });
+  $('frame-private-enemy').addEventListener('click', frameLocalEnemy);
+  $('frame-containers').addEventListener('click', () => {
+    state.camera = { ...CONTAINERS_BUILD28_DEMO_CAMERA };
+    previewCameraY = state.camera.y;
+    state.hop = 0; state.verticalSpeed = 0;
+  });
+  const textureInput = $('private-texture');
+  const textureStatus = $('private-texture-status');
+  const textureSummary = () => localPrivateTexture
+    ? `Texture PNG locale chargée · ${localPrivateTexture.width} × ${localPrivateTexture.height} · meshes locaux uniquement ; shader et éclairage Web générés, sans parité native.`
+    : 'Aucune texture locale chargée ; matériaux Web générés.';
+  textureInput.addEventListener('change', async () => {
+    const generation = ++privateTextureGeneration;
+    const file = textureInput.files?.[0];
+    if (!file) {
+      textureStatus.textContent = textureSummary();
+      return;
+    }
+    textureStatus.textContent = 'Décodage de la texture PNG locale…';
+    let bitmap;
+    try {
+      if (!/\.png$/i.test(file.name)) {
+        throw new TypeError('Choisis un fichier PNG local.');
+      }
+      if (!Number.isFinite(file.size) || file.size <= 0 || file.size > 16 * 1024 * 1024) {
+        throw new RangeError('Le fichier PNG doit contenir entre 1 octet et 16 Mio.');
+      }
+      bitmap = await createImageBitmap(file, {
+        imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none',
+      });
+      if (generation !== privateTextureGeneration) return;
+      localPrivateTexture = Object.freeze(renderer.replacePrivateTexture(bitmap));
+      textureStatus.textContent = textureSummary();
+    } catch (error) {
+      if (generation === privateTextureGeneration) {
+        textureStatus.textContent = `Échec de la texture : ${error.message} ${textureSummary()}`;
+      }
+    } finally {
+      bitmap?.close();
+    }
+  });
   for (const spec of localMeshPreviewSpec) {
     $(spec.inputId).addEventListener('change', async () => {
       const file = $(spec.inputId).files?.[0];
@@ -55,7 +144,7 @@ if (containersPreviewEnabled) {
         localNativeMeshes.add(spec.slot);
         status.textContent = localNativeMeshes.size + '/2 meshes locaux · '
           + mesh.triangleCount + ' triangles sur le groupe ' + spec.groupIndex
-          + ' · matériaux provisoires · pas de comparaison native';
+          + ' · shader et éclairage Web générés · pas de comparaison native';
       } catch (error) {
         status.textContent = 'Échec ' + spec.slot + ' : ' + error.message;
       }
@@ -104,6 +193,8 @@ function loadLevel(index) {
   state.camera = containersPreviewEnabled
     ? { ...CONTAINERS_BUILD28_DEMO_CAMERA }
     : { x: state.level.spawn.x, y: 1.68, z: state.level.spawn.z, yaw: 0, pitch: 0 };
+  if (containersPreviewEnabled && localNativeEnemy) frameLocalEnemy();
+  else previewCameraY = state.camera.y;
   state.enemies = state.level.enemies.map((e, i) => ({
     ...e, y: 0, id: i, alive: true, active: false, clock: 0, face: 0,
     fireTimer: rand(1.6, 2.7) + e.delay, strafe: rand(-1, 1), phase: rand(0, Math.PI * 2),
@@ -351,8 +442,8 @@ function update(dt) {
       x: state.camera.x + sx * norm * velocity * dt,
       z: state.camera.z + sz * norm * velocity * dt,
     }, .34, state.solids);
-    state.camera.x = clamp(next.x, -14.9, 14.9);
-    state.camera.z = clamp(next.z, -33.8, 21.8);
+    state.camera.x = containersPreviewEnabled ? next.x : clamp(next.x, -14.9, 14.9);
+    state.camera.z = containersPreviewEnabled ? next.z : clamp(next.z, -33.8, 21.8);
     state.walkCycle += dt * velocity * 1.4;
   }
   if (state.verticalSpeed !== 0 || state.hop > 0) {
@@ -360,7 +451,7 @@ function update(dt) {
     state.verticalSpeed -= 14 * dt;
     if (state.hop < 0) { state.hop = 0; state.verticalSpeed = 0; }
   }
-  state.camera.y = (containersPreviewEnabled ? CONTAINERS_BUILD28_DEMO_CAMERA.y : 1.68) + state.hop;
+  state.camera.y = (containersPreviewEnabled ? previewCameraY : 1.68) + state.hop;
 
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
@@ -549,6 +640,7 @@ function render() {
         renderer.drawPrivateMesh('mesh7', '#f6f8f9')) {
       privateIndexedDraws++;
     }
+    nativeEnemyStats = renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
     manifestStats = {
       ...manifestStats,
       privateIndexedDraws, localFilePreviewOnly: true,
@@ -596,6 +688,14 @@ function frame(now) {
       p95Fps: 1000 / at(.05),
       generatedManifest: manifestStats,
       locallyLoadedSourceGroups: localNativeMeshes.size,
+      locallyLoadedTexture: localPrivateTexture,
+      localNativeEnemy,
+      nativeEnemyIndexedDrawCalls: nativeEnemyStats?.drawCalls ?? 0,
+      nativeEnemySpawnVerified: false,
+      skinAnimationVerified: false,
+      camera: { ...state.camera },
+      nativeMaterialShaderMatch: false,
+      nativeLightingMatch: false,
       localFilesStayInBrowser: true,
       totalWebGLDrawCalls: renderer.getDrawCalls(),
       browserMeasured: true,

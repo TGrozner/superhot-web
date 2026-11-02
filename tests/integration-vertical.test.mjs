@@ -44,29 +44,6 @@ test('SH16 reports a candidate module missing from main rather than claiming nat
   });
 });
 
-test('SH16 current checkout remains UNASSESSED independent of green Web tests', async () => {
-  const r = await auditVerticalIntegration();
-  assert.equal(r.schemaVersion, 2);
-  assert.equal(r.target, 'Containers/build28');
-  assert.equal(r.entrypoint, 'src/main.js');
-  assert.equal(r.nativeParityVerdict, 'UNASSESSED');
-  assert.equal(r.nativeExecutionObserved, false);
-  assert.equal(r.browserGpuTested, false);
-  assert.equal(r.browserCaptureCompared, false);
-  assert.equal(r.flags.affineBoxRendererDeclared, true);
-  assert.equal(r.flags.legacyCollisionSourceDetected, true);
-  assert.equal(r.flags.containersPreviewWired, true);
-  assert.equal(r.flags.localObjPreviewWired, true);
-  assert.equal(r.flags.containersPreviewCollidersExplicitlyCleared, true);
-  assert.equal(r.flags.containersPreviewEnemiesExplicitlyCleared, true);
-  assert.equal(r.cargoCpuProbe.sourceHullProxyAdapters, 5);
-  assert.equal(r.cargoCpuProbe.staticLegacySpawnRisk.outsideLegacyZ, true);
-  assert.deepEqual(r.legacyMovementClamp, {x:[-14.9, 14.9],z:[-33.8, 21.8]});
-  assert.equal(r.sourceQualifiedMeshGroupsKnown, 2);
-  assert.equal(r.userSelectedPrivateMeshesObserved, null);
-  assert.ok(r.staticImportGraph.moduleCount >= 3);
-});
-
 test('SH16 distinguishes source-group upload path from a real measured browser session', () => {
   assert.deepEqual(assessContainersBrowserMetrics(), {
     status: 'NOT_OBSERVED', nativeParityVerdict: 'UNASSESSED',

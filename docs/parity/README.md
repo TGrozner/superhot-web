@@ -188,14 +188,14 @@ des appels WebGL2 et correspondance pixel native ne sont pas encore mesurés.
 
 ## Opt-in local OBJ group inspection (SH-05, 2026-11-02)
 
-Open `/?scene=containers`. The **LOCAL OBJ PREVIEW** panel accepts a local `.obj` or `.obj.gz` for each of the two independently verified Combined Mesh groups:
+Open `/?scene=containers`. The **LOCAL OBJ + PNG PREVIEW** panel accepts a local `.obj` or `.obj.gz` for each of the two independently verified Combined Mesh groups:
 
 - `Mesh level28:6`, OBJ group suffix `_47`, expected **1546** triangles / cargo center `[17.45,2.575,13.975]` in the *Web* preview coordinate convention.
 - `Mesh level28:7`, OBJ group suffix `_48`, expected **1546** triangles / cargo center `[17.475,5.725,15.8]`.
 
 Selecting either file decompresses/parses it in the browser, converts the OBJ's mirrored-X exported coordinates to the Web preview convention by reflecting X and Z, and validates triangle count and world bounds *before* WebGL2 upload. The matching generated hull **and its artificial ribs** disappear only after the genuine local group is successfully accepted. The other generated proxies remain. This is opt-in; ordinary modes and users without local files are unaffected.
 
-**Privacy / rights:** the local input uses the user's File object directly; no network request, upload, source-file path, storage, or repository asset is involved. No OBJ, source texture, or original MCD material is bundled in `superhot-web`. Use only legitimately obtained personal source files. The imported groups are shown with **synthetic Web colors/lighting**. Native runtime visibility, material binding, camera/FOV, shadows, actual running gameplay and pixel-level 1:1 fidelity remain **UNVERIFIED**. The preview is deliberately *not* playable native Containers gameplay; neither the original collision nor enemies are attached. The `window.__superhotSceneMetrics` report distinguishes locally loaded groups from generated proxies.
+**Privacy / rights:** the local inputs use the user's File objects directly; no network request, upload, source-file path, storage, or repository asset is involved. No OBJ, source texture, or original MCD material is bundled in `superhot-web`. Use only legitimately obtained personal source files. The imported groups use **synthetic Web colors/lighting** unless a local PNG is selected; that optional texture does not replace the generated Web shader or lighting. Native runtime visibility, material binding, camera/FOV, shadows, actual running gameplay and pixel-level 1:1 fidelity remain **UNVERIFIED**. The preview is deliberately *not* playable native Containers gameplay; neither the original collision nor enemies are attached. The `window.__superhotSceneMetrics` report distinguishes locally loaded groups and texture state from generated proxies.
 
 **Private evidence (do not publish original resources):** `superhot-research#42/#43/#45/#47/#55/#60/#63` establishes the Unity indices, converted OBJ existence, first container submesh47 (4638 indices, 1546 triangles), and X-mirrored OBJ AABB matching its serialized source. Group48 has source-reported 4638 indices and corresponding collider envelope. This UI provides a real GPU rendering path but does not validate native material/shader/animation parity. Screenshots and performance should be assessed directly in a browser before claiming visible fidelity.
 
@@ -244,5 +244,89 @@ Attendu dans un cadre où les instances sont dessinées :
 à une capture MCD native **à pose/projection réellement appariées**.
 Les compteurs de l'application ne remplacent pas une preuve GPU/pixel ;
 aucun de ces nombres n'est présenté comme observé avant ce test.
-Les matériaux natifs (référence sérialisée 5:3) restent non résolus,
-les couleurs sont synthétiques, et **aucun 1:1 n'est validé**.
+La jointure statique matériau/texture est identifiée ci-dessous ; le shader et
+l'éclairage Web restent générés, et **aucun 1:1 n'est validé**.
+
+## Texture PNG locale facultative — Containers
+
+Dans `/?scene=containers`, charger ses exports OBJ comme ci-dessus puis choisir
+son PNG dans **Texture PNG locale facultative — béton des meshes**. La texture
+peut aussi être sélectionnée avant les OBJ : elle ne devient visible que sur
+les meshes locaux chargés. Pendant la visite, **Échap** libère la souris pour
+accéder aux sélecteurs. Le statut des meshes reste indépendant de celui de la
+texture ; les deux groupes continuent de produire les quatre placements décrits
+ci-dessus, sans nouveau mesh ni modification des proxies.
+
+Le fichier doit être non vide, porter l'extension `.png` et ne pas dépasser
+**16 Mio**. Le navigateur décode l'image avec
+`createImageBitmap(file, { imageOrientation: 'flipY', premultiplyAlpha: 'none',
+colorSpaceConversion: 'none' })`, puis appelle
+`renderer.replacePrivateTexture(bitmap)`. Le renderer refuse les dimensions
+invalides ou supérieures au `MAX_TEXTURE_SIZE` de la session WebGL2. Un échec de
+décodage ou de transfert GPU conserve la dernière texture valide ; le statut
+accessible annonce l'échec et l'état conservé. Une sélection plus récente
+invalide les décodages en attente, et chaque bitmap décodé est fermé après
+utilisation, y compris lorsqu'il est devenu obsolète. Recharger la page revient
+aux matériaux générés : aucune sélection n'est persistée.
+
+La texture utilise les UV présents dans l'OBJ, une échelle `(0.1, 0.1)` et un
+offset `(0, 0)`, avec répétition, mipmaps et filtrage linéaire. L'échantillon
+sRGB est converti en linéaire pour l'éclairage, puis la sortie texturée est
+réencodée en sRGB. Seuls les draws des meshes privés consomment cette texture :
+boîtes, nervures, sol, fragments et autres modes conservent leur rendu généré.
+
+**Provenance statique privée :** mesh6/sub47 et mesh7/sub48 sont reliés au
+matériau `resources.assets::3`, shader `XULM FULLFORWARD/Concrete 2019 MAIN`,
+avec MainTex `resources.assets::248`, échelle approximative `(0.1, 0.1)` et
+offset `(0, 0)`. Ces identifiants ne chargent aucune ressource automatiquement
+et ne prouvent pas que le fichier choisi est la texture originale. Aucun octet
+de texture ni code du shader original n'est ajouté au dépôt public.
+
+`window.__superhotSceneMetrics.locallyLoadedTexture` vaut `null` sans texture
+acceptée, sinon `{ width, height }` pour la dernière image transférée avec succès,
+même si aucun OBJ n'est encore chargé. `locallyLoadedSourceGroups` et les
+compteurs de draws restent indépendants. `nativeMaterialShaderMatch` et
+`nativeLightingMatch` restent `false` : **texture présente ne signifie ni shader
+natif, ni éclairage natif, ni parité pixel**. Cette implémentation ne constitue
+pas une mesure GPU ni une comparaison native ; les vérifications navigateur
+avec fichiers personnels et les contrôles de régression doivent être effectués
+séparément.
+
+## Modèles ennemis originaux — import local raccordé
+
+La PR SH-14 #114 est raccordée au même aperçu `/?scene=containers` :
+choisir **EnemyMerged — complet** ou **EnemyMergedHeadless — sans tête**, puis
+l'export personnel OBJ/OBJ.gz correspondant. Le chargeur de l'agent vérifie
+l'identité du fichier, son empreinte SHA-256, ses bornes et ses triangles avant
+le transfert GPU. Une erreur conserve le modèle déjà affiché. Rien n'est envoyé
+au serveur ou stocké entre deux visites.
+
+Le modèle complet contient **2254 triangles**, la variante sans tête **2132**.
+Ce sont les véritables exports de `sharedassets0.assets:284/285`, pas le
+mannequin procédural. Ils sont affichés **statiquement**, en pose exportée :
+les animations, les apparitions et la simulation des ennemis natifs ne sont
+pas raccordées par cette intégration. La couleur rouge provient du paramètre
+du matériau, mais le shader et l'éclairage restent ceux du Web.
+
+**Cadrer le modèle** montre le personnage entier au-dessus du sol de visite.
+**Vue des conteneurs** restaure la caméra d'ensemble. Ces deux placements sont
+diagnostiques, pas des positions de jeu natives. La navigation Containers
+n'applique plus les limites de déplacement d'un autre niveau du prototype :
+le premier déplacement ne téléporte plus la caméra de z=31 à z=21.8.
+Les limites des modes de jeu ordinaires restent inchangées.
+
+La texture béton ne s'applique qu'aux conteneurs, jamais à l'ennemi.
+`window.__superhotSceneMetrics.localNativeEnemy` décrit le modèle chargé et
+`nativeEnemyIndexedDrawCalls` son draw distinct ; `camera` expose une copie
+de la caméra de visite. `nativeEnemySpawnVerified` et `skinAnimationVerified`
+restent `false`.
+
+**Vérification navigateur locale effectuée le 2026-11-02 :** Chromium/WebGL2
+a affiché les deux vrais modèles, chacun avec un draw indexé, ainsi que les
+quatre placements de conteneurs texturés depuis deux fichiers OBJ.
+Une mauvaise sélection OBJ a été rejetée sans supprimer le modèle précédent ;
+une image PNG illisible a conservé la texture précédente. Aucune erreur WebGL
+observée dans ces scénarios. Un damier de contrôle GPU a confirmé l'orientation
+des UV et l'absence de modification du rendu des boîtes générées.
+Captures et fichiers originaux restent dans le corpus privé. Ce constat Web
+ne vaut pas comparaison pixel avec MCD ni validation des animations.
