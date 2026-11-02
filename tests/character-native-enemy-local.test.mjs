@@ -42,7 +42,7 @@ test('strict OBJ group binds to SH-12 indexed non-cuboid pipeline without claimi
   assert.deepEqual(source.groupEvidence[0].bounds.max.map((v) => v + 0), [0, 1, 0]);
   assert.equal(source.drawRanges[0].groupName, 'Demo_0');
   assert.deepEqual(source.sourceCounts, { v: 3, vt: 3, vn: 1 });
-  assert.equal(source.mesh.vertices[2], 0);
+  assert.ok(source.mesh.vertices[2] === 0); // WebGL signed zero is equivalent geometrically
   assert.equal(source.mesh.vertices[5], -1);
   assert.equal(source.skinWeightsAvailable, false);
   assert.equal(source.materialBindingsResolved, false);
