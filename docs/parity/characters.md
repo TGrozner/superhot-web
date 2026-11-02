@@ -63,3 +63,82 @@ The `rootMatrix` must be an explicit Web right-handed **world** transform (not a
 ## Tests / limitations
 
 `node --test tests/character-*.test.mjs` covers generated non-box triangle shape and normals, hierarchy/rotations and reference safety, mirrored matrices, indexed draw calls and state restoration in a mock WebGL2 API. Mock calls and Node CI cannot establish a visible GPU frame, actual native render, active enemy clip, material color, hit reaction or 1:1. No new private-game assets are committed or uploaded.
+
+
+## P0 2026-11-02: REAL enemy geometry locally, static until skin evidence
+
+**This section supersedes the old native-mesh blocker in the first SH-14 delivery above.** The original rig/11-piece character remains a clearly labeled procedural fallback. The **real converted enemy mesh geometry now has exact owner-qualified source and byte-level receipts**; this is more useful visually than generating another approximated humanoid.
+
+### Native proof ledger, pre-existing PRIVATE requests (no new corpus scan in this slice)
+
+1. [research #74](https://github.com/TGrozner/superhot-research/issues/74), result artifact `13138705902`: serialized `sharedassets0.assets:Animator4659` → `GO870 EnemyBodyPrefab`, candidate controller `(fileID0,path638)`, Avatar `(fileID0,path632)`, `m_Enabled=0` in prefab data only. This does **not** establish active animator runtime.
+2. [research #78/#79/#80](https://github.com/TGrozner/superhot-research/issues/80), result artifact `13140750302`: prefab GO870/Transform2048 has piecewise `SkinnedMeshRenderer` components, and exact `SkinnedMeshRenderer4748 → m_Mesh(fileID0,pathID284), 60 bone references` (`EnemyMerged`), `renderer4749 → (fileID0,pathID285), 59 bone references` (`EnemyMergedHeadless`). These are **same-owner sharedassets0.assets** pointers. `resources.assets:pathID284/285` instead names unrelated **glass shards**; never resolve by pathID alone.
+3. [research #81](https://github.com/TGrozner/superhot-research/issues/81), run `41440880253`, artifact `13140480419`: exact Mesh284/285 exported by the private UnityPy conversion as OBJ position/normal/UV and triangular faces. The OBJ format **does not encode weights, bindposes, clips, skin transforms or native materials**.
+4. [research #88/#90](https://github.com/TGrozner/superhot-research/issues/88), artifacts `13139108195`/`13140612009`: prior SH-14 independent private reads inspected `result.json`, recomputed gzip and uncompressed OBJ SHA-256, enumerated group labels, vertex/UV/normal declarations, triangles and bounds. These receipts are encoded as **metadata only** in `src/characters/native-enemy-local.js`. They are NOT an additional native execution or newly downloaded data in this PR.
+
+| Strict local source check | `merged`: sharedassets0:284 | `headless`: sharedassets0:285 |
+|---|---:|---:|
+| Serialized renderer / `m_Bones` refs | 4748 / 60 | 4749 / 59 |
+| Exact OBJ group | `EnemyMerged_0` | `EnemyMergedHeadless_0` |
+| Source `v/vt/vn` declarations | 5237 each | 4895 each |
+| Triangles | 2254 | 2132 |
+| Exact .obj.gz bytes | 110391 | 103229 |
+| Exact uncompressed .obj bytes | 660805 | 618720 |
+| Uncompressed SHA-256 | `acd05fef8f85ce06a1b6a6255247b01d3e27b5f3687525504ef39f45d2f67add` | `e6146e67cd0a9fb49b2641cc59fb397f5c236f78eb5c290a2206a74764305cff` |
+
+Source OBJ AABB: X ±0.878194034, Y [0.0000810648,1.9474926] (headless max1.78382015), Z [-0.122781016,0.24209635]. Pipeline explicitly maps `(-x,y,-z)` and keeps triangle winding, following the existing Containers preview convention. Web AABB Z [-0.24209635,0.122781016]. This is **converted authored geometry with no independently observed Unity runtime draw**, not evidence of 1:1 silhouette in the game's running scene.
+
+### SH-14 implementation — public code only, files reserved to this lane
+
+`src/characters/native-enemy-local.js` exports:
+
+- `NATIVE_ENEMY_OBJ_EXPORTS.merged/headless`: immutable public **metadata**, qualified by source file *and* path ID, with exact compressed/decompressed hashes and sizes.
+- `loadNativeEnemyObj(file,{variant:'merged'|'headless'})`: owner-provided local File API `.obj` or `.obj.gz` **only**. Rejects wrong extension, size, SHA-256, missing exact OBJ group, wrong `v/vt/vn` counts, triangle count, source bounds, or malformed normals/UV/indices. No network request, automatic path access, asset serialization, clipboard, storage or upload. Strictness intentionally rejects alternate conversions until independently qualified.
+- `decodeSourceNeutralEnemyObj(text,evidence)`: source-neutral shape conversion via **SH-12** `parseObjGroupsIntoIndexedMesh`, not itself a proof of native source. Its result always labels itself **unverified**.
+- `createEnemyStaticIndexedPass(gl,program,uniforms,receipt)`: loads one SH-12 indexed mesh via the existing SH-14 WebGL2 character pass; provides `draw(worldMatrix)` and `dispose()`. The returned report explicitly distinguishes *digest-verified static export geometry* from a caller-provided mock, *generated red material* from native shader, and `skinned:false/nativeEnemySpawnVerified:false` from an activated EnemyBodyPrefab. One draw packet, no invented hitbox or fake bone matrices. Root transforms may later be supplied by SH-06 without creating false limb animation.
+
+The exact exported data remains in the user's private `superhot-research` corpus. **No OBJ files, original vertex buffers, source binaries, texture, shader, copyrighted game code, Unity bindposes or captures enter public Git or Actions logs.** The only tests use a *newly generated 3-vertex OBJ*, and cannot prove real-browser GPU drawing.
+
+### Exact SH-05 hook: static native mesh first, real skin/pose later
+
+SH-05 alone may edit shared `src/main.js`, `src/renderer.js`, `src/levels.js`, `index.html`. Do **not** edit them from SH-14 or claim this PR is visible automatically.
+
+Inside SH-05's existing `createRenderer()` after `gl`, `program`, `uniforms` are available:
+
+```js
+import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
+let nativeEnemyPass = null;
+function acceptLocalEnemyReceipt(receipt) {
+  const newPass = createEnemyStaticIndexedPass(gl, program, uniforms, receipt);
+  nativeEnemyPass?.dispose();
+  nativeEnemyPass = newPass;
+}
+function drawLocalEnemyDiagnostic(worldMatrix) {
+  if (!nativeEnemyPass) return { drawCalls: 0, triangles: 0 };
+  const stats = nativeEnemyPass.draw(worldMatrix);
+  drawCalls += stats.drawCalls; // SH-05's shared renderer counter
+  return stats;
+}
+// Include acceptLocalEnemyReceipt/drawLocalEnemyDiagnostic in renderer return.
+// No native EnemyBodyPrefab ID, combat entity, or active Animator inferred.
+```
+
+In SH-05's existing opt-in `?scene=containers` **local-only UI** (no server upload):
+
+```js
+import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
+const receipt = await loadNativeEnemyObj(fileFromInput, { variant: 'merged' });
+renderer.acceptLocalEnemyReceipt(receipt);
+// Render-only diagnostic placement, intentionally NOT sourced from a native
+// Containers EnemyBodyPrefab spawn. Scene camera currently roughly
+// (11,7,31,yaw0,pitch-0.19): z~5 puts a 0..2m model near its sightline.
+const diagnosticWebWorldMatrix = [
+  1,0,0,0, 0,1,0,0, 0,0,1,0, 11,0,5,1,
+];
+// Every frame AFTER renderer.begin(camera), never as a gameplay enemy:
+const nativeEnemyMetrics = renderer.drawLocalEnemyDiagnostic(diagnosticWebWorldMatrix);
+```
+
+Show the text **`STATIC SOURCE-EXPORTED ENEMY · DIAGNOSTIC POSITION · NOT MCD SPAWN / MATERIAL / ANIMATION`** in the browser. Telemetry fields should separately report `sourceMeshOwner='sharedassets0.assets'`, `sourceMeshPathID=284|285`, `nativeIndexedDrawCalls`, `nativeStaticTriangleCount`, `nativeEnemySpawnVerified=false`, `skinAnimationVerified=false`. No native gameplay hit test should use this stand-in; SH-03 owns combat and SH-06 owns evaluated animation.
+
+**Visual acceptance requires** a real user-selected local OBJ loaded in a WebGL2 browser, an actual frame with **nonzero** enemy indexed draws and screenshot, correct front-face/normal orientation, then a matching native MCD capture and matched camera/scale/material checks. Until that exists, **1:1 is unmeasured**. Full animated original 60/59-bone rig requires owner-qualified ordered `m_Bones`, Mesh `m_BindPose`, per-vertex bone weights/indices, Avatar632 resolution, SH-06 clip/retarget pose and verified runtime instantiation — still OPEN. One static mesh cannot legitimately be presented as skinned just by moving its root.
