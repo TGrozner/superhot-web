@@ -464,3 +464,67 @@ mapping accepted native intents to them must be explicitly labeled
 substitution, not parity. A browser user gesture, resumed AudioContext and
 recorded non-silent output plus a paired native observation remain the
 audibility gate. `src/main.js` and `src/audio.js` remain exclusively SH-05.
+
+
+## SH-07 P0 — enemy-death sound uses AudioPrefab, NOT the Gun PlayClip route
+
+**PROUVÉ — native source request only.** Steam SUPERHOT MCD build `20299547`,
+Unity `2018.4.14f1`, Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+The PRIVATE existing artifacts were reused without a new bridge request:
+
+- Research [#89](https://github.com/TGrozner/superhot-research/issues/89),
+  run `41442138603`, artifact `13139513152`,
+  `managed/Assembly-CSharp/PejAiBody.cs:565–602`,
+  UTF-8 excerpt SHA-256 `2f938d5c65af66128acd324d52b6fb542c2ca369bf2e6f1bb298227c5e913c60`.
+- Research [#113](https://github.com/TGrozner/superhot-research/issues/113),
+  run `41463176601`, artifact `13148839109`,
+  `managed/Assembly-CSharp/AudioManager.cs:579–612`,
+  UTF-8 excerpt SHA-256 `0f5ace43712f182a9961ce6088bfc50f03580d7c433a28bae5a9f189b7be0b89`.
+
+**Native call chain:** `PejAiBody.Kill` immediately returns if
+`controller.IsDead` at entry. On the remaining path it invokes
+`controller.Kill` and then requests
+`AudioManager.PlayPrefabSound(AudioGameObjectResources.EnemyShatter, …)`
+at the enemy's world position with **Y+1.5 Unity units**. This is the
+**`AudioPrefab` overload**, not `PlayClip(AudioClip,…)`. Consequently the
+`PlayClip` null-channel / matching-clip cooldown rules in the previous section
+**must not be copied** to this request.
+
+`AudioManager.PlayPrefabSound(AudioPrefab,…)` first requires an audio
+object pool keyed by the **resolved `AudioPrefab.Name`**; absent pool
+returns an empty effect. For a pooled instance it requests pause if reused,
+sets world position, spatial blend 1, un-mutes the source, and calls
+`AudioSource.Play`. Newly obtained instances are registered as playing;
+reused instances are not registered twice. Positive pitch randomization adds
+a uniform signed offset to the source's **existing** pitch, potentially
+accumulating on reuse; no pitch reinitialization was identified in this method.
+Pitch zero warns only. `PejAiBody.Kill` uses the overload's default
+pitch-randomization argument (zero). No `AudioSource.Play` execution,
+waveform or audible result has been directly observed.
+
+**PROUVÉ — isolated Web plan:** `src/sound/mcd-prefab-sound-intent.js`
+exposes `planMcdAudioPrefabPlay` and the Kill call-site-specific
+`planMcdBodyKillShatterPrefab`. They require external facts for
+`AudioPrefab.Name`, pool existence, pooled source reuse and previous pitch.
+No sound is emitted, no original prefab is stored and no guessed MCD
+clip is selected. `tests/sound-mcd-prefab-intent.test.mjs` covers ten
+source-bounded cases; finite-number checks and immutable output are Web
+boundary policy, not claims about managed code exception behavior.
+
+**INCONNU — blocking actual sound:** whether the currently shootable
+Containers Web enemy goes through the native `PejAiBody.Kill` route,
+which `AudioPrefab.Name` is bound to `EnemyShatter`, whether that pool is
+populated at runtime, the source's underlying clips, mixer, attenuation,
+browser AudioContext readiness, or any speaker output. A requested
+`AudioSource.Play` is **not** a measured audible sound. No native/browser
+paired trace, source media, or commercial asset is published.
+
+**SH-05 integration handoff:** wire only when the body-Kill path is
+source-qualified (do not assume every prototype `killEnemy` means
+`PejAiBody.Kill`). Feed the enemy's real source position and resolved
+prefab/pool facts; ignore `null` or `empty-effect` outcomes. A permitted
+replacement may call an explicitly labeled **generated Web shatter** cue,
+but that requires a user-resumed AudioContext and an actual non-silent
+browser waveform/speaker verification before claiming audibility. Continue
+to keep `src/main.js` and `src/audio.js` exclusively under SH-05 ownership.
