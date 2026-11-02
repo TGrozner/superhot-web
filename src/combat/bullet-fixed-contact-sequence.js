@@ -23,6 +23,7 @@ export function planBulletFixedContactSequence({
   }
 
   const events = [];
+  let currentPosition = projectilePosition;
   const result = (status, consumedHits, stoppedAt = null) => ({
     status, consumedHits, stoppedAt, events,
   });
@@ -42,9 +43,17 @@ export function planBulletFixedContactSequence({
         collisionPoint: hit.collisionPoint,
         otherCanCollideCurrent: hit.otherCanCollideCurrent,
       });
-      for (const event of pair.events) events.push({ ...event, hitIndex: i });
+      for (const event of pair.events) {
+        events.push({ ...event, hitIndex: i });
+        if (event.type === 'position-request' && event.target === 'current')
+          currentPosition = event.position;
+      }
       if (pair.outcome === 'other-can-collide-unverified') {
         return result('pair-can-collide-unverified', i + 1, i);
+      }
+      if (pair.outcome === 'parent-weapon-ids-incomplete' ||
+          pair.outcome === 'parent-weapon-guard-conflict') {
+        return result(pair.outcome, i + 1, i);
       }
       if (typeof hit.destroyedAfterHandler !== 'boolean') {
         return result('destruction-state-unverified', i + 1, i);
@@ -57,7 +66,7 @@ export function planBulletFixedContactSequence({
 
     const route = planIncomingBulletFixedContacts({
       orderedHits: [hit], firedByPlayer: current.firedByPlayer,
-      sniperBullet: current.sniperBullet, projectilePosition, velocity,
+      sniperBullet: current.sniperBullet, projectilePosition: currentPosition, velocity,
     });
     for (const event of route.events) events.push({ ...event, hitIndex: i });
     if (route.status === 'native-loop-stop-requested') {

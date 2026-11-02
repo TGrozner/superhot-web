@@ -5,9 +5,14 @@ Run **node scripts/integration-vertical.mjs** from the repository root with Node
 ## Current localhost integration — original assets and sampled poses
 
 The configured root URL `/` loads the private source-scene package automatically:
-68 meshes,360 eligible world instances,17 textures and the original pistol.
+68 meshes,360 eligible world instances,21 textures and the original pistol.
 EnemyMerged/Headless use a62-bone hierarchy with60/59 weighted GPU matrices and
-original idle/walk/hit poses evaluated in Unity. No query flags are required.
+original idle/walk/hit/fire/punch poses evaluated in Unity. Walk/run state speeds
+and evidenced locomotion transitions are consumed by the renderer. Shooting uses
+native additive pose grids over locomotion, with source entry/exit timing. Its
+activation still comes from the Web AI's attack intent, not a reproduced native
+controller decision. Raw punch inspection does not establish gameplay parity.
+No query flags are required.
 
 `assessContainersBrowserMetrics` accepts `CONTAINERS_ORIGINAL_GEOMETRY_WEB_GAMEPLAY`
 with actual source-world draw counts. The four-draw manual preview is a separate
@@ -19,6 +24,28 @@ spawn candidates are connected to Web gameplay; this is not native PhysX, spawne
 timing, navigation or ragdoll death. Source projection parameters are consumed by
 all draw passes through the same uploaded view-projection matrix. See
 `characters.md` and `visual.md` for bounded runtime and image-comparison evidence.
+
+Containers also consumes the source minimum/max time scale, movement/jump/look
+contributions, world-time player displacement and action pulses. Its linked pistol
+has five rounds, a0.6-world-second delay and source projectile speed36; the enemy
+projectile uses its separately linked speed28. Native collision/event ordering and
+enemy firing decisions remain unreproduced. `R` no longer creates ammunition in
+Containers; native Replay is not implemented.
+
+Original local WAVs are fetched and decoded after a user gesture. Chromium observed
+a5→4 shot using an actual `AudioBufferSourceNode`, then the original ready clip
+after the world-time delay. Enemy fire shares the verified source clip/cache with
+player primary fire. The generated demo mode retains explicitly procedural sounds.
+Audio graph playback is not proof of physical speaker output or full mixer parity.
+
+Chromium also exercised original throwing audio (a nonzero signal measured in
+the Web Audio graph), Escape pause without pointer lock, Headless walking from
+the inspection controls, and procedural-demo reloading after original mode.
+A close-range Web kill selected the impact-time frozen idle pose instead of the
+unrelated hit/stun clip; original ragdoll and breakup remain unimplemented.
+The world renders121 source Concrete MAIN compositions and239 generic draws.
+Both the12-level BC3 lightmap and the no-S3TC PNG fallback were observed with
+no WebGL error. This is bounded shader coverage, not a matched whole-frame claim.
 
 The sections below preserve earlier integration observations, not current setup instructions.
 

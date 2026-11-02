@@ -65,9 +65,9 @@ export function planPejAiBodyStun({
     );
   }
 
-  // If already stunned, concrete=true preserves stunedConcretePart as-is;
-  // this branch does NOT unconditionally turn it on.
-  if (!alreadyStunned || !isConcrete)
+  // Cancellation calls EndStun before this check, resetting the stun timer.
+  // Otherwise an already-stunned concrete hit preserves the existing flag.
+  if (kamikazeAnimFired || !alreadyStunned || !isConcrete)
     commands.push({ op: 'set-stuned-concrete-part', value: isConcrete });
 
   // Strict < in native; equality does NOT schedule audio.

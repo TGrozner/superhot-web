@@ -117,6 +117,20 @@ test('sniper can continue handled environment only if post-handler destruction e
   assert.equal(blocked.events.some(e => e.type === 'player-kill-request'), false);
 });
 
+test('surviving sniper uses its latest pair-contact position for the next player attack', () => {
+  const input = {
+    orderedHits: [pairHit, player], current: { ...current, sniperBullet: true },
+    projectilePosition: v(6, 2, 1), velocity: v(36),
+  };
+  const before = structuredClone(input);
+  const result = planBulletFixedContactSequence(input);
+  assert.deepEqual(result.events.find(e => e.type === 'player-kill-request'), {
+    type: 'player-kill-request', hitIndex: 1, attackOrigin: v(-3, 2, 1),
+    flags: { switchToBlack: false, hardKill: false, forceKill: false },
+  });
+  assert.deepEqual(input, before);
+});
+
 test('missing hit guards and flags cannot silently become a valid contact', () => {
   assert.throws(() => plan([{ layer: 'Bullets', ignored: 0 }]), /explicit/);
   assert.throws(() => plan([player], { current: { ...current, firedByPlayer: 0 } }), /explicit/);
