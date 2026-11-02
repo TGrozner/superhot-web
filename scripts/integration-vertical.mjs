@@ -194,21 +194,37 @@ export function assessContainersBrowserMetrics(metrics) {
   const proxyOmissions = metrics.generatedManifest?.hiddenByPrivateMesh;
   const calls = metrics.totalWebGLDrawCalls;
   const frameMs = metrics.p95FrameMs;
+  const triple = metrics.generatedManifest?.sourceQualifiedMesh6DrawPackets;
   const validCounts = [groups, draws, proxyOmissions, calls].every(
     value => Number.isSafeInteger(value) && value >= 0);
+  // The post-SH04 local Mesh6 group47 can legally reuse one GPU upload for
+  // three nearly congruent, source-qualified placements. 2 loaded file groups
+  // may therefore produce 4 indexed draw calls, NOT 4 independently loaded
+  // source meshes. Legacy telemetry without this field remains supported.
+  const newModel = triple !== undefined;
+  const mesh7Draws = newModel ? draws - triple : null;
+  const mappingValid = newModel
+    ? (Number.isSafeInteger(triple) && (triple === 0 || triple === 3) &&
+      (mesh7Draws === 0 || mesh7Draws === 1) &&
+      groups === (triple > 0 ? 1 : 0) + mesh7Draws)
+    : (draws <= 2 && draws <= groups);
   if (!validCounts || !Number.isFinite(frameMs) || frameMs <= 0 ||
-      groups > 2 || draws > 2 || draws > groups || calls < draws) {
+      groups > 2 || draws > 4 || !mappingValid || calls < draws) {
     return { status: 'INVALID_COUNTERS', nativeParityVerdict: 'UNASSESSED' };
   }
-  const sourceMeshesActive = groups > 0 && draws === groups && proxyOmissions > 0;
+  const matchedGeneratedHulls = newModel
+    ? (triple > 0 ? 2 : 0) + mesh7Draws
+    : draws;
+  const sourceMeshesActive = groups > 0 && draws >= groups && proxyOmissions > 0;
   return {
     status: sourceMeshesActive ? 'APP_REPORTED_INDEXED_MESH_DRAWS' : 'GENERATED_OR_PARTIAL_PROXY_ONLY',
     reportedSourceGroups: groups,
     reportedPrivateIndexedDraws: draws,
+    reportedSourceQualifiedMesh6DrawPackets: newModel ? triple : null,
     reportedProxyPacketsOmitted: proxyOmissions,
     reportedTotalWebGLDrawCalls: calls,
     reportedP95FrameMs: frameMs,
-    sourceMatchedHullFraction: groups + '/5',
+    sourceMatchedHullFraction: matchedGeneratedHulls + '/5',
     originalMaterialProven: false,
     physicalCollisionProven: false,
     browserScreenshotCaptured: false,
