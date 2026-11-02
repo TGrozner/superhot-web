@@ -22,13 +22,16 @@ export function traceFlowScenario(events, ruleOverrides = {}) {
   const steps = [];
 
   for (const [index, event] of events.entries()) {
-    const before = state;
-    const after = reduceFlow(before, event, rules);
+    // Record precisely what the reducer consumes. Re-reading a caller-owned
+    // getter after reduceFlow could otherwise falsify the diagnostic trace.
+    if (!event || typeof event !== 'object') throw new TypeError('Flow event must be an object');
     const eventSnapshot = Object.freeze({
       type: event.type,
-      ...(Object.hasOwn(event, 'amount') ? { amount: event.amount } : {}),
-      ...(Object.hasOwn(event, 'realSeconds') ? { realSeconds: event.realSeconds } : {}),
+      ...('amount' in event ? { amount: event.amount } : {}),
+      ...('realSeconds' in event ? { realSeconds: event.realSeconds } : {}),
     });
+    const before = state;
+    const after = reduceFlow(before, eventSnapshot, rules);
     const changedFields = Object.freeze(STATE_FIELDS.filter((field) => !Object.is(before[field], after[field])));
     steps.push(Object.freeze({ index, event: eventSnapshot, before, after,
       changedFields, changed: changedFields.length > 0 }));
