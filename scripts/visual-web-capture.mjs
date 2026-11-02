@@ -168,22 +168,63 @@ export function requireContainersWebEvidence({metrics,frame,expectedCamera,expec
     nativeCameraMatched:false,nativeWorldPoseMatched:false,pixelComparisonPerformed:false,
   };
 }
-function sampleNotBlank(windowRef,documentRef,blob){
-  return windowRef.createImageBitmap(blob).then(bitmap=>{
-    try{
-      const probe=documentRef.createElement('canvas');probe.width=64;probe.height=36;
-      const ctx=probe.getContext('2d',{willReadFrequently:true});
-      if(!ctx)throw new Error('2D screenshot probe unavailable');
-      ctx.drawImage(bitmap,0,0,64,36);
-      const pixels=ctx.getImageData(0,0,64,36).data;
-      const distinct=new Set();
-      for(let i=0;i<pixels.length;i+=4){
-        distinct.add(pixels[i]+':'+pixels[i+1]+':'+pixels[i+2]);
-        if(distinct.size>=4)break;
-      }
-      if(distinct.size<4)throw new Error('WebGL screenshot appears blank/uniform; no image proof');
-    }finally{bitmap.close?.();}
-  });
+/**
+ * Synchronously copies the default WebGL2 framebuffer AFTER the application's
+ * render callback into JS-owned pixels. This avoids the canvas.toBlob() timing
+ * ambiguity when preserveDrawingBuffer=false and gameplay keeps rendering.
+ * The readback itself is evidence only of WEB pixels, never original MCD.
+ * WebGL returns bottom-up rows; the PNG encoder expects top-down rows.
+ */
+export function readRenderedWebglRgba(canvas) {
+  const width=canvas?.width,height=canvas?.height;
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||
+      width<=0||height<=0||width*height>8_000_000){
+    throw new RangeError('Readback requires a bounded nonzero WebGL canvas');
+  }
+  const gl=canvas.getContext?.('webgl2');
+  if(!gl||typeof gl.readPixels!=='function'||typeof gl.getError!=='function'){
+    throw new Error('Live WebGL2 framebuffer readback required');
+  }
+  if(gl.drawingBufferWidth!==width||gl.drawingBufferHeight!==height){
+    throw new Error('WebGL framebuffer dimensions differ from canvas');
+  }
+  if(gl.getParameter(gl.FRAMEBUFFER_BINDING)!==null){
+    throw new Error('Expected the on-screen default WebGL framebuffer');
+  }
+  const raw=new Uint8Array(width*height*4);
+  gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,raw);
+  if(gl.getError()!==gl.NO_ERROR){
+    throw new Error('WebGL readPixels failed; GPU screenshot is unverified');
+  }
+  const samples=new Set();
+  for(let y=0;y<36&&samples.size<4;y++){
+    const sy=Math.min(height-1,Math.floor((y+.5)*height/36));
+    for(let x=0;x<64&&samples.size<4;x++){
+      const sx=Math.min(width-1,Math.floor((x+.5)*width/64));
+      const at=4*(sy*width+sx);
+      samples.add(raw[at]+256*raw[at+1]+65536*raw[at+2]);
+    }
+  }
+  if(samples.size<4)throw new Error('WebGL screenshot appears blank/uniform; no image proof');
+  const rgba=new Uint8ClampedArray(raw.length);
+  const rowBytes=width*4;
+  for(let y=0;y<height;y++){
+    rgba.set(raw.subarray((height-1-y)*rowBytes,(height-y)*rowBytes),y*rowBytes);
+  }
+  return rgba;
+}
+async function encodeFrozenFramePng(documentRef,rgba,width,height) {
+  const imageCanvas=documentRef.createElement('canvas');
+  imageCanvas.width=width;imageCanvas.height=height;
+  const ctx=imageCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
+  if(!ctx||typeof ctx.createImageData!=='function'||typeof ctx.putImageData!=='function'){
+    throw new Error('2D PNG encoder unavailable');
+  }
+  const image=ctx.createImageData(width,height);
+  image.data.set(rgba);
+  ctx.putImageData(image,0,0);
+  return await new Promise((resolve,reject)=>imageCanvas.toBlob(blob=>
+    blob?resolve(blob):reject(new Error('Frozen frame PNG encoding failed')),'image/png'));
 }
 const toHex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
 /**
@@ -202,7 +243,7 @@ export async function captureContainersWeb({
 }={}){
   if(!windowRef||!documentRef)throw new Error('Live browser required');
   const canvas=documentRef.getElementById('scene');
-  if(!canvas||typeof canvas.toBlob!=='function')throw new Error('WebGL canvas #scene unavailable');
+  if(!canvas||typeof canvas.getContext!=='function')throw new Error('WebGL canvas #scene unavailable');
   const expected=cameraPose(expectedCamera);
   const getFrame=windowRef.__superhotGetRenderedFrameSnapshot;
   if(typeof getFrame!=='function')throw new Error('Same-rendered-frame camera evidence unavailable');
@@ -214,23 +255,30 @@ export async function captureContainersWeb({
   evidence();
   if(webCommit!==null&&!/^[a-f0-9]{7,40}$/i.test(webCommit))throw new Error('Invalid Web commit SHA');
   let report;
-  // Read the completed-render snapshot and request its canvas pixels in the
-  // same synchronous callback; one-second telemetry cannot identify this view.
-  const blob=await new Promise((resolve,reject)=>windowRef.requestAnimationFrame(()=>{
+  const startingFrameId=getFrame().frameId;
+  // SH-05 schedules its render rAF before DevTools calls this function. We
+  // accept only a NEW completed frame, and synchronously read GPU pixels in
+  // that SAME callback. The PNG is later encoded from this frozen copy, so
+  // subsequent animation updates cannot change the recorded image.
+  const rgba=await new Promise((resolve,reject)=>windowRef.requestAnimationFrame(()=>{
     try{
       report=evidence();
-      canvas.toBlob(b=>{
-        try{
-          requireRenderedFrame(getFrame(),expected,expectedScreen);
-          if(!b)throw new Error('WebGL screenshot unavailable');
-          resolve(b);
-        }catch(error){reject(error);}
-      },'image/png');
+      if(report.frameId<=startingFrameId){
+        throw new Error('No new completed Web render before framebuffer capture');
+      }
+      const pixels=readRenderedWebglRgba(canvas);
+      const finalFrame=getFrame();
+      if(finalFrame.frameId!==report.frameId||
+          finalFrame.activeScreen!==report.activeScreen||
+          finalFrame.worldClock!==report.worldClock){
+        throw new Error('Web rendered frame changed during synchronous GPU readback');
+      }
+      resolve(pixels);
     }catch(error){reject(error);}
   }));
-  if(blob.type!=='image/png')throw new Error('Canvas did not encode PNG');
-  if(typeof windowRef.createImageBitmap!=='function')throw new Error('createImageBitmap required for blank-frame guard');
-  await sampleNotBlank(windowRef,documentRef,blob);
+  const rgbaDigest=await windowRef.crypto.subtle.digest('SHA-256',rgba.buffer);
+  const blob=await encodeFrozenFramePng(documentRef,rgba,report.viewport[0],report.viewport[1]);
+  if(blob.type!=='image/png')throw new Error('Frozen framebuffer did not encode PNG');
   const base=new Uint8Array(await blob.arrayBuffer());
   const parts=scanPng(base);
   if(get32(parts[0].data,0)!==report.viewport[0]||get32(parts[0].data,4)!==report.viewport[1]||
@@ -249,6 +297,9 @@ export async function captureContainersWeb({
     schemaVersion:1,origin:'web',status:'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING',
     source:'WEBGL_CANVAS_NOT_MCD',scene,
     capturedAt,webCommit:webCommit??'UNRECORDED',...report,rawCanvasSha256:toHex(digest),
+    rawFrameRgbaSha256:toHex(rgbaDigest),
+    captureMethod:'WEBGL2_READ_PIXELS_SYNCHRONOUS_COMPLETED_FRAME',
+    pixelEncoding:'RGBA8_DEFAULT_FRAMEBUFFER_TO_2D_SRGB_PNG',
     limitations:['No executed native MCD capture or paired active camera',
       'Web world clock/animation is not a matched native pose, even when the camera is fixed',
       'Original geometry does not establish native material, lighting or runtime parity',
@@ -265,6 +316,7 @@ export async function captureContainersWeb({
     }finally{windowRef.setTimeout(()=>windowRef.URL.revokeObjectURL(url),60000);}
   }
   return{status:metadata.status,...report,rawCanvasSha256:metadata.rawCanvasSha256,
+    rawFrameRgbaSha256:metadata.rawFrameRgbaSha256,captureMethod:metadata.captureMethod,
     screenshotBytes:marked.length,cameraStatus:metadata.camera.status,
     downloadRequested:Boolean(download),intendedFilename};
 }

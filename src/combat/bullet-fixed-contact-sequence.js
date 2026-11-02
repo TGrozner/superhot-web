@@ -1,5 +1,6 @@
 import { planBulletPairContact } from './bullet-pair-contacts.js';
 import { planIncomingBulletFixedContacts } from './incoming-bullet-contacts.js';
+import { planEnemyBodyPartBulletContact } from './enemy-body-part-contact.js';
 
 /**
  * Bounded composer for Bullet.FixedUpdate's ordered collision loop.
@@ -8,7 +9,8 @@ import { planIncomingBulletFixedContacts } from './incoming-bullet-contacts.js';
  * trace is executed here. Caller supplies actual comparator-ordered hits and
  * post-handler destroyed state; never infer either from request names.
  *
- * Only Bullets, Environment, Smashers and CustomCollider routes are modeled.
+ * Only Bullets, Environment, Smashers, CustomCollider and source-gated
+ * Enemies body-part contacts are modeled.
  * Other native layers deliberately stop the composition rather than letting
  * a later hit through. All events are REQUESTS, not verified side effects.
  */
@@ -24,6 +26,8 @@ export function planBulletFixedContactSequence({
 
   const events = [];
   let currentPosition = projectilePosition;
+  // Bullet.cs:246-251 and 210: reset after every native FixedUpdate.
+  let enemyPartCollisionHandled = false;
   const result = (status, consumedHits, stoppedAt = null) => ({
     status, consumedHits, stoppedAt, events,
   });
@@ -61,6 +65,40 @@ export function planBulletFixedContactSequence({
       if (hit.destroyedAfterHandler) {
         return result('native-loop-stop-requested', i + 1, i);
       }
+      continue;
+    }
+
+    if (hit.layer === 'Enemies' && (enemyPartCollisionHandled || hit.enemyBodyPart !== undefined)) {
+      // Bullet.HandleCollision alerts even when a prior bodypart in this
+      // FixedUpdate has already been handled (private #102:238,244-251).
+      events.push({ type: 'alert-request', hitIndex: i, parameters: [5, 0.05, 2] });
+      if (!enemyPartCollisionHandled) {
+        const enemy = planEnemyBodyPartBulletContact({
+          bullet: {
+            ownerControllerInstanceId: current.ownerControllerInstanceId,
+            ownerInHotswitch: current.ownerInHotswitch,
+            excludeInCollision: current.excludeInCollision,
+            firedByPlayer: current.firedByPlayer,
+            pierceConcreteBody: current.pierceConcreteBody,
+            goThroughGlass: current.goThroughGlass,
+          },
+          target: hit.enemyBodyPart, piercingShotActive: hit.piercingShotActive,
+        });
+        if (enemy.nativeHandlerReturn === null) {
+          return result('enemy-native-branch-unmodeled', i + 1, i);
+        }
+        enemyPartCollisionHandled = enemy.nativeHandlerReturn;
+        for (const intent of enemy.intents) events.push({ ...intent, hitIndex: i });
+        // Outer HandleCollision returns true for Enemies even when the
+        // inner EnemiesCollisionHandle returned false (private #102:244-251).
+        if (!current.sniperBullet) return result('native-loop-stop-requested', i + 1, i);
+      }
+      // The following destroyed flag is post-handler native state, never
+      // deduced from a requested Kill, Stun or DestroyBullet.
+      if (typeof hit.destroyedAfterHandler !== 'boolean') {
+        return result('destruction-state-unverified', i + 1, i);
+      }
+      if (hit.destroyedAfterHandler) return result('native-loop-stop-requested', i + 1, i);
       continue;
     }
 
