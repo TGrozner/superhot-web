@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planMcdDefragmentationUpdate as plan } from '../src/flow/defrag-advance-intents.js';
+import { isMcdLevelClear } from '../src/flow/containers-gates.js';
+import { planMcdProgressEndingInvocation } from '../src/flow/ending-intents.js';
 
 const state = (override = {}) => ({ entryPoint: 'Level', dontUpdateRun: false,
   defragSuperhot: false, currentDiskCell: 10, ...override });
@@ -79,4 +81,47 @@ test('input objects are not mutated by the intent plan', () => {
   plan(a,b);
   assert.deepEqual(a,state());
   assert.deepEqual(b,run());
+});
+
+
+test('synthetic vertical contract: quota clear -> deferred defrag intent -> Level cell advance', () => {
+  // This composes *authored predicates*; it does not execute Unity callbacks,
+  // read a real Containers run, or measure visible native UI.
+  const clear = isMcdLevelClear({
+    gameType: 'RUN_LEVEL', allNeededEnemyKilled: true,
+    playerDead: false, winOnDeath: false,
+  });
+  assert.equal(clear, true);
+  assert.equal(isMcdLevelClear({
+    gameType: 'RUN_LEVEL', allNeededEnemyKilled: false,
+    playerDead: false, winOnDeath: false,
+  }), false);
+
+  const ending = planMcdProgressEndingInvocation({
+    endSHAnimation: true, startReadingInput: false, inputRead: true,
+    startSuperAnimation: false, effectStarted: false,
+    replayEnded: true, levelEnded: false,
+  }, {
+    blockReplays: false, finishWithoutReplay: false,
+    tutorialRun: false, endRunId: false, replayManagerPlayingReplay: false,
+    errorPunchStopped: false, replayPlayerInReplay: false,
+    acceptedFinishButton: false, isLastRunLevel: false,
+    skipSuperTextAfterLevel: false, skipDefragBetweenLevels: false,
+  });
+  const deferred = ending.effects.filter(effect => effect.type === 'enqueue');
+  assert.equal(deferred.length, 1);
+  assert.equal(deferred[0].callback, 'OpenDefragmentationMenu');
+  assert.equal(deferred[0].timebase, 'UNVERIFIED');
+
+  // Only *after* an external callback opens the menu, and a run snapshot
+  // is obtained after optional advancement, can this disk plan be computed.
+  const disk = plan(state(), run());
+  assert.equal(disk.shouldAdvance, true);
+  assert.deepEqual(methods(disk).slice(0, 2), [
+    'CurrentRun.MoveToNextCell', 'CurrentRun.CheckIfLastCell',
+  ]);
+  assert.deepEqual(disk.interpolation, {
+    totalSymbols: 24, durationSeconds: 0.5,
+    source: 'Interpolator(duration, totalSymbols)',
+  });
 });
