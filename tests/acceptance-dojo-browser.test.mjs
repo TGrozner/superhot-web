@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startDojoCapture } from '../scripts/acceptance-dojo-browser.mjs';
+import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS } from '../scripts/acceptance-dojo-browser.mjs';
 
 function mockBrowser() {
   const listeners = new Map();
-  let seq=1, intervalCallback=null, cleared=false;
+  let seq=1, intervalCallback=null, cleared=false, screen='playing';
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
-  const snapshot=()=>({frameId:seq,activeScreen:'playing',worldClock:seq*.1,
+  const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
     nativeScene:{source},gameplay:{encounter:{killed:0,killTarget:6,enemies:[]},
       weapon:true,ammo:6,heldItem:null,items:[{id:'cup-1',name:'PRIVATE_NAME',state:'static'},
         {id:'cup-2',name:'PRIVATE_NAME',state:'held'}],originalFragmentCount:2,
@@ -23,8 +23,10 @@ function mockBrowser() {
   globalThis.window=fakeWindow;
   globalThis.document={createElement(){return {click(){}};}};
   return {
-    setFrame(n){seq=n;}, tick(){intervalCallback();},
-    key(code,down=true){listeners.get(down?'keydown':'keyup')?.({code});},
+    setFrame(n){seq=n;}, setScreen(value){screen=value;},
+    setSceneBuildIndex(index){source.sceneBuildIndex=index;},
+    tick(){intervalCallback();},
+    key(code,down=true,extra={}){listeners.get(down?'keydown':'keyup')?.({code,...extra});},
     get listenerCount(){return listeners.size;}, get cleared(){return cleared;},
     teardown(){delete globalThis.window;delete globalThis.document;},
   };
@@ -86,5 +88,56 @@ test('SH10 recorder is bounded and rejects browser-hook absence',()=>{
     mock.setFrame(2);mock.tick();
     assert.equal(recorder.stopped,true);
     assert.equal(recorder.length,2);
+  } finally {mock.teardown();}
+});
+
+test('SH10 readiness fails early on wrong local scene, not as a fabricated browser playthrough',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setSceneBuildIndex(28);
+    const receipt=inspectDojoCaptureReadiness();
+    assert.equal(receipt.ready,false);
+    assert.deepEqual(receipt.reasons,['WRONG_OR_MISSING_DOJO_BUILD10']);
+    assert.throws(()=>startDojoCapture(),/WRONG_OR_MISSING_DOJO_BUILD10/);
+    mock.setSceneBuildIndex(10);
+    assert.equal(inspectDojoCaptureReadiness().ready,true);
+    startDojoCapture().stop();
+  } finally {mock.teardown();}
+});
+
+test('SH10 number-key route receipts are captured during gameplay without opening DevTools',()=>{
+  const mock=mockBrowser();
+  try {
+    const recorder=startDojoCapture();
+    const codes=['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6'];
+    const types=['door-before','door-after','stairs-bottom','stairs-top',
+      'wall-press-start','wall-press-end'];
+    for(let i=0;i<codes.length;i++){
+      mock.setFrame(4+i*3);
+      mock.tick();
+      mock.key(codes[i]);
+    }
+    assert.deepEqual(codes.map(code=>DOJO_ROUTE_HOTKEYS[code]),types);
+    assert.deepEqual(recorder.markers,
+      types.map((type,i)=>({type,frameId:4+i*3})));
+    mock.key('Digit6',true,{repeat:true});
+    assert.equal(recorder.markers.length,6);
+    mock.setScreen('paused');mock.setFrame(25);mock.tick();mock.key('Digit1');
+    assert.equal(recorder.markers.length,6);
+    assert.equal(recorder.markerWarnings.length,0);
+    assert.equal(recorder.stop().marks.length,6);
+    assert.equal(mock.listenerCount,0);
+  } finally {mock.teardown();}
+});
+
+test('SH10 duplicate keyboard marker surfaces a warning rather than silently replacing evidence',()=>{
+  const mock=mockBrowser();
+  try {
+    const recorder=startDojoCapture();
+    mock.key('Digit1');
+    mock.setFrame(3);mock.tick();mock.key('Digit1');
+    assert.deepEqual(recorder.markers,[{type:'door-before',frameId:1}]);
+    assert.match(recorder.markerWarnings.join(' '),/duplicate route marker/);
+    assert.equal(recorder.stop().markerWarnings.length,1);
   } finally {mock.teardown();}
 });

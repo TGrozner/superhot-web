@@ -10,6 +10,47 @@ const DOJO_ROUTE_MARKERS = Object.freeze([
 const MOVEMENT_KEYS = new Set(['KeyW', 'KeyZ', 'ArrowUp', 'KeyS', 'KeyA', 'KeyQ',
   'ArrowDown', 'ArrowLeft', 'KeyD', 'ArrowRight']);
 const asItemKey = id => id == null ? null : String(id);
+export const DOJO_ROUTE_HOTKEYS = Object.freeze({
+  Digit1: 'door-before', Digit2: 'door-after',
+  Digit3: 'stairs-bottom', Digit4: 'stairs-top',
+  Digit5: 'wall-press-start', Digit6: 'wall-press-end',
+});
+
+/** A browser-only readiness receipt; not evidence of native gameplay or a complete run. */
+export function inspectDojoCaptureReadiness() {
+  const reasons = [];
+  if (typeof window === 'undefined' ||
+      typeof window.__superhotGetRenderedFrameSnapshot !== 'function') {
+    return {ready:false,status:'WEB_DOJO_CAPTURE_NOT_READY',
+      reasons:['RENDERED_FRAME_HOOK_UNAVAILABLE'],frameId:null};
+  }
+  let frame;
+  try { frame = window.__superhotGetRenderedFrameSnapshot(); }
+  catch { return {ready:false,status:'WEB_DOJO_CAPTURE_NOT_READY',
+    reasons:['RENDERED_FRAME_HOOK_FAILED'],frameId:null}; }
+  if (!frame) reasons.push('RENDERED_FRAME_UNAVAILABLE');
+  else {
+    const source = frame.nativeScene?.source, g = frame.gameplay;
+    const sceneName = typeof source?.scenePath === 'string'
+      ? source.scenePath.replaceAll(String.fromCharCode(92), '/').split('/').at(-1).toLowerCase()
+      : null;
+    if (sceneName !== 'shrl_dojo2.unity' ||
+        source?.sceneBuildIndex !== 10 || source?.serializedOwner !== 'level10') {
+      reasons.push('WRONG_OR_MISSING_DOJO_BUILD10');
+    }
+    if (![6,7].includes(g?.encounter?.killTarget) ||
+        !Number.isSafeInteger(g?.encounter?.killed) || !Array.isArray(g?.encounter?.enemies)) {
+      reasons.push('DOJO_ENCOUNTER_NOT_READY');
+    }
+    if (!Array.isArray(g?.items) || g.items.length === 0) reasons.push('SOURCE_PICKUP_ITEMS_UNAVAILABLE');
+    if (!g?.feet || ![g.feet.x,g.feet.y,g.feet.z].every(Number.isFinite) ||
+        typeof g.grounded !== 'boolean') reasons.push('PLAYER_FEET_UNAVAILABLE');
+    if (!Number.isSafeInteger(g?.audio?.sceneAmbienceSources)) reasons.push('AMBIENCE_TELEMETRY_UNAVAILABLE');
+  }
+  return {ready:reasons.length===0,
+    status:reasons.length ? 'WEB_DOJO_CAPTURE_NOT_READY' : 'WEB_DOJO_CAPTURE_READY_NOT_PLAYTHROUGH_VERIFIED',
+    reasons,frameId:Number.isSafeInteger(frame?.frameId)?frame.frameId:null};
+}
 
 export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -19,12 +60,23 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
       !Number.isInteger(maxFrames) || maxFrames < 1 || maxFrames > 50000) {
     throw new RangeError('invalid bounded Dojo capture settings');
   }
-  if (typeof window.__superhotGetRenderedFrameSnapshot !== 'function') {
-    throw new Error('Rendered-frame snapshot hook unavailable');
+  const readiness = inspectDojoCaptureReadiness();
+  if (!readiness.ready) {
+    throw new Error('Dojo capture preflight failed: ' + readiness.reasons.join(', '));
   }
-  const frames = [], marks = [], pressed = new Set();
+  const frames = [], marks = [], pressed = new Set(), markerWarnings = [];
   let lastFrameId = -1, timer = null, stopped = false;
-  const onDown = event => { if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code); };
+  const onDown = event => {
+    if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
+    const type = DOJO_ROUTE_HOTKEYS[event.code];
+    if (!type || event.repeat || event.isComposing) return;
+    const target = event.target;
+    if (target?.isContentEditable || ['INPUT','SELECT','TEXTAREA'].includes(target?.tagName)) return;
+    // Hotkeys are meaningful only while the *actual* browser game is playing.
+    if (window.__superhotGetRenderedFrameSnapshot()?.activeScreen !== 'playing') return;
+    try { mark(type); }
+    catch (error) { markerWarnings.push(event.code + ': ' + error.message); }
+  };
   const onUp = event => pressed.delete(event.code);
   const onBlur = () => pressed.clear();
   window.addEventListener('keydown', onDown, { passive: true });
@@ -79,22 +131,26 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
       pressed.clear();
     }
     return { schemaVersion: 2, captureKind: 'SH10_DOJO_OWNER_BROWSER_V2',
-      frames: frames.slice(), marks: marks.slice() };
+      frames: frames.slice(), marks: marks.slice(),
+      markerWarnings: markerWarnings.slice() };
   };
+  function mark(type) {
+    if (stopped) throw new Error('cannot mark a stopped Dojo capture');
+    if (!DOJO_ROUTE_MARKERS.includes(type)) throw new RangeError('unknown route marker');
+    sample();
+    if (!frames.length) throw new Error('no rendered frame available for route marker');
+    if (marks.some(mark => mark.type === type)) throw new Error('duplicate route marker');
+    marks.push({type, frameId: frames.at(-1).frameId});
+    return {type, frameId: frames.at(-1).frameId};
+  }
   timer = window.setInterval(sample, intervalMs);
   sample();
   return Object.freeze({
     get length() { return frames.length; },
     get stopped() { return stopped; },
-    mark(type) {
-      if (stopped) throw new Error('cannot mark a stopped Dojo capture');
-      if (!DOJO_ROUTE_MARKERS.includes(type)) throw new RangeError('unknown route marker');
-      sample();
-      if (!frames.length) throw new Error('no rendered frame available for route marker');
-      if (marks.some(mark => mark.type === type)) throw new Error('duplicate route marker');
-      marks.push({type, frameId: frames.at(-1).frameId});
-      return {type, frameId: frames.at(-1).frameId};
-    },
+    get markers() { return marks.map(mark => ({...mark})); },
+    get markerWarnings() { return markerWarnings.slice(); },
+    mark,
     stop,
     save(filename = 'dojo-full-run.json') {
       if (typeof filename !== 'string' || !/^dojo-[a-z0-9_-]+\.json$/i.test(filename)) {
@@ -107,7 +163,8 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
       link.href = url; link.download = filename;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 5000);
-      return {frameCount:frames.length, marks:marks.length, downloadedRequested:true};
+      return {frameCount:frames.length, marks:marks.length,
+        markerWarnings:markerWarnings.slice(), downloadedRequested:true};
     },
   });
 }
