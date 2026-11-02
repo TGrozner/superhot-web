@@ -64,7 +64,7 @@ test('AddBlowForce without Animator returns null and issues no force commands', 
 test('KillWithBlowForce schedules Kill after the force request, including missing Animator', () => {
   const p = planPejAiKillWithBlowForce({ ...base(), blowInterval: 0.7 });
   assert.deepEqual(p.commands.at(-1), {
-    op: 'invoke-controller-kill', method: 'Kill', afterSeconds: 0.7, scheduler: 'Unity Invoke',
+    op: 'request-unity-invoke', method: 'Kill', afterSeconds: 0.7, scheduler: 'Unity Invoke',
   });
   assert.ok(operationNames(p).indexOf('invoke-animator-kill-default') < p.commands.length - 1);
   const absent = planPejAiKillWithBlowForce({ hasAnimator: false, force: 2 });
