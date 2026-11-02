@@ -156,7 +156,7 @@ export function generatedUniformsWithSerializedFogOff(generatedLighting,settings
  * photometric transfer, and final compositor are NOT recovered. These values
  * are not native-parity uniforms.
  */
-export const DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL = \`
+export const DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL = `
 vec3 dojoDoorWarningSpotWebPreview(
   sampler2D sourceCookie, vec3 worldPosition,
   vec3 lightPosition, vec3 lightDirection, vec3 lightRight, vec3 lightUp,
@@ -175,7 +175,7 @@ vec3 dojoDoorWarningSpotWebPreview(
   if (any(lessThan(cookieUv, vec2(0.0))) ||
       any(greaterThan(cookieUv, vec2(1.0)))) return vec3(0.0);
   return sourceColor * sourceIntensity * texture(sourceCookie, cookieUv).a;
-}\`.trim();
+}`.trim();
 
 const sourceDoorId = value =>
   typeof value === 'string' && /^[A-Za-z0-9_.-]+::[1-9][0-9]*$/.test(value);
