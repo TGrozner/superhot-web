@@ -48,25 +48,32 @@ export function sampleLinearScalar(keyframes, time) {
   if (!Array.isArray(keyframes) || keyframes.length === 0) {
     throw new RangeError('keyframes must be a non-empty array');
   }
-  for (let i = 0; i < keyframes.length; i++) {
-    const key = keyframes[i];
+  // Fix both array membership and the values before validation/search.
+  // Caller-authored getters must not change a validated track mid-sample.
+  const sourceKeys = keyframes.slice();
+  const samples = [];
+  for (let i = 0; i < sourceKeys.length; i++) {
+    const key = sourceKeys[i];
     if (!key || typeof key !== 'object') throw new TypeError('keyframe must be an object');
-    requireFinite(key.time, `keyframes[${i}].time`);
-    requireFinite(key.value, `keyframes[${i}].value`);
-    if (i && key.time <= keyframes[i - 1].time) {
+    const keyTime = key.time;
+    const keyValue = key.value;
+    requireFinite(keyTime, `keyframes[${i}].time`);
+    requireFinite(keyValue, `keyframes[${i}].value`);
+    if (i && keyTime <= samples[i - 1].time) {
       throw new RangeError('keyframe times must be strictly increasing');
     }
+    samples.push({ time: keyTime, value: keyValue });
   }
-  if (time <= keyframes[0].time) return keyframes[0].value;
-  const last = keyframes[keyframes.length - 1];
+  if (time <= samples[0].time) return samples[0].value;
+  const last = samples[samples.length - 1];
   if (time >= last.time) return last.value;
-  let low = 0, high = keyframes.length - 1;
+  let low = 0, high = samples.length - 1;
   while (high - low > 1) {
     const mid = Math.floor((high + low) / 2);
-    if (keyframes[mid].time <= time) low = mid;
+    if (samples[mid].time <= time) low = mid;
     else high = mid;
   }
-  const left = keyframes[low], right = keyframes[high];
+  const left = samples[low], right = samples[high];
   // Stay finite when two valid extreme timestamps span more than Number.MAX_VALUE.
   // This is numerical robustness for our Web scaffold, not a Unity curve rule.
   const span = right.time - left.time;
