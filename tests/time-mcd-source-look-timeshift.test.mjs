@@ -17,7 +17,7 @@ const inputs = (rotation = Q0, unscaledTime = 1, extras = {}) => ({
   takedownCanUseTimeshifts: false, lockLookShifter: false,
   ...extras,
 });
-const ready = () => ({...createMcdSourceLookTimeshiftState({cameraWorldRotation: Q0}), warmupUpdatesRemaining: 0});
+const ready = () => ({...createMcdSourceLookTimeshiftState({cameraWorldRotation: Q0, currentTimeModifier: 0}), warmupUpdatesRemaining: 0});
 const near = (actual, expected, tol = 1e-4) => assert.ok(Math.abs(actual - expected) < tol, `${actual} != ${expected}`);
 
 test('15° rotation writes max 0.3 and retains 0.15; next zero-angle sample drains it', () => {
@@ -35,7 +35,7 @@ test('15° rotation writes max 0.3 and retains 0.15; next zero-angle sample drai
 });
 
 test('Wydmuszka stops warmup, buffer, modifier, last measured time and camera-angle baseline', () => {
-  const state = createMcdSourceLookTimeshiftState({cameraWorldRotation: Q0});
+  const state = createMcdSourceLookTimeshiftState({cameraWorldRotation: Q0, currentTimeModifier: 0});
   const result = advanceMcdSourceLookTimeshift(state, inputs(qYaw(30), 1, {wydmuszkaMode:true}));
   assert.equal(result.measured, false);
   assert.equal(result.wroteModifier, false);
@@ -43,7 +43,7 @@ test('Wydmuszka stops warmup, buffer, modifier, last measured time and camera-an
 });
 
 test('first ten Update calls rearm previous rotation even when a measure happens', () => {
-  let state = createMcdSourceLookTimeshiftState({cameraWorldRotation:Q0});
+  let state = createMcdSourceLookTimeshiftState({cameraWorldRotation:Q0, currentTimeModifier: 0});
   for(let n=1;n<=10;n++) {
     const step=advanceMcdSourceLookTimeshift(state, inputs(qYaw(n*15), n*.1));
     assert.equal(step.state.warmupUpdatesRemaining,10-n);
@@ -99,7 +99,8 @@ test('ResetRotationAccumulated only clears accumulated rotation and reanchors ca
 });
 
 test('source adapter requires all unknown runtime gates and an explicit quaternion',()=>{
-  assert.throws(()=>createMcdSourceLookTimeshiftState({}),/quaternion/);
+  assert.throws(()=>createMcdSourceLookTimeshiftState({currentTimeModifier:0}),/quaternion/);
+  assert.throws(()=>createMcdSourceLookTimeshiftState({cameraWorldRotation:Q0}),/initial shifter modifier/);
   assert.throws(()=>advanceMcdSourceLookTimeshift(ready(),{...inputs(),lockLookShifter:undefined}),/lockLookShifter/);
   assert.throws(()=>advanceMcdSourceLookTimeshift(ready(),inputs(Q0,Number.NaN)),/unscaledTime/);
 });
