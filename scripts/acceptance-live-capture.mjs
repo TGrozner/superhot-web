@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve, relative, isAbsolute, join, basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -105,6 +105,22 @@ export function metrics(a, b, roi = [0,0,1,1]) {
 
 const cameraOK = (c) => c?.source==='RUNTIME_OBSERVED' && ['x','y','z','yaw','pitch','fovYDegrees'].every(k=>number(c[k]));
 const maxCameraDiff = (a,b) => ({position:Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z),angle:Math.hypot(a.yaw-b.yaw,a.pitch-b.pitch),fov:Math.abs(a.fovYDegrees-b.fovYDegrees)});
+/** A source-qualified LOCAL browser draw is useful evidence, not MCD pixel parity. */
+export function localMeshDrawEvidence(stats) {
+  const reasons=[];
+  if(stats?.mode!=='CONTAINERS_COLLIDER_PROXY_NOT_MCD_RUNTIME') reasons.push('CONTAINERS_BROWSER_ROUTE_UNVERIFIED');
+  if(stats?.activeScreen!=='playing'||stats?.browserMeasured!==true) reasons.push('LIVE_BROWSER_FRAME_UNVERIFIED');
+  if(stats?.locallyLoadedSourceGroups!==2) reasons.push('TWO_LOCAL_SOURCE_GROUPS_UNVERIFIED');
+  if(stats?.generatedManifest?.privateIndexedDraws!==2) reasons.push('TWO_PRIVATE_INDEXED_DRAWS_UNVERIFIED');
+  if(!Number.isSafeInteger(stats?.generatedManifest?.hiddenByPrivateMesh)||
+    stats.generatedManifest.hiddenByPrivateMesh<2) reasons.push('PROXY_SUBSTITUTION_UNVERIFIED');
+  if(!Number.isSafeInteger(stats?.totalWebGLDrawCalls)||stats.totalWebGLDrawCalls<2) reasons.push('WEBGL_DRAW_COUNT_UNVERIFIED');
+  if(!number(stats?.p95FrameMs)||stats.p95FrameMs<=0||
+    !Number.isSafeInteger(stats?.samples)||stats.samples<1) reasons.push('FRAME_TIMING_UNVERIFIED');
+  return {status:reasons.length?'WEB_LOCAL_MESH_UNVERIFIED':'WEB_LOCAL_MESH_GPU_DRAW_OBSERVED_NOT_MCD_PARITY',
+    nativeParityCertified:false,reasons};
+}
+
 
 /** Private local capture path and thresholds are *operator attestations*, not independent native certification. */
 export function compare(web, native, opts = {}) {
@@ -169,10 +185,23 @@ class Devtools {
     if(r.exceptionDetails)throw Error('Browser evaluation failed');return r.result?.value;}
 }
 
-export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromium',holdMs=300}={}){
+export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromium',holdMs=300,mesh6=null,mesh7=null}={}){
   if(typeof WebSocket!=='function')throw Error('Node >=22 required');
   if(!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url))throw Error('Local HTTP URL required');
   if(!out||isInside(out))throw Error('Capture directory must remain outside public checkout');
+  if(Boolean(mesh6)!==Boolean(mesh7))throw Error('Supply BOTH --mesh6 and --mesh7, or neither');
+  if(mesh6&&new URL(url).searchParams.get('scene')!=='containers')throw Error('Local OBJ proof requires ?scene=containers');
+  // Resolve symlinks. Local private files never appear in output or HTTP requests.
+  const privateFiles=[mesh6,mesh7].map(file=>{
+    if(!file)return null;
+    let p;
+    try{
+      p=realpathSync(resolve(file)); const st=statSync(p);
+      if(isInside(p)||!st.isFile()||st.size<1||st.size>256_000_000)throw Error('private boundary');
+    }catch{throw Error('OBJ inputs must be private files outside checkout, max 256 MB each');}
+    if(!/\.(?:obj|obj\.gz|gz)$/i.test(p))throw Error('Only local OBJ/OBJ.gz inputs supported');
+    return p;
+  });
   const profile=join(tmpdir(),'sh10-chrome-'+process.pid+'-'+Date.now());mkdirSync(profile,{recursive:true});
   const child=spawn(chrome,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:'ignore'});
   let procError;child.on('error',e=>{procError=e});let cdp;
@@ -196,6 +225,26 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
     await cdp.eval("document.querySelector('#start-button')?.click()");await sleep(300);
     const observation="(()=>{const c=document.querySelector('#scene'),r=c.getBoundingClientRect(),g=c.getContext('webgl2');return {playing:document.querySelector('#hud')?.hidden===false,webgl2:!!g,rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:c.width,height:c.height,dpr:devicePixelRatio},room:document.querySelector('#room-name')?.textContent?.trim(),performance:window.__superhotSceneMetrics||null,hook:typeof window.__sh10AcceptanceSnapshot==='function'?window.__sh10AcceptanceSnapshot():null};})()";
     const first=await cdp.eval(observation);if(!first?.playing||!first?.webgl2)throw Error('Active WebGL2 game not observed');
+    if(privateFiles[0]){
+      // CDP file inputs reference local paths only; nothing is fetched or uploaded.
+      await cdp.call('DOM.enable');
+      const {root}=await cdp.call('DOM.getDocument',{depth:1});
+      for(const [i,id] of ['private-mesh6','private-mesh7'].entries()){
+        const {nodeId}=await cdp.call('DOM.querySelector',{nodeId:root.nodeId,selector:'#'+id});
+        if(!nodeId)throw Error('Private OBJ file input absent');
+        await cdp.call('DOM.setFileInputFiles',{nodeId,files:[privateFiles[i]]});
+      }
+      let proof;
+      for(let i=0;i<150;i++){
+        const state=await cdp.eval(observation);
+        const msg=await cdp.eval("document.getElementById('private-mesh-status')?.textContent||''");
+        if(msg.startsWith('Échec'))throw Error('Private OBJ rejected by browser parser; inspect local UI');
+        proof=localMeshDrawEvidence(state?.performance);
+        if(proof.reasons.length===0)break;
+        await sleep(100);
+      }
+      if(proof?.reasons?.length)throw Error('Private OBJ GPU draw not verified: '+proof.reasons.join(','));
+    }
     mkdirSync(out,{recursive:true});const frames=[];const begin=Date.now();
     const snap=async(name)=>{
       const state=await cdp.eval(observation),rect=state.rect;
@@ -213,7 +262,10 @@ export async function captureWeb(url,out,{chrome=process.env.CHROME_BIN||'chromi
     const manifest={schemaVersion:1,captureKind:'ACTUAL_BROWSER_CDP_PNG',scene,camera:cameraOK(hook?.camera)?hook.camera:null,
       coordinateFrameId:hook?.coordinateFrameId||null,stimulusId:'IDLE_THEN_KEYW_'+holdMs+'MS',initialStateId:hook?.initialStateId||null,
       timeScale:number(hook?.timeScale)?hook.timeScale:null,viewport:{width:frames[0].width,height:frames[0].height,dpr:1},frames,
-      performance:after.performance,notes:'Web actual CDP pixels. Proxy NOT native paired. Native reference remains private.'};
+      performance:after.performance,
+      localMeshPreview:privateFiles[0]?localMeshDrawEvidence(after.performance):
+        {status:'WEB_PROXY_ONLY_NO_LOCAL_MESH',nativeParityCertified:false},
+      notes:'Web actual CDP pixels. Local private OBJ GPU draw is NOT MCD frame parity.'};
     writeFileSync(join(out,'web-capture.json'),JSON.stringify(manifest,null,2)+'\n');return manifest;
   }finally{if(cdp)cdp.ws.close();child.kill();await sleep(200);rmSync(profile,{recursive:true,force:true,maxRetries:3});}
 }
@@ -223,8 +275,9 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   try{
     const a=process.argv.slice(2);if(a.includes('--capture-web')){
       const out=arg(a,'--out')||join(tmpdir(),'sh10-web-'+Date.now());
-      const m=await captureWeb(arg(a,'--url'),out,{chrome:arg(a,'--chrome')||undefined});
-      process.stdout.write(JSON.stringify({status:'BROWSER_CAPTURED_NATIVE_UNPAIRED',out,frames:m.frames,scene:m.scene,performance:m.performance},null,2)+'\n');
+      const m=await captureWeb(arg(a,'--url'),out,{chrome:arg(a,'--chrome')||undefined,
+        mesh6:arg(a,'--mesh6')||null,mesh7:arg(a,'--mesh7')||null});
+      process.stdout.write(JSON.stringify({status:'BROWSER_CAPTURED_NATIVE_UNPAIRED',out,frames:m.frames,scene:m.scene,performance:m.performance,localMeshPreview:m.localMeshPreview},null,2)+'\n');
     }else{
       const wp=arg(a,'--web'),np=arg(a,'--native');if(!wp||!np)throw Error('Use --capture-web --url http://localhost:PORT/?scene=containers --out /tmp/capture OR --web /tmp/web-capture.json --native /private/native.json --thresholds /private/thresholds.json [--gate]');
       if(isInside(np))throw Error('Native reference must be outside public repo');
