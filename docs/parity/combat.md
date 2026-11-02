@@ -422,3 +422,65 @@ pure module; route `kill-enemy` to an existing death/reaction handler only
 for a proven unprotected-target context. Preserve Update/FixedUpdate phase
 boundary, avoid interpreting Web Node tests as 1:1 parity, and require a
 visible browser acceptance plus native capture before declaring fidelity.
+
+
+## SH-03 — ShotGun source-bounded volley (2026-11-02)
+
+**PROUVÉ PAR RAPPORT DE SOURCE STATIQUE MCD, NON OBSERVÉ EN JEU :**
+MCD Steam build `20299547`, Unity `2018.4.14f1`,
+`Assembly-CSharp` SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+La lecture **privée** `superhot-research#8`, run `41425737208`,
+artifact `13132969099`, `spec/combat/combat-specification.md:40–56`
+(source rapportée `Gun.Attack:99–147`, `ShotGun.Fire:51–92`)
+établit que le chemin ShotGun à munition positive décrémente **une**
+munition mais produit **un projectile initial + `pelletsCount` suppléments**.
+Le premier vecteur est rapporté comme direction normalisée × 1,16 +
+échantillon / 35 ; les suivants comme direction d'entrée + échantillon × 2/15.
+Le résultat **n'est pas renormalisé** avant la multiplication par la vitesse.
+L'ordre du `ShotId` et la résolution de l'aléa/muzzle native restent hors du
+module et ne sont pas inventés.
+
+**PROUVÉ PAR ASSET UNITY DÉCODÉ, INSTANCE ACTIVE INCONNUE :** lecture
+privée `superhot-research#21`, run `41430166074`, artifact `13133798009`,
+`spec/combat/serialized-settings.md:21–27` :
+`sharedassets0.assets:4850` est un **candidat** `ShotGun` avec
+`pelletsCount=8`, ammo 2/2 et `bulletSpeed=36`. En combinant cette
+instance candidate avec le corps de méthode décrit ci-dessus, la projection
+statique est **9 projectiles / pression de détente**, pas 8 ni 12. Les
+overrides, `(owner,path_id)` de l'arme réellement tenue dans Containers,
+les mods et les effets de pooling/réutilisation sont **INCONNUS**.
+
+**PROVISOIRE WEB (et isolé du navigateur) :**
+`src/combat/shotgun-volley.js` expose `planShotgunVolley` :
+cinq prédicats de permission injectés explicitement, ammo positif requis,
+origines des 9 projectiles et échantillons de dispersion fournis par l'appelant,
+vitesses non renormalisées et une seule consommation de munition.
+Les branches `NoShooting`, arme jetée, tir bloqué et arme vide sont
+**non modélisées**, jamais converties silencieusement en tir.
+Aucune distribution aléatoire n'est supposée. `pelletIndex` est une
+étiquette **Web**, pas la preuve du champ `ShotId` natif.
+
+Les tests `tests/combat-shotgun-volley.test.mjs` couvrent un scénario
+**synthétique de bout en bout** : 9 bullet plans → mouvement Update de
+la balle centrale → collision Web FixedUpdate → demande de mort
+`kill-enemy` sur une cible ordinaire, et contrôle d'occlusion solide.
+Ils ne sont **ni** des tests du `SphereCast` PhysX, **ni** une observation
+native de projectiles/ragdoll, **ni** une capture d'un tir dans Containers.
+La réussite CI doit être vérifiée séparément à la SHA exacte de la PR.
+
+**Raccord SH-05 seulement :** dans `src/main.js` (fichiers exclusifs #5),
+identifier d'abord une vraie arme tenue et ses valeurs actives ; passer
+les gardes de `Gun.Attack` et le contexte de `ShotGun.Fire`, les origines
+muzzle finales et les échantillons Unity-derived/sourcés ; instancier
+chacun des 9 projectiles **uniquement** si cette configuration est réellement
+active, puis séparer mouvement Update, balayage FixedUpdate, collision
+et réaction ennemie. Une capture navigateur montrant neuf trajectoires
+et un test natif apparié de cadence, diffusion, collision et dégâts sont
+nécessaires avant toute revendication de parité MCD.
+
+**INCONNU / réfutation directe :** une lecture source du corps exact
+`ShotGun.Fire:51–92` ou une trace native de tir donnant un autre facteur
+pour les directions infirmerait ce contrat ; une arme active avec une
+valeur `pelletsCount` différente infirmerait les **neuf** projectiles
+pour cette situation, sans infirmer la formule générale `1 + pelletsCount`.
