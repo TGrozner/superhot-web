@@ -137,3 +137,58 @@ for (const range of drawRanges) {
 The uploader still validates/owns VAO+VBO+EBO; `gpu.draw()` remains backward compatible, while `gpu.draw({firstIndex,indexCount})` now draws only the requested triangle range. Material slots and world transforms are deliberately not inferred from buffer shape. SH-05 should first run a **synthetic/authorized in-memory split-stream fixture** through this contract, then capture a real browser frame and draw-call trace; only substitute a source-qualified mesh when its exact bytes and bindings are verified. SH-15 handles paired screenshot comparison with same native/Web camera.
 
 **Acceptance ladder:** (1) 6 synthetic vertices, two submeshes and two drawElements with offsets 0 and 6 bytes (uint16) in mocked WebGL2, not a screenshot; (2) SH-05's browser/GPU smoke screenshot, winding/reflection and draw call count; (3) verified private native buffer provenance + matching scene instance + authorized runtime draw; (4) matched camera, silhouette/material/color deltas measured by SH-15. Only (1) is established by this module's tests. Never conflate a parser unit test or green CI with MCD visual parity.
+
+
+## 2026-11-02 P0 OBJ group adapter — exported topology, not another cube
+
+**Correction to the earlier binary-only blocker.** The SH-11 owner [#75](https://github.com/TGrozner/superhot-web/issues/75) has inspected the *private* result.json chain: research #53 and #60 confirm existing UnityPy gzip OBJ exports for level28 Mesh6/Mesh7; #61/#63 establish complete private access to Mesh6 OBJ (artifact 13135277646). Its recorded static measurements are **44,030 OBJ positions, 29,809 triangles, 61 submesh groups**, with group **47 = 1,546 triangles / 2,402 distinct referenced positions**, bounds matching serialized Unity after X reflection. These are **SH-11's evidence**, not this module reading game assets or a live runtime draw. Files, original source paths, raw triangles and game textures remain private. The native materials, active mesh draw, instance world transform, camera and 1:1 visual output remain unresolved.
+
+The public adapter **decodeIndexedObjPayload(objText, descriptor)** accepts a *caller-authorized, decoded OBJ string*. It does not decompress source files, ship game content, parse Unity asset formats, or fetch the private corpus. OBJ can have three distinct indices for each corner (position, UV, normal); this adapter splits GPU vertices at seams, supports OBJ negative relative references, selects explicit groups and assigns explicit externally qualified material slots. It returns the existing packet fields **mesh, drawRanges, world** plus groupEvidence for numerical checks. It rejects missing or repeated groups, non-triangle faces, missing UV/normal, unsupported OBJ syntax and count/bounds mismatches. OBJ usemtl and numerical group suffixes are **not** trusted material evidence.
+
+### Exact SH-05 renderer handoff (SH-05 owns all shared files)
+
+SH-11 supplies privately decoded *authorized* OBJ text, verified exact group name, confirmed triangle and position-reference counts, qualified material slot, bounds after axis conversion and SHA/provenance; SH-04 supplies independently checked OBJ-to-Web axis mapping and world TRS. None is inferred by this module. SH-05 can wire the following **only after those inputs are actually available**:
+
+    import { decodeIndexedObjPayload, meshModelMatrices } from './render/mesh-format.js';
+    import { uploadIndexedMesh } from './render/gpu-mesh.js';
+
+    const { mesh, drawRanges, groupEvidence, world } = decodeIndexedObjPayload(
+      authorizedDecodedObjText,
+      {
+        coordinateSpace: 'web-rh',
+        axisSigns: verifiedObjToWebSigns,  // array of exactly three +1/-1
+        winding: verifiedFinalWinding,     // 'keep' or 'flip', explicitly verified
+        groups: [{
+          name: verifiedExactObjGroupName,
+          materialSlot: verifiedMaterialSlot, // NOT inferred from group number
+          expectedTriangles: 1546,           // group 47, Mesh6, SH-11 source finding
+          expectedPositionRefs: 2402,        // original OBJ v references, NOT Web vertexCount
+          expectedBounds: {
+            min: verifiedTargetBoundsMin, max: verifiedTargetBoundsMax, tolerance: 1e-5,
+          },
+        }],
+        worldMatrix: verifiedWebWorldMatrix,  // optional, no automatic native conversion
+      },
+    );
+    const gpu = uploadIndexedMesh(gl, program, mesh); // cached by geometry, SH-05 renderer only
+    // Inside SH-05's established renderer.begin(camera) draw pipeline:
+    const { model, normal, mirrored } = world ?? meshModelMatrices(instanceWorldMatrix);
+    gl.uniform1i(uniforms.uUseAffine, 1);
+    gl.uniformMatrix4fv(uniforms.uAffineModel, false, model);
+    gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
+    // Bind source-qualified material slot (SH-13) or clearly label diagnostic color.
+    for (const range of drawRanges) {
+      bindQualifiedMaterial(range.materialSlot);
+      gpu.draw(range);   // existing drawElements: firstIndex/indexCount into EBO
+      drawCalls++;
+    }
+    // When GL_CULL_FACE is enabled, adjust frontFace for mirrored model and restore.
+    // On context shutdown/rebuild: gpu.dispose().
+
+A source OBJ that already mirrors X and reverses triangle winding (UnityPy export) **does not imply** that any additional axis conversion is safe. The final Web orientation is an SH-04/SH-11 measured decision. The explicit axisSigns and winding are not defaults. Mesh geometry, material binding and runtime visibility are separate proof obligations. The GPU may have more split vertices than original OBJ distinct-position references due to seams.
+
+### Tangible generated-only acceptance and next visual gate
+
+The generated **non-cubic, asymmetric wedge** in tests/render-mesh-obj.test.mjs has two selected groups, distinct UV/normal seams, negative OBJ indices, signed X reflection and winding correction. Behavioral tests validate both group bounds, triangle counts, per-corner vertex splitting, resulting normals and **mocked WebGL2 drawElements index offsets 0 and 12 bytes** (6 and 3 uint16 indices, two material slots). This is an end-to-end *CPU parser → GPU API mock* check, not a browser/WebGL2 execution, not native polygons, and not a 1:1 claim.
+
+The next P0 **visible** gate is SH-05 loading an authorized mesh privately (never committing or shipping original OBJ/bytes publicly), replacing a Containers collider-proxy silhouette in the opt-in browser scene, recording the WebGL2 frame and indexed draw telemetry, then requesting SH-15's same-camera native/Web comparison. Only SH-05 modifies src/main.js, src/renderer.js or src/levels.js. SH-12 does not alter SH-13's material-model or lighting-model modules.
