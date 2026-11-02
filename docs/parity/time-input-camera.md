@@ -101,3 +101,25 @@ Le fichier [`tests/time-contract-web-gaps.test.mjs`](../../tests/time-contract-w
 
 **Provenance native inchangée** : MCD build `20299547`, Unity `2018.4.14f1`, assembly SHA-256 `ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`, corpus privé commit `be6d535e608f66c93db3acc422385035d1281063`. Les références primaires et secondaires exactes (runs, artifact IDs, SHA-256 des textes) figurent plus haut et dans `time-input-camera.evidence.json`. **OBSERVÉ natif : aucun élément quantitatif supplémentaire.** Ce cycle ne déclenche pas `workflow_dispatch` ni le runner ; les quatre requêtes privées bornées décrites dans l'issue #1 restent nécessaires.
 
+
+
+## Qualification d'une comparaison temporelle (SH-01, TC-Q01 à TC-Q05)
+
+Le test [`time-contract-qualification.test.mjs`](../../tests/time-contract-qualification.test.mjs) définit une **porte de recevabilité méthodologique**. Il ne déduit aucune règle supplémentaire de MCD : le résultat `COMPARABLE` signifie uniquement que l'on dispose des données nécessaires pour tenter une comparaison différentielle, **jamais** une parité 1:1 certifiée.
+
+| ID | Entrée auditée et statut actuel | Source exacte / version | Réfutation ou critère de levée |
+| --- | --- | --- | --- |
+| **TC-Q01** | **PROUVÉ — déclaration seulement** : `fixedTimestepDenominator = 60`. **INCONNU — runtime** : un rapport signale 120 sur une instance Containers. | `decompiled/TimeControl.decompiled.cs:16`, TC-004, artifact privé `13108091209` / run `41367755041` ; `HANDOFF.md:73`, TC-R03, artifact `13108420851` / run `41368361512` ; cible build `20299547`. | Lire l'instance active `(owner,path_id)`, la valeur sérialisée et les écritures sur `Time.fixedDeltaTime`. Une autre instance ou un override runtime réfute l'utilisation de 60 ou de 120 comme contrat universel. |
+| **TC-Q02** | **INCONNU — méthode effectivement exécutée** : une entrée du handoff n'est pas le corps IL/CIL d'une méthode ni une mesure. | `HANDOFF.md:69–74`, TC-R01 à TC-R04, SHA-256 du texte lu `408cec616a4e1399120a72df8014e237073b649ab781da688b304df3b7e060a7`. | Fournir corps de méthode + identifiant + lignes/token, SHA de l'assembly et branche d'appel effectivement liée à la scène. Réfuter l'hypothèse par une branche effective différente. |
+| **TC-Q03** | **INCONNU — observation quantitative** : aucune trace native admissible n'a été lue. Une suite d'images ou des timestamps hors unité ne vaut pas mesure. | `runtime/observations.json` **non lu** ; source signalée par `HANDOFF.md:55` (TC-R06). | Deux échantillons au minimum, temps en secondes strictement croissant, valeur finie avec unité explicite, build et scène ; vérifier une trace contradictoire ou une mesure non calibrée. |
+| **TC-Q04** | **COMPARABLE uniquement sur fixture synthétique** ; **INCONNU pour MCD**, aucune certification de parité. | `tests/time-contract-qualification.test.mjs`, fixture de test artificielle ; version Web déterminée par le SHA du commit de la PR, **pas** un original MCD. | Pour un test réel, exiger aussi une trace Web horodatée et versionnée, même scène et événement ; même une concordance locale ne prouve pas 1:1 sur toutes les branches. |
+
+| **TC-Q05** | **INCONNU / non comparable** si scènes ou unités physiques diffèrent, même avec des séries numériques bien formées. | `tests/time-contract-qualification.test.mjs`, fixture artificielle sans observation MCD. | Réfuter un appariement en changeant l'identifiant de scène ou l'unité de la grandeur mesurée ; exiger la concordance des deux avant comparaison. |
+
+Les contrôles automatisés exigent simultanément : déclaration de source explicitement limitée ; méthode avec type, nom, bornes et SHA d'assembly ; binding d'instance active `(scene,owner,pathId)` ; traces native et Web finies, horodatées et versionnées, avec unités de mesure identiques et scène native correspondant au binding. **Ils vérifient la présence/cohérence de métadonnées, pas l'authenticité du corpus ni l'exécution de la méthode.** Seules les lectures privées et les observations originales permettent de relever réellement le niveau de preuve.
+
+### Audit de disponibilité de la passerelle (2026-11-02)
+
+Lecture des exécutions du workflow privé `corpus-query.yml` : six runs visibles, dont le dernier succès `41368361512` démarré à **00:39:56 UTC** ; **aucun run plus récent** au moment de cet audit. L'artifact `13108150429` (run `41367855635`) est une tranche de **262144 octets d'une capture PNG**, pas une lecture des méthodes temps/entrées/caméra ; il ne permet pas une mesure chiffrée. Le connecteur GitHub autorise la lecture des artifacts, **pas** `workflow_dispatch`. Aucune requête nouvelle n'a été lancée sur le runner.
+
+La demande minimale reste quatre lectures privées `read` (séparées, sans scan) : `decompiled/TimeControl.decompiled.cs:26+160`, `spec/time-input-camera.md:1+600`, `runtime/observations.json:1+250`, `spec/player-camera-bindings.json:1+250`. Les contenus originaux restent privés. Ni `src/main.js` ni les modules SH-02 ne sont modifiés.
