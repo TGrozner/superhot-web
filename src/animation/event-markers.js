@@ -18,51 +18,64 @@ const MAX_OCCURRENCES = 4096;
  * This deliberately imposes no Unity ordering or blending semantics.
  */
 export function advanceAnimationMarkers(clock, dt, markers, { maxOccurrences = MAX_OCCURRENCES } = {}) {
-  const next = advanceClipClock(clock, dt);
+  // Advance and traverse the same validated clock values. Mutable getters
+  // must not change the rate or duration halfway through one operation.
+  if (clock === null || typeof clock !== 'object') throw new TypeError('clock must be an object');
+  const clockSnapshot = {
+    time: clock.time, duration: clock.duration, rate: clock.rate,
+    loop: clock.loop, paused: clock.paused,
+  };
+  const next = advanceClipClock(clockSnapshot, dt);
   if (!Array.isArray(markers)) throw new TypeError('markers must be an array');
   if (!Number.isSafeInteger(maxOccurrences) || maxOccurrences < 1 || maxOccurrences > MAX_OCCURRENCES) {
     throw new RangeError(`maxOccurrences must be an integer from 1 to ${MAX_OCCURRENCES}`);
   }
 
-  const { duration, time: start = 0, rate = 1, paused = false, loop = false } = clock;
+  const { duration, time: start = 0, rate = 1, paused = false, loop = false } = clockSnapshot;
+  const snapshots = [];
   for (const [index, marker] of markers.entries()) {
-    if (!marker || typeof marker !== 'object' ||
-      typeof marker.id !== 'string' || marker.id.length === 0) {
+    if (!marker || typeof marker !== 'object') {
       throw new TypeError(`markers[${index}] must have a non-empty string id`);
     }
-    if (typeof marker.time !== 'number' || !Number.isFinite(marker.time)) {
+    const id = marker.id;
+    const time = marker.time;
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new TypeError(`markers[${index}] must have a non-empty string id`);
+    }
+    if (typeof time !== 'number' || !Number.isFinite(time)) {
       throw new TypeError(`markers[${index}].time must be finite`);
     }
-    if (marker.time < 0 || (loop ? marker.time >= duration : marker.time > duration)) {
+    if (time < 0 || (loop ? time >= duration : time > duration)) {
       throw new RangeError(`markers[${index}].time is outside the clip`);
     }
+    snapshots.push({ index, id, time });
   }
-  if (paused || rate === 0 || dt === 0 || markers.length === 0) {
+  if (paused || rate === 0 || dt === 0 || snapshots.length === 0) {
     return { ...next, events: [] };
   }
 
   const end = loop ? start + dt * rate : next.time;
   const events = [];
-  for (const [index, marker] of markers.entries()) {
+  for (const { index, id, time } of snapshots) {
     if (!loop) {
-      if (marker.time > start && marker.time <= end) {
-        events.push({ id: marker.id, index, time: marker.time, cycle: 0,
-          elapsedSeconds: (marker.time - start) / rate });
+      if (time > start && time <= end) {
+        events.push({ id, index, time, cycle: 0,
+          elapsedSeconds: (time - start) / rate });
       }
       continue;
     }
 
     // A clip-local marker repeats every `duration` seconds. Enforce an explicit
     // bound rather than silently losing markers if a frame skips many loops.
-    const first = Math.max(0, Math.floor((start - marker.time) / duration) + 1);
-    const last = Math.floor((end - marker.time) / duration);
+    const first = Math.max(0, Math.floor((start - time) / duration) + 1);
+    const last = Math.floor((end - time) / duration);
     const count = Math.max(0, last - first + 1);
     if (!Number.isSafeInteger(count) || count > maxOccurrences - events.length) {
       throw new RangeError('animation marker occurrence limit exceeded');
     }
     for (let cycle = first; cycle <= last; cycle++) {
-      const at = marker.time + cycle * duration;
-      events.push({ id: marker.id, index, time: marker.time, cycle,
+      const at = time + cycle * duration;
+      events.push({ id, index, time, cycle,
         elapsedSeconds: (at - start) / rate });
     }
   }
