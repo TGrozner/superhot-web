@@ -259,3 +259,108 @@ The four pre-change isolated views in `docs/parity/visual.md` measure silhouette
 IoU 0.9554–0.9615 and RGB delta 0.0940–0.1022. No post-change comparison or
 visible improvement has been measured. SH-05 can integrate this pass without
 editing its caller integration or waiting for a different rig package.
+
+## Dojo/build10 — first-person hands and katana (SH-14 WEB-ONLY, 2026-11-02)
+
+The current priority is **SHRL_Dojo2 / build10**, replacing the old Containers
+first milestone. The baseline is `main@2297ccb6548004d02261615676d7d23466032016`
+and `docs/dojo-reprise.md` is the archive handoff. The old source-authored
+held katana REST placement is already in `native-items.js`; this new pass
+must not duplicate or replace that path unless real swing package data exists.
+
+The private checkpoint
+`private/checkpoints/dojo-fidelity-before-stabilization/work-in-progress.zip`
+contains an unfinished `native-player-animation.js`, source extraction and
+renderer changes. **That local archive is not available to Web-only SH-14.**
+Neither its contents nor a new private `result.json` were inspected for this
+change. No native player-hand clip timings, active Animator state, material,
+weapon socket transforms or live frame are newly claimed from it.
+
+### Already known static rig identities (from dojo-reprise.md)
+
+For build10 `SHRL_Dojo2`, use the *scene-configured* player-hand hierarchy:
+Animator `6333` (`AnimCtrl_PlayerMain`), HandManager `6545`,
+SkinnedMeshRenderer `6378`, weapon-bone Transform `2896` (GO `1435`).
+The isolated `bHands.prefab` is NOT a substitute for that active hierarchy.
+These serialized links do not establish which animation/weight was played in a
+particular native frame. The pistol's original first-person view does not
+show hands holding it; its pickup/recoil uses DOTween. Three katana swing
+sound references are null; no synthetic swing sound is added.
+
+### Executable Web slice supplied
+
+`src/characters/native-player-animation.js` exports
+`createDojoPlayerAnimationPass(gl, {sourcePackage, rig, clips, lighting})`.
+It directly REUSES `createNativeSkinPass` for genuine indexed,
+four-influence GPU deformations and the original source clip samples. This
+does **not** create another skinner or a procedural hand model.
+
+- `sourcePackage`: **raw private source skin package**, schemaVersion 1,
+  in Unity-order vertices/weights, containing the sampled scene hands mesh,
+  `clips`, `bones`, inverse binds and a verified
+  `weaponAttachment:{bone,localMatrix,source,coordinates}`. Never use
+  EnemyMerged 284/285 or the unrelated isolated bHands prefab as a stand-in.
+- `rig`: exact source scene IDs above, plus
+  `weaponBoneName` equal to the source package attachment bone's name,
+  and a nonempty `provenance` identifying the private archive evidence.
+- `clips:{held,swing}`: explicit **names already present in the raw package**.
+  No guessed first-person katana clip name, duration or transition is provided.
+  Held loops; swing clamps, using caller's source-clip seconds. The caller must
+  supply the active event/phase, not infer an Animator transition from
+  `fireDelay` or an arbitrary timeout.
+- `pass.draw({heldItem,phase,sourceClipTime,modelMatrix,viewProjection,
+  cameraPosition,shaderTime,color,katanaMeshLocalMatrix})`: only draws hands
+  when `heldItem.isKatana === true`. It requires actual camera-relative
+  player-hands `modelMatrix`, real scene viewProjection and explicit Web
+  preview color. It does not draw pistol hands. With `phase='swing'`,
+  the source sample moves the bone and its attached katana socket in the
+  **same draw**, not a hand-follow animation bolted on afterward.
+- `draw` returns `weaponBoneWorldMatrix` (copied, no scratch alias) and,
+  only if source-qualified `katanaMeshLocalMatrix` is supplied, a
+  `katanaModelMatrix` suitable for the existing indexed native item draw.
+  If mesh-local placement is unavailable, hands still draw but the sword
+  stays on the previous source-backed held-placement path. It never guesses
+  a new blade offset or invokes hit/damage planning.
+- `nativeHandsMaterialParity: false`, `nativePlayerControllerTransitionVerified:
+  false`. The reused enemy pass would incorrectly apply Red Crystal to hand
+  UV0. The Web preview therefore deliberately omits UV0 **only in its
+  in-memory draw view** to select existing generic Web lighting, preserving
+  original UV0, geometry, skin weights and clips in the private source object.
+  This is a **diagnostic Web material**, not a native hand texture/shader.
+
+### Exact SH-05 exclusive integration contract
+
+After privately restoring and validating the archived hands source package,
+SH-05 owns `renderer.js/main.js`: create the pass ONCE on the existing
+WebGL2 context, then call `draw` inside `drawViewModel(camera)`, after the
+native world has prepared the same projection/camera but before HUD. Pass
+the *source-authored camera-relative hand model matrix*, original clip names,
+phase and clip seconds from the genuine katana action path. The draw itself
+restores host GL program/VAO/front-face state and does not modify combat.
+
+If `katanaModelMatrix` is returned, draw the current held source katana
+instances with `renderer.drawNativeInstance(instanceId,katanaModelMatrix,true)`
+using the model's private source-local offset, avoiding a second draw via
+`nativeItemDraws().held`. If no native socket/local offset exists, preserve
+the currently working static held katana instead of making one up. Dispose
+the pass on package replacement/reset, never create it once per frame.
+Do not repurpose the enemy `drawNativeSkin` state map or alter SH-06 and SH-03.
+
+### Evidence / acceptance boundary
+
+`tests/character-native-player-animation.test.mjs` uses an **authored
+non-cuboid fixture** to exercise real WebGL2 indexed draw calls (mock context),
+exact source-clip pose interpolation, a moving weapon socket,
+non-katana invisibility, invalid-source rejection, GL state restoration and
+preservation of private UV data. These tests are not an actual browser/GPU
+screenshot or a reverse-engineered katana animation.
+
+**Blocked before owner-visible rendering:** the private archived scene hands
+mesh/clips/weapon-bone socket/source material and their real first-person
+matrix have not been made available through approved Web-only resources.
+The SHA and location of the checkpoint are in `docs/dojo-reprise.md`; no
+local runner, research workflow, native binary or asset was accessed. SH-05
+must verify the recovered archive (without re-running its extractor), integrate
+the shared hook on a green baseline, and provide Thomas a localhost hand+katana
+idle/swing pair to test. Comparing native/Web frames at matched camera,
+time, action and joint poses is still required; **no 1:1 claim**.
