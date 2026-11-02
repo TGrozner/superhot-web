@@ -5,6 +5,7 @@ import {
   assessNativeWorldBrowserFrame,
   assessNativeElevatedPlatformBindings, projectPreparedColliderRoi,
   assessPreparedColliderActivation, assessNativeWorldEncounterTrace,
+  assessContainersBuild28VerticalEvidence,
 } from '../scripts/integration-native-world.mjs';
 
 const sampleSource = () => ({
@@ -395,4 +396,98 @@ test('SH16 does not infer source-native damage from an isolated target death or 
   const stale = browserEncounterTraceFixture();
   stale.samples[0].metrics.enemies[0].alive = false;
   assert.equal(assessNativeWorldEncounterTrace(stale).status, 'NO_ASYNC_WEB_ENEMY_DEFEAT_TRANSITION');
+});
+
+
+// SH-16 source-identity regression: source-world mode is shared by build10
+// Dojo and build28 Containers. Identical counters cannot prove scene identity.
+function containersBuild28IdentityFixture() {
+  const source = {
+    sceneBuildIndex: 28,
+    scenePath: 'Assets/Scenes/level28.unity', // entirely synthetic test tuple
+    serializedOwner: 'fixture-level28',
+  };
+  const prepared = sampleSource();
+  prepared.source = { ...source };
+  const { samples } = browserEncounterTraceFixture();
+  for (const sample of samples) {
+    sample.frame.nativeScene.source = { ...source };
+    sample.metrics.nativeScene.source = { ...source };
+  }
+  return { expectedSource: source, prepared, samples };
+}
+
+test('SH16 P0 binds actual Containers scene identity to source package and every rendered/async sample', () => {
+  const gate = assessContainersBuild28VerticalEvidence(containersBuild28IdentityFixture());
+  assert.equal(gate.status, 'CONTAINERS_BUILD28_WEB_SCENE_ACTOR_AND_ASYNC_ENCOUNTER_ONLY');
+  assert.equal(gate.webTraceStatus, 'WEB_WORLD_ACTOR_AMMO_AND_ASYNC_DEFEAT_SEQUENCE_ONLY');
+  assert.equal(gate.sourceIdentity.sceneBuildIndex, 28);
+  assert.equal(gate.sourceIdentity.originalMcdSceneExecutionProven, false);
+  assert.equal(gate.matchedNativeGameplayPixels, false);
+  assert.equal(gate.measuredVisualDelta, null);
+  assert.equal(gate.nativeParityVerdict, 'UNASSESSED');
+});
+
+test('SH16 rejects current Dojo/build10 as Containers even with perfectly matching draw counts', () => {
+  const fixture = containersBuild28IdentityFixture();
+  const dojo = { sceneBuildIndex: 10, scenePath: 'Assets/Scenes/SHRL_Dojo2.unity',
+    serializedOwner: 'fixture-dojo' };
+  fixture.expectedSource = dojo;
+  fixture.prepared.source = dojo;
+  for (const sample of fixture.samples) {
+    sample.frame.nativeScene.source = dojo;
+    sample.metrics.nativeScene.source = dojo;
+  }
+  assert.equal(assessContainersBuild28VerticalEvidence(fixture).status,
+    'INDEPENDENT_CONTAINERS_BUILD28_SOURCE_TUPLE_REQUIRED');
+});
+
+test('SH16 refuses independently mismatched owner-local scene package despite equivalent meshes/instances', () => {
+  const fixture = containersBuild28IdentityFixture();
+  fixture.prepared.source = { ...fixture.expectedSource, sceneBuildIndex: 10 };
+  assert.equal(assessContainersBuild28VerticalEvidence(fixture).status,
+    'PREPARED_PACKAGE_SCENE_IDENTITY_MISMATCH');
+  const noProof = containersBuild28IdentityFixture();
+  delete noProof.expectedSource;
+  assert.equal(assessContainersBuild28VerticalEvidence(noProof).status,
+    'INDEPENDENT_CONTAINERS_BUILD28_SOURCE_TUPLE_REQUIRED');
+});
+
+test('SH16 catches a Dojo rendered frame under an unchanged Containers WebGL draw budget', () => {
+  const fixture = containersBuild28IdentityFixture();
+  fixture.samples[1].frame.nativeScene.source = {
+    sceneBuildIndex: 10, scenePath: 'Assets/Scenes/SHRL_Dojo2.unity',
+    serializedOwner: 'fixture-dojo',
+  };
+  assert.equal(assessContainersBuild28VerticalEvidence(fixture).status,
+    'RENDERED_FRAME_SCENE_IDENTITY_MISMATCH');
+  assert.equal(assessContainersBuild28VerticalEvidence(fixture).failingSample, 1);
+});
+
+test('SH16 rejects stale 1Hz scene telemetry even when rendered frame has correct source identity', () => {
+  const fixture = containersBuild28IdentityFixture();
+  fixture.samples[0].metrics.nativeScene.source = {
+    sceneBuildIndex: 10, scenePath: 'Assets/Scenes/SHRL_Dojo2.unity',
+    serializedOwner: 'fixture-dojo',
+  };
+  const report = assessContainersBuild28VerticalEvidence(fixture);
+  assert.equal(report.status, 'STALE_OR_DIFFERENT_ASYNC_METRICS_SCENE_IDENTITY');
+  assert.equal(report.failingSample, 0);
+});
+
+test('SH16 never promotes scene-identified Web world to native contact when actor/fire sequence is absent', () => {
+  const fixture = containersBuild28IdentityFixture();
+  fixture.samples[1].frame.gameplay.ammo = 5;
+  const report = assessContainersBuild28VerticalEvidence(fixture);
+  assert.equal(report.status, 'CONTAINERS_BUILD28_SCENE_IDENTITY_WITH_INCOMPLETE_WEB_TRACE');
+  assert.equal(report.webTraceStatus, 'NO_AMMO_DECREASE_CANDIDATE');
+  assert.equal(report.executedNativeColliderContactObserved, false);
+  assert.equal(report.nativeParityVerdict, 'UNASSESSED');
+});
+
+test('SH16 rejects incomplete reported source identity instead of inferring it from mode/counts', () => {
+  const fixture = containersBuild28IdentityFixture();
+  delete fixture.samples[1].frame.nativeScene.source.serializedOwner;
+  assert.equal(assessContainersBuild28VerticalEvidence(fixture).status,
+    'RENDERED_FRAME_SCENE_IDENTITY_MISMATCH');
 });

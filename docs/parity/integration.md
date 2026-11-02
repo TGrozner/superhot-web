@@ -260,3 +260,42 @@ The report requires the **exact locally prepared scene draw budget** (never a ha
 **Privacy and source reuse:** Existing private research #8–#15 `result.json` archives were reopened, JSON-validated and SHA256-checked locally without new corpus queries. None of the originals, binaries, OBJ data, images or native source excerpts is included in public files. No SH-05 or SH-15 reserved file is modified.
 
 **Run** `node --test tests/integration-native-world.test.mjs` as a local unit gate, then require GitHub Actions `npm run check` on the exact PR HEAD; this is not a browser/GPU/native test.
+
+
+## SH-16 P0 (2026-11-02): prevent a Dojo scene from satisfying the Containers gate
+
+**Concrete cross-lane regression risk identified by reading current code, NOT by running a browser:** the homepage now selects owner-local **Dojo/build10** (`SHRL_Dojo2`), while `Containers/build28` remains the original SH-16 acceptance target. The app's `NATIVE_ORIGINAL_GEOMETRY_WEB_GAMEPLAY` mode and the previous `assessNativeWorldEncounterTrace` only checked mesh/instance/texture counts across samples. They did **not** check `nativeScene.source` at all: a Dojo package with matching geometry counts could falsely satisfy a report described as a Containers encounter. No pixel measurement can fix incorrect scene registration.
+
+The new independently testable `assessContainersBuild28VerticalEvidence` is **fail-closed** and deliberately not wired into `src/main.js`. To run it on the owner's machine (no native bytes leave the PC):
+
+```js
+import { assessContainersBuild28VerticalEvidence } from './scripts/integration-native-world.mjs';
+
+// expectedSource must be transcribed from an INDEPENDENT, private, source-
+// qualified serialized Containers scene record, not copied from the Web page.
+// These fields intentionally have no invented literal path or owner.
+const expectedSource = {
+  sceneBuildIndex: 28,
+  scenePath: verifiedPrivateContainersScenePath,
+  serializedOwner: verifiedPrivateSerializedOwner,
+};
+const report = assessContainersBuild28VerticalEvidence({
+  expectedSource,
+  prepared: prepareNativeScene(ownerLocalPrivatePackage),
+  samples: [
+    { frame: completedFrameA, metrics: copiedAsyncMetricsA },
+    { frame: completedFrameB, metrics: copiedAsyncMetricsB },
+  ],
+});
+```
+
+It checks source tuple `(sceneBuildIndex,scenePath,serializedOwner)` **exactly** against `prepared.source`, each same-rendered-frame `frame.nativeScene.source`, and independently against each **asynchronous** `metrics.nativeScene.source`. Wrong build10, mismatched private package, changed scene with identical draw counts, missing provenance and stale ~1 Hz telemetry all fail with distinct statuses. Only after these checks does it reuse the exact source draw-budget/actor/ammunition/async defeat gate. Positive status `CONTAINERS_BUILD28_WEB_SCENE_ACTOR_AND_ASYNC_ENCOUNTER_ONLY` **still does not prove** a same-projectile body-part hit, executed native PhysX, AI, shader fidelity or matched pixels. The results always set `nativeExecutionObserved=false`, `matchedNativeGameplayPixels=false`, `measuredVisualDelta=null` and `nativeParityVerdict='UNASSESSED'`.
+
+**SH-05 integration dependency:** the shared runtime already publishes `frame.nativeScene.source` in `__superhotGetRenderedFrameSnapshot()` and `metrics.nativeScene.source` in `__superhotSceneMetrics`, but only the owner can select/verify the **actual** build28 local package and its independent source tuple. After source-identity pass, collect a single causal receipt
+`shotId → projectileId → exact collider/GO/bodyPart → source armor/bulletproof/boss guards → post-handler result → actor pose/frameId` and pair the **executed native MCD** scene/camera/phase and WebGL2 readPixels output through SH-15. Until then, the existing Web `closestImpact → killEnemy` sphere hit and progression remain non-native. Do not auto-bind SH-03's pure gates to arbitrary Web spheres.
+
+**SH-15 integration dependency:** report actual source scene/build index in paired manifests; reject a Dojo Web frame paired with a Containers native PNG even if camera, dimensions and mesh counts happen to agree. No new browser or original-game screenshot was produced here: full-scene visual delta is **not measured**, not zero.
+
+**Other PRs checked this cycle (18:45 UTC):** SH-16 #127 is merged on main at `78b4f8a6`; #152, #125, #147, #143, #144, #145, #146 and #151 are also merged. SH-14 #134 and SH-13 #150 remain open with `mergeable=false`; SH-03 #153 is open and its exact HEAD requires revalidation against the now advanced main. SH-05 owns review/rebase/merge. This SH-16 PR touches only the three reserved integration files, not the runtime.
+
+**Private primary reinspection (2026-11-02, no new corpus query):** actual `result.json` JSON was opened from existing research artifacts #8–#15 and hashed, not treated as proven merely because Actions succeeded. #8 is a partial 120-line static source read (`next_start=121`), #9 a bounded audio read, #10 an untruncated **five-row SQLite table schema** (not any world mesh/camera), #11–#12 bounded reads, #13 a 97-line TimeControl read, #14 a 75-line read and #15 a 110-line camera/time source read. None is a recorded executed Containers gameplay frame. Source text, binaries, OBJ, shaders and original captures remain private. This new public gate contains only synthetic fixture identifiers; it does not reproduce private source code.
