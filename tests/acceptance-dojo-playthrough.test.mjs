@@ -4,10 +4,10 @@ import { assessDojoPlaythrough, DOJO_TRACE_STATUS } from '../scripts/acceptance-
 
 // Authored synthetic data tests only verify the acceptance gate, NOT a browser run.
 const frame = (frameId, activeScreen, killed, enemies, {
-  killTarget = 6, scenePath = 'Assets/Scenes/SHRL_Dojo2.unity', buildIndex = 10,
+  killTarget = 6, scenePath = 'Assets/Scenes/SHRL_Dojo2.unity', sceneBuildIndex = 10,
 } = {}) => ({
   frameId, activeScreen,
-  nativeScene: { source: { scenePath, buildIndex } },
+  nativeScene: { source: { scenePath, sceneBuildIndex } },
   gameplay: { encounter: { killed, killTarget, enemies } },
 });
 const enemy = (id, alive = true) => ({ id, alive });
