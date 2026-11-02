@@ -91,16 +91,15 @@ export function stepTime(state, {
   if (!state || typeof state !== 'object') throw new TypeError('state is required');
   requireFinite(dt, 'dt');
   if (dt < 0) throw new RangeError('dt must be nonnegative');
-  // Snapshot state once. The caller may expose accessor properties: validating
-  // one read and then spreading the original object would read them a second
-  // time after validation. Keep supplementary fields without rereading clocks.
+  // Snapshot state once. Avoid object-rest destructuring: some engines read
+  // excluded accessor properties again while copying the remaining fields.
+  // Preserve support for inherited/non-enumerable clocks via explicit fallback.
   // PROVISIONAL WEB integrity rule, not a native SUPERHOT MCD time contract.
-  const {
-    timeScale, lookActivity, shotPulse, realClock, worldClock, ...otherState
-  } = state;
-  const stateSnapshot = {
-    ...otherState, timeScale, lookActivity, shotPulse, realClock, worldClock,
-  };
+  const stateSnapshot = { ...state };
+  for (const name of ['timeScale', 'lookActivity', 'shotPulse', 'realClock', 'worldClock']) {
+    if (!Object.hasOwn(stateSnapshot, name)) stateSnapshot[name] = state[name];
+  }
+  const { timeScale, lookActivity, shotPulse, realClock, worldClock } = stateSnapshot;
   for (const [name, value] of Object.entries({timeScale, lookActivity, shotPulse, realClock, worldClock})) {
     requireFinite(value, name);
   }
