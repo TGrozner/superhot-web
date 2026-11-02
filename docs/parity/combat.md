@@ -245,3 +245,27 @@ an authorized `superhot-research` workflow dispatcher executes only
 `{"operation":"read","path":"spec/combat/combat-specification.md","start":1,"count":200}`
 and returns the result privately. SH-05 exclusively owns `src/main.js`
 integration; numerical correctness is not a 1:1 MCD claim.
+
+
+## SH-03 — projectile snapshot regression (2026-11-02, WEB ONLY)
+
+**PROUVÉ (source Web)**: pre-change `src/combat/projectiles.js` Git blob
+`df57edeedab1f55c6e753c7a22385326ecadc26d` checks the input's numeric components, then re-reads
+`pos`, `direction`, `speed`, `ttl`, and `age` during integration.
+Changing getters can replace the validated values with different or nonfinite
+ones. This was reproduced in synthetic Node 22.16.0 fixtures: **3 failing
+regressions out of 4** on the prior integration (one ordinary control passed).
+
+**WEB-PROVISIONAL correction**: snapshot each kinematic input only once,
+validate the snapshot, use it for movement, lifetime, impact and output.
+Other enumerable metadata is retained. No damage, weapon, AI, scheduling,
+collision priority or firing constant was changed. The four isolated
+regressions pass after the correction; repository CI is a separate gate.
+
+**INCONNU (MCD)**: no new Unity method/IL or active serialized projectile,
+damage, weapon, or agent configuration was retrieved. Private
+`superhot-research` run `41368361512` remains a *secondary handoff*, not
+a native firing proof. The narrow read-only private request remains
+`spec/combat/combat-specification.md` lines 1–200 via the authorized gateway;
+its `workflow_dispatch` action is not exposed by this connector.
+No original resources are copied. SH-05 alone owns browser integration.
