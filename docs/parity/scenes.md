@@ -1,4 +1,7 @@
-# SH-04 — scènes, transforms et rendu (état initial)
+# SH-04 — scènes, transforms et rendu
+
+> **État corrigé au 2 novembre 2026 — source de vérité actuelle :** la passerelle PRIVÉE `corpus-issue.yml` via issues `[corpus-query]` fonctionne (correctif de concurrence privé `42e0df07`). Les passages plus bas indiquant « workflow_dispatch bloqué » et « aucun raccord main » sont des **archives historiques périmées**, et ne constituent plus des blocages. Les meshes natifs ne sont jamais distribués par ce dépôt. La tranche Containers visible dans le code a été raccordée par SH-05 dans la PR #105 ; **aucune capture GPU ni comparaison native à caméra appariée n'est attestée**.
+
 
 **Statut : infrastructure testée, fidélité MCD non établie.** Ce dépôt public ne contient ni asset extrait, ni shader original, ni résultat brut du corpus privé. Aucun objet, placement, matériau ou niveau du jeu original n'est revendiqué comme reproduit.
 
@@ -111,3 +114,25 @@ Dans l'échantillon étudié, cinq GameObjects cargos et leurs modèles sont sé
 **Contrat SH-05, sans modifier ses fichiers :** importer `createContainersBuild28DrawPlan` et éventuellement `CONTAINERS_BUILD28_DEMO_CAMERA` (caméra purement synthétique, **pas** un binding natif). Puis soumettre uniquement les paquets `packet.legacyBoxArgs !== null` à `renderer.box(...packet.legacyBoxArgs)`. `createContainersBuild28Nodes()` fournit 46 primitives : cinq enveloppes de cargo, 40 nervures non-sourcées et un plancher synthétique. Les 46 paquets représentent au maximum 46 appels `renderer.box` sans instancing ; le culling peut en supprimer selon la caméra. `tests/scene-containers-build28.test.mjs` vérifie les centres/tailles dérivés, les 46 primitives générées, la visibilité depuis un repère de démonstration et les arguments legacy strictement finis. **Aucune intégration à `src/main.js`, `src/renderer.js` ou `src/levels.js` n'est réalisée ici.**
 
 **CRITÈRES réfutables avant revendication visuelle :** le niveau Web doit effectivement charger ce manifeste via SH-05, afficher au moins cinq volumes de cargo distincts et un niveau surélevé depuis la caméra de démonstration, produire zéro paquet affine non supporté et mesurer en navigateur WebGL2 les draw calls, p95 GPU/frame et une capture témoin. Pour comparer à MCD, relever une vraie caméra d'exécution dans la même scène et résoudre les liens mesh/matériau/shader et les variantes de prefab. Tant que cette preuve manque, **parité visuelle, dimensions de mesh, occlusion, FPS, p95 et fidélité 1:1 restent INCONNUS**. Les tests Node et la CI Web ne prouvent que le manifeste généré.
+
+
+## État source-qualifié de Containers après l'intégration #105 (2 novembre 2026)
+
+**PROUVÉ — sérialisation Unity, pas exécution native** : MCD build 20299547, scène `level28` Unity 2018.4.14f1, SHA-256 `e0dae9e43ce59ff8f53e157bae277c382602efdf8b34386cacf8c34995b2db91`. La requête privée bornée [research #68](https://github.com/TGrozner/superhot-research/issues/68), run `41435932125`, artifact `13136407658`, relie les six GameObjects et renderers à leurs groupes statiques :
+
+| GO | Renderer `level28` | Mesh : groupe | Usage Web actuellement préparé |
+| ---: | ---: | --- | --- |
+| 336 | 7837 | 6:47 | `cargo-22` : groupe 47 local sans translation |
+| 459 | 7940 | 7:48 | `cargo-upper` : autre fichier local facultatif |
+| 461 | 7941 | 7:46 | non raccordé en mesh source |
+| 673 | 8123 | 7:77 | non raccordé en mesh source |
+| 839 | 8272 | 6:24 | `cargo-7` : réutilisation groupe 47 avec translation `(-7.35,0,+4.5)` |
+| 1003 | 8417 | 6:32 | instance ajoutée avec translation `(-1.4,-0.05,-25.2)` |
+
+Chaque groupe possède 4 638 indices, soit 1 546 triangles. **OBSERVÉ — export converti privé uniquement** : [research #63](https://github.com/TGrozner/superhot-research/issues/63), artifact `13135277646`, gzip mesh6 SHA-256 `ff59d8e1548448926a6431d27578310f3a68f6e35d272cbe63576a1df8034941`. Les groupes 24, 32 et 47 présentent une géométrie quasi superposable après recentrage (écart de position observé ≤ 2,01 × 10⁻⁶ unité, UV et normales cohérentes). La réutilisation d'un GPU buffer pour trois dessins est une **approximation contrôlée du Web**, non une égalité de frames natives.
+
+**LIVRÉ dans le code sur `main`** : [PR #105](https://github.com/TGrozner/superhot-web/pull/105), commit de fusion `70b7a930b00adf0a88f0ae5368bb5b29ff46dd52`, contient `src/scenes/containers-mesh6-local-plan.js`, son test et le raccord exclusif SH-05 (`main.js`, `renderer.js`, `levels.js`). Le mode `?scene=containers` conserve les proxies générés tant que l'utilisateur n'a pas sélectionné **son propre** OBJ/OBJ.gz privé via File API. Après chargement valide, le plan prévoit trois `drawElements` à partir de l'unique groupe 47 et masque uniquement les proxies correspondants ; aucune géométrie ni texture originale n'est ajoutée au dépôt. Les termes « dessine » et « masque » sont ici des **propriétés du code**, pas des observations GPU.
+
+**MATÉRIAUX / ÉCLAIRAGE :** [PR #104](https://github.com/TGrozner/superhot-web/pull/104) source-qualifie les références externes des cargos (matériau `fileID5:pathID3`) et quelques emplacements UV2/lightmap, **sans** résoudre le propriétaire cible du Material, le shader, les pixels de l'atlas, la couleur ni le rendu runtime. SH-13 conserve la responsabilité de cette résolution. Le brouillard désactivé est sérialisé et raccordé séparément par #95 ; aucune validation pixel appariée.
+
+**INCONNU / critère d'acceptation** : avec les fichiers privés locaux autorisés, vérifier dans un navigateur WebGL2 les groupes 6:47 et 7:48, trois instances Mesh6 et une Mesh7, les appels `drawElements` réellement émis, la disparition exclusive des proxies concernés et le rendu des normales/winding. Relever une capture, `p95FrameMs`, résolution/DPR et GPU, puis comparer avec une frame MCD à caméra/projection/pose appariées. Les 46 proxies initiaux et les tests Node verts ne démontrent aucune parité native. **SH-05 est le seul propriétaire des fichiers partagés et de ces mesures.**
