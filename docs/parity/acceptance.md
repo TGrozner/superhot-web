@@ -174,3 +174,123 @@ node --test tests/acceptance-dojo-playthrough.test.mjs
 Successful validation only means supplied sampled frames cover the five milestones in order, and the validator has no way to authenticate the source of an arbitrary JSON trace. Sampling can miss very brief states; it cannot infer missing events. This is *not* a test of movement, collision, visual fidelity, or an original-native comparison. Ordinary CI runs only authored tests, not the private full-run gate.
 
 **Status at submission:** no owner browser full run, no measured native/Web gameplay pair. SH-05 alone owns the shared gameplay fixes and final integration.
+
+
+## Dojo/build10 strict full-run gate v2 (SH-10; opt-in, no native success claim)
+
+The earlier `assessDojoPlaythrough` (PR #170) establishes only **start → living spawn →
+some kills → win at source 6/7 quota → restart with empty enemy list** in
+user-supplied Web snapshots. It does **not** prove actual gameplay execution,
+pickup/fire, collision, audio, GPU pixels or MCD native parity. Do not replace
+that limited result with an unqualified 1:1 claim.
+
+The stronger **`scripts/acceptance-dojo-vertical.mjs`** consumes the new v2
+recorder output and fails closed unless each observable milestone is present:
+- Source tuple must stay **SHRL_Dojo2.unity / build10 / level10** on every
+  sampled rendered frame; kill target remains 6 or 7 with **each intermediate
+  kill-counter integer** sampled, no reset before victory, and a later
+  playing state with zero kills and no enemies.
+- Pistol must be visibly equipped in Web telemetry and ammo must decrease at
+  least once (a Web ammo transition, **not** independently proven bullet hit).
+  A single **same-ID** scene pickup must appear as held and later as a
+  released item with changed Web state before victory.
+- After restart, the count of original scene items must match initial state;
+  no previously changed item should remain, and there must be no held item or
+  live fragment count. Starting weapon and ammo return, the world clock
+  resets, and `audio.sceneAmbienceSources` matches the initial count
+  (WebAudio node count, **not** an audible waveform test).
+- An **operator-marked** door/threshold traversal, stair ascent and blocked
+  wall press must have monotonically ordered rendered-frame samples with
+  bounded movement. Door displacement .65–5 m; stair elevation .2–3 m with
+  grounded endpoints; wall-press displacement <= .15 m despite movement input.
+  These are **Web collision sanity checks**, not a native PhysX contact
+  comparison, not an automatically verified door/step identity, and not
+  source-derived movement tolerances.
+
+### Owner-local browser procedure (after SH-05 merges; not executed by SH-10)
+
+Run the **existing** `node server.mjs` and open
+`http://localhost:4173/` with the private Dojo scene configured. Before
+starting the encounter, in DevTools (the recorder is opt-in):
+
+```js
+const { startDojoCapture } = await import('/scripts/acceptance-dojo-browser.mjs');
+window.dojoRun = startDojoCapture({ intervalMs: 100 });
+```
+
+The recorder is a **read-only browser timer**, using the already exposed
+`__superhotGetRenderedFrameSnapshot()`; it does not automate the original
+game, move characters or create fake kills. Start the Dojo encounter, use the
+pistol, take and throw a real in-scene item, traverse the door threshold and
+stairs and walk against a blocked wall. For each physical location, call
+`dojoRun.mark(...)` **while performing that step**:
+
+```js
+dojoRun.mark('door-before');      // on the approach
+// Move through the door at the threshold.
+dojoRun.mark('door-after');       // after crossing
+dojoRun.mark('stairs-bottom');    // before the climb
+// Walk up the stairs.
+dojoRun.mark('stairs-top');       // after the climb
+dojoRun.mark('wall-press-start'); // while pressing a blocked wall
+// Keep walking into the same wall.
+dojoRun.mark('wall-press-end');
+```
+
+All markers must occur **before victory**, without duplicate markers, and
+should bound at least three collected frames per route. The operator must
+choose appropriate actual scene locations. The v2 JSON is **unauthenticated
+user-provided telemetry**; a marker merely labels a rendered Web frame, not a
+source or native scene location. With high FPS or multiple kills between
+samples, the gate can report *INCOMPLETE* even for a successful game session;
+it never fills missing frames with invented evidence.
+
+After all **6–7** kills, observe the victory screen, restart, allow audio
+and scene initialization to settle, and capture the reset screen. Save the
+trace to a **private local file** with:
+
+```js
+dojoRun.save('dojo-full-run.json');
+```
+
+The saved JSON contains only bounded actor IDs/states, event counters and
+player feet coordinates; **no original assets, audio buffers, object names,
+pixel captures, private paths or code**. Verify the browser download actually
+exists. Run this opt-in command **only on the owner's checkout**:
+
+```bash
+node scripts/acceptance-dojo-vertical.mjs --trace private/dojo-full-run.json
+```
+
+Nonzero status means trace *invalid/incomplete* or a Web acceptance criterion
+not observed; it **does not automatically refute the original MCD game**.
+The authored CI fixtures (`node --test tests/acceptance-dojo-vertical.test.mjs
+tests/acceptance-dojo-browser.test.mjs`) are all synthetic. A green hosted
+CI reports tests of the **validator**, not a real Chrome playthrough.
+
+### SH-05 delta handoff and native limitations
+
+P0 owner **SH-05**: after main CI-verified merge, collect a single actual owner
+localhost Dojo trace; distinguish reachability/win/restart faults from sparse
+sampling. Failed route labels or player feet movement should be investigated
+alongside real collision geometry (312 selected scene boxes and three doors
+described in `docs/dojo-reprise.md`), never by changing these gate thresholds
+to force green. SH-05 is the **sole owner** of shared runtime modifications.
+
+P1 owners **SH-02/SH-03/SH-05**: if Dojo start/weapon/spawn/ammo/kill quota
+or WebAudio reset fails the trace, reproduce on a stable scene and correct the
+runtime in the designated lane, not in SH-10 acceptance scripts.
+
+P1 owners **SH-04/SH-05/SH-13/SH-14/SH-15**: real browser pixels versus
+matched executed MCD Dojo scene, camera/pose/time remain **UNKNOWN** without
+two independently acquired and paired frames; use SH-15's visual protocol.
+The prior private research #2 HANDOFF artifact 13131037087 is a **reported
+source handoff**, not executed Dojo browser parity. Earlier **Containers**
+build28 120-vs-60 TimeControl and R/Replay claims must not be applied to
+Dojo/build10 without an active instance/profile and runtime evidence.
+No private research workflow, native binary, Unity, Frida, owner PC or
+new runner was invoked to build this Web-only gate.
+
+**Delivery verification scope:** synthetic Node tests; no original-native
+execution, owner-local browser playthrough, screenshot comparison, GPU pixel
+score or native 1:1 claim.
