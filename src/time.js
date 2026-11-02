@@ -5,10 +5,9 @@
  * STATUS: PROVISIONAL. These numbers are the existing Web prototype, NOT
  * verified SUPERHOT: MIND CONTROL DELETE mechanics. SH-01 owns native parity.
  * A malformed caller-provided ruleset must not leak non-finite target values.
- * SH-01 PR #12 proves only MCD TimeControl DECLARATIONS (e.g. minTimescale
- * initializer 0.01 and fixedTimestepDenominator initializer 60), not active
- * serialized overrides, update phase, or runtime law. Do not transplant them
- * here until an executable native contract has been independently verified.
+ * Native TimeControl source #13 now establishes the order of its LateUpdate;
+ * the explicit source-qualified model below is separate from these Web rules.
+ * Active shifter inputs and runtime measurements are still unverified.
  *
  * Call stepTime only for an active simulation tick. The optional paused flag
  * freezes all time domains and activity decay when a caller needs a pure
@@ -169,5 +168,96 @@ export function sampleFrameDelta(previousTimestampMs, timestampMs) {
       Math.max(0, (timestampMs - previousTimestampMs) / 1000),
     ),
     nextTimestampMs: timestampMs,
+  };
+}
+
+/**
+ * Source-qualified TimeControl model, isolated from the Web prototype rules.
+ *
+ * PROUVÉ as delivered MCD code (not a runtime trace): private corpus-query
+ * #13, artifact 13134370412, TimeControl.decompiled.cs:28-63,70-87.
+ * The instance's shifter producer/POWER state must be supplied by the caller.
+ * Do not substitute this for stepTime until SH-05 wires a verified scenario.
+ */
+export const MCD_SOURCE_TIME_CONSTANTS = Object.freeze({
+  minimumTimescale: Math.fround(0.005),
+  maximumTimescale: 1,
+  powerMaximumTimescale: Math.fround(0.2),
+  noOverride: -1,
+  initialDelayedUpdates: 2,
+});
+
+/** Models the values set by Awake, not proof that any given instance ran Awake. */
+export function createMcdSourceTimeState({ fixedTimestepDenominator, powerActive } = {}) {
+  if (!Number.isFinite(fixedTimestepDenominator) || fixedTimestepDenominator <= 0) {
+    throw new RangeError('fixedTimestepDenominator must be positive and finite');
+  }
+  if (typeof powerActive !== 'boolean') {
+    throw new TypeError('powerActive must be an explicitly supplied boolean');
+  }
+  return {
+    fixedDeltaTime: Math.fround(1 / Math.fround(fixedTimestepDenominator)),
+    minimumTimescale: MCD_SOURCE_TIME_CONSTANTS.minimumTimescale,
+    maximumTimescale: powerActive
+      ? MCD_SOURCE_TIME_CONSTANTS.powerMaximumTimescale
+      : MCD_SOURCE_TIME_CONSTANTS.maximumTimescale,
+    forcedTimeScale: MCD_SOURCE_TIME_CONSTANTS.noOverride,
+    delayedUpdates: MCD_SOURCE_TIME_CONSTANTS.initialDelayedUpdates,
+    shifters: [],
+  };
+}
+
+/**
+ * Pure representation of one TimeControl.LateUpdate, without simulating Unity.
+ * `shifters` are caller-supplied snapshots of IsTerminated and
+ * CurrentTimeModifier, not made-up native producers. On the first two calls,
+ * there is no Time.timeScale write and no registry termination sweep.
+ * Subsequent calls remove terminated shifters, select the maximum strictly
+ * positive modifier, clamp it, then apply any forced override (including 0).
+ * The result reports a requested write; it does not execute the original game.
+ */
+export function advanceMcdSourceTime(state) {
+  if (!state || typeof state !== 'object') throw new TypeError('state must be supplied');
+  const {
+    delayedUpdates, shifters, minimumTimescale, maximumTimescale, forcedTimeScale,
+  } = state;
+  if (!Number.isInteger(delayedUpdates) || delayedUpdates < 0) {
+    throw new RangeError('delayedUpdates must be a nonnegative integer');
+  }
+  if (!Array.isArray(shifters)) throw new TypeError('shifters must be an array');
+  if (typeof forcedTimeScale !== 'number') throw new TypeError('forcedTimeScale must be numeric');
+  if (!Number.isFinite(minimumTimescale) || !Number.isFinite(maximumTimescale)
+      || minimumTimescale > maximumTimescale) {
+    throw new RangeError('invalid timescale bounds');
+  }
+  if (delayedUpdates > 0) {
+    return {
+      state: { ...state, delayedUpdates: delayedUpdates - 1 },
+      wroteTimeScale: false,
+      timeScale: null,
+      aggregate: null,
+    };
+  }
+  const survivors = [];
+  let aggregate = 0;
+  for (const shifter of shifters) {
+    if (!shifter || typeof shifter.terminated !== 'boolean'
+        || typeof shifter.currentTimeModifier !== 'number') {
+      throw new TypeError('shifter must supply terminated and currentTimeModifier');
+    }
+    if (shifter.terminated) continue;
+    survivors.push(shifter);
+    // Matches positive-only maximum of the source loop; NaN compares false.
+    const modifier = Math.fround(shifter.currentTimeModifier);
+    if (modifier > aggregate) aggregate = modifier;
+  }
+  const clamped = Math.min(maximumTimescale, Math.max(minimumTimescale, aggregate));
+  const timeScale = forcedTimeScale !== MCD_SOURCE_TIME_CONSTANTS.noOverride
+    ? Math.fround(forcedTimeScale) : clamped;
+  return {
+    state: { ...state, shifters: survivors, timeScale },
+    wroteTimeScale: true,
+    timeScale,
+    aggregate,
   };
 }
