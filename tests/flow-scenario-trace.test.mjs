@@ -75,3 +75,35 @@ test('invalid scenario input fails instead of reporting fictional parity', () =>
   assert.throws(() => traceFlowScenario([ev('unknown')]), RangeError);
   assert.throws(() => traceFlowScenario([], { roomCount: 0 }), RangeError);
 });
+
+test('diagnostic event must equal the exact getter values consumed by the reducer', () => {
+  let typeReads = 0;
+  let amountReads = 0;
+  const unstableEvent = {
+    get type() {
+      typeReads += 1;
+      return typeReads === 1 ? E.DAMAGE : E.ROOM_CLEARED;
+    },
+    get amount() {
+      amountReads += 1;
+      return amountReads === 1 ? 3 : 1;
+    },
+  };
+
+  const run = traceFlowScenario([ev(E.START), unstableEvent]);
+  assert.equal(run.final.phase, P.DEAD);
+  assert.deepEqual(run.steps[1].event, { type: E.DAMAGE, amount: 3 });
+  assert.equal(run.steps[1].after.health, 0);
+  assert.equal(typeReads, 1);
+  assert.equal(amountReads, 1);
+});
+
+test('trace retains inherited event payload actually consumed by the Web reducer', () => {
+  const inheritedTick = Object.assign(Object.create({ realSeconds: 2 }), { type: E.TICK });
+  const run = traceFlowScenario([
+    ev(E.START), ev(E.ROOM_CLEARED), inheritedTick,
+  ]);
+  assert.equal(run.final.roomIndex, 1);
+  assert.deepEqual(run.steps[2].event, { type: E.TICK, realSeconds: 2 });
+  assert.equal(Object.isFrozen(run.steps[2].event), true);
+});
