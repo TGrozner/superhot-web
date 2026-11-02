@@ -192,3 +192,108 @@ A source OBJ that already mirrors X and reverses triangle winding (UnityPy expor
 The generated **non-cubic, asymmetric wedge** in tests/render-mesh-obj.test.mjs has two selected groups, distinct UV/normal seams, negative OBJ indices, signed X reflection and winding correction. Behavioral tests validate both group bounds, triangle counts, per-corner vertex splitting, resulting normals and **mocked WebGL2 drawElements index offsets 0 and 12 bytes** (6 and 3 uint16 indices, two material slots). This is an end-to-end *CPU parser → GPU API mock* check, not a browser/WebGL2 execution, not native polygons, and not a 1:1 claim.
 
 The next P0 **visible** gate is SH-05 loading an authorized mesh privately (never committing or shipping original OBJ/bytes publicly), replacing a Containers collider-proxy silhouette in the opt-in browser scene, recording the WebGL2 frame and indexed draw telemetry, then requesting SH-15's same-camera native/Web comparison. Only SH-05 modifies src/main.js, src/renderer.js or src/levels.js. SH-12 does not alter SH-13's material-model or lighting-model modules.
+
+
+## 2026-11-02 SH-12 P0 — select existing private OBJ source groups `2_24` and `2_47`
+
+The SH-12 **source-neutral** entry point `parseObjGroupsIntoIndexedMesh(objText, groupNames, options?)`
+reuses `decodeIndexedObjPayload` and `uploadIndexedMesh`; it is **not** an
+alternative Unity byte-stream or `m_CompressedMesh` parser. Two-argument
+calls preserve OBJ's original coordinates/winding, with no claim that its axes
+already correspond to Web. With axis conversion, explicitly pass winding;
+never silently reverse winding based on a filename or unqualified PathID.
+
+**Private corpus evidence checked from actual `result.json` this cycle:**
+`superhot-research#68` artifact `13136407658` returned six serialized
+renderer bindings without truncation, including GO839 / renderer8272 /
+`level28:mesh6` submesh24 and GO336 / renderer7837 / mesh6 submesh47.
+Both report 4638 indices, one selected submesh, enabled MeshRenderer and an
+unresolved *owner-qualified* material reference `(fileId=5,pathId=3)`.
+`superhot-research#63` artifact `13135277646` returned the complete private
+gzip payload; its SHA-256 slice matched `result.json`. Private local read:
+632318 compressed bytes, 5722287 decoded OBJ characters, 44030 `v`,
+44030 `vt`, 44030 `vn`, 29809 triangular `f`, 62 multiword `g` labels.
+The groups whose **terminal tokens** are `2_24` and `2_47` are each unique,
+1546 triangles / 2402 referenced position indices. Native 3D renderer output,
+materials, dynamic visibility and parity are **not** established.
+
+### Browser integration contract — SH-05 is the sole owner of shared entrypoints
+
+Pass decoded UTF-8 text **only from a user-selected local File** (a local
+`.obj.gz` can be decompressed by the browser `DecompressionStream('gzip')`
+before passing the text). Do not fetch it from the public server, publish it,
+save it in a repository/workflow artifact, or collect it via analytics.
+
+```js
+// SH-05-owned integration location, NOT a file changed by SH-12:
+import { parseObjGroupsIntoIndexedMesh, meshModelMatrices } from './render/mesh-format.js';
+import { uploadIndexedMesh } from './render/gpu-mesh.js';
+
+const decoded = parseObjGroupsIntoIndexedMesh(localPrivateObjText, ['2_24', '2_47'], {
+  // Source OBJ is mirrored on X; Web preview convention also reflects Z:
+  // two reflections => determinant +1, therefore do NOT flip a second time.
+  axisSigns: [-1, 1, -1], winding: 'keep',
+  expectedGroups: {
+    '2_24': {
+      expectedTriangles: 1546, expectedPositionRefs: 2402,
+      expectedBounds: {
+        min: [8.60, 0.97605, 14.37], max: [11.60, 4.17395, 22.58],
+        tolerance: 0.003,
+      },
+    },
+    '2_47': {
+      expectedTriangles: 1546, expectedPositionRefs: 2402,
+      expectedBounds: {
+        min: [15.95, 0.97605, 9.87], max: [18.95, 4.17395, 18.08],
+        tolerance: 0.003,
+      },
+    },
+  },
+});
+
+const gpu = uploadIndexedMesh(gl, program, decoded.mesh); // ONE upload for both
+const identityWorld = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+const { model, normal } = meshModelMatrices(identityWorld);
+for (const range of decoded.drawRanges) {
+  gl.uniform1i(uniforms.uUseAffine, 1);
+  gl.uniformMatrix4fv(uniforms.uAffineModel, false, model);
+  gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
+  // SH-05/SH-13 explicitly bind a clearly labelled DIAGNOSTIC fallback
+  // until exact owner-qualified Unity material/shader/texture are resolved.
+  bindExplicitlyDiagnosticMaterial(range.groupName);
+  gpu.draw(range);
+  drawCalls++;
+}
+// On context loss/reset: gpu.dispose().
+```
+
+For this static-batched OBJ, the converted vertices already carry their
+**global scene coordinates**. Identity world is intentional: *do not* also
+translate by cargo centers or reapply serialized GameObject TRS. The two
+validated AABBs lie at cargo-7 (10.1,2.575,18.475) and cargo-22
+(17.45,2.575,13.975) in the Web preview convention. The single interleaved
+VBO/EBO has two separate triangle ranges (each 4638 indices) and two
+`drawElements` calls; it **does not** deduplicate translationally congruent
+group geometry yet. A future shared local-space mesh optimization requires
+explicit recenter/instance-matrix testing rather than a silent transform.
+`parseObjGroupsIntoIndexedMesh` deliberately strips the internal group
+ordinal `materialSlot` and returns no guessed material binding.
+
+Selection semantics: exact multiword name always works; a `2_N` terminal
+token works **only when uniquely present**. Ambiguous duplicate endings,
+reopened groups, missing groups, quads, malformed `v/vt/vn`, zero/out-of-range
+positive/relative references, invalid bounds and unsupported axis conversion
+are hard failures. The returned `groupEvidence[].independentChecks` distinguishes
+caller-provided source assertions from counts self-measured from OBJ text.
+The synthetic fixture tests exercise two non-cubic groups, UV/normal seam
+splitting, negative OBJ indices, source-derived bounds, and two offset-correct
+`drawElements` calls in a WebGL2 mock. No original asset is committed.
+
+**Integrate safely:** `?scene=containers` already has a separate SH-05
+local-file mesh6:g47 / mesh7:g48 path from #98. Use this two-group adapter to
+add mesh6:g24 and optionally replace mesh6:g47 **inside SH-05's files**,
+preserving the no-file generated-proxy fallback. Only remove each specific
+cargo hull+artificial ribs after successfully checking and uploading its group.
+Record `locallyLoadedSourceGroups`, triangle/draw-call totals and a real GPU
+screenshot. SH-15 still needs matched active-native camera/render captures;
+do not claim a 1:1 scene from successful unit tests.
