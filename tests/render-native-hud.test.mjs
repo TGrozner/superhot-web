@@ -22,11 +22,20 @@ function packet() {
   return {crosshairs: Object.fromEntries(kinds.map((kind, i) => [kind, {textureId: `sceneHud_${String(i).padStart(3, '0')}`, scale: 1}])),
     heartTextureId: 'sceneHud_009', punchTime: .4, punchScale: 2, initialHealthOpacity: 0};
 }
+function sourceAssets() {
+  return Object.fromEntries(
+    Array.from({length: 10}, (_, index) => {
+      const id = `sceneHud_${String(index).padStart(3, '0')}`;
+      return [id, {name: id + '.png', type: 'image/png'}];
+    }),
+  );
+}
 function setup() {
   const root = element(), crosshair = element(), health = element();
   health.setAttribute('aria-label', 'Vie restante');
   const hud = createNativeHud(root, crosshair, health);
-  hud.configure(packet()); hud.setActive(true);
+  assert.deepEqual(hud.configure(packet(), sourceAssets()), {ready: true, missingAssetIds: []});
+  hud.setActive(true);
   const frame = {dt: 0, timeScale: .005, kind: 'none', hp: 2, capacity: 3, cooldown: 0, attackDelay: 1, visible: true};
   return {root, crosshair, health, hud, frame};
 }
@@ -117,7 +126,7 @@ test('reset/reconfigure and deactivation clear clocks, masks, glyphs and source-
   hud.reset();
   hud.update({...frame, kind: 'gun'});
   assert.equal(crosshair.style.width, '50px');
-  hud.configure({...packet(), initialHealthOpacity: .75});
+  hud.configure({...packet(), initialHealthOpacity: .75}, sourceAssets());
   hud.update(frame);
   assert.equal(health.style.opacity, '0.75');
   hud.setActive(false);
@@ -142,4 +151,37 @@ test('invalid packets and frame values fail without replacing the configured sou
   assert.throws(() => hud.update({...frame, dt: -1}), /clocks/);
   assert.throws(() => hud.update({...frame, hp: 4}), /clocks/);
   hud.update(frame);
+});
+
+test('Dojo HUD refuses unlisted sprites and restores generated HUD when asset list regresses', () => {
+  const root = element(), crosshair = element(), health = element();
+  const hud = createNativeHud(root, crosshair, health);
+  const source = packet();
+  assert.deepEqual(hud.configure(source), {
+    ready: false,
+    missingAssetIds: Array.from({length: 10}, (_, index) =>
+      `sceneHud_${String(index).padStart(3, '0')}`),
+  });
+  hud.setActive(true);
+  assert.equal(root.classList.contains('native-hud'), false);
+  assert.equal(crosshair.style.maskImage, undefined);
+
+  assert.deepEqual(hud.configure(source, sourceAssets()), {ready: true, missingAssetIds: []});
+  hud.setActive(true);
+  hud.update({dt: 0, timeScale: 0, kind: 'gun', hp: 2, capacity: 3, attackDelay: 1});
+  assert.equal(root.classList.contains('native-hud'), true);
+  assert.equal(crosshair.style.maskImage, 'url("/local-assets/sceneHud_001")');
+  assert.equal(health.children.length, 3);
+
+  const missing = sourceAssets();
+  delete missing.sceneHud_001;
+  missing.sceneHud_009.type = 'text/plain';
+  assert.deepEqual(hud.configure(source, missing), {
+    ready: false, missingAssetIds: ['sceneHud_009', 'sceneHud_001'],
+  });
+  hud.setActive(true);
+  assert.equal(root.classList.contains('native-hud'), false);
+  assert.equal(crosshair.classList.contains('native-crosshair'), false);
+  assert.equal(crosshair.style.maskImage, undefined);
+  assert.equal(health.children.length, 0);
 });
