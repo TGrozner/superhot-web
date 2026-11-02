@@ -421,7 +421,7 @@ export function createRenderer(canvas) {
   // A local, source-converted OBJ may be reused for different serialized
   // submesh placements via per-draw affine transforms (SH-04/11 #68/#63).
   // No original data is shipped; non-identity models remain opt-in.
-  function drawPrivateMesh(slot, color, modelMatrix = null) {
+  function drawPrivateMesh(slot, color, modelMatrix = null, drawRange = null) {
     const mesh = privateMeshes.get(slot);
     if (!mesh) return false;
     let model = identity4, normal = identity3;
@@ -446,7 +446,9 @@ export function createRenderer(canvas) {
     gl.uniformMatrix3fv(uniforms.uAffineNormal, false, normal);
     if (hasPrivateTexture) gl.uniform4f(uniforms.uColor, 1, 1, 1, 1);
     else gl.uniform4f(uniforms.uColor, rgba[0], rgba[1], rgba[2], 1);
-    mesh.draw();
+    mesh.draw(drawRange);
+    // Only suppress a matching generated proxy after an accepted GL draw.
+    if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) return false;
     drawCalls++;
     return true;
   }

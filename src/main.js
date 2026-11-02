@@ -1,8 +1,10 @@
 import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
-import { LEVELS, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
+import { LEVELS, CONTAINERS_WEB_FALLBACK_SPAWN, buildContainersCollisionSolids, containersWalkSolids, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
 import { planLocalMesh6Draws } from './scenes/containers-mesh6-local-plan.js';
+import { localMesh7ObjParseRequest, planLocalMesh7Draws } from './scenes/containers-mesh7-local-plan.js';
+import { parseObjGroupsIntoIndexedMesh } from './render/mesh-format.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { prepareNativeScene } from './scenes/native-scene-local.js';
@@ -45,6 +47,7 @@ let nativeCombatStarted = false;
 const nativeGameplay = () => containersPreviewEnabled && nativeScene && !nativeInspection;
 const actorMatrix = new Float32Array(16);
 const weaponMatrix = new Float32Array(16);
+let localMesh7DrawPackets = [];
 let previewCameraY = CONTAINERS_BUILD28_DEMO_CAMERA.y;
 // Inspection placement is separate from a gameplay actor or observed native spawn.
 const enemyInspectionMatrix = new Float32Array([
@@ -99,7 +102,7 @@ if (containersPreviewEnabled) {
       });
       $('frame-private-enemy').disabled = false;
       enemyStatus.textContent = enemySummary();
-      if (containersPreviewEnabled && !nativeScene) frameLocalEnemy();
+      if (containersPreviewEnabled && !nativeScene) resetContainersTarget();
       return true;
     } catch (error) {
       if (generation === nativeEnemyGeneration) {
@@ -112,7 +115,7 @@ if (containersPreviewEnabled) {
   enemyInput.addEventListener('change', () => loadEnemyFile(enemyInput.files?.[0], $('private-enemy-variant').value));
   $('frame-private-enemy').addEventListener('click', frameLocalEnemy);
   $('frame-containers').addEventListener('click', () => {
-    if (nativeScene) { nativeInspection = false; loadLevel(0); return; }
+    if (containersPreviewEnabled) { nativeInspection = false; loadLevel(0); return; }
     state.camera = { ...CONTAINERS_BUILD28_DEMO_CAMERA };
     previewCameraY = state.camera.y;
     state.hop = 0; state.verticalSpeed = 0;
@@ -160,14 +163,28 @@ if (containersPreviewEnabled) {
       status.textContent = 'Chargement local et vérification du groupe ' + spec.groupIndex + '…';
       try {
         const source = await readLocalObjFile(file);
-        const { mesh } = parseLocalObjGroup(source, {
-          groupIndex: spec.groupIndex, expectedTriangles: 1546, expectedCenter: spec.center,
-        });
-        renderer.replacePrivateMesh(spec.slot, mesh);
+        let mesh;
+        if (spec.slot === 'mesh7') {
+          // Independently source-qualified #121: three distinct OBJ7 groups,
+          // preserved as per-submesh drawElements ranges, not cloned geometry.
+          const request = localMesh7ObjParseRequest();
+          const decoded = parseObjGroupsIntoIndexedMesh(source, request.selectors, request.options);
+          const plan = planLocalMesh7Draws({ drawRanges: decoded.drawRanges });
+          if (plan.drawPackets.length !== 3) throw new Error('Mesh7 must have three verified cargo ranges');
+          mesh = decoded.mesh;
+          renderer.replacePrivateMesh(spec.slot, mesh);
+          localMesh7DrawPackets = plan.drawPackets;
+        } else {
+          mesh = parseLocalObjGroup(source, {
+            groupIndex: spec.groupIndex, expectedTriangles: 1546, expectedCenter: spec.center,
+          }).mesh;
+          renderer.replacePrivateMesh(spec.slot, mesh);
+        }
         localNativeMeshes.add(spec.slot);
-        status.textContent = localNativeMeshes.size + '/2 meshes locaux · '
-          + mesh.triangleCount + ' triangles sur le groupe ' + spec.groupIndex
-          + ' · shader et éclairage Web générés · pas de comparaison native';
+        status.textContent = localNativeMeshes.size + '/2 fichiers locaux · '
+          + mesh.triangleCount + ' triangles source convertis'
+          + (spec.slot === 'mesh7' ? ' · trois groupes 48/46/77 distincts' : ' · groupe 47')
+          + ' · shader/éclairage Web, pas de parité native';
         return true;
       } catch (error) {
         status.textContent = 'Échec ' + spec.slot + ' : ' + error.message;
@@ -296,6 +313,20 @@ function setScreen(name) {
   if (!playing) keys.clear();
 }
 
+/** Gameplay target exists only after the original OBJ has been authenticated
+ * from the owner's local file; its web hit shape/AI remain NOT native verified. */
+function resetContainersTarget() {
+  state.enemies = localNativeEnemy ? [{
+    id: 'containers-static-local-target', x: 11, y: 0.97, z: 24,
+    alive: true, active: true, clock: 0, face: 0, delay: 0,
+    phase: 0, strafe: 0, fireTimer: Infinity,
+    nativeSpawnVerified: false, nativeHitboxVerified: false,
+  }] : [];
+  state.bullets = [];
+  state.fragments = [];
+  state.transition = 0;
+}
+
 function loadLevel(index) {
   state.levelIndex = index;
   state.level = LEVELS[index];
@@ -305,17 +336,15 @@ function loadLevel(index) {
     max: vec(o.x + o.w / 2, o.y + o.h / 2, o.z + o.d / 2),
   }));
   state.camera = containersPreviewEnabled
-    ? { ...CONTAINERS_BUILD28_DEMO_CAMERA }
+    ? { ...CONTAINERS_WEB_FALLBACK_SPAWN }
     : { x: state.level.spawn.x, y: 1.68, z: state.level.spawn.z, yaw: 0, pitch: 0 };
-  if (containersPreviewEnabled && localNativeEnemy && !nativeScene) frameLocalEnemy();
-  else previewCameraY = state.camera.y;
+  previewCameraY = state.camera.y; // no automatic camera snap after load
   state.enemies = state.level.enemies.map((e, i) => ({
     ...e, y: 0, id: i, alive: true, active: false, clock: 0, face: 0,
     fireTimer: rand(1.6, 2.7) + e.delay, strafe: rand(-1, 1), phase: rand(0, Math.PI * 2),
   }));
   if (containersPreviewEnabled) {
-    // Visual-only review: do not retain invisible invented obstacle/enemy rules.
-    // No native BoxCollider physics has been connected to this preview.
+    // Source-derived bounds use provisional Web AABB contact, not Unity PhysX.
     state.objects = [];
     state.solids = [];
     state.enemies = [];
@@ -335,6 +364,9 @@ function loadLevel(index) {
         return { x:m[12], y:m[13], z:m[14], id, alive:true, active:true, clock:0,
           face:0, delay:0, fireTimer:2+id, strafe:0, phase:0, walking:false, deathAt:null };
       });
+    } else if (!nativeScene && !nativeInspection) {
+      state.solids = buildContainersCollisionSolids();
+      resetContainersTarget();
     }
   }
   state.bullets = []; state.fragments = []; state.drops = [];
@@ -347,7 +379,7 @@ function loadLevel(index) {
     ? 'CONTAINERS · GÉOMÉTRIE ORIGINALE · COMBAT WEB'
     : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
   $('stage-banner').textContent = containersPreviewEnabled
-    ? 'CONTAINERS · VISITE DES MODÈLES · PAS DE GAMEPLAY NATIF'
+    ? 'CONTAINERS · COLLISIONS ET COMBAT WEB · PAS DE PARITÉ NATIVE'
     : `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
       (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
 }
@@ -518,7 +550,7 @@ function killEnemy(enemy) {
   state.drops.push({ x: enemy.x, y: floorY + .38, z: enemy.z, bob: rand(0, 7) });
   state.shotPulse = Math.max(.65, state.shotPulse);
   audio.shatter();
-  if (state.enemies.every((e) => !e.alive)) state.transition = 2;
+  if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
 }
 function damagePlayer() {
   state.health--;
@@ -561,7 +593,7 @@ function walkThroughScene(position, feet) {
   if (containersPreviewEnabled && nativeInspection) return position;
   const obstacles = nativeGameplay()
     ? state.solids.filter(s => s.max.y > feet + .12 && s.min.y < feet + 1.6)
-    : state.solids;
+    : containersPreviewEnabled ? containersWalkSolids(state.solids, feet + 1.6) : state.solids;
   return resolveWalk(position, .34, obstacles);
 }
 function update(dt) {
@@ -609,7 +641,7 @@ function update(dt) {
 
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
-    if (containersPreviewEnabled && (nativeInspection || !nativeCombatStarted)) continue;
+    if (containersPreviewEnabled && (nativeInspection || !nativeScene || !nativeCombatStarted)) continue;
     enemy.walking = false;
     enemy.clock += worldDt;
     if (state.waveClock < enemy.delay) continue;
@@ -667,7 +699,7 @@ function update(dt) {
   if (state.transition>0) {
     state.transition-=dt;
     if (state.transition<=0) {
-      if(nativeGameplay() || state.levelIndex === LEVELS.length-1) finish(true);
+      if (containersPreviewEnabled || state.levelIndex === LEVELS.length - 1) finish(true);
       else {state.health=Math.min(3,state.health+1);loadLevel(state.levelIndex+1);}
     }
   }
@@ -811,31 +843,55 @@ function render() {
     const mesh6Plan = planLocalMesh6Draws({
       group47Loaded: localNativeMeshes.has('mesh6'),
     });
-    const omitCargoIds = [
-      ...mesh6Plan.omitGeneratedProxyIds,
-      ...(localNativeMeshes.has('mesh7') ? ['cargo-upper'] : []),
-    ];
+    const omitCargoIds = [];
+    let privateIndexedDraws = 0, convertedTrianglesDrawn = 0;
+    // Draw indexed originals first, then suppress ONLY the matching synthetic
+    // hull/ribs for successfully submitted ranges. Never copy native bytes to Git.
+    for (const packet of mesh6Plan.drawPackets) {
+      if (renderer.drawPrivateMesh(packet.gpuSlot, '#485761', packet.modelMatrix)) {
+        privateIndexedDraws++;
+        convertedTrianglesDrawn += 1546;
+        if (packet.id === 'cargo-22' || packet.id === 'cargo-7') omitCargoIds.push(packet.id);
+      }
+    }
+    for (const packet of localMesh7DrawPackets) {
+      if (renderer.drawPrivateMesh(packet.gpuSlot, '#f6f8f9', packet.modelMatrix, packet.drawRange)) {
+        privateIndexedDraws++;
+        convertedTrianglesDrawn += packet.drawRange.indexCount / 3;
+        omitCargoIds.push(packet.generatedProxyCandidate);
+      }
+    }
     manifestStats = drawContainersBuild28Preview(renderer, cam, {
       aspect: canvas.width / Math.max(1, canvas.height),
       omitCargoIds,
     });
-    let privateIndexedDraws = 0;
-    for (const packet of mesh6Plan.drawPackets) {
-      if (renderer.drawPrivateMesh(packet.gpuSlot, '#485761', packet.modelMatrix)) {
-        privateIndexedDraws++;
-      }
-    }
-    if (localNativeMeshes.has('mesh7') &&
-        renderer.drawPrivateMesh('mesh7', '#f6f8f9')) {
-      privateIndexedDraws++;
-    }
-    nativeEnemyStats = renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
+    const target = state.enemies.find(enemy => enemy.alive);
+    if (nativeInspection) {
+      enemyInspectionMatrix[0] = nativeSkinInfo ? -1 : 1;
+      nativeEnemyStats = renderer.drawNativeSkin(enemyInspectionMatrix, 'idle', state.worldClock)
+        ?? renderer.drawLocalEnemyDiagnostic(enemyInspectionMatrix);
+    } else if (target) drawEnemy(target);
+    else nativeEnemyStats = null;
+    // Prototype-only weapon, bullet and impact visuals; authentic MCD
+    // weapon rigs, enemy AI, combat damage and animation remain unverified.
+    for (const drop of state.drops) drawPickup(drop);
+    for (const bullet of state.bullets) drawBullet(bullet);
+    for (const p of state.fragments) renderer.shard(
+      p.x, p.y, p.z, p.sx, p.sy, p.sz, p.color, p.rx, p.ry, p.rz,
+      clamp(p.life / .6, 0, 1),
+    );
+    if (state.screen === 'playing') drawViewModel(cam);
     manifestStats = {
       ...manifestStats,
-      privateIndexedDraws, localFilePreviewOnly: true,
-      sourceConvertedApproximationOnly: true,
+      privateIndexedDraws, convertedTrianglesDrawn,
+      verifiedLocalMesh7RangeDraws: localMesh7DrawPackets.length,
+      localFilePreviewOnly: true, sourceConvertedApproximationOnly: true,
       sourceQualifiedMesh6DrawPackets: mesh6Plan.drawPackets.length,
-      nativeMeshMatch: false, // no runtime material, camera or pixel parity established
+      collisionConnected: state.solids.length === 5,
+      sourceDerivedColliderCount: state.solids.length,
+      shootableWebFallbackEnemy: Boolean(target && nativeEnemyStats),
+      nativeMeshMatch: false, nativeEnemySpawnVerified: false,
+      nativeCombatParityVerified: false,
     };
   }
   if (syntheticManifest) {

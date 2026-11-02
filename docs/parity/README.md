@@ -331,3 +331,16 @@ Cette vérification statique est historique. Les vérifications actuelles du
 monde complet, du skinning et des quatre références natives isolées sont
 décrites dans [visual.md](visual.md) et [characters.md](characters.md).
 Elles ne constituent toujours pas une validation de fidélité 1:1.
+
+### SH-05 — Mode de secours sans package de scène complet (2 Nov 2026)
+
+Les apports de la PR #128 sont conservés lorsque le package privé de scène
+complète n'est pas disponible. Les paragraphes suivants concernent uniquement
+ce mode de secours : avec le package complet, les colliders, points auteur,
+armes et animations décrits plus haut prennent le relais.
+
+The default original-local-file view now uses **five level28 serialized BoxCollider envelopes** as provisional AABB contact obstacles and a clearly **invented Web spawn** (11, 2.65, 28). The serialized overhead cargo is excluded from ground-level 2D walking, but remains eligible for 3D projectile contact. This is **not** a Unity PhysX CharacterController replay or a native player spawn. Source: private research #16/#27/#30/#32/#37/#39, published derived hulls in `src/scenes/containers-build28.js`.
+
+When the owner supplies verified original OBJ6/OBJ7 through local File inputs or loopback allowlist, SH-05 draws three Mesh6 group47 placements and **three separately verified Mesh7 ranges** 48/46/77 (1546 triangles each, 9276 submitted triangles total if all six succeed). Only after a successful WebGL draw for each matching cargo does its generated proxy and decorative ribs disappear; other 3D scene substitutes remain clearly provisional. Mesh7 provenance: research #68/#103; contract `src/scenes/containers-mesh7-local-plan.js` (#121). No mesh/texture files enter the public repo.
+
+After authenticated local EnemyMerged/Headless OBJ load, one **stationary, shootable Web fallback target** appears at diagnostic coordinates (11, .97, 24) with the real static mesh; player movement, ammunition, projectiles, hit spheres, fallback shatter FX and existing viewmodel weapon are prototype behaviours rather than MCD reverse-engineered runtime gameplay. No original enemy spawning/AI, PhysX hitbox, evaluated skin animation, native weapon model, XULM shader, or native paired-frame/FPS proof is claimed. A clear completes this one-target Web sandbox rather than silently progressing into the three invented prototype stages. Runtime details and provenance are available in `tests/parity-containers-playable.test.mjs`. Browser GPU source-file smoke remains a separate mandatory check, NOT replaced by green Node tests.

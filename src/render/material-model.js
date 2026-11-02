@@ -477,10 +477,70 @@ export function decodeContainersConcreteRgb24Mip0(streamBytes) {
   });
 }
 
+
 /**
- * Public-safe WebGL sampler contract for the source Concrete RGB24 chain.
- * The eight-level form consumes the native mip chain; the one-level form
- * must not synthesize levels and therefore uses plain nearest minification.
+ * SOURCE-BACKED P0 DIFFUSE MIP CHAIN (NOT shader parity).
+ *
+ * Reads ONLY the explicitly user-supplied, exact PRIVATE resS byte range for
+ * resources.assets:248, never fetches or persists original game pixels.
+ * RGB24 source layout is interpreted in the conventional Unity largest-first
+ * packed mip order. The original payload itself was NOT inspected here, so
+ * the order/origin and color transfer remain assumptions to test visually.
+ *
+ * Unlike decodeContainersConcreteRgb24Mip0(), this preserves all EIGHT source
+ * mip levels. This avoids gl.generateMipmap() fabricating new levels, and
+ * allows SH-05 to test the source-serialized FilterMode.Point rather than
+ * the current generated LINEAR_MIPMAP_LINEAR/LINEAR configuration.
+ */
+export function decodeContainersConcreteRgb24MipChain(streamBytes) {
+  const meta=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeStream;
+  const bytes=streamBytes instanceof Uint8Array?streamBytes:
+    streamBytes instanceof ArrayBuffer?new Uint8Array(streamBytes):null;
+  if(!bytes) throw new TypeError('Native RGB24 mip chain requires Uint8Array or ArrayBuffer');
+  if(bytes.byteLength!==meta.sourceByteCount) {
+    throw new RangeError('Exact 65535-byte private resources.assets:248 RGB24 mip chain required');
+  }
+  if(meta.unityFormatId!==3||meta.width!==128||meta.height!==128||meta.mipCount!==8) {
+    throw new Error('Unexpected Containers Concrete source texture descriptor');
+  }
+  const levels=[];
+  let offset=0,width=meta.width,height=meta.height;
+  for(let mip=0;mip<meta.mipCount;mip++){
+    const sourceBytes=width*height*3;
+    if(offset+sourceBytes>bytes.byteLength) throw new RangeError('Truncated RGB24 mip '+mip);
+    const rgba=new Uint8Array(width*height*4);
+    for(let i=0;i<width*height;i++){
+      const src=offset+3*i,dst=4*i;
+      rgba[dst]=bytes[src];
+      rgba[dst+1]=bytes[src+1];
+      rgba[dst+2]=bytes[src+2];
+      rgba[dst+3]=255;
+    }
+    levels.push(Object.freeze({level:mip,width,height,
+      sourceByteOffsetWithinStream:offset,sourceByteCount:sourceBytes,
+      pixelsRgba:rgba}));
+    offset+=sourceBytes;
+    width=Math.max(1,width>>1);height=Math.max(1,height>>1);
+  }
+  if(offset!==bytes.byteLength) throw new RangeError('RGB24 mip chain has trailing bytes');
+  return Object.freeze({
+    levels:Object.freeze(levels),mipsDecoded:levels.length,
+    sourceBytesConsumed:offset,sourceTexture:Object.freeze({owner:meta.owner,pathId:meta.pathId}),
+    uvScale:CONTAINERS_CONCRETE_SOURCE.mainTexture.uvScale,
+    uvOffset:CONTAINERS_CONCRETE_SOURCE.mainTexture.uvOffset,
+    originVerified:false,colorTransferVerified:false,shaderPassVerified:false,
+    sourceMipOrderingAssumed:'largest-first-contiguous',
+    provenance:'locally-provided-native-RGB24-all-mips-diagnostic-not-native-shader',
+    lightmapSamplingEnabled:false,
+  });
+}
+
+/**
+ * GL ENUM NAMES (no GL context required). Actual GL uniforms/texture uploads
+ * remain SH-05-only. Two conditions: with all 8 original mips, sample Point/
+ * nearest-mip; with one source mip, avoid generating invented source levels.
+ * These are source-serialized sampler semantics, not a proof the Unity runtime
+ * did not override quality settings, LOD bias or the shader's sampler state.
  */
 export function containersConcreteGpuSamplerPacket({mipLevels=8}={}) {
   if(mipLevels!==1&&mipLevels!==8) {
@@ -488,7 +548,7 @@ export function containersConcreteGpuSamplerPacket({mipLevels=8}={}) {
   }
   const native=CONTAINERS_CONCRETE_SOURCE.mainTexture.nativeSampler;
   if(native.unityFilterMode!==0||native.unityWrapU!==0||native.unityWrapV!==0) {
-    throw new Error('Source sampler assumptions changed; revalidate Unity metadata');
+    throw new Error('Source sampler assumptions changed; revalidate against original Unity metadata');
   }
   return Object.freeze({
     minFilter:mipLevels===8?'NEAREST_MIPMAP_NEAREST':'NEAREST',
