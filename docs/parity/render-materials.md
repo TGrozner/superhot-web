@@ -304,3 +304,61 @@ Only the **first RGB24 mip** is decoded; lower mips remain in the private input 
 **SH-12 contract:** preserve verified source UV0 for `Mesh6:g24/g47`, `Mesh7:g48` group draw ranges; do not replace with UV2. The decoded diffuse uses the source-authored `_MainTex` 0.1× UV0 transform. Atlas is DXT5/BC3, but **no native UV2 channel or atlas orientation has been transported**; do not decode/sample as if native until source-qualified UV2, bake encoding and original shader sample rules are recovered. Browser local texture upload, palette, shader draw belongs exclusively to SH-05, not SH-13.
 
 No native screenshot, original texture bytes, actual browser draw with this PNG-equivalent stream, or 1:1 measurement has been observed. This PR adds metadata and a deterministic pure decoder, **not the GPU integration**.
+
+
+### SH-13 P0 — native Concrete Point sampler versus the CURRENT Web trilinear pass (2026-11-02)
+
+**Fresh direct source check (not a second corpus query):** Reopened the actual PRIVATE `result.json` from research [#41](https://github.com/TGrozner/superhot-research/issues/41) artifact `13134492119` and [#100](https://github.com/TGrozner/superhot-research/issues/100) artifact `13141079714`, and the original [#50](https://github.com/TGrozner/superhot-research/issues/50) artifact `13134569214` closure documentation. Source Texture2D `resources.assets:248` metadata, independent of inferred Unity runtime frames:
+
+| Serialized Unity field | Native metadata | Web implementation at `main=09b14932` |
+| --- | --- | --- |
+| `m_TextureSettings.m_FilterMode` | **0 = Point**, verified 2018.4 Unity enum | `src/renderer.js` uses `LINEAR_MIPMAP_LINEAR` + `LINEAR` |
+| `m_TextureSettings.m_WrapU/V` | **0 / 0 = Repeat / Repeat** | `REPEAT / REPEAT` (already consistent) |
+| `m_TextureSettings.m_Aniso`, `m_MipBias` | 1, 0.0 | source sampler not currently represented in Web |
+| `m_MipCount` | **8 original RGB24 levels**, 65,535 bytes total | Web invokes **`gl.generateMipmap()`** after PNG ImageBitmap upload, *new synthetic mips* |
+| `m_ColorSpace` | serialized integer **1** | Web uses `SRGB8_ALPHA8` + a generated transfer shader; native transfer remains unverified |
+| diffuse source | `resources.assets.resS` `[59500780, 59566315)` | UI asks for **PNG**, not the original `.resS` slice |
+
+**Concrete discrepancy:** the authored diffuse has **Point** filtering, while the Web prototype currently displays interpolated/trilinear filtered pixels. Even using the original texture image as PNG, that produces a visible difference on high-frequency boundaries. In an intentionally synthetic black/white two-texel example, point sampling returns 255 and linear sampling returns 127.5 at the chosen boundary; this is a **calculated diagnostic delta**, NOT an MCD screenshot/1:1 claim. The source metadata does not prove an absence of runtime texture quality overrides or XULM sampler overrides.
+
+**NEW SH-13 pure API (this PR):** `decodeContainersConcreteRgb24MipChain(exactBytes)` accepts exactly 65,535 private bytes and emits `levels[0..7]` with `{level,width,height,pixelsRgba,sourceByteOffsetWithinStream}`. No resampling, no synthesized pixels, no native assets in Git. Assumes a conventional largest-first contiguous Unity mip order; original byte content/UV orientation and output color transfer remain unobserved. `containersConcreteGpuSamplerPacket({mipLevels:8})` returns enum names `NEAREST_MIPMAP_NEAREST`, `NEAREST`, `REPEAT`, `REPEAT`, `generateMipmaps:false`; `mipLevels:1` disables source-mip sampling and returns `NEAREST` minification. Old single-mip decoder stays backward-compatible.
+
+**SH-05 ONLY — exact native RGB24 File API/GPU integration hook** (this lane **does not modify** `src/main.js`, `src/renderer.js`, `src/levels.js`):
+
+```js
+import {
+  containersBuild28ConcreteMaterialSource,
+  decodeContainersConcreteRgb24MipChain,
+  containersConcreteGpuSamplerPacket,
+} from './render/material-model.js';
+
+const src=containersBuild28ConcreteMaterialSource().mainTexture.nativeStream;
+// localResSFile selected via <input type=file>; never HTTP upload, storage or Git.
+if(localResSFile.size < src.sourceByteOffset + src.sourceByteCount) {
+  throw new RangeError('Original local resources.assets.resS is truncated');
+}
+const bytes=await localResSFile.slice(
+  src.sourceByteOffset, src.sourceByteOffset + src.sourceByteCount,
+).arrayBuffer();
+const decoded=decodeContainersConcreteRgb24MipChain(bytes);
+const sampler=containersConcreteGpuSamplerPacket({mipLevels:decoded.mipsDecoded});
+// Inside SH-05-owned renderer while gl.TEXTURE_2D is bound:
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+for (const mip of decoded.levels) {
+  // RGBA8 is an *explicit linear diagnostic hypothesis*; SRGB8_ALPHA8 is
+  // an alternate hypothesis. m_ColorSpace=1 does not prove MCD's transfer.
+  gl.texImage2D(gl.TEXTURE_2D, mip.level, gl.RGBA8,
+    mip.width, mip.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, mip.pixelsRgba);
+}
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl[sampler.minFilter]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl[sampler.magFilter]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl[sampler.wrapS]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl[sampler.wrapT]);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAX_LEVEL,sampler.maxLevel);
+// DO NOT call gl.generateMipmap(); source chain already contains eight levels.
+// UV0 ST: * [0.10000000149, 0.10000000149] + [0,0] (source authored).
+```
+
+**SH-12 boundary:** keep original OBJ mesh UV0 and submesh separation. These RGB24 mip levels are diffuse UV0; they do not supply baked UV2 or solve the unrelated BC3 lightmap. `sharedassets28.assets:2` is DXT5 with 12 source mips, but its texels, RGBM/XULM interpretation, UV2 and bake/lighting remain separate, so no fake lightmap sample is permitted.
+
+**Measurement request for SH-05 / SH-15:** with the owner's PRIVATE `.resS` and authorized OBJ, run a fixed Containers camera 1920×1080 DPR1; screenshot A with current trilinear/generated mips and B with exact source mips plus Point sampler, same RGB transfer choice. Compute changed-pixel fraction and MAE over cargo pixels and compare p95 frame time; log sampler settings and GPU draw count. Then compare against an actual MCD native frame **only after matching native camera/pose/material**. Until GPU A/B is executed, this remains a concrete, source-proved sampler mismatch plus an analytic synthetic demonstration, **not a measured visual result**. No second bridge request is necessary.
