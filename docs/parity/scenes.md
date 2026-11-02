@@ -45,3 +45,11 @@ Le culling actuel est volontairement conservateur et CPU. Le tri par couleur n'e
 **Blocage passerelle** : `.github/workflows/corpus-query.yml` du dépôt privé reste limité à `workflow_dispatch`. Ce connecteur permet de lire workflow et artifacts préexistants, mais ne propose pas ici de dispatch autorisé. Demande minimale à exécuter par un détenteur du droit de dispatch, dans le dépôt **privé uniquement** :
 `{"operation":"query","sql":"SELECT name,sql FROM sqlite_master WHERE type='table' AND name IN ('scenes','hierarchy','objects','serialized','sources') ORDER BY name"}`.
 Il faut ensuite une requête bornée sur une scène MCD identifiée, sans sortie brute/asset dans le dépôt public. Cette absence de dispatch n'est pas un échec de recherche ni une preuve que les données manquent.
+
+
+## Identifiants Unity canoniques — garde Web (2026-11-02)
+
+- **PROUVÉ (code Web)** : avant cette correction, `unityObjectKey('owner', '00042')` et `unityObjectKey('owner', 42)` produisaient deux clés distinctes, alors que ces valeurs décimales désignent le même entier. La normalisation textuelle des zéros en tête et de `-0` conserve désormais les entiers signés exacts, même au-delà de `Number.MAX_SAFE_INTEGER`. Références : `src/scenes/graph.js`, `tests/scene-unity-key-normalization.test.mjs` ; test réfutable par `node --test tests/scene-unity-key-normalization.test.mjs`.
+- **PROUVÉ (contrat de l'adaptateur uniquement)** : la clé reste composée de `(owner, path_id)`; deux propriétaires distincts ne sont jamais confondus. Les nombres JavaScript non sûrs sont rejetés ; on transmet leurs représentations décimales originales sous forme de chaînes ou `bigint`.
+- **INCONNU (MCD)** : quels IDs exacts, `owner`, instances actives et relations parent/prefab sont présents dans les scènes d'exécution. Cette correction n'introduit aucune géométrie native et n'atteste pas un niveau, un objet ni un matériau de MCD.
+- **Perf WebGL2** : aucune nouvelle soumission GPU, aucun shader, aucune modification du planner/culling. Le coût de normalisation est purement CPU et n'a pas été benchmarké ; les mesures p95/FPS WebGL2 restent réservées au futur raccord instrumenté par SH-05.

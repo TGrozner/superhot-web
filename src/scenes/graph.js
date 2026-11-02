@@ -20,9 +20,16 @@ export function unityObjectKey(owner, pathId) {
   if (typeof pathId === 'number' && !Number.isSafeInteger(pathId)) {
     throw new TypeError('Unsafe Unity path_id: supply the exact decimal string');
   }
-  const id = typeof pathId === 'bigint' ? String(pathId) : String(pathId);
+  if (!['string', 'number', 'bigint'].includes(typeof pathId)) {
+    throw new TypeError('Unity path_id must be an integer');
+  }
+  const id = String(pathId);
   if (!/^-?\d+$/.test(id)) throw new TypeError('Unity path_id must be an integer');
-  return JSON.stringify([owner, id]);
+  // The same serialized integer may arrive as a number, bigint or decimal
+  // string. Canonicalize textually to keep 64-bit+ IDs exact across runtimes.
+  const negative = id[0] === '-';
+  const digits = (negative ? id.slice(1) : id).replace(/^0+/, '') || '0';
+  return JSON.stringify([owner, negative && digits !== '0' ? '-' + digits : digits]);
 }
 
 export function multiplyMatrices(a, b) {
