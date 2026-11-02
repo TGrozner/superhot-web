@@ -1,10 +1,46 @@
-import { add3, multiply3, segmentAabb, segmentSphere, subtract3 } from '../math.js';
+import { add3, dot3, multiply3, subtract3 } from '../math.js';
 
 // Numerical tie tolerance; collision priorities are provisional Web rules, NOT native MCD evidence.
 export const IMPACT_EPSILON = 1e-9;
 
 const isFinitePoint = (point) => point !== null && typeof point === 'object' &&
   ['x', 'y', 'z'].every((axis) => Number.isFinite(point[axis]));
+
+// Combat-only exact-direction slabs: the general math helper treats displacements
+// below 1e-8 as parallel, which can miss very short but nonzero sweeps.
+function sweptBoxFraction(start, end, min, max) {
+  let enter = 0, leave = 1;
+  for (const axis of ['x', 'y', 'z']) {
+    const delta = end[axis] - start[axis];
+    if (delta === 0) {
+      if (start[axis] < min[axis] || start[axis] > max[axis]) return null;
+      continue;
+    }
+    let a = (min[axis] - start[axis]) / delta;
+    let b = (max[axis] - start[axis]) / delta;
+    if (a > b) [a, b] = [b, a];
+    enter = Math.max(enter, a);
+    leave = Math.min(leave, b);
+    if (enter > leave) return null;
+  }
+  return enter;
+}
+
+// Do not classify a nonzero segment as a point merely because it is short:
+// the general segmentSphere helper uses a < 1e-10 as its zero-length cutoff.
+function sweptSphereFraction(start, end, center, radius) {
+  const delta = subtract3(end, start);
+  const offset = subtract3(start, center);
+  const c = dot3(offset, offset) - radius * radius;
+  if (c <= 0) return 0;
+  const a = dot3(delta, delta);
+  if (a === 0) return null;
+  const halfB = dot3(offset, delta);
+  const discriminant = halfB * halfB - a * c;
+  if (discriminant < 0) return null;
+  const t = (-halfB - Math.sqrt(discriminant)) / a;
+  return t >= 0 && t <= 1 ? t : null;
+}
 
 /**
  * Trace a finite segment against axis-aligned solids and spherical hit volumes.
@@ -39,14 +75,14 @@ export function firstImpact(start, end, { solids = [], targets = [] } = {}) {
     if (['x', 'y', 'z'].some((axis) => solid.min[axis] > solid.max[axis])) {
       throw new RangeError('Every solid needs min <= max on every axis');
     }
-    consider(segmentAabb(start, end, solid.min, solid.max), 'solid', solid, i);
+    consider(sweptBoxFraction(start, end, solid.min, solid.max), 'solid', solid, i);
   }
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
     if (!isFinitePoint(target?.center) || !Number.isFinite(target?.radius) || target.radius < 0) {
       throw new TypeError('Every target needs a finite center and nonnegative radius');
     }
-    consider(segmentSphere(start, end, target.center, target.radius), 'target', target, i);
+    consider(sweptSphereFraction(start, end, target.center, target.radius), 'target', target, i);
   }
 
   if (closest === null) return null;
