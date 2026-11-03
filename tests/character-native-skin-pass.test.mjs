@@ -851,33 +851,33 @@ test('Web J3 sentry breathing and real turning animate the same GPU bones/socket
     });
   };
 
-  const first = draw('guard-a', 0, 1);
+  const first = draw('enemy-1', 0, 1);
   assert.equal(first.actorWebPoseReaction, null, 'fresh idle state should not snap');
-  const breathing = draw('guard-a', .55, 1.1);
+  const breathing = draw('enemy-1', .55, 1.1);
   assert.equal(breathing.actorWebPoseReaction.kind, 'idle');
   assert.equal(breathing.webPoseLeanApplied, true);
   assert.ok(Math.abs(breathing.weaponAttachmentMatrix[13] - first.weaponAttachmentMatrix[13]) > .002,
     'subtle idle movement must reach the same sampled weapon socket as the GPU pose');
   assert.notDeepEqual(Array.from(breathing.boneModelMatrices), Array.from(first.boneModelMatrices));
 
-  const turning = draw('guard-a', .65, 1.2, .25);
+  const turning = draw('enemy-1', .65, 1.2, .25);
   assert.equal(turning.actorWebPoseReaction.kind, 'turn');
   assert.ok(Math.abs(turning.actorWebPoseReaction.roll) > .06,
     'actual heading change must trigger a readable, bounded body bank');
   assert.ok(Math.abs(turning.actorWebPoseReaction.roll) <= .18);
-  const separate = draw('guard-b', .65, 1.2);
+  const separate = draw('enemy-2', .65, 1.2);
   assert.equal(separate.actorWebPoseReaction.kind, 'idle',
     'another actor must not inherit the first guard heading history');
 
-  const snap = draw('guard-a', .75, 1.3, 2.8);
+  const snap = draw('enemy-1', .75, 1.3, 2.8);
   assert.notEqual(snap.actorWebPoseReaction?.kind, 'turn',
     'a sudden orientation snap cannot be mistaken for a physical turn');
-  const shot = draw('guard-a', .8, 1.4, 2.8, {
+  const shot = draw('enemy-1', .8, 1.4, 2.8, {
     action: { state: 'fire', time: 0, weight: 1, blend: 1 },
   });
   assert.equal(shot.actorWebPoseReaction, null,
     'the firing edge must preserve source muzzle aim, without idle or turn banking');
-  const death = draw('guard-a', .85, 1.5, 2.8, {
+  const death = draw('enemy-1', .85, 1.5, 2.8, {
     solvedPose: { rig: pass.rig, provenance: 'authored solved J3 fixture',
       boneModelMatrices: new Float32Array([...identity(), ...identity()]) },
   });
