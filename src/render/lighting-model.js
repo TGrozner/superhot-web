@@ -157,6 +157,20 @@ export function generatedUniformsWithSerializedFogOff(generatedLighting,settings
  * are not native-parity uniforms.
  */
 export const DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL = `
+float dojoWebWarningSmooth(float x) {
+  float t = clamp(x, 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+float dojoWebWarningFalloff(float radius, float range, float along, float cosHalfAngle) {
+  float distance = dojoWebWarningSmooth(1.0 - radius / range);
+  float cone = (along / radius - cosHalfAngle) / max(1.0 - cosHalfAngle, 0.0001);
+  return distance * dojoWebWarningSmooth(cone / 0.2);
+}
+float dojoWebWarningCompression(float energy) {
+  return energy / (3.0 + energy);
+}
+// Web visual design: soft cone, distance fade and highlight compression.
+// Serialized world basis, cookie, color and controller envelope stay untouched.
 vec3 dojoDoorWarningSpotWebPreview(
   sampler2D sourceCookie, vec3 worldPosition,
   vec3 lightPosition, vec3 lightDirection, vec3 lightRight, vec3 lightUp,
@@ -174,7 +188,28 @@ vec3 dojoDoorWarningSpotWebPreview(
     / aperture + vec2(0.5);
   if (any(lessThan(cookieUv, vec2(0.0))) ||
       any(greaterThan(cookieUv, vec2(1.0)))) return vec3(0.0);
-  return sourceColor * sourceIntensity * texture(sourceCookie, cookieUv).a;
+  float edge = min(min(cookieUv.x, cookieUv.y),
+                   min(1.0 - cookieUv.x, 1.0 - cookieUv.y));
+  float feather = dojoWebWarningSmooth(edge / 0.06);
+  float energy = sourceIntensity * texture(sourceCookie, cookieUv).a * feather
+    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
+  return sourceColor * dojoWebWarningCompression(max(energy, 0.0));
+}
+// Web-authored optional visual cue, NOT an MCD cookie substitute.
+// Requires explicit per-spot Web-mode opt-in from the GPU integration owner.
+// No procedural asset, texture sample, new geometry or extra draw pass.
+vec3 dojoDoorWarningSpotWebGlow(
+  vec3 worldPosition, vec3 lightPosition, vec3 lightDirection,
+  float sourceRange, float cosHalfAngle, vec3 sourceColor, float sourceIntensity
+) {
+  vec3 offset = worldPosition - lightPosition;
+  float radius = length(offset);
+  if (radius <= 0.0 || radius > sourceRange) return vec3(0.0);
+  float along = dot(offset, lightDirection);
+  if (along <= 0.0 || along / radius < cosHalfAngle) return vec3(0.0);
+  float energy = sourceIntensity
+    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
+  return sourceColor * dojoWebWarningCompression(max(energy, 0.0));
 }`.trim();
 
 const sourceDoorId = value =>
@@ -240,7 +275,7 @@ const sourceSpotlight = (spotlight, doorId, rendererId) => {
  * without consuming the curve or changing the warning clock.
  */
 export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
-  verifiedDoorKeys, decodedCookies, meshLayer,
+  verifiedDoorKeys, decodedCookies, meshLayer, allowWebCookieFreeGlow = false,
 } = {}) {
   if (sceneSource?.sceneBuildIndex !== 10 ||
       sceneSource.serializedOwner !== 'level10' ||
@@ -252,6 +287,9 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
       !(decodedCookies instanceof Set) ||
       !Number.isInteger(meshLayer) || meshLayer < 0 || meshLayer > 31) {
     throw new TypeError('Dojo warning needs packets, joined door IDs, decoded cookies and mesh layer');
+  }
+  if (typeof allowWebCookieFreeGlow !== 'boolean') {
+    throw new TypeError('allowWebCookieFreeGlow must be boolean');
   }
   const spotlights = [], falseLights = [], omissions = [], occupiedSlots = new Set();
   for (const packet of livePackets) {
@@ -304,9 +342,17 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
     }
     if (!decodedCookies.has(spotlight.cookieTextureId)) {
       omissions.push(Object.freeze({ id, reason: 'source-cookie-not-decoded' }));
+      if (allowWebCookieFreeGlow) {
+        spotlights.push(Object.freeze({ ...spotlight,
+          webPreviewMode: 'web-procedural-no-cookie', sourceCookieDecoded: false,
+          shaderParity: 'web-authored-creative-light-not-MCD',
+        }));
+      }
       continue;
     }
-    spotlights.push(spotlight);
+    spotlights.push(Object.freeze({ ...spotlight,
+      webPreviewMode: 'source-cookie-web-preview', sourceCookieDecoded: true,
+    }));
   }
   falseLights.sort((a,b) => a.slot - b.slot);
   return Object.freeze({
@@ -330,6 +376,17 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
  * is an explicit argument; never assumes a missing source PNG is white.
  * This returns UNCLAMPED additive Web-preview RGB, not a native color result.
  */
+const dojoWebWarningSmooth = value => {
+  const t = clamp01(value);
+  return t * t * (3 - 2 * t);
+};
+const dojoWebWarningWeight = (spotlight, radius, along) =>
+  dojoWebWarningSmooth(1 - radius / spotlight.range) *
+  dojoWebWarningSmooth(((along / radius - spotlight.cosHalfAngle) /
+    Math.max(1 - spotlight.cosHalfAngle, .0001)) / .2);
+const zeroWebWarning = () => Object.freeze({ rgb: Object.freeze([0, 0, 0]), cookieUv: null });
+
+/** CPU mirror of the deliberately Web-styled, cookie-bearing GPU preview. */
 export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha) {
   const point = sourceLightVec3(worldPosition, 'warning sample worldPosition');
   if (!Number.isFinite(cookieAlpha) || cookieAlpha < 0 || cookieAlpha > 1) {
@@ -339,21 +396,44 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
   const radius = Math.hypot(...delta);
   const along = delta.reduce((sum,x,i) => sum + x * spotlight.direction[i], 0);
   if (radius <= 0 || radius > spotlight.range || along <= 0 ||
-      along / radius < spotlight.cosHalfAngle) {
-    return Object.freeze({ rgb: Object.freeze([0,0,0]), cookieUv: null });
-  }
+      along / radius < spotlight.cosHalfAngle) return zeroWebWarning();
   const aperture = 2 * along * spotlight.tanHalfAngle;
+  if (aperture <= 0) return zeroWebWarning();
   const cookieUv = [
     0.5 + delta.reduce((sum,x,i) => sum + x * spotlight.right[i], 0) / aperture,
     0.5 + delta.reduce((sum,x,i) => sum + x * spotlight.up[i], 0) / aperture,
   ];
-  if (aperture <= 0 || cookieUv.some(value => value < 0 || value > 1)) {
-    return Object.freeze({ rgb: Object.freeze([0,0,0]), cookieUv: null });
-  }
+  if (cookieUv.some(value => value < 0 || value > 1)) return zeroWebWarning();
+  const edge = Math.min(cookieUv[0], cookieUv[1], 1 - cookieUv[0], 1 - cookieUv[1]);
+  const energy = spotlight.intensity * cookieAlpha *
+    dojoWebWarningSmooth(edge / .06) * dojoWebWarningWeight(spotlight, radius, along);
+  const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: Object.freeze(spotlight.color.map(channel =>
-      channel * spotlight.intensity * cookieAlpha)),
+    rgb: Object.freeze(spotlight.color.map(channel => channel * glow)),
     cookieUv: Object.freeze(cookieUv),
+  });
+}
+
+/**
+ * CPU mirror of the optional Web-only procedural warning illumination.
+ * It deliberately requires an explicit Web fallback packet, never a phantom
+ * Unity cookie. No image, mesh, URL or runtime event is generated here.
+ */
+export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition) {
+  if (spotlight?.webPreviewMode !== 'web-procedural-no-cookie') {
+    throw new TypeError('Explicit Web procedural warning packet required');
+  }
+  const point = sourceLightVec3(worldPosition, 'warning glow worldPosition');
+  const delta = point.map((x,i) => x - spotlight.position[i]);
+  const radius = Math.hypot(...delta);
+  const along = delta.reduce((sum,x,i) => sum + x * spotlight.direction[i], 0);
+  if (radius <= 0 || radius > spotlight.range || along <= 0 ||
+      along / radius < spotlight.cosHalfAngle) return zeroWebWarning();
+  const energy = spotlight.intensity * dojoWebWarningWeight(spotlight, radius, along);
+  const glow = energy / (3 + energy);
+  return Object.freeze({
+    rgb: Object.freeze(spotlight.color.map(channel => channel * glow)),
+    cookieUv: null,
   });
 }
 
@@ -368,7 +448,9 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
  *   (instanceId: string, packets: object[]) => object,
  *   cookieImage: (textureId: string) => ImageBitmap | null}}
  */
-export function createDojoDoorWarningSceneAdapter(scene, images) {
+export function createDojoDoorWarningSceneAdapter(scene, images, {
+  allowWebCookieFreeGlow = false,
+} = {}) {
   const source = scene?.source;
   if (source?.sceneBuildIndex !== 10 || source.serializedOwner !== 'level10' ||
       !source.scenePath?.endsWith('SHRL_Dojo2.unity')) {
@@ -432,6 +514,7 @@ export function createDojoDoorWarningSceneAdapter(scene, images) {
         verifiedDoorKeys: qualifiedDoorKeys,
         decodedCookies,
         meshLayer: instance.layer,
+        allowWebCookieFreeGlow,
       });
     },
     /** Return only a previously decoded source scene cookie; no fallback. */
