@@ -215,3 +215,25 @@ test('ragdoll uses indexed authored collider bounds while honoring live enable s
   assert.ok(added.contacts.some(contact=>contact.collider.id==='new-support'),
     'changing the scene box list must invalidate the indexed broadphase');
 });
+
+test('Web ragdoll keeps natural 30 Hz fall without an unbounded hitch catch-up',()=>{
+  const regular=create(),budgeted=create();
+  const frame=1/30;
+  advanceNativeDeathRuntime(regular,frame);
+  const timely=advanceNativeDeathRuntime(budgeted,frame,{limitWebFrameWork:true});
+  near(timely.droppedWebSimulationTime,0);
+  for(const part of [1,2]){
+    assert.ok(Math.abs(regular.getBoneWorldMatrix(part)[13]-
+      budgeted.getBoneWorldMatrix(part)[13])<0.006,
+      '30 fps ragdolls must not hover behind an otherwise identical normal frame');
+  }
+  const hitched=create();
+  const delayed=advanceNativeDeathRuntime(hitched,0.3,{limitWebFrameWork:true});
+  assert.ok(delayed.droppedWebSimulationTime>0.25 &&
+    delayed.droppedWebSimulationTime<0.3,
+    'large tab/GPU stalls still discard PBD work beyond the bounded four steps');
+  near(hitched.elapsed,0.3);
+  assert.ok(hitched.bodies[0].velocity.y>-0.5,
+    'a single hitch must not integrate the full fall in one unstable catch-up');
+  assert.ok(Array.from(hitched.boneModelMatrices).every(Number.isFinite));
+});
