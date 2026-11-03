@@ -81,6 +81,8 @@ const BY_SPAWN_GO = new Map(DOJO_DOOR_SOURCE_BINDINGS.map(binding =>
 // sweep with broad breathing highlights. Reuses only the three verified Dojo
 // light packets; adds no texture, proxy geometry, GPU pass or draw call.
 const WEB_WARNING_SWEEP_RADIANS = 0.30;
+const WEB_WARNING_PITCH_RADIANS = 0.15;
+const WEB_WARNING_IRIS_FOCUS = 0.38;
 const WEB_WARNING_RANGE_GAIN = 0.26;
 const WEB_WARNING_INTENSITY_GAIN = 0.20;
 const WEB_WARNING_MIN_CYCLE_SECONDS = 1.2;
@@ -105,28 +107,29 @@ function createWebWarningSweep(catalog, controller) {
     const spotlight = packet.spotlight;
     const sourceDirection = spotlight.direction;
     const sourceRight = spotlight.right;
-    let direction = null, right = null;
+    const sourceUp = spotlight.up;
+    let direction = null, right = null, up = null;
     if (finiteBasisVector(sourceDirection) && finiteBasisVector(sourceRight) &&
-        finiteBasisVector(spotlight.up)) {
-      const dot = sourceDirection.reduce((sum, n, axis) =>
-        sum + n * sourceRight[axis], 0);
-      const directionLength = Math.hypot(...sourceDirection);
-      const rightLength = Math.hypot(...sourceRight);
-      if (Math.abs(dot) < 0.001 &&
-          Math.abs(directionLength - 1) < 0.001 &&
-          Math.abs(rightLength - 1) < 0.001) {
+        finiteBasisVector(sourceUp)) {
+      const dot = (a, b) => a.reduce((sum, n, axis) => sum + n * b[axis], 0);
+      const unitBasis = [sourceDirection, sourceRight, sourceUp]
+        .every(axis => Math.abs(Math.hypot(...axis) - 1) < 0.001);
+      if (unitBasis && Math.abs(dot(sourceDirection, sourceRight)) < 0.001 &&
+          Math.abs(dot(sourceDirection, sourceUp)) < 0.001 &&
+          Math.abs(dot(sourceRight, sourceUp)) < 0.001) {
         direction = Array.from(sourceDirection);
         right = Array.from(sourceRight);
-        // Writable packet-owned vectors: never mutate vectors shared with
-        // the original private scene package.
+        up = Array.from(sourceUp);
+        // Packet-owned vectors; never mutate private scene-package arrays.
         spotlight.direction = [...direction];
         spotlight.right = [...right];
+        spotlight.up = [...up];
       }
     }
     bases.set(packet.id, {
-      packet, direction, right,
-      range: door.spotlight.range,
+      packet, direction, right, up,
       intensity: door.spotlight.intensity,
+      spotAngle: door.spotlight.spotAngle,
       duration: door.curve.at(-1).time,
     });
   }
@@ -138,8 +141,10 @@ function createWebWarningSweep(catalog, controller) {
       for (let axis = 0; axis < 3; axis++) {
         spotlight.direction[axis] = base.direction[axis];
         spotlight.right[axis] = base.right[axis];
+        spotlight.up[axis] = base.up[axis];
       }
     }
+    spotlight.spotAngle = base.spotAngle;
     spotlight.intensity = base.intensity;
     if (!base.packet.active) spotlight.range = 0;
   }
@@ -172,13 +177,25 @@ function createWebWarningSweep(catalog, controller) {
           (1 + WEB_WARNING_INTENSITY_GAIN * breathing);
       }
       if (!base.direction) continue;
-      const angle = WEB_WARNING_SWEEP_RADIANS * sweep;
-      const cos = Math.cos(angle), sin = Math.sin(angle);
+      // J4 Web-authored lighthouse: as the red beam sweeps sideways its
+      // aperture tightens; halfway through it glides up the doorway.
+      // Keep a smooth, single-cycle warning, never a high-frequency strobe.
+      const yaw = WEB_WARNING_SWEEP_RADIANS * sweep;
+      const pitch = WEB_WARNING_PITCH_RADIANS *
+        Math.sin(Math.PI * phase) ** 2;
+      const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+      const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
+      packet.spotlight.spotAngle = base.spotAngle *
+        (1 - WEB_WARNING_IRIS_FOCUS * breathing);
       for (let axis = 0; axis < 3; axis++) {
+        const yawedDirection = base.direction[axis] * cosYaw +
+          base.right[axis] * sinYaw;
         packet.spotlight.direction[axis] =
-          base.direction[axis] * cos + base.right[axis] * sin;
+          yawedDirection * cosPitch + base.up[axis] * sinPitch;
         packet.spotlight.right[axis] =
-          base.right[axis] * cos - base.direction[axis] * sin;
+          base.right[axis] * cosYaw - base.direction[axis] * sinYaw;
+        packet.spotlight.up[axis] =
+          base.up[axis] * cosPitch - yawedDirection * sinPitch;
       }
     }
   }
