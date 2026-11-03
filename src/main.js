@@ -1150,7 +1150,7 @@ function update(dt) {
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
     // Advance existing warning envelopes before accepting fresh commands.
     // This preserves trigger()'s first source-clock sample.
-    nativeDoorWarningBridge?.advance(worldDt);
+    nativeDoorWarningBridge?.advance(worldDt, state.camera);
     if (nativeHandsController) {
       try {
         const heldId = nativeItems?.held?.id ?? 'unarmed';
