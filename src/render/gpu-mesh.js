@@ -74,9 +74,11 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
      * inverse-transpose normal. SH-05 owns the matching shader and draw order.
      *
      * @param {WebGLProgram} instancedProgram Linked instance-aware shader.
-     * @param {{capacity?:number,requireUV?:boolean}} [options]
+     * @param {{capacity?:number,requireUV?:boolean,inheritAttributes?:string[]}} [options]
      */
-    createInstancedBatch(instancedProgram, { capacity = 128, requireUV: instanceRequireUV = false } = {}) {
+    createInstancedBatch(instancedProgram, {
+      capacity = 128, requireUV: instanceRequireUV = false, inheritAttributes = [],
+    } = {}) {
       if (disposed) throw new Error('Cannot instance a disposed mesh');
       if (!instancedProgram) throw new TypeError('Instancing requires a linked shader');
       if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 8192) {
@@ -97,7 +99,26 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
       for (const index of required) {
         if (locations[index] < 0) throw new Error('Instanced shader must expose ' + attrNames[index]);
       }
-      const active = locations.filter(location => location >= 0);
+      // Source-owned UV2/COLOR0/TANGENT0 are attached to the original VAO
+      // after uploadIndexedMesh() returns. Clone enabled bindings by shader
+      // name; do not silently lose them on the instanced VAO. Disabled or
+      // optimized-out source channels must be kept on the regular draw path.
+      if (!Array.isArray(inheritAttributes) || inheritAttributes.length > 6 ||
+          inheritAttributes.some(name => typeof name !== 'string' ||
+            !/^a[A-Za-z0-9_]+$/.test(name) || attrNames.includes(name)) ||
+          new Set(inheritAttributes).size !== inheritAttributes.length) {
+        throw new TypeError('inheritAttributes must contain distinct supplemental attribute names');
+      }
+      const inherited = inheritAttributes.map(name => {
+        const source = gl.getAttribLocation(program, name);
+        const target = gl.getAttribLocation(instancedProgram, name);
+        if (source < 0 || target < 0) {
+          throw new Error('Instancing requires active source and target attribute ' + name);
+        }
+        return { name, source, target };
+      });
+      const active = [...locations, ...inherited.map(attr => attr.target)]
+        .filter(location => location >= 0);
       if (new Set(active).size !== active.length) {
         throw new Error('Instanced shader has overlapping attribute locations');
       }
@@ -117,6 +138,39 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
           if (locations[index] < 0) continue;
           gl.enableVertexAttribArray(locations[index]);
           gl.vertexAttribPointer(locations[index], size, gl.FLOAT, false, MESH_VERTEX_STRIDE, offset);
+        }
+        if (inherited.length) {
+          // The base mesh VAO can include extra float attribute buffers owned
+          // by the scene pass (COLOR0, UV2, TANGENT0). Query its actual VAO
+          // state instead of guessing source format/stride/buffer identity.
+          gl.bindVertexArray(vao);
+          const bindings = inherited.map(({ name, source, target }) => {
+            if (!gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_ENABLED)) {
+              throw new Error('Cannot instance missing source mesh channel ' + name);
+            }
+            const buffer = gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING);
+            const type = gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_TYPE);
+            const divisor = gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_DIVISOR);
+            if (!buffer || divisor !== 0 || type !== gl.FLOAT ||
+                gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_INTEGER)) {
+              throw new Error('Instancing requires per-vertex float channel ' + name);
+            }
+            return {
+              target, buffer, type,
+              size: gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_SIZE),
+              normalized: gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_NORMALIZED),
+              stride: gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_STRIDE),
+              offset: gl.getVertexAttribOffset(source, gl.VERTEX_ATTRIB_ARRAY_POINTER),
+            };
+          });
+          gl.bindVertexArray(batchVao);
+          for (const item of bindings) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, item.buffer);
+            gl.enableVertexAttribArray(item.target);
+            gl.vertexAttribPointer(item.target, item.size, item.type,
+              item.normalized, item.stride, item.offset);
+            gl.vertexAttribDivisor(item.target, 0);
+          }
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, capacity * 100, gl.DYNAMIC_DRAW);
