@@ -382,6 +382,11 @@ if (containersPreviewEnabled) {
       }
       if (!response) throw new Error('Le pack Dojo est absent de cet hébergement. Aucun décor de substitution ne sera affiché.');
       localAssetManifest = await response.json();
+      if (localAssetManifest?.standaloneVersion !== 1 ||
+          localAssetManifest.scene !== 'SHRL_Dojo2' ||
+          localAssetManifest.sceneBuildIndex !== 10) {
+        throw new Error('Seul le pack canonique local-assets/manifest.json est accepté ; aucun fallback private/.');
+      }
       if (!localAssetManifest?.assets?.scenePackage ||
           !localAssetManifest.assets.enemyMerged || !localAssetManifest.assets.enemyRig) {
         throw new Error('Pack Dojo incomplet : scène, personnage et rig animé requis.');
@@ -401,6 +406,20 @@ if (containersPreviewEnabled) {
       await loadScene();
       if (!results.every(Boolean) || !nativeScene || !nativeSkinInfo) {
         throw new Error('Dojo incomplet : scène ou personnage animé impossible à charger.');
+      }
+      // The exact same packaged scene and rig must support death physics on
+      // localhost and GitHub Pages; never silently freeze dead enemies because
+      // a stale pre-ragdoll pack was restored by a static asset deployment.
+      const death = nativeScene.gameplay?.deathPhysics;
+      const declaredDeath = localAssetManifest.features?.ragdoll;
+      if (!death || !nativeRigSha256 ||
+          nativeRigSha256 !== nativeScene.gameplay.deathPhysicsRigSha256 ||
+          declaredDeath?.rigSha256 !== nativeRigSha256 ||
+          declaredDeath.bodies !== 22 || declaredDeath.joints !== 21 ||
+          death.source?.identity !== 'sharedassets0.assets::5163 / EnemyMergedForPooler' ||
+          death.bodies?.length !== 22 || death.joints?.length !== 21 ||
+          death.boneParents?.length !== nativeSkinInfo.skinRig.boneOrder.length) {
+        throw new Error('Ragdoll absent ou rig incompatible : reconstruire et publier le pack Dojo canonique (sync-dojo-assets.mjs).');
       }
       const source = nativeScene.source;
       if (source.sceneBuildIndex !== 10 || !/dojo/i.test(source.scenePath)) {
@@ -1792,7 +1811,13 @@ function frame(now) {
         textures: nativeScene.textures.size, sourceCameraProjection: nativeScene.camera.projection } : null,
       enemies: state.enemies.map(e => ({ x:e.x,y:e.y,z:e.z,alive:e.alive,
         clip:e.animation?.state ?? (e.walking ? 'walk' : 'idle'),clock:e.clock,
-        poseFrozenAtDeath: !e.alive && Boolean(nativeSkinInfo) })),
+        poseFrozenAtDeath: !e.alive && !e.deathSolvedPose && Boolean(nativeSkinInfo),
+        ragdollStatus: e.deathPhysicsStatus ?? (!e.alive ? 'no-verified-runtime' : 'alive'),
+        ragdollRendered: Boolean(nativeEnemyStats?.solvedPoseApplied),
+      })),
+      ragdollPackVerified: Boolean(localAssetManifest?.features?.ragdoll &&
+        nativeRigSha256 === nativeScene?.gameplay?.deathPhysicsRigSha256),
+      activeRagdolls: state.enemies.filter(e => !e.alive && e.deathRuntime).length,
       nativeActionActivationVerified: false,
       worldClock: state.worldClock,
       camera: { ...state.camera },
