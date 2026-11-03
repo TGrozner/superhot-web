@@ -161,6 +161,24 @@ export function assessDojoVertical(trace) {
   if (!checks.startButtonClickObserved) errors.push('no trusted owner Start button click observed before first combat frame');
   if (!checks.winRestartButtonClickObserved) errors.push('no trusted owner win-screen Replay button click between win and restart frames');
   observed.uiClicks = Array.isArray(actions) ? actions.length : 0;
+  // Browser-originating input attempts are only receipts. We must additionally
+  // witness the matching Web state transition; an input alone is not a hit.
+  const inputs = trace.inputActions;
+  if (inputs !== undefined && (!Array.isArray(inputs) || inputs.length > 256 ||
+      inputs.some(a => !isRecord(a) || !['fire','pickup','throw'].includes(a.kind) ||
+        !integer(a.frameId) || a.activeScreen !== 'playing')) ||
+      (trace.inputActionsTruncated !== undefined &&
+        typeof trace.inputActionsTruncated !== 'boolean')) {
+    errors.push('invalid browser input-attempt telemetry');
+    return report(DOJO_VERTICAL_STATUS.INVALID);
+  }
+  const witnessedInput = (kind, beforeId, afterId) => Array.isArray(inputs) &&
+    inputs.some(a => a.kind === kind && a.frameId >= beforeId && a.frameId < afterId);
+  observed.inputReceipts = Array.isArray(inputs) ? inputs.length : 0;
+  checks.inputReceiptsComplete = trace.inputActionsTruncated === false;
+  if (!checks.inputReceiptsComplete) {
+    errors.push('browser input receipts absent or truncated; old traces cannot certify actions');
+  }
 
   // Web encounter retains dead actors until the next reset. A kill counter can
   // reach the quota even when the trace contains only one dead actor repeatedly;
@@ -211,6 +229,12 @@ export function assessDojoVertical(trace) {
     get(f).weapon === true && get(active[i - 1]).weapon === true &&
     get(active[i - 1]).ammo > 0 && get(f).ammo < get(active[i - 1]).ammo);
   if (!checks.pistolEquippedAndFired) errors.push('no consecutive playing frames with armed ammo decrease (gun discard is not a shot)');
+  checks.pistolFireInputObserved = active.some((f, i) => i > 0 &&
+    f.activeScreen === 'playing' && active[i - 1].activeScreen === 'playing' &&
+    get(f).weapon === true && get(active[i - 1]).weapon === true &&
+    get(active[i - 1]).ammo > 0 && get(f).ammo < get(active[i - 1]).ammo &&
+    witnessedInput('fire', active[i - 1].frameId, f.frameId));
+  if (!checks.pistolFireInputObserved) errors.push('no trusted pointer-locked primary-fire input receipt aligned with armed ammo decrease');
 
   let picked = null;
   for (let i = start; i < win; i++) {
@@ -219,11 +243,17 @@ export function assessDojoVertical(trace) {
   }
   checks.pickupObserved = picked !== null;
   if (!checks.pickupObserved) errors.push('no source-item held state observed');
+  checks.pickupInputObserved = picked !== null && picked.index > 0 &&
+    witnessedInput('pickup', frames[picked.index - 1].frameId, frames[picked.index].frameId);
+  if (!checks.pickupInputObserved) errors.push('no trusted E input receipt aligned with same-item pickup');
   const released = picked ? frames.findIndex((f, i) => i > picked.index && i < win &&
     f.activeScreen === 'playing' && get(f).heldItem === null &&
     hasItem(f, picked.id, ['flying', 'resting', 'attached', 'broken'])) : -1;
   checks.throwOrReleaseObserved = released >= 0;
   if (!checks.throwOrReleaseObserved) errors.push('no same-item release with changed world state before victory');
+  checks.throwInputObserved = released > 0 && witnessedInput('throw',
+    frames[released - 1].frameId, frames[released].frameId);
+  if (!checks.throwInputObserved) errors.push('no trusted F input receipt aligned with same-item release');
 
   const initial = get(frames[start]), after = get(frames[restart]);
   checks.itemPoolReset = initial.itemsTotal > 0 && initial.itemStates.length === 0 &&
