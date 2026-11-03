@@ -1,44 +1,66 @@
-# Dojo/build10 standalone static hosting
+# Déploiement standalone du Dojo SHRL_Dojo2 / build 10
 
-Target: deploy the **same browser runtime and original SHRL_Dojo2 source package** that the owner currently loads locally. No network access to the owner's machine is needed after deployment. No substitute geometry or procedural fallback is selected when assets are missing.
+**État au 3 novembre 2026 : en production, confirmé jouable par Thomas.**
 
-## Build the static package (one-time on the machine holding the files)
+- URL stable : **https://tgrozner.github.io/superhot-web/**
+- Repo : `TGrozner/superhot-web`, branche de déploiement `main`, dossier `/(root)`
+- Premier commit qui publie les assets : `876a2cdde01845b685a81ccf818d965c78fb0c56` (historique ; ne pas supposer que c'est le HEAD actuel)
+- Pack initial : **52 assets, 47 872 002 octets**, sous `local-assets/` + `manifest.json`, avec SHA-256 par fichier
+- GitHub Actions : `Verify prototype` + `pages build and deployment` ; publication du SHA initial réussie
+- Après téléchargement initial, **aucune connexion au PC du propriétaire** ni au repo privé de recherche n'est nécessaire pour jouer.
 
-Prerequisites: Node.js 20+, an up-to-date `superhot-web` checkout with this change, and the complete source-qualified local Dojo export referenced by `private/browser-assets.json`.
+## Architecture et règles invariantes
+
+```text
+GitHub Pages: /superhot-web/
+  index.html + style.css + src/                  code du jeu
+  local-assets/manifest.json                     liste des assets + SHA
+  local-assets/<id>.<extension>                   meshes, scène, rigs, PNG, WAV
+```
+
+Le client charge `manifest.json` par URL relative à son propre `import.meta.url`, puis les assets par chemins de la même origine. Il ne doit **jamais** demander `/local-assets/manifest` à la machine d'un visiteur, ni un dossier `C:\dev\...`, ni un tunnel Cloudflare. Le serveur `server.mjs` reste utile en développement ; s'il trouve le pack déjà publié il le sert en priorité, sans exiger `private/`.
+
+**Pas de fallback graphique :** le pack doit identifier `SHRL_Dojo2`, build 10, et fournir scène, modèle ennemi, rig animé, textures et références nécessaires. S'il manque des données, afficher l'erreur et arrêter, **pas** les anciennes salles générées/proxies/cubes. Le chargement incomplet n'autorise aucune affirmation de parité.
+
+## Changements de code (fréquents)
+
+1. L'agent travaille exclusivement dans sa lane avec une branche/PR. **SH-05 est propriétaire des fichiers communs et du merge** ; relire la dernière version de `main`.
+2. Contrôler `npm run check` et la CI sur le SHA de PR. Fusionner sur `main` sans faire de reset/force push et sans toucher au poste du propriétaire.
+3. Le workflow GitHub Pages reconstruit automatiquement le site à la **même URL**. Les visiteurs recevront la nouvelle version du code au rechargement.
+4. Après fusion, vérifier le workflow Pages pour **ce SHA** puis une scène Dojo fonctionnelle dans un navigateur. Pas de « testé en navigateur » si seules la CI et les métriques statiques ont été lues.
+
+Les fonctionnalités qui réutilisent des assets **déjà présents dans** `local-assets/manifest.json` ne nécessitent **aucun nouvel export** ni intervention de Thomas.
+
+## Nouveaux assets, animations, matériaux ou sons
+
+L'hébergement Pages **n'a pas accès aux exports restés privés**. L'agent doit d'abord vérifier si l'asset existe déjà dans le manifeste publié ; un asset identifié dans le corpus de recherche ne l'est pas nécessairement.
+
+Sur le poste propriétaire, **uniquement pour les fichiers dont la redistribution est autorisée** :
 
 ```powershell
 cd C:\dev\superhot-web
+git fetch origin main
+git restore --source=origin/main -- scripts/vendor-dojo-assets.mjs scripts/publish-dojo-pages.mjs
 node scripts/vendor-dojo-assets.mjs
+node scripts/publish-dojo-pages.mjs
 ```
 
-This **reads** the owner-local allowlist and copies the same source bytes into `local-assets/`. Its `manifest.json` lists file IDs, filenames, MIME types, SHA-256 and sizes. It checks SHRL_Dojo2 / scene build index 10, required models/rig/textures, configured file containment and GitHub file/site size limits. The source directory is not modified. When vendoring succeeds, the public HTML loads a source-qualified scene from its same-origin `./local-assets/` URL. `src/main.js` and the HUD resolve all referenced files relative to the site root. On the local Node server, the static package takes priority over `private/` so the rendered asset source is consistent.
+- `vendor-dojo-assets.mjs` lit `private/browser-assets.json`, valide scène `SHRL_Dojo2` / build 10, couvre les IDs requis, vérifie chemins et limites de taille, puis régénère le pack `local-assets/` et ses SHA-256.
+- `publish-dojo-pages.mjs` **vérifie tailles et hashes**, refuse les fichiers inattendus, copie **uniquement** `local-assets/` dans un clone Git temporaire puis pousse ce commit vers `main`. Il ne modifie pas les worktrees locaux et ne force jamais un push.
+- Vérifier ensuite le workflow **pages build and deployment** pour le nouveau SHA et charger le site. Le site ne nécessite plus le PC lorsque les fichiers sont hébergés.
 
-**Do not upload the local project corpus, private research, source game binaries, reverse-engineering dumps, local absolute paths, or any assets you lack authorization to redistribute.** Publishing a public Pages site makes *all its static files freely downloadable*, even if the repo is private. The local export is not itself a redistribution license, nor a claim of native 1:1 gameplay.
+**Important :** ces commandes rendent les fichiers accessibles publiquement. Le fait qu'un jeu soit installé et que ses données aient été extraites ne démontre pas le droit de les redistribuer. Ne jamais publier de fichiers de recherche privée, code décompilé, exécutable natif, secrets ou nouveaux fichiers commerciaux sans autorisation vérifiée.
 
-## Publication
+## Checklist de sortie
 
-GitHub Pages is already configured through `main` / `/(root)`. Only when rights to redistribute the included files are established, include the generated `local-assets/` directory in an authorized deployment. The web application cannot be standalone on GitHub Pages until the complete `local-assets/manifest.json` and its listed files are actually hosted.
+- [ ] `main` contient bien les fichiers et le manifeste référencés par la nouvelle feature, et les sommes correspondent.
+- [ ] CI et workflow **GitHub Pages** terminés en succès sur le SHA attendu.
+- [ ] L'URL de la démo sert le vrai Dojo (pas la scène générée), avec ressources réseau servies depuis le site, pas le PC.
+- [ ] Smoke navigateur ciblé : décor, textures, ennemis animés, tir, F/E, mort, victoire et REJOUER selon les changements effectués.
+- [ ] Signaler honnêtement les tests non exécutés et les écarts à l'original. CI « success » n'est pas une capture ni une preuve 1:1.
 
-For a local offline smoke check after vendoring:
+## Sources et garde-fous
 
-```powershell
-npm start
-# Open http://localhost:4173/
-```
+Le travail de reverse engineering continue dans le dépôt de recherche privé et son runner autorisé. Les agents ne doivent ni démarrer une deuxième instance locale ni republier le corpus. Les descriptions de données natives restent source-qualifiées sans extrapoler leur comportement.
 
-The local server now prefers the standalone package if present. Start from a clean server process after pack generation.
-
-## Diagnostic invariants
-
-- If `manifest.json` is missing, the page shows **Dojo original indisponible** and does not draw the old Roblox-style collider proxies.
-- If the scene isn't SHRL_Dojo2/build10, loading fails.
-- If the animated enemy source or referenced textures are missing, loading fails.
-- For production, file access is same-origin: `/superhot-web/local-assets/…` (Pages), not `/local-assets/…` on the visitor's computer.
-- Node's existing loopback-only `/local-assets/manifest` remains available for local development without a vendored pack.
-- The runtime is the currently built Web adaptation, not an assertion of complete Unity/MCD gameplay or rendering parity.
-
-## GitHub Pages size and legal constraints
-
-GitHub repository individual file limits and Pages publication limits apply. A build containing an oversized original scene package cannot be made to fit by enabling Git LFS; Pages does not support directly serving LFS objects as normal files. Use a separately hosted, authorized static asset distribution if the complete site cannot fit.
-
-Asset hashes prove byte identity between the input files and staged copies; they do **not** prove that the rendered WebGL frame equals the native frame. Browser and source-capture comparison are still required for any such claim.
+Les instructions globales à lire au début de **chaque cycle agent** sont à la racine : [AGENTS.md](../AGENTS.md). L'historique de récupération `docs/dojo-reprise.md` est conservé pour référence, sans supplanter ce fonctionnement.
