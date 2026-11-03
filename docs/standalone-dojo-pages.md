@@ -22,6 +22,27 @@ Le client charge `manifest.json` par URL relative à son propre `import.meta.url
 
 **Pas de fallback graphique :** le pack doit identifier `SHRL_Dojo2`, build 10, et fournir scène, modèle ennemi, rig animé, textures et références nécessaires. S'il manque des données, afficher l'erreur et arrêter, **pas** les anciennes salles générées/proxies/cubes. Le chargement incomplet n'autorise aucune affirmation de parité.
 
+## Pipeline canonique ragdoll : local = Pages
+
+Le paquet publié antérieur à la physique du ragdoll peut afficher le Dojo mais **figer toutes les morts**. Désormais `local-assets/` est l'unique source d'assets à l'exécution. Les données sous `private/` servent exclusivement à créer ce paquet, pas à alimenter une variante locale différente.
+
+Depuis la machine autorisée, dans la racine de la copie contenant les exports privés :
+
+```powershell
+npm run sync:dojo
+npm start
+```
+
+La première commande appelle l'extracteur privé déjà existant, prépare le scenePackage et le rig à empreinte SHA-256 identique, reconstruit l'unique `local-assets/` (sans le publier) et vérifie les 22 corps, 21 articulations, 62 os et les SHA. Après vérification locale, **uniquement si chaque asset est autorisé à la redistribution** :
+
+```powershell
+npm run publish:dojo
+```
+
+La publication reconstruit **et revérifie** le même pack avant d'envoyer ses fichiers dans un clone temporaire sur GitHub. Elle ne pousse jamais `private/` et ne modifie pas le worktree actif. La CI Pages refuse toute archive de scène dépourvue de `gameplay.deathPhysics`, de son empreinte `deathPhysicsRigSha256` concordante avec `enemyRig.json`, ou du manifeste `features.ragdoll`. Cela évite que l'ancien pack sans physique soit republié après un correctif de code.
+
+**Transition :** la première publication du pack enrichi doit précéder la fusion du garde-fou strict dans le navigateur. Jusqu'à cette publication, un déploiement Pages qui exige `--require-ragdoll` échouera volontairement plutôt que remplacer le site par des assets incomplets. Le résultat reste un solveur Web PBD, pas PhysX natif.
+
 ## Changements de code (fréquents)
 
 1. L'agent travaille exclusivement dans sa lane avec une branche/PR. **SH-05 est propriétaire des fichiers communs et du merge** ; relire la dernière version de `main`.
@@ -41,8 +62,7 @@ Sur le poste propriétaire, **uniquement pour les fichiers dont la redistributio
 cd C:\dev\superhot-web
 git fetch origin main
 git restore --source=origin/main -- scripts/vendor-dojo-assets.mjs scripts/publish-dojo-pages.mjs
-node scripts/vendor-dojo-assets.mjs
-node scripts/publish-dojo-pages.mjs
+npm run publish:dojo
 ```
 
 - `vendor-dojo-assets.mjs` lit `private/browser-assets.json`, valide scène `SHRL_Dojo2` / build 10, couvre les IDs requis, vérifie chemins et limites de taille, puis régénère le pack `local-assets/` et ses SHA-256.
