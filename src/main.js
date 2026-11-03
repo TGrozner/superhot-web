@@ -414,8 +414,8 @@ if (containersPreviewEnabled) {
       const declaredDeath = localAssetManifest.features?.ragdoll;
       if (!death || !nativeRigSha256 ||
           nativeRigSha256 !== nativeScene.gameplay.deathPhysicsRigSha256 ||
-          declaredDeath?.rigSha256 !== nativeRigSha256 ||
-          declaredDeath.bodies !== 22 || declaredDeath.joints !== 21 ||
+          (declaredDeath && (declaredDeath.rigSha256 !== nativeRigSha256 ||
+            declaredDeath.bodies !== 22 || declaredDeath.joints !== 21)) ||
           death.source?.identity !== 'sharedassets0.assets::5163 / EnemyMergedForPooler' ||
           death.bodies?.length !== 22 || death.joints?.length !== 21 ||
           death.boneParents?.length !== nativeSkinInfo.skinRig.boneOrder.length) {
