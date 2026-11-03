@@ -604,3 +604,61 @@ native replay's actual clock/time phase and matched inputs are still UNKNOWN.
 Five/six authored Node regressions validate only the observer, not a browser
 playthrough. SH-05/SH-02 own any runtime/time adjustment after a real
 owner-local trace identifies a reproducible discrepancy.
+
+
+### SH-10 — Dojo GPU receipts for real hands and warning lights (3 November 2026)
+
+**Purpose:** make actual Web rendering changes measurable without confusing a
+Node fixture, a GPU draw submission or a clicked button with native 1:1 parity.
+The recorder now includes bounded scalar-only `gameplay.visual` metadata from
+the same already-rendered browser frame: number of source-world draw calls,
+hands draw calls/triangles, the reported hand pose/socket flags, and whether
+the source door-warning envelope and Web spotlights are active. It does **not**
+store original textures, model names, IDs, shader contents, pixel images,
+proprietary meshes, camera paths, or assets. Missing fields stay `null`.
+Known warning status tokens are allowlisted, not copied from arbitrary source
+strings.
+
+Record the existing private owner-local run as before, then evaluate:
+
+`node scripts/acceptance-dojo-visible.mjs --trace private/dojo-full-run.json`
+
+This is an **opt-in diagnostic** and has no unconditional red CI gate.
+Results distinguish:
+
+- `WEB_RENDERED_VISUAL_HOOKS_SAMPLED_NOT_NATIVE_PARITY` — actual browser
+  snapshot-shaped Web receipts were supplied, **not** an independently
+  executed/verified Chromium session and **not** a native screenshot match.
+- `WEB_DOJO_WARNING_ACTIVE_WITHOUT_RENDERED_SPOTLIGHT` — a source warning
+  envelope was active while the same sampled frame reported **zero Web
+  spotlight draws**. This is a **Web integration gap** (`exit 1`), not proof of
+  a native light error. With `main@980dad6` the warning bridge is wired, but
+  `renderedSpotlights:0` is explicit pending source world TRS/cookie data and
+  the actual native-world fragment pass. An active warning must be **sampled**:
+  absent/degraded source packet or a missed 50 ms transition does not count.
+- `WEB_RENDERED_VISUAL_HOOKS_NOT_OBSERVED` — older capture or no world GPU
+  draw evidence (`exit 2`). Invalid/mislabeled source data is also rejected
+  (`exit 2`). A pistol-only run with zero hands is **unexercised**, not a
+  katana regression.
+
+For P0 VISUAL, SH-05/SH-13/SH-14 still need three **visible** paired checks:
+(1) **same camera/world scene angle/placement** on real Dojo browser and
+licensed private native frames, (2) **silhouette and animation** of enemy,
+hands and katana at the same action/time, (3) **color and illumination**,
+especially door warning ROI, and a second time-separated frame. The
+snapshot-only report has **no pixels, no matched native camera and no
+reference RGB/light measurements**. Visual parity stays **UNKNOWN**. The
+SH-10 script does not edit a gameplay/renderer owner file; the first proven
+Web spotlights gap goes to SH-05/SH-13, and contact/physics issues go to
+SH-03/SH-06.
+
+**Clock recorder correction:** `gameplay.moving` is now a **Web keyboard
+axis intent** (physical `KeyboardEvent.code`) matching the real
+`src/main.js` axes: `KeyW/KeyZ/ArrowUp` vs `KeyS/ArrowDown`,
+`KeyD/ArrowRight` vs `KeyA/ArrowLeft`. Opposing axes cancel;
+`KeyQ` is ignored, since Q printed on AZERTY emits `KeyA`. This
+fixes the measurement-label bug in #230 without touching game inputs.
+Holding an axis against a wall **does not prove translation**; the
+clock-slope observer remains only an input-regime diagnostic, not a native
+movement/physics verdict. Existing 6–7 kill/restart acceptance is unchanged;
+no game/corpus binary or private runner was invoked for authored Node tests.
