@@ -993,3 +993,68 @@ colliding with a wall without retroactively suppressing the shot, one
 unobstructed projectile reaching the actor and a distinct subsequent death,
 then 6–7 distinct deaths/victory. Passing Node fixtures alone is **not**
 native gameplay or audio parity.
+
+
+## SH-03 — Dojo spawner ancestry and per-enemy weapon activation (2026-11-03)
+
+**SOURCE-QUALIFIED STATIC ONLY — MCD build 20299547, scene level10.**
+New private evidence from already completed structured corpus results
+#166/#167/#168, #173 (artifact 13227588077, spawner ancestry),
+#178 (PejAiIniter.Apply), #179 (WeaponSelector enum) and #180
+(PejAiIniter.TryRandomizeWeapon). In serialized level10, **one** inactive
+EnemyFactory child belongs to the active spawner transform subtree, while
+a different inactive EnemyFactory belongs to an unrelated subtree.
+GetComponentsInChildren(includeInactive:true) means the former must not
+be discarded just because its source GameObject begins inactive.
+Its initializer carries **WeaponSelector.BasedOnDifficulty** (enum 11).
+The out-of-subtree initializer has a fixed Pistol selector, but that does
+**not** license using it as the spawner's factory. The source spawner's
+serialized `templates=[]` is not evidence that its runtime child
+component discovery returns an empty array.
+
+**STILL UNKNOWN:** which difficulty preset was *active at instantiation*,
+that preset's weighted weapon probabilities/caps and available prefab set,
+full initializer archetype enum mapping and modifications, active enemy
+body health, weapon-class runtime settings and a native spawn/shot trace.
+A static factory member or default C# field is not a witnessed spawned
+enemy. No native binary, asset, decompiled code or raw private JSON is
+included here.
+
+**DELIVERY — pure, opt-in source gate.** The new
+`src/combat/native-dojo-factory-plan.js` exports
+`collectNativeDojoSpawnerFactories` and
+`planNativeDojoEnemyActivation`. The former requires complete scene
+parent chains and an exhaustive factory list; it includes inactive
+in-spawner factories, excludes unrelated siblings and fails closed on
+truncated ancestry or cycles. The latter consumes an **actual chosen
+spawn template** with an already decoded source enum, the **current**
+difficulty, available weapon prefab families and fully qualified
+per-family runtime settings; it reuses existing source-backed weapon
+weights/caps and archetype selection at **spawn time**. If any input is
+missing or ambiguous, it returns `status:'blocked'`. It deliberately
+does not infer missing source data or replace the owner-validated Web
+pistol, health or kill-target behavior.
+
+**SH-05 integration hook, not wired by SH-03:** Provide source parent
+records/factories and explicit decoded enum names at scene load; pass
+the returned `templates` into `advanceNativeSpawner` instead of the
+hard-coded Web template **only if the ancestry result is qualified**.
+At each emitted `spawn` command, pass the selected
+`command.template`, living actors and active source difficulty/prefabs
+to `planNativeDojoEnemyActivation`. On `qualified`, attach
+`family/archetype/weaponSettings` to that individual new actor and
+initialize its gun runtime from the same settings used by Update and
+late emission; otherwise preserve the exact existing 7/7 Web fallback.
+Do not change `src/main.js` within SH-03. In particular, a source
+factory being reachable does not establish its current weighted family.
+For the Dojo, the missing runtime difficulty and archetype provenance
+must be supplied before enabling weighted selection.
+
+**TESTED BY FIXTURES, NOT LIVE GAME:** the new
+`tests/combat-native-dojo-factory-plan.test.mjs` runs a synthetic
+spawner order through source hierarchy filtering, at-spawn Pistol
+selection, accepted Attack, deferred projectile request, and a second
+shotgun-with-cap scenario. These verify adapter behavior only; they
+do not prove a native projectile collision, real audible cue, 7/7
+browser regression or MCD fidelity. Preserve the owner's known-good
+manual Dojo route until SH-05 records the actual integrated result.
