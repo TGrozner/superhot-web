@@ -1133,13 +1133,16 @@ function update(dt) {
         continue;
       }
       if(event.type!=='spawn') continue;
-      // The existing encounter's only selected template is 'web-pistol'.
-      // Bind an explicit per-actor Web fallback family for both Attack and
-      // late weapon-pose emission. Native Dojo factory selection is UNKNOWN.
-      event.enemy.activeWeaponSettings=Object.freeze({
-        ...nativeEncounter.enemySettings,
-        family:nativeEncounter.enemySettings.family ?? 'Pistol',
-      });
+      // The runtime still lacks source-qualified active prefab/weapon values,
+      // so this scene deliberately does not enable native factory selection.
+      // Preserve the Web fallback, but never overwrite a future qualified
+      // activation's per-actor weapon settings with Web pistol defaults.
+      if(event.activation?.status !== 'qualified') {
+        event.enemy.activeWeaponSettings=Object.freeze({
+          ...nativeEncounter.enemySettings,
+          family:nativeEncounter.enemySettings.family ?? 'Pistol',
+        });
+      }
       state.enemies.push(event.enemy);
     }
   }
@@ -1419,12 +1422,21 @@ function drawEnemy(enemy) {
     const time = animationClock - animation.startedAt;
     enemy.fireAction=enemyFireAction(enemy,animationClock);
     const solvedPose=dying ? enemy.deathSolvedPose??null : null;
-    nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, animation.state, time, {
+    nativeEnemyStats = renderer.drawNativeActorSkin(enemy.id, actorMatrix, animation.state, time, {
       statePlayback, transition:solvedPose?null:transition,
       action:solvedPose?null:enemy.fireAction, solvedPose,
       shaderTime: state.runClock, cameraPosition: state.camera,
     })
+      ?? renderer.drawNativeSkin(actorMatrix, animation.state, time, {
+        statePlayback, transition:solvedPose?null:transition,
+        action:solvedPose?null:enemy.fireAction, solvedPose,
+        shaderTime: state.runClock, cameraPosition: state.camera,
+      })
       ?? renderer.drawLocalEnemyDiagnostic(actorMatrix);
+    // No subsequent enemy draw can mutate this actor's owned source frame.
+    // Missing rig/pose produces no false receipt for hits or late shots.
+    enemy.actorSkinFrame = nativeEnemyStats?.actorPoseOwnedSnapshot === true &&
+      nativeEnemyStats.actorId === enemy.id ? nativeEnemyStats : null;
     if(nativeGameplay() && nativeEnemyStats?.boneModelMatrices) {
       if(enemy.alive && nativeEnemyStats.skinned) {
         const bones=nativeEnemyStats.boneModelMatrices;

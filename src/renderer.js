@@ -4,6 +4,7 @@ import { createGeneratedLighting, lightingUniformPacket } from './render/lightin
 import { createEnemyStaticIndexedPass } from './characters/native-enemy-local.js';
 import { enemyRedCrystalDiagnosticWebPacket } from './render/material-model.js';
 import { createNativeSkinPass } from './characters/native-skin-pass.js';
+import { createNativeActorSkinRuntime } from './characters/native-actor-skin.js';
 import { createDojoPlayerAnimationPass } from './characters/native-player-animation.js';
 import { createNativeWorldPass } from './render/native-world-pass.js';
 
@@ -373,16 +374,18 @@ export function createRenderer(canvas) {
     return report;
   }
   let skinnedEnemy = null;
+  let actorSkinRuntime = null;
   let skinClips = {};
   let skinStates = {};
   function replaceNativeCharacter(receipt, sourcePackage = null) {
-    let nextSkin = null, nextStatic = null;
+    let nextSkin = null, nextStatic = null, nextActors = null;
     const instances = {};
     const stateInstances = {};
     try {
       if (sourcePackage) {
         if (sourcePackage.source?.variant !== receipt.variant) throw new Error('Character mesh and rig variants differ');
         nextSkin = createNativeSkinPass(gl, sourcePackage);
+        nextActors = createNativeActorSkinRuntime(nextSkin);
         for (const clip of nextSkin.availableClips) {
           instances[clip] = nextSkin.createInstance({ clip,
             playback: ['idle', 'walk', 'run'].includes(clip) ? 'loop' : 'clamp' });
@@ -398,6 +401,7 @@ export function createRenderer(canvas) {
     skinnedEnemy?.dispose();
     nativeEnemyPass?.dispose();
     skinnedEnemy = nextSkin;
+    actorSkinRuntime = nextActors;
     nativeEnemyPass = nextStatic;
     skinClips = instances;
     skinStates = stateInstances;
@@ -424,6 +428,33 @@ export function createRenderer(canvas) {
       transition: transition ? { from: (statePlayback ? skinStates : skinClips)[transition.from],
         fromTime: transition.fromTime * scale(transition.from), elapsed: transition.elapsed } : null,
       action, solvedPose, shaderTime, cameraPosition, sourceLighting: nativeSkinLighting,
+      color: [0.720588207244873, 0, 0, 1],
+    });
+    drawCalls += report.drawCalls;
+    return report;
+  }
+
+  // The SH-14 runtime returns owned per-actor bone matrices and weapon
+  // sockets, unlike the GPU pass's reusable draw scratch. Web gameplay still
+  // chooses its own pose; no native controller execution is inferred.
+  function drawNativeActorSkin(actorId, modelMatrix, clip, time, {
+    statePlayback = false, transition = null, action = null, solvedPose = null,
+    shaderTime = 0, cameraPosition = currentCamera,
+  } = {}) {
+    if (!actorSkinRuntime) return null;
+    const selection = (name, elapsed) => statePlayback
+      ? {state: name, time: elapsed}
+      : {clip: name, playback: ['idle', 'walk', 'run'].includes(name) ? 'loop' : 'clamp', time: elapsed};
+    const pose = selection(clip, time);
+    if (transition) pose.transition = {
+      from: selection(transition.from, transition.fromTime),
+      elapsed: transition.elapsed,
+    };
+    if (action) pose.action = action;
+    if (solvedPose) pose.solvedPose = solvedPose;
+    const report = actorSkinRuntime.drawActor({
+      actorId, pose, modelMatrix, viewProjection, shaderTime,
+      cameraPosition, sourceLighting: nativeSkinLighting,
       color: [0.720588207244873, 0, 0, 1],
     });
     drawCalls += report.drawCalls;
@@ -539,7 +570,7 @@ export function createRenderer(canvas) {
   }
   return {
     begin,draw,affineBox,replacePrivateMesh,replacePrivateTexture,drawPrivateMesh,
-    replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin,
+    replaceNativeCharacter, drawLocalEnemyDiagnostic, drawNativeSkin, drawNativeActorSkin,
     replaceNativeWorld, drawNativeWorld, drawNativeWeapon, drawFirstPersonWeapon,
     replaceDojoPlayerHands, drawDojoPlayerHands,
     setNativeInstanceVisible, drawNativeInstance, getNativeInstanceBounds,
