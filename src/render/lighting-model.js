@@ -270,18 +270,34 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
         throw new RangeError(id + ' invalid or duplicate source false-light slot');
       }
       if (intensity > 0) {
-        occupiedSlots.add(slot);
-        falseLights.push(Object.freeze({
-          doorId: id, slot,
-          position: sourceLightVec3(packet.falseLight.position, id + ' falseLight.position'),
-          intensity,
-          shaderParity: 'unverified-no-false-light-composition',
-        }));
+        // The Unity component can be known before its parent-chain world TRS
+        // has been recovered. Do not crash the Dojo or invent a world point.
+        if (packet.falseLight.position == null) {
+          omissions.push(Object.freeze({ id,
+            reason: 'source-false-light-world-position-not-resolved' }));
+        } else {
+          occupiedSlots.add(slot);
+          falseLights.push(Object.freeze({
+            doorId: id, slot,
+            position: sourceLightVec3(packet.falseLight.position, id + ' falseLight.position'),
+            intensity,
+            shaderParity: 'unverified-no-false-light-composition',
+          }));
+        }
       }
     }
     if (!packet.spotlight?.enabled) continue;
+    const range = sourceLightNonnegative(packet.spotlight.range, id + ' spotlight.range');
+    if (range === 0) continue;
+    // SH-04 research #175 may provide local TRS, not the accumulated
+    // world-space basis. Until that exact chain is qualified, fail closed.
+    if (['position', 'direction', 'right', 'up'].some(
+      name => packet.spotlight[name] == null)) {
+      omissions.push(Object.freeze({ id,
+        reason: 'source-spotlight-world-basis-not-resolved' }));
+      continue;
+    }
     const spotlight = sourceSpotlight(packet.spotlight, id, packet.rendererId);
-    if (!(spotlight.range > 0)) continue;
     if (((spotlight.cullingMask >>> 0) & (1 << meshLayer)) === 0) {
       omissions.push(Object.freeze({ id, reason: 'source-spotlight-layer-mask' }));
       continue;
