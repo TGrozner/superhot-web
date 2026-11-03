@@ -766,3 +766,64 @@ test('Web-only impact glow hits the actual GPU material once, fades, and spares 
   }), /hit flash must be a finite intensity/);
   pass.dispose();
 });
+
+
+test('Web locomotion bank follows live per-actor strafing while sparing shots, teleports and ragdolls', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic test socket', coordinates: 'synthetic local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, x, z, clock, extra = {}) => {
+    const matrix = identity();
+    matrix[12] = x;
+    matrix[14] = z;
+    return actors.drawActor({
+      actorId, pose: { state: 'run', time: .15, ...extra },
+      modelMatrix: matrix, viewProjection: identity(),
+      shaderTime: clock, color: [.8, .1, .2, 1],
+    });
+  };
+
+  const first = draw('strafing', 0, 0, 1);
+  assert.equal(first.actorWebPoseReaction, null, 'no invented movement on first frame');
+  const leaning = draw('strafing', .28, .15, 1.1);
+  assert.equal(leaning.actorWebPoseReaction.kind, 'locomotion');
+  assert.ok(leaning.actorWebPoseReaction.roll < -.1);
+  assert.ok(leaning.actorWebPoseReaction.pitch < -.02);
+  assert.equal(leaning.webPoseLeanApplied, true);
+  const fresh = draw('fresh', .28, .15, 1.1);
+  assert.equal(fresh.webPoseLeanApplied, false, 'other actor has independent history');
+  assert.notDeepEqual(Array.from(leaning.boneModelMatrices), Array.from(fresh.boneModelMatrices));
+  assert.ok(Math.abs(leaning.weaponAttachmentMatrix[13] - fresh.weaponAttachmentMatrix[13]) > .05,
+    'weapon socket follows the same banked bones, not a separate visual transform');
+  const uploaded = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  assert.equal(uploaded.length, 3, 'GPU palette is submitted once per real enemy draw');
+
+  const shot = draw('strafing', .55, .30, 1.2, {
+    action: { state: 'fire', time: 0, weight: 1, blend: 1 },
+  });
+  assert.equal(shot.actorWebPoseReaction, null,
+    'no strafe banking on the real firing edge: deferred muzzle aim is preserved');
+  assert.equal(shot.webPoseLeanApplied, false);
+
+  assert.equal(draw('strafing', 40, 0, 1.3).actorWebPoseReaction, null,
+    'teleport cannot create a fake dramatic bank');
+  assert.equal(draw('strafing', 40.2, 0, 1.65).actorWebPoseReaction, null,
+    'paused or delayed frames are not velocity samples');
+  assert.equal(draw('strafing', 40.3, 0, 0).actorWebPoseReaction, null,
+    'REJOUER rewinds the clock without carrying old momentum');
+
+  const death = draw('strafing', 40.3, 0, .1, {
+    solvedPose: { rig: pass.rig, provenance: 'synthetic ragdoll frame',
+      boneModelMatrices: new Float32Array([...identity(), ...identity()]) },
+  });
+  assert.equal(death.webPoseLeanApplied, false);
+  assert.equal(draw('strafing', 40.4, 0, .2).actorWebPoseReaction, null,
+    'externally solved ragdoll clears this actor movement history');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 9);
+  pass.dispose();
+});
