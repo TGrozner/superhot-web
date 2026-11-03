@@ -105,6 +105,7 @@ try {
   await mkdir(dest, { recursive: true });
   for (const filename of filenames) await copyFile(join(pack, filename), join(dest, filename));
 
+  git(checkout, ['config', 'core.autocrlf', 'false']);
   git(checkout, ['config', 'user.name', author]);
   git(checkout, ['config', 'user.email', email]);
   git(checkout, ['add', '--', 'local-assets']);
