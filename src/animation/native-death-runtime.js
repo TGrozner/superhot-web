@@ -3,6 +3,8 @@ import { meshModelMatrices } from '../render/mesh-format.js';
 import { moveNativeFragmentSphere } from '../vfx/native-fragment-physics.js';
 
 const axes=['x','y','z'];
+// Browser-side frame budget only: never advertise it as a Unity fixed-step policy.
+const WEB_MAX_DEATH_SUBSTEPS = 4;
 const zero=()=>({x:0,y:0,z:0});
 const point=m=>({x:m[12],y:m[13],z:m[14]});
 const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
@@ -150,6 +152,19 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   } else throw new TypeError('Only source Impulse/ConstantForce supported');
 }
 
+// Broadphase before expensive triangle/penetration sweeps. Collider boxes
+// are authored and the candidate corridor is conservative for each sphere.
+// This still handles the source geometry, not simplified replacement geometry.
+function nearbyStaticBoxes(scene,start,end,radius) {
+  const min={x:Math.min(start.x,end.x)-radius,y:Math.min(start.y,end.y)-radius,
+    z:Math.min(start.z,end.z)-radius};
+  const max={x:Math.max(start.x,end.x)+radius,y:Math.max(start.y,end.y)+radius,
+    z:Math.max(start.z,end.z)+radius};
+  return { boxes:scene.boxes.filter(box=>box.enabled &&
+    box.max.x>=min.x && box.min.x<=max.x &&
+    box.max.y>=min.y && box.min.y<=max.y &&
+    box.max.z>=min.z && box.min.z<=max.z) };
+}
 function contactsFor(runtime,body,displacement,contacts) {
   // Sweep the shape centers from the last collision-admitted pose, including
   // joint corrections and angular movement. Sphere-center chords approximate
@@ -160,7 +175,11 @@ function contactsFor(runtime,body,displacement,contacts) {
   const record=hit=>contacts.push({boneIndex:body.source.boneIndex,partId:body.source.partId,...hit});
   for(const sphere of body.spheres) {
     const start=transform(from,sphere.center),end=transform(requested,sphere.center),candidate={...start};
-    const hits=moveNativeFragmentSphere(runtime.collisionScene,candidate,body.velocity,sub(end,start),sphere.radius,runtime.definition.material);
+    const localScene=nearbyStaticBoxes(runtime.collisionScene,start,end,sphere.radius);
+    const hits=localScene.boxes.length
+      ? moveNativeFragmentSphere(localScene,candidate,body.velocity,sub(end,start),
+        sphere.radius,runtime.definition.material)
+      : [];
     const first=hits.find(hit=>!hit.penetration);
     if(first)fraction=Math.min(fraction,first.t);
     for(const hit of hits)record(hit);
@@ -176,7 +195,11 @@ function contactsFor(runtime,body,displacement,contacts) {
   // source box faces; no guessed horizontal ground plane is introduced.
   for(let iteration=0;iteration<2;iteration++)for(const sphere of body.spheres) {
     const start=transform(body.world,sphere.center),candidate={...start};
-    const hits=moveNativeFragmentSphere(runtime.collisionScene,candidate,body.velocity,zero(),sphere.radius,runtime.definition.material);
+    const localScene=nearbyStaticBoxes(runtime.collisionScene,start,start,sphere.radius);
+    const hits=localScene.boxes.length
+      ? moveNativeFragmentSphere(localScene,candidate,body.velocity,zero(),
+        sphere.radius,runtime.definition.material)
+      : [];
     if(hits.length) {
       translate(body,sub(candidate,start));
       for(const hit of hits)record(hit);
@@ -221,16 +244,23 @@ function composePose(runtime) {
  * cleanupRequested edge. Attached objects must use getBoneWorldMatrix, which
  * is the same transform as rendering (no visual-only bone length projection).
  */
-export function advanceNativeDeathRuntime(runtime,scaledDelta) {
+export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork=false}={}) {
   if(!Number.isFinite(scaledDelta)||scaledDelta<0)throw new TypeError('Nonnegative scaled delta required');
+  if(typeof limitWebFrameWork!=='boolean')throw new TypeError('limitWebFrameWork must be boolean');
   const target=runtime.elapsed+scaledDelta;
   if(!Number.isFinite(target))throw new RangeError('Death clock overflow');
   const contacts=[];
-  let remaining=scaledDelta;
+  // Source dt retained for every executed substep. On a slow Web frame,
+  // dropping excess simulation time is preferable to a feedback loop of
+  // more work, lower FPS and ever larger deltas. Cleanup still uses world time.
+  const acceptedDelta=limitWebFrameWork
+    ? Math.min(scaledDelta,WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta)
+    : scaledDelta;
+  runtime.droppedWebSimulationTime=(runtime.droppedWebSimulationTime??0)+scaledDelta-acceptedDelta;
+  let remaining=acceptedDelta;
   while(remaining>1e-12) {
     const dt=Math.min(runtime.definition.fixedDelta,remaining);
     const contactStart=contacts.length;
-    const previous=runtime.bodies.map(b=>({world:b.world.slice()}));
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
       for(const axis of axes) {
@@ -241,30 +271,34 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta) {
       }
       rotateBody(body,mul(body.angularVelocity,dt));
       contactsFor(runtime,body,mul(body.velocity,dt),contacts);
-      previous[i].predicted={...body.position};
       body.forces=body.forces.filter(f=>f.until>runtime.elapsed+dt);
     }
     for(let iteration=0;iteration<runtime.definition.solverIterations;iteration++) {
       for(const joint of runtime.joints)if(joint.enabled){solveLimits(joint);solveAnchor(joint);}
-      for(const body of runtime.bodies)contactsFor(runtime,body,zero(),contacts);
     }
+    // Collision solves once on the final projected pose, not once *per joint
+    // iteration* (22 bodies × joints × scene boxes was the Dojo FPS collapse).
+    for(const body of runtime.bodies)contactsFor(runtime,body,zero(),contacts);
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
-      const correction=mul(sub(body.position,previous[i].predicted),1/dt);
-      // Keep sweep restitution/friction; add only constraint displacement.
-      for(const axis of axes)body.velocity[axis]+=correction[axis];
+      // The angular/linear joint correction is a POSITION projection. The
+      // previous implementation added correction/dt to body.velocity, then
+      // repeated that impulse each substep: artificial energy, flying elastic
+      // corpses. Preserve source gravity/forces and admitted collision
+      // impulses only; never turn solver error into kinetic energy.
       for(let c=contactStart;c<contacts.length;c++) {
         const contact=contacts[c];
         if(contact.boneIndex!==body.source.boneIndex)continue;
         const inward=dot(body.velocity,contact.normal);
         if(inward<0)for(const axis of axes)body.velocity[axis]-=contact.normal[axis]*inward;
       }
-      body.angularVelocity=mul(rotationVector(multiplyMatrices(body.world,inverse(previous[i].world))),1/dt);
+      // Likewise, do not create spin from a joint-correction quaternion.
     }
     runtime.elapsed+=dt;remaining-=dt;composePose(runtime);
   }
   runtime.elapsed=target;
   const cleanupRequested=!runtime.cleanupRequested&&runtime.elapsed>=runtime.definition.cleanupAfterSeconds;
   if(cleanupRequested)runtime.cleanupRequested=true;
-  return {boneModelMatrices:runtime.boneModelMatrices,contacts,cleanupRequested};
+  return {boneModelMatrices:runtime.boneModelMatrices,contacts,cleanupRequested,
+    droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
 }
