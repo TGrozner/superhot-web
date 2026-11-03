@@ -308,3 +308,57 @@ test('Dojo source packet without wrapper schemaVersion renders source skin and w
     rig: rig(), clips: clipBindings,
   }), /schemaVersion|version|schema/i);
 });
+
+
+test('descriptor-only recovered scene packet draws indexed hands without invented held/swing aliases', () => {
+  const { gl, calls } = mockGl();
+  const playerPacket = {
+    schemaVersion: 1,
+    skin: { ...pkg(), weaponAttachment: undefined },
+    weaponBone: 1,
+    states: [{ name: 'Fixture.Hands' }],
+    // Real extractor keys item profiles by pickup_<pathId>, not katana.
+    // This test intentionally does not infer any profile-to-clip binding.
+    profiles: { pickup_4201: { fixture: 'authored item key' } },
+  };
+  const pass = createDojoPlayerAnimationPass(gl, {
+    playerPacket, rig: rig(),
+    // No guessed clip aliases: a recovered controller must send an explicit
+    // descriptor for every actual draw.
+  });
+  assert.equal(pass.clips, null);
+  assert.throws(() => pass.draw(frame('held', .5)), /controller descriptor required/);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 0);
+  const sourceFrame = pass.draw({
+    ...frame('swing', .5),
+    descriptor: { clip: 'swingSource', playback: 'clamp', time: .5 },
+  });
+  assert.equal(sourceFrame.sampledClip, 'swingSource');
+  assert.equal(sourceFrame.handsDrawCalls, 1);
+  assert.equal(sourceFrame.handsTriangles, 2);
+  assert.equal(sourceFrame.sourcePoseSampled, true);
+  assert.equal(sourceFrame.weaponBoneWorldMatrix[12], 1.5);
+  assert.equal(sourceFrame.katanaModelMatrix[12], 1.75);
+  assert.equal(sourceFrame.nativePlayerControllerTransitionVerified, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 1);
+  pass.dispose();
+});
+
+test('descriptor-only mode rejects unknown source clips and never activates without recovered packet', () => {
+  const { gl, calls } = mockGl();
+  const packet = {
+    skin: { ...pkg(), weaponAttachment: undefined },
+    weaponBone: 1, states: [], profiles: { pickup_4201: {} },
+  };
+  const pass = createDojoPlayerAnimationPass(gl, { playerPacket: packet, rig: rig() });
+  assert.throws(() => pass.draw({
+    ...frame('swing', .5),
+    descriptor: { clip: 'unexported-swing', playback: 'clamp', time: .5 },
+  }), /clip unavailable/);
+  assert.equal(pass.draw({ heldItem: { isKatana: false } }), null);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 0);
+  pass.dispose();
+  assert.throws(() => createDojoPlayerAnimationPass(gl, {
+    sourcePackage: pkg(), rig: rig(), clips: null,
+  }), /explicit held and swing source clips/);
+});
