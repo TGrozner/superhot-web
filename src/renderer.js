@@ -470,9 +470,10 @@ export function createRenderer(canvas) {
     if (!nativeWorld) throw new Error('Native scene is not loaded');
     return nativeWorld.getInstanceBounds(id);
   }
-  function drawNativeWorld() {
+  function drawNativeWorld(warningPackets = null) {
     if (!nativeWorld) return null;
-    const report = nativeWorld.draw(viewProjection, currentCamera, currentSceneClock);
+    // Packets are sampled by SH-07's source controller; drawing never advances its clock.
+    const report = nativeWorld.draw(viewProjection, currentCamera, currentSceneClock, warningPackets);
     drawCalls += report.drawCalls;
     return report;
   }
