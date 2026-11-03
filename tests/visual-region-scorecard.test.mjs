@@ -156,9 +156,9 @@ test('missing owner-qualified paired object ID and reused native/Web masks fail 
   }finally{f.remove();}
 });
 
-test('empty, colored or wrong-sized masks cannot produce an IoU',()=>{
+test('both empty, colored or wrong-sized masks cannot produce a qualified IoU',()=>{
   const n=image(),w=image(),a=mask(actorN),b=mask(actorW);
-  assert.throws(()=>measureRegisteredRegion(n,w,mask(()=>false),b),/positive visible area/);
+  assert.throws(()=>measureRegisteredRegion(n,w,mask(()=>false),mask(()=>false)),/Both masks have no visible pixels/);
   const colored=mask(actorN);colored.rgb[3*26+1]=0;
   assert.throws(()=>measureRegisteredRegion(n,w,colored,b),/grayscale/);
   assert.throws(()=>measureRegisteredRegion(n,w,{...a,width:9},b),/viewport/);
@@ -266,4 +266,48 @@ test('CLI prints only aggregated JSON, never native images/source keys/paths',()
     const overwrite=spawnSync(process.execPath,[...args,'--out',out],{encoding:'utf8'});
     assert.equal(overwrite.status,2);
   }finally{f.remove();}
+});
+
+test('one-sided invisible regions have real zero-IoU evidence without fake material RGB', () => {
+  const n=mark(image(),actorN,[200,20,20]);
+  const w=image();
+  const empty=mask(()=>false);
+  const missingWeb=measureRegisteredRegion(n,w,mask(actorN),empty);
+  assert.equal(missingWeb.visibilityStatus,'NATIVE_ONLY_VISIBLE');
+  assert.equal(missingWeb.silhouetteIou,0);
+  assert.equal(missingWeb.centroidDistancePx,null);
+  assert.equal(missingWeb.nativeAreaPixels,20);
+  assert.equal(missingWeb.webAreaPixels,0);
+  assert.equal(missingWeb.symmetricDifferencePixels,20);
+  assert.equal(missingWeb.sharedFractionOfSmallerMask,0);
+  assert.equal(missingWeb.materialIntersection,null);
+  assert.ok(missingWeb.silhouetteUnion.rgbMae01>0);
+  const missingNative=measureRegisteredRegion(w,n,empty,mask(actorN));
+  assert.equal(missingNative.visibilityStatus,'WEB_ONLY_VISIBLE');
+  assert.equal(missingNative.silhouetteIou,0);
+  assert.equal(missingNative.nativeAreaPixels,0);
+  assert.equal(missingNative.webAreaPixels,20);
+  assert.throws(()=>measureRegisteredRegion(w,w,empty,empty),/Both masks have no visible pixels/);
+});
+
+test('a missing Web actor stays rankable by absolute visible screen pixels', () => {
+  const sample=setup();
+  try {
+    writeFileSync(join(sample.dir,'actor-absent.png'),
+      png(WIDTH,HEIGHT,mask(()=>false).rgb));
+    sample.regions.regions[0].webMask='actor-absent.png';
+    sample.save();
+    const report=scoreVisualRegions(sample.nativePath,sample.webPath,sample.regionsPath);
+    const actor=report.regions.find(r=>r.kind==='actor');
+    assert.equal(report.blockers.length,0);
+    assert.equal(actor.visibilityStatus,'NATIVE_ONLY_VISIBLE');
+    assert.equal(actor.silhouetteIou,0);
+    assert.equal(actor.centroidDistancePx,null);
+    assert.equal(actor.materialMeasurementStatus,'BLOCKED_MISSING_VISIBLE_SURFACE');
+    assert.equal(actor.materialIntersection,null);
+    assert.equal(actor.symmetricDifferencePixels,20);
+    assert.ok(actor.screenWeightedUnionRgbMae01>0);
+    assert.equal(report.topAbsoluteSilhouetteDifferences[0].kind,'actor');
+    assert.equal(report.nativeWebPairVerifiedOneToOne,false);
+  } finally { sample.remove(); }
 });
