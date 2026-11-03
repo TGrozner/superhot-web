@@ -429,18 +429,3 @@ receipts, not actual Chromium execution, projectile causality or a matched
 MCD native observation. A completed owner-local Dojo playthrough and the
 same-scene/angle original visual reference remain **UNKNOWN**.
 
-
-## SH-10 active Dojo source-path requalification (3 November 2026)
-
-Source-only audit of current Web entry point (not a Chromium Dojo run):
-`KeyR` is conditional on `!nativeGameplay()`, so the legacy prototype
-reload helper cannot be used as a Dojo keyboard receipt. In contrast, actual
-Dojo movement sends `scaledDeltaTime: worldDt` from `tick.worldDelta` to
-the source-qualified pre-constraint movement; a prior acceptance matrix
-incorrectly described this active path as using real dt. These are **Web source
-classification corrections**, not an original-MCD comparison.
-
-SH-05 owns active Replay wiring and gameplay/browser execution. SH-02 owns
-native movement/time qualification; SH-03 projectile phases. The remaining
-full Dojo Start→6/7 living-to-dead actors→win→Replay→restart test must still
-be played in Chromium and validated from private browser telemetry.
