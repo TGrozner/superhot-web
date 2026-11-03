@@ -827,3 +827,63 @@ test('Web locomotion bank follows live per-actor strafing while sparing shots, t
   assert.equal(calls.filter(call => call[0] === 'draw').length, 9);
   pass.dispose();
 });
+
+
+test('Web J3 sentry breathing and real turning animate the same GPU bones/socket without disturbing fire or death', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'authored J3 fixture', coordinates: 'test bone local',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, poseTime, shaderTime, heading = 0, extra = {}) => {
+    const model = identity();
+    model[0] = Math.cos(heading);
+    model[2] = -Math.sin(heading);
+    model[8] = Math.sin(heading);
+    model[10] = Math.cos(heading);
+    return actors.drawActor({
+      actorId, pose: { state: 'idle', time: poseTime, ...extra },
+      modelMatrix: model, viewProjection: identity(), shaderTime,
+      color: [.8, .1, .2, 1],
+    });
+  };
+
+  const first = draw('guard-a', 0, 1);
+  assert.equal(first.actorWebPoseReaction, null, 'fresh idle state should not snap');
+  const breathing = draw('guard-a', .55, 1.1);
+  assert.equal(breathing.actorWebPoseReaction.kind, 'idle');
+  assert.equal(breathing.webPoseLeanApplied, true);
+  assert.ok(Math.abs(breathing.weaponAttachmentMatrix[13] - first.weaponAttachmentMatrix[13]) > .002,
+    'subtle idle movement must reach the same sampled weapon socket as the GPU pose');
+  assert.notDeepEqual(Array.from(breathing.boneModelMatrices), Array.from(first.boneModelMatrices));
+
+  const turning = draw('guard-a', .65, 1.2, .25);
+  assert.equal(turning.actorWebPoseReaction.kind, 'turn');
+  assert.ok(Math.abs(turning.actorWebPoseReaction.roll) > .06,
+    'actual heading change must trigger a readable, bounded body bank');
+  assert.ok(Math.abs(turning.actorWebPoseReaction.roll) <= .18);
+  const separate = draw('guard-b', .65, 1.2);
+  assert.equal(separate.actorWebPoseReaction.kind, 'idle',
+    'another actor must not inherit the first guard heading history');
+
+  const snap = draw('guard-a', .75, 1.3, 2.8);
+  assert.notEqual(snap.actorWebPoseReaction?.kind, 'turn',
+    'a sudden orientation snap cannot be mistaken for a physical turn');
+  const shot = draw('guard-a', .8, 1.4, 2.8, {
+    action: { state: 'fire', time: 0, weight: 1, blend: 1 },
+  });
+  assert.equal(shot.actorWebPoseReaction, null,
+    'the firing edge must preserve source muzzle aim, without idle or turn banking');
+  const death = draw('guard-a', .85, 1.5, 2.8, {
+    solvedPose: { rig: pass.rig, provenance: 'authored solved J3 fixture',
+      boneModelMatrices: new Float32Array([...identity(), ...identity()]) },
+  });
+  assert.equal(death.webPoseLeanApplied, false, 'ragdolls remain fully source-driven');
+  assert.equal(death.actorWebPoseReaction, null);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 7,
+    'no extra draw calls or fabricated meshes for Web-only pose accents');
+  pass.dispose();
+});
