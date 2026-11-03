@@ -67,6 +67,51 @@ function webPoseReaction(actorId, pose, identity, solvedPose) {
 }
 
 /**
+ * WEB game-feel: bank into actual lateral movement and pitch into a run.
+ * The actor's two already-rendered world transforms are used, so this adds
+ * no authored clip, timing guess, event or extra GPU draw. The accepted
+ * gunshot's frame is intentionally excluded: its muzzle must not move before
+ * the deferred shot takes its socket snapshot.
+ *
+ * @param {Map<string | number, {time: number, x: number, z: number}>} frames
+ * @param {string | number} actorId
+ * @param {{name: string}} identity
+ * @param {number[] | Float32Array} modelMatrix
+ * @param {number | undefined} shaderTime
+ * @param {object | null} solvedPose
+ * @param {object | null} action
+ * @returns {{kind: string, pitch: number, roll: number, design: string} | null}
+ */
+function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTime,
+                            solvedPose, action) {
+  if (solvedPose !== null || action !== null ||
+      (identity.name !== 'walk' && identity.name !== 'run') ||
+      !Number.isFinite(shaderTime) || !modelMatrix || modelMatrix.length !== 16) return null;
+  const previous = frames.get(actorId);
+  if (!previous) return null;
+  // A first frame, pause, teleport or replay is NOT a movement sample.
+  const dt = shaderTime - previous.time;
+  if (!(dt > 0 && dt <= .15)) return null;
+  const dx = modelMatrix[12] - previous.x;
+  const dz = modelMatrix[14] - previous.z;
+  if (!Number.isFinite(dx) || !Number.isFinite(dz) ||
+      Math.hypot(dx, dz) > 1.5) return null;
+  const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
+  const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  if (rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  const strafe = (dx * modelMatrix[0] + dz * modelMatrix[2]) / (dt * rightLength);
+  const advance = (dx * modelMatrix[8] + dz * modelMatrix[10]) / (dt * forwardLength);
+  const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
+  const pitch = clamp(-advance * .022, .11);
+  const roll = clamp(-strafe * .05, .18);
+  if (Math.abs(pitch) + Math.abs(roll) < .012) return null;
+  return Object.freeze({
+    kind: 'locomotion', pitch, roll,
+    design: 'Web-only responsive locomotion banking',
+  });
+}
+
+/**
  * @param {ReturnType<import('./native-skin-pass.js').createNativeSkinPass>} skinPass
  */
 export function createNativeActorSkinRuntime(skinPass) {
@@ -83,6 +128,9 @@ export function createNativeActorSkinRuntime(skinPass) {
   const transitions = new Set(skinPass.availableTransitions);
   const actions = new Set(skinPass.availableActions);
   const instances = new Map();
+  // One tiny previous-transform sample per actor. Never share camera or
+  // movement history between enemies; the runtime is recreated per rig.
+  const movementFrames = new Map();
 
   function choosePose(selection, label) {
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) {
@@ -181,7 +229,9 @@ export function createNativeActorSkinRuntime(skinPass) {
         !actions.has(action.state))) {
       throw new RangeError('Source-composable actor action unavailable: ' + String(action?.state));
     }
-    const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose);
+    const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose)
+      ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
+        modelMatrix, shaderTime, solvedPose, action);
     // Web game-feel: a hard impact reads instantly against the red crystalline
     // silhouette. This pulse follows the live, already accepted hit state;
     // it never fabricates a hit event, clip, or ragdoll motion.
@@ -196,6 +246,20 @@ export function createNativeActorSkinRuntime(skinPass) {
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
     const report = skinPass.draw(draw);
+    // Update history only after a successful, real GPU draw. A failed
+    // frame cannot poison the next actor's banking sample.
+    if (solvedPose !== null) {
+      movementFrames.delete(actorId);
+    } else if (Number.isFinite(shaderTime)) {
+      movementFrames.set(actorId, {
+        time: shaderTime, x: modelMatrix[12], z: modelMatrix[14],
+      });
+      if (movementFrames.size > 128) {
+        for (const [id, sample] of movementFrames) {
+          if (shaderTime - sample.time > 10) movementFrames.delete(id);
+        }
+      }
+    }
     // GPU pass reuses its matrix scratch for every actor; copy *immediately*.
     const matrices = new Float32Array(report.boneModelMatrices);
     const socket = report.weaponAttachmentMatrix === null
