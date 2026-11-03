@@ -1,5 +1,14 @@
 # SH-06 — Animation et VFX : registre de preuve
 
+## SH-06 — huit fenêtres source distinctes de coup de poing (03/11/2026)
+
+**PROUVÉ sur données sérialisées, pas sur une attaque Dojo jouée :** relecture directe de l'artifact privé `superhot-research #46`, run `41432965583`, artifact `13135780460`, `spec/animation/damage-window-writes.json`, SHA256 du contenu `94118dc244fccce15614038fd0945f9a4bd809be5a0f87d902cff2fc9c791110`. Sur le propriétaire `sharedassets0.assets`, huit clips de poing ont chacun une écriture `MeleeDamage=true` puis `false`. Les couples `path_id: début→fin` (secondes de clip) sont : 429 et 468 : `0.4686083197593689→0.7319236993789673` ; 440 : `0.36084142327308655→0.5744336247444153` ; 448 : `0.2970873713493347→0.41553398966789246` ; 457 : `0.3728155493736267→0.4535922706127167` ; 475 : `0.35922330617904663→0.5582523941993713` ; 483 : `0.28446266055107117→0.43558305501937866` ; 489 : `0.3588349521160126→0.45980581641197205`. Les identités des variantes MR et non-MR sont conservées, sans généralisation depuis leurs noms.
+
+**Implémentation Web limitée :** `src/animation/mcd-punch-damage-events.js` étend le planificateur existant #174 à ces huit identités, sans extrapoler aux autres clips. La porte `dojo-punch-contact-gate.js` hérite des vraies bornes du clip sélectionné et refuse un contact hors fenêtre, sans émettre de dégâts automatiquement. Les tests `animation-mcd-punch-damage-events.test.mjs` et `animation-dojo-punch-contact-gate.test.mjs` couvrent les autres variantes, les fenêtres plus courtes et les preuves absentes.
+
+**INCONNU / critère de raccord #5 :** les huit clips ne sont pas tous nécessairement utilisés par les ennemis Dojo. Un intervalle sérialisé, même avec le vrai `PejAiAnimator.MeleeDamageStart/End` (research #152) et le scanner natif (research #29), ne prouve ni la sélection de la transition Mecanim, ni la réception de l'événement, ni un contact physique ou les dégâts. SH-05 doit d'abord relever l'identité du clip réellement actif, son temps d'évaluation et le balayage géométrique horodaté, puis substituer la requête Web conditionnelle au `damagePlayer()` immédiat. Aucun test CI ne constitue un test navigateur/natif de ce raccord.
+
+
 **Périmètre :** SUPERHOT: MIND CONTROL DELETE (Steam app `690040`), pas SUPERHOT 2016. Ce document accompagne les primitives Web indépendantes. Il ne constitue **pas** une certification de parité native.
 
 
