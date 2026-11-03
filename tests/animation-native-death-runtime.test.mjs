@@ -122,3 +122,24 @@ test('parallel authored axis and swingAxis produce deterministic finite constrai
   }
   assert.deepEqual(a.boneModelMatrices,b.boneModelMatrices);
 });
+
+test('death inherits each sampled rigidbody linear and angular velocity, not a shared root velocity',()=>{
+  const def=definition();def.gravity={x:0,y:0,z:0};
+  const current=new Float32Array([...matrix(0,0,0),...matrix(0,1,0),
+    ...matrix(0,2,0),...matrix(0.2,2,0)]);
+  const previousTorso=composeLocalMatrix({position:{x:-0.1,y:2,z:0},
+    rotation:{x:0,y:0,z:-Math.sin(0.1),w:Math.cos(0.1)}});
+  const previous=new Float32Array([...matrix(0,0,0),...matrix(0,1,0),
+    ...previousTorso,...matrix(0.2,2,0)]);
+  const runtime=createNativeDeathRuntime({
+    definition:def,collisionScene:{boxes:[]},boneModelMatrices:current,
+    modelMatrix:matrix(0,0,0),initialVelocity:{x:0.5,y:0,z:0},
+    previousBoneModelMatrices:previous,previousModelMatrix:matrix(0,0,0),
+    poseDeltaSeconds:0.1,
+  });
+  near(runtime.bodies[0].velocity.x,0);
+  near(runtime.bodies[1].velocity.x,1);
+  near(runtime.bodies[1].angularVelocity.z,2);
+  near(runtime.bodies[0].angularVelocity.z,0);
+  assert.ok(Array.from(runtime.boneModelMatrices).every(Number.isFinite));
+});
