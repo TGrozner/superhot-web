@@ -422,3 +422,11 @@ le tronc devrait accompagner davantage la réaction et éviter l'effet « bras
 seul ». Comparer kill avec et sans point d'impact, au moins six morts à FPS
 stable, puis victoire/rejouer. Aucun smoke navigateur ou gain FPS ne découle
 de la CI ; pas de revendication PhysX 1:1.
+
+### SH-06 — coût VFX après hitch : quatre sweeps maximum par shard visible (Web J4, 03/11/2026)
+
+Les morceaux **déjà présents et autorisés** issus d'un GunPickup passent par `advanceGunPickupShardRuntime` et `advanceNativeFragmentBody` dans le Dojo live (`src/combat/native-items.js`). Avant cette modification, un fragment simulait autant de pas fixes que nécessaires pour rattraper un long `worldDt`. À 150 Hz, un intervalle de 300 ms provoquait environ 45 sweeps **par morceau** ; plusieurs objets brisés pouvaient amplifier une chute de FPS.
+
+**Réglage créatif Web, pas une propriété native :** le runtime de fragments visibles conserve les petits pas issus du paquet physique sur les frames ordinaires et limite à **quatre pas balayés par frame** les grandes durées, en répartissant le temps total sur les pas plus grands. Pas d'accumulation de dette simulée : position et durée HDR suivent toujours le temps passé. Après disparition HDR, le morceau n'exécute plus aucun sweep. L'API de simulation hors runtime conserve par défaut les sous-pas source pour les simulations/testeurs qui en ont besoin. Tous les contacts utilisent toujours les colliders de la scène hébergée, pas un sol inventé.
+
+**Test ciblé :** après une pause de 300 ms, la translation libre conserve la distance et utilise au moins cinq fois moins d'accès à la scène de collision ; la disparition à expiration HDR ne fait aucun accès. La trajectoire avec rebonds peut changer légèrement sur un gros hitch, compromis Web assumé pour fluidifier le combat. **À mesurer sur Pages :** briser plusieurs objets avec les touches F/E, provoquer un ralentissement/retour d'onglet, puis contrôler les fragments, les collisions, les FPS, victoire et REJOUER. Les tests Node/CI ne valent pas mesure navigateur, et aucune équivalence PhysX n'est revendiquée.
