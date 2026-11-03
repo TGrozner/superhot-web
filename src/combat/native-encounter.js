@@ -175,6 +175,25 @@ function occupied(runtime, start, end, enemies, except = null) {
   return enemies.some(other => other !== except && participating(other) &&
     occupiedSegment(start, end, position(other), runtime.body.radius*2, runtime.body.height));
 }
+// J3 Web crossfire: a living teammate between a proven muzzle and the player
+// blocks the fire order. Check the body at the shot's interpolated height;
+// an ally behind the shooter, beyond the target, or already dead is not cover.
+// This is gun permission, NOT a new projectile hitbox or friendly-fire damage.
+function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
+  const dx=target.x-muzzle.x, dz=target.z-muzzle.z;
+  const lengthSquared=dx*dx+dz*dz;
+  if(!Number.isFinite(lengthSquared) || lengthSquared<=EPSILON)return false;
+  const radiusSquared=runtime.body.radius*runtime.body.radius;
+  return enemies.some(other => {
+    if(other===shooter || !participating(other))return false;
+    const t=((other.x-muzzle.x)*dx+(other.z-muzzle.z)*dz)/lengthSquared;
+    if(t<=0 || t>=1)return false;
+    const y=muzzle.y+(target.y-muzzle.y)*t;
+    if(y<other.y || y>other.y+runtime.body.height)return false;
+    const sidewaysX=muzzle.x+dx*t-other.x, sidewaysZ=muzzle.z+dz*t-other.z;
+    return sidewaysX*sidewaysX+sidewaysZ*sidewaysZ<=radiusSquared;
+  });
+}
 function nearestEnemy(enemies, point) {
   let nearest=null, best=Infinity;
   for (const enemy of enemies) if (participating(enemy)) {
@@ -251,7 +270,7 @@ function spawnEnemy(runtime, point, order, population) {
       ? Object.freeze({status:'qualified',factoryId:activation.factoryId,
         family:activation.family,archetype:activation.archetype,prefabId:activation.prefabId})
       : Object.freeze({status:'web-pistol-fallback',reason:activation.reason}),
-    encounter:{route:null, target:null, visible:false, canAttack:false, spawnPointId:point.id,
+    encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
@@ -264,6 +283,7 @@ function moveEnemy(runtime, enemy, input) {
   const state=enemy.encounter;
   if (!state) return;
   state.canAttack=false;
+  state.webAllyBlockingShot=false;
   enemy.walking=false;
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
     enemy.runtime.pendingShot=null;
@@ -277,8 +297,14 @@ function moveEnemy(runtime, enemy, input) {
   // native eye/AimTarget bone, and cannot authorize firing.
   const sightOrigin={x:start.x,y:start.y+runtime.aimHeight,z:start.z};
   state.visible=nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2) === null;
-  state.canAttack=armed && Boolean(enemy.muzzlePosition && enemy.muzzleForward) &&
+  const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
+  const worldMuzzleClear=armed && muzzleKnown &&
     nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
+  // Both a world obstacle and an ally can occlude a shot, but only a real
+  // muzzle receipt authorizes repositioning. Existing strafing seeks a lane.
+  state.webAllyBlockingShot=worldMuzzleClear &&
+    webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,playerPosition,enemies);
+  state.canAttack=worldMuzzleClear && !state.webAllyBlockingShot;
   const stopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stop=state.visible && distance(start,playerFeet) <= stopDistance;
   // J3 Web-only tactics: a body-visible enemy whose *known* muzzle is
