@@ -124,7 +124,8 @@ export function assessDojoVertical(trace) {
         g.itemsTruncated !== false ||
         !finiteVec(g.feet) || typeof g.grounded !== 'boolean' ||
         typeof g.moving !== 'boolean' ||
-        (g.heldItem !== null && itemKey(g.heldItem) === null)) {
+        (g.heldItem !== null && itemKey(g.heldItem) === null) ||
+        (g.weapon && g.heldItem !== null)) {
       errors.push('missing/invalid Dojo v2 runtime telemetry at sample ' + i);
       return report(DOJO_VERTICAL_STATUS.INVALID);
     }
@@ -145,9 +146,11 @@ export function assessDojoVertical(trace) {
   checks.everyKillCounterObserved = Array.from({length: target + 1}, (_, value) => value)
     .every(value => witnessedKills.has(value));
   if (!checks.everyKillCounterObserved) errors.push('one or more individual kill-counter transitions were not sampled');
-  checks.pistolEquippedAndFired = active.some(f => get(f).weapon && get(f).ammo > 0) &&
-    active.some((f, i) => i > 0 && get(f).ammo < get(active[i - 1]).ammo);
-  if (!checks.pistolEquippedAndFired) errors.push('no Web pistol-equipment/ammo-consumption observation');
+  checks.pistolEquippedAndFired = active.some((f, i) => i > 0 &&
+    f.activeScreen === 'playing' && active[i - 1].activeScreen === 'playing' &&
+    get(f).weapon === true && get(active[i - 1]).weapon === true &&
+    get(active[i - 1]).ammo > 0 && get(f).ammo < get(active[i - 1]).ammo);
+  if (!checks.pistolEquippedAndFired) errors.push('no consecutive playing frames with armed ammo decrease (gun discard is not a shot)');
 
   let picked = null;
   for (let i = start; i < win; i++) {
