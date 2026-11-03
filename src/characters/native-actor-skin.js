@@ -21,26 +21,47 @@
 /**
  * Reactive Web animation accents; these are a deliberate game-feel choice,
  * NOT source Animator clips or native timing. They only accompany an actual
- * available hit/punch clip, never substitute for missing source animation.
+ * available hit/punch clip or source-composable fire action; no missing source
+ * animation, attack event or fire decision is synthesized.
  * Clock and actor identity come from the live Dojo gameplay caller.
  */
 function webPoseReaction(actorId, pose, identity, solvedPose) {
-  if (solvedPose !== null || (identity.name !== 'hit' && identity.name !== 'punch')) {
-    return null;
-  }
+  if (solvedPose !== null) return null;
   const hit = identity.name === 'hit';
-  const duration = hit ? .32 : .36;
-  if (pose.time <= 0 || pose.time >= duration) return null;
-  const envelope = Math.sin(Math.PI * pose.time / duration);
+  const melee = identity.name === 'punch';
+  // An actual, validated fire action already exists in the active actor
+  // package. Its action time (not the looping locomotion time) drives a
+  // short Web-authored recoil AFTER the firing edge, never before it.
+  const fire = !hit && !melee && pose.action?.state === 'fire';
+  if (!hit && !melee && !fire) return null;
+  let envelope;
+  if (fire) {
+    const time = pose.action.time;
+    const weight = pose.action.weight;
+    const blend = pose.action.blend ?? 1;
+    if (!Number.isFinite(time) || time <= 0 || time >= .9 ||
+        !Number.isFinite(weight) || !Number.isFinite(blend)) return null;
+    // Source clip seconds at the current controller speed. The snap/recovery
+    // curve and angles are deliberate WEB gameplay values, not MCD data.
+    const snap = Math.min(1, time / .15);
+    const recovery = Math.min(1, (.9 - time) / .75);
+    envelope = snap * recovery * Math.max(0, Math.min(1, weight)) *
+      Math.max(0, Math.min(1, blend));
+  } else {
+    const duration = hit ? .32 : .36;
+    if (pose.time <= 0 || pose.time >= duration) return null;
+    envelope = Math.sin(Math.PI * pose.time / duration);
+  }
+  if (envelope <= 0) return null;
   let parity = typeof actorId === 'number' ? actorId % 2 : 0;
   if (typeof actorId === 'string') {
     for (let i = 0; i < actorId.length; i++) parity = (parity + actorId.charCodeAt(i)) % 2;
   }
   const side = parity ? 1 : -1;
   return Object.freeze({
-    kind: identity.name,
-    pitch: (hit ? .08 : -.14) * envelope,
-    roll: side * (hit ? .22 : .035) * envelope,
+    kind: fire ? 'fire' : identity.name,
+    pitch: (fire ? .12 : hit ? .08 : -.14) * envelope,
+    roll: side * (fire ? .05 : hit ? .22 : .035) * envelope,
     design: 'Web-only reactive animation accent',
   });
 }
