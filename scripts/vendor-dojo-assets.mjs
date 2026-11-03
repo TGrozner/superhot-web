@@ -14,6 +14,7 @@ import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { assertDojoDeathPhysics } from './verify-dojo-ragdoll.mjs';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const sourceRoot = resolve(repo, 'private');
@@ -108,6 +109,14 @@ const realScene = await realpath(resolve(sourceRoot, config.scenePackage));
 if (!inside(realScene, realPrivate)) throw new Error('Scene file escapes private/');
 const packet = JSON.parse(gunzipSync(await readFile(realScene)).toString('utf8'));
 assertDojoScene(packet);
+// Private assets are build inputs, never a second runtime asset source.
+ // Refuse to overwrite the canonical local-assets pack with a scene that
+ // does not contain the exact source ragdoll for the served enemy rig.
+const rigSource = await realpath(resolve(sourceRoot, config.enemyRig));
+if (!inside(rigSource, realPrivate)) throw new Error('enemyRig escapes private/');
+const ragdoll = assertDojoDeathPhysics(packet, await readFile(rigSource));
+console.log('Qualified canonical Dojo ragdoll:', ragdoll.bodies,
+  'bodies,', ragdoll.joints, 'joints; exact rig SHA-256.');
 const missing = [...requiredIds(packet)].filter(id => !Object.hasOwn(config, id));
 if (missing.length) throw new Error('Cannot publish incomplete Dojo pack. Missing manifest IDs: ' + missing.join(', '));
 
@@ -142,6 +151,12 @@ try {
     standaloneVersion: 1,
     scene: 'SHRL_Dojo2',
     sceneBuildIndex: 10,
+    // Source-qualified release capability; both localhost and Pages consume
+    // this manifest and the exact rig/scene archive that it binds.
+    features: { ragdoll: {
+      bodies: ragdoll.bodies, joints: ragdoll.joints,
+      rigSha256: ragdoll.rigSha256,
+    } },
     assets,
   };
   await writeFile(join(tmp,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');

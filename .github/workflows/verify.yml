@@ -14,8 +14,10 @@ jobs:
       - name: Install development tooling
         run: npm ci --ignore-scripts
       - name: Verify standalone Pages publisher syntax
-        run: node --check scripts/publish-dojo-pages.mjs
+        run: node --check scripts/publish-dojo-pages.mjs && node --check scripts/sync-dojo-assets.mjs && node --check scripts/verify-dojo-ragdoll.mjs
       - name: Block missing or corrupt Pages assets
         run: node scripts/verify-pages-pack.mjs
+      - name: Check ragdoll in the exact standalone pack
+        run: node scripts/verify-dojo-ragdoll.mjs
       - name: Syntax, unit tests and TypeScript checks
         run: npm run check
