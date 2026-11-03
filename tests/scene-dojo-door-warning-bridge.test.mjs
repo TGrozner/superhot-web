@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDojoDoorWarningBridge, DOJO_DOOR_SOURCE_BINDINGS } from '../src/scenes/dojo-door-warning-bridge.js';
+import { prepareDojoDoorWarningLighting } from '../src/render/lighting-model.js';
 
 // All fixtures are synthetic. The component IDs are non-asset Unity metadata;
 // no native AnimationCurve, texture, model, compiled shader or game output.
@@ -86,4 +87,99 @@ test('missing one source warning ID never redirects the signal to an adjacent do
   assert.deepEqual(bridge.packets().map(p => p.active), [false, false]);
   assert.equal(bridge.accept(warning(103)).status, 'triggered');
   assert.deepEqual(bridge.packets().map(p => p.active), [true, false]);
+});
+
+const browserFromUnityX = 'browserWorld = H * sourceUnityWorld * H, H=diag(-1,1,1,1)';
+const noPrecomputedWorldCatalog = Object.fromEntries(DOJO_DOOR_SOURCE_BINDINGS.map(binding => {
+  const key = `level10::${binding.warningComponentPathId}`;
+  const sourceDoor = door(key);
+  // Contract fixture: real private scene package may lack these derived
+  // world fields even when it has the serialized light/cookie properties.
+  delete sourceDoor.falseLight.position;
+  sourceDoor.spotlight.color = [1, 0, 0];
+  return [key, sourceDoor];
+}));
+const browserScene = overrides => scene({
+  coordinateSpace: { browserFromUnity: browserFromUnityX },
+  gameplay: { audio: { doors: noPrecomputedWorldCatalog } },
+  ...overrides,
+});
+
+test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotlight and false-light packets', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  assert.equal(bridge.readiness, 'source-catalog-present');
+  for (const binding of DOJO_DOOR_SOURCE_BINDINGS) {
+    assert.equal(bridge.accept(warning(binding.spawnGameObjectPathId)).status, 'triggered');
+  }
+  bridge.advance(1);
+  const packets = bridge.packets();
+  assert.deepEqual(packets.map(packet => packet.id), ['level10::7089', 'level10::7090', 'level10::7091']);
+  const expectedWorld = [
+    { spot: [16.010014, 1.7, -17.900024], falseLight: [13.100007, 1.7, -17.899987],
+      forward: [-1, 0, 0] },
+    { spot: [-4.149988, 2.7, -12.039994], falseLight: [-4.149997, 2.7, -14.95],
+      forward: [0, 0, -1] },
+    { spot: [12.250015, 1.7, -3.639992], falseLight: [12.249999, 1.7, -6.549998],
+      forward: [0, 0, -1] },
+  ];
+  packets.forEach((packet, index) => {
+    const expected = expectedWorld[index];
+    packet.spotlight.position.forEach((value, axis) =>
+      assert.ok(Math.abs(value - expected.spot[axis]) < 0.00001));
+    packet.falseLight.position.forEach((value, axis) =>
+      assert.ok(Math.abs(value - expected.falseLight[axis]) < 0.00001));
+    packet.spotlight.direction.forEach((value, axis) =>
+      assert.ok(Math.abs(value - expected.forward[axis]) < 0.0001));
+    assert.ok(Math.abs(packet.spotlight.direction.reduce((sum, v, i) =>
+      sum + v * packet.spotlight.right[i], 0)) < 0.00001);
+    assert.deepEqual(packet.spotlight.up, [0, 1, 0]);
+  });
+
+  // SH-13 adapter receives data ONLY: renderer still needs source cookie
+  // alpha, mesh layer 8 and an SH-05 GPU hook to emit visible pixels.
+  const lights = prepareDojoDoorWarningLighting(source, packets, {
+    verifiedDoorKeys: new Set(packets.map(packet => packet.id)),
+    decodedCookies: new Set(['test-local-cookie']),
+    meshLayer: 8,
+  });
+  assert.equal(lights.spotlights.length, 3);
+  assert.equal(lights.falseLights.length, 3);
+  assert.deepEqual(lights.omissions, []);
+  assert.equal(lights.nativeLightingParity, false);
+  bridge.reset();
+  assert.equal(bridge.packets().filter(packet => packet.active).length, 0);
+});
+
+test('world-basis enrichment fails closed on unverified coordinates, and never overrides private runtime basis', () => {
+  const unverified = createDojoDoorWarningBridge(browserScene({
+    coordinateSpace: { browserFromUnity: 'unsupported-axes' },
+  }));
+  unverified.accept(warning(103));
+  unverified.advance(1);
+  assert.equal(unverified.packets()[0].spotlight.position, undefined);
+  assert.equal(unverified.packets()[0].falseLight.position, undefined);
+
+  const catalogWithPartialRuntime = { ...noPrecomputedWorldCatalog };
+  catalogWithPartialRuntime['level10::7089'] = {
+    ...noPrecomputedWorldCatalog['level10::7089'],
+    spotlight: {
+      ...noPrecomputedWorldCatalog['level10::7089'].spotlight,
+      position: [9, 8, 7],
+    },
+    falseLight: {
+      ...noPrecomputedWorldCatalog['level10::7089'].falseLight,
+      position: [6, 5, 4],
+    },
+  };
+  const bridge = createDojoDoorWarningBridge(browserScene({
+    gameplay: { audio: { doors: catalogWithPartialRuntime } },
+  }));
+  bridge.accept(warning(103));
+  bridge.advance(1);
+  assert.deepEqual(bridge.packets()[0].spotlight.position, [9, 8, 7]);
+  assert.equal(bridge.packets()[0].spotlight.direction, undefined,
+    'never mix a partial runtime basis with serialized initial axes');
+  assert.deepEqual(bridge.packets()[0].falseLight.position, [6, 5, 4]);
+  assert.equal(catalogWithPartialRuntime['level10::7090'].spotlight.position, undefined,
+    'source catalog is not mutated');
 });

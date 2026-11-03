@@ -15,6 +15,65 @@ export const DOJO_DOOR_SOURCE_BINDINGS = Object.freeze([
     spotlightComponentPathId: 6344, falseLightComponentPathId: 7152 }),
 ]);
 
+// Derived browser-world scene markers, NOT raw Unity transforms or a source
+// mesh/material/cookie. Sources: private research #175 and #181 (level10),
+// joining the nine child TRS to three parent Transform roots (father=0).
+// Browser source package uses H=diag(-1,1,1,1); forward=Unity local +Z.
+// These are SERIALIZED INITIAL world poses, not measured runtime door motion.
+// Right/up retain the reflected Unity cookie basis; native UV convention and
+// photometric transfer still require a paired render comparison.
+const BROWSER_FROM_UNITY_X = 'browserWorld = H * sourceUnityWorld * H, H=diag(-1,1,1,1)';
+const DOJO_INITIAL_WARNING_WORLD = Object.freeze({
+  'level10::7089': Object.freeze({
+    spotlight: Object.freeze({
+      position: Object.freeze([16.010014, 1.700000, -17.900024]),
+      direction: Object.freeze([-0.99999999982, 0, 0.00001898408]),
+      right: Object.freeze([-0.00001898408, 0, -0.99999999982]),
+      up: Object.freeze([0, 1, 0]),
+    }),
+    falseLightPosition: Object.freeze([13.100007, 1.700000, -17.899987]),
+  }),
+  'level10::7090': Object.freeze({
+    spotlight: Object.freeze({
+      position: Object.freeze([-4.149988, 2.700000, -12.039994]),
+      direction: Object.freeze([-0.00000910372, 0, -0.99999999996]),
+      right: Object.freeze([0.99999999996, 0, -0.00000910372]),
+      up: Object.freeze([0, 1, 0]),
+    }),
+    falseLightPosition: Object.freeze([-4.149997, 2.700000, -14.950000]),
+  }),
+  'level10::7091': Object.freeze({
+    spotlight: Object.freeze({
+      position: Object.freeze([12.250015, 1.700000, -3.639992]),
+      direction: Object.freeze([-0.00001171682, 0, -0.99999999993]),
+      right: Object.freeze([0.99999999993, 0, -0.00001171682]),
+      up: Object.freeze([0, 1, 0]),
+    }),
+    falseLightPosition: Object.freeze([12.249999, 1.700000, -6.549998]),
+  }),
+});
+
+// Never replace a basis supplied by the private runtime package; even one
+// explicit axis means the publisher must finish/validate the remaining axes.
+// This fallback only enriches recognized, source-qualified Dojo doors.
+function addSerializedInitialWorldBases(catalog) {
+  return Object.fromEntries(Object.entries(catalog).map(([doorId, door]) => {
+    const initial = DOJO_INITIAL_WARNING_WORLD[doorId];
+    if (!initial || !door?.spotlight || !door?.falseLight) return [doorId, door];
+    const hasExplicitSpotBasis = ['position', 'direction', 'right', 'up']
+      .some(field => door.spotlight[field] != null);
+    return [doorId, {
+      ...door,
+      spotlight: hasExplicitSpotBasis
+        ? door.spotlight
+        : { ...door.spotlight, ...initial.spotlight },
+      falseLight: door.falseLight.position != null
+        ? door.falseLight
+        : { ...door.falseLight, position: initial.falseLightPosition },
+    }];
+  }));
+}
+
 const BY_SPAWN_GO = new Map(DOJO_DOOR_SOURCE_BINDINGS.map(binding =>
   [binding.spawnGameObjectPathId, binding]));
 
@@ -54,7 +113,12 @@ export function createDojoDoorWarningBridge(scene) {
   const catalog = scene?.gameplay?.audio?.doors;
   const hasCatalog = catalog !== null && typeof catalog === 'object' &&
     !Array.isArray(catalog) && Object.keys(catalog).length > 0;
-  const controller = qualified && hasCatalog ? createMcdDoorWarnings(catalog) : null;
+  const qualifiedWorldBasis = qualified &&
+    scene?.coordinateSpace?.browserFromUnity === BROWSER_FROM_UNITY_X;
+  const controller = qualified && hasCatalog
+    ? createMcdDoorWarnings(qualifiedWorldBasis
+      ? addSerializedInitialWorldBases(catalog) : catalog)
+    : null;
   const readiness = qualified ? (hasCatalog ? 'source-catalog-present' : 'missing-private-door-catalog')
     : 'not-dojo-build10-source';
 
