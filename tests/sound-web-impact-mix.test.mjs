@@ -4,6 +4,7 @@ import {createWebImpactMix} from '../src/sound/web-impact-mix.js';
 
 function fakeAudio(state = 'running') {
   const nodes = [];
+  const gains = [];
   const param = (value = 0) => ({value,
     setValueAtTime(v) { this.value = v; },
     exponentialRampToValueAtTime(v) { this.value = v; },
@@ -16,7 +17,7 @@ function fakeAudio(state = 'running') {
     nodes.push(n); return n;
   };
   const ctx = {state, currentTime: 2.25, sampleRate: 8000, destination: base(),
-    createGain: () => ({...base(), gain: param()}),
+    createGain: () => { const n = {...base(), gain: param()}; gains.push(n); return n; },
     createDynamicsCompressor: () => ({...base(), threshold: param(), ratio: param(),
       attack: param(), release: param()}),
     createBuffer: (_channels, length) => ({getChannelData: () => new Float32Array(length)}),
@@ -25,7 +26,7 @@ function fakeAudio(state = 'running') {
     createPanner: () => ({...base(), positionX: param(), positionY: param(),
       positionZ: param()}),
   };
-  return {ctx, nodes};
+  return {ctx, nodes, gains};
 }
 
 test('original Web gunshot is scheduled with HRTF and kept inside the voice budget', () => {
@@ -77,4 +78,21 @@ test('a saturated combat mix prioritizes shots over footsteps, not the oldest sh
   assert.equal(stepNoise.stopped, true); // Lower-priority voice was stopped.
   assert.equal(mix.getActiveVoices(), 2);
   mix.dispose();
+});
+
+
+test('Web accents can be trimmed beside original-mode buffers without scheduling muted voices', () => {
+  const {ctx, nodes, gains} = fakeAudio();
+  const layer = createWebImpactMix(ctx);
+  assert.equal(layer.getMixLevel(), 1);
+  assert.throws(() => layer.setMixLevel(1.01), /mixLevel 0\.\.1/);
+  layer.setMixLevel(0);
+  assert.equal(gains[0].gain.value, 0);
+  assert.equal(layer.startAmbience(), false);
+  assert.equal(layer.emit('player-shot').status, 'blocked');
+  assert.equal(nodes.length, 0);
+  layer.setMixLevel(0.15);
+  assert.ok(Math.abs(gains[0].gain.value - 0.114) < 1e-9);
+  assert.equal(layer.emit('player-shot').status, 'started');
+  layer.dispose();
 });
