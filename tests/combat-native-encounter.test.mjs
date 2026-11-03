@@ -364,3 +364,43 @@ test('J3 Web peeking: a body-visible enemy sidesteps low cover until its real mu
   assert.deepEqual(p(blind.x,blind.y,blind.z),p(2,0,5),
     'unknown muzzle does not authorize speculative peeking or shooting');
 });
+
+test('J3 Web crossfire: living allies block muzzle shots and trigger safe flanking, not ghost bullets',()=>{
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const runtime=setup(data), shooter=firstSpawn(runtime,near);
+  const ally={id:'web-ally',x:4,y:0,z:2,alive:true,active:true};
+  shooter.clock=1.6;
+  shooter.muzzlePosition=p(2,1.4,2);
+  shooter.muzzleForward=p(1,0,0);
+  const group=[shooter,ally];
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:.2}));
+  assert.equal(shooter.encounter.visible,true,'empty world keeps line of sight');
+  assert.equal(shooter.encounter.webAllyBlockingShot,true,'standing ally occupies the muzzle lane');
+  assert.equal(shooter.encounter.canAttack,false,'cannot authorize shooting through ally');
+  assert.ok(Math.abs(shooter.z-2)>.05,'already wired tactic seeks an actual lateral shooting lane');
+
+  let cleared=false;
+  for(let i=1;i<12;i++){
+    shooter.clock=1.6+i*.2;
+    shooter.muzzlePosition=p(shooter.x,1.4,shooter.z); // simulated updated GPU socket
+    advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:.2}));
+    if(shooter.encounter.canAttack){ cleared=true; break; }
+  }
+  assert.ok(cleared,'swept/navmesh-safe sidesteps eventually clear ally');
+  assert.equal(shooter.encounter.webAllyBlockingShot,false);
+  assert.ok(Math.hypot(shooter.x-ally.x,shooter.z-ally.z)>.8,
+    'shooter never clips through the blocking ally');
+
+  shooter.x=2;shooter.z=2;shooter.muzzlePosition=p(2,1.4,2);
+  ally.alive=false;
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
+  assert.equal(shooter.encounter.canAttack,true,'dead ally no longer blocks fire');
+  ally.alive=true;ally.x=10;ally.z=2;
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
+  assert.equal(shooter.encounter.canAttack,true,'ally beyond the target does not occlude');
+  ally.x=4;ally.z=3;
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
+  assert.equal(shooter.encounter.canAttack,true,'ally outside the capsule radius does not occlude');
+});
