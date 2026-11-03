@@ -31,6 +31,8 @@ export type DojoReplayMilestone =
   | 'retry' | 'first-clear' | 'double-record'
   | 'score-record' | 'speed-record' | 'clear';
 
+export type DojoWebStyleGrade = 'C' | 'B' | 'A' | 'S';
+
 export interface DojoReplayRecap {
   readonly text: string;
   readonly milestone: DojoReplayMilestone;
@@ -38,6 +40,9 @@ export interface DojoReplayRecap {
   /** Only true for victorious rounds. Persist best under the quota-specific key. */
   readonly shouldPersist: boolean;
   readonly provenance: 'WEB_ONLY';
+  /** Creative Web style ladder based solely on existing combat score. */
+  readonly styleGrade: DojoWebStyleGrade | null;
+  readonly nextStyleTarget: number | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -93,6 +98,18 @@ function validateRun(value: unknown): DojoReplayRun {
   return run;
 }
 
+function gradeDojoStyle(run: DojoReplayRun): {grade: DojoWebStyleGrade; nextTarget: number | null} {
+  // #271 awards 100, 200, ... for consecutive kills within this 6/7 cap.
+  // Dodge bonuses can exceed this COMBO-ONLY S benchmark. Web tuning, not MCD.
+  const ceiling = 50 * run.quota * (run.quota + 1);
+  const bScore = Math.ceil(ceiling * 0.5 / 50) * 50;
+  const aScore = Math.ceil(ceiling * 0.7 / 50) * 50;
+  if (run.score >= ceiling) return {grade:'S',nextTarget:null};
+  if (run.score >= aScore) return {grade:'A',nextTarget:ceiling};
+  if (run.score >= bScore) return {grade:'B',nextTarget:aScore};
+  return {grade:'C',nextTarget:bScore};
+}
+
 /**
  * Generate end-screen feedback from ACTUAL Web counters, independent of MCD.
  * `best` comes from `readDojoReplayBest` for the SAME quota. No side effects.
@@ -136,10 +153,19 @@ export function createDojoReplayRecap(snapshot: unknown,
   const recordText = !run.victory && nextBest !== null
     ? ` · record : ${nextBest.bestScore} pts / ${nextBest.fastestSeconds.toFixed(1)} s`
     : '';
+  const style = run.victory ? gradeDojoStyle(run) : null;
+  const stillNeeded = Math.max(0, run.quota - run.kills);
+  const styleText = style === null
+    ? stillNeeded > 0 ? ` · ${stillNeeded} ENNEMI${stillNeeded > 1 ? 'S' : ''} RESTANT${stillNeeded > 1 ? 'S' : ''}`
+      : ' · QUOTA ATTEINT, MAIS RUN PERDU'
+    : style.nextTarget === null ? ' · STYLE S — RANG MAX'
+      : ` · STYLE ${style.grade} · PROCHAIN RANG : ${style.nextTarget} PTS`;
   return Object.freeze({
-    text: `${metrics} · ${title[milestone]}${recordText}`,
+    text: `${metrics} · ${title[milestone]}${styleText}${recordText}`,
     milestone, best: nextBest,
     shouldPersist: run.victory,
     provenance: 'WEB_ONLY',
+    styleGrade: style?.grade ?? null,
+    nextStyleTarget: style?.nextTarget ?? null,
   });
 }
