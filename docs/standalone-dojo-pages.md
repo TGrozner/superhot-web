@@ -39,7 +39,7 @@ La première commande appelle l'extracteur privé déjà existant, prépare le s
 npm run publish:dojo
 ```
 
-La publication reconstruit **et revérifie** le même pack avant d'envoyer ses fichiers dans un clone temporaire sur GitHub. Elle ne pousse jamais `private/` et ne modifie pas le worktree actif. La CI Pages refuse toute archive de scène dépourvue de `gameplay.deathPhysics`, de son empreinte `deathPhysicsRigSha256` concordante avec `enemyRig.json`, ou du manifeste `features.ragdoll`. Cela évite que l'ancien pack sans physique soit republié après un correctif de code.
+La publication reconstruit **et revérifie** le même pack avant d'envoyer ses fichiers dans un clone temporaire sur GitHub. Elle ne pousse jamais `private/` et ne modifie pas le worktree actif. La CI Pages refuse toute archive de scène dépourvue de `gameplay.deathPhysics`, de son empreinte `deathPhysicsRigSha256` concordante avec `enemyRig.json`, ou d'un manifeste `features.ragdoll` incohérent lorsqu'il est déclaré. Pour la première migration depuis l'ancien script sur `main`, la preuve réelle dans le scenePackage + empreinte rig suffit ; les futures générations déclarent également la feature. Cela évite que l'ancien pack sans physique soit republié après un correctif de code.
 
 **Transition :** la première publication du pack enrichi doit précéder la fusion du garde-fou strict dans le navigateur. Jusqu'à cette publication, un déploiement Pages qui exige `--require-ragdoll` échouera volontairement plutôt que remplacer le site par des assets incomplets. Le résultat reste un solveur Web PBD, pas PhysX natif.
 
