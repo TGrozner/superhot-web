@@ -443,3 +443,24 @@ test('Dojo screenshot Start gate is only a UI witness and leaves non-Dojo captur
     {nativeScene:nativeMetrics.nativeScene}),null);
   assert.equal(requireDojoStartedVisualFrame({getElementById:()=>null},report,'menu'),null);
 });
+
+test('captures a sparse two-tone Dojo-like WebGL silhouette instead of rejecting a valid frame',()=>{
+  let showSinglePixel=true;
+  const gl={
+    FRAMEBUFFER_BINDING:0x8ca6,RGBA:0x1908,UNSIGNED_BYTE:0x1401,NO_ERROR:0,
+    drawingBufferWidth:8,drawingBufferHeight:8,
+    getParameter(){return null;},getError(){return 0;},
+    readPixels(_x,_y,_w,_h,_format,_type,dst){
+      dst.fill(0);
+      for(let i=3;i<dst.length;i+=4)dst[i]=255;
+      if(showSinglePixel)dst[4*(4*8+7)]=255;
+    },
+  };
+  const canvas={width:8,height:8,getContext:()=>gl};
+  const rgba=readRenderedWebglRgba(canvas);
+  // readPixels is bottom-up; the exported pixels must be top-down.
+  assert.equal(rgba[4*(3*8+7)],255);
+  assert.equal(rgba[4*(3*8+6)],0);
+  showSinglePixel=false;
+  assert.throws(()=>readRenderedWebglRgba(canvas),/blank\/uniform/);
+});
