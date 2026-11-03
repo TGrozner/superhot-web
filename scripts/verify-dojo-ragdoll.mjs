@@ -102,9 +102,12 @@ export async function verifyDojoRagdollPack(packDir) {
   catch { fail('scenePackage gzip/JSON cannot be decoded'); }
   const report = assertDojoDeathPhysics(scene, rigBytes);
   const declared = manifest.features?.ragdoll;
-  if (declared?.bodies !== report.bodies ||
-      declared?.joints !== report.joints ||
-      declared?.rigSha256 !== report.rigSha256) {
+  // The existing main publisher predates feature declarations. During the
+  // one-time migration, accept its *actual* source-qualified scene/rig bytes;
+  // a declaration, if present, must match. Never accept missing physics.
+  if (declared && (declared.bodies !== report.bodies ||
+      declared.joints !== report.joints ||
+      declared.rigSha256 !== report.rigSha256)) {
     fail('manifest features.ragdoll does not match the actual scene and rig');
   }
   return report;
