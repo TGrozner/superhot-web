@@ -371,7 +371,31 @@ const WEB_LOOK_BUFFER_CAP = Math.fround(0.6);
 // A JS 1/60 dt is slightly below Math.fround(1/60), so `>` missed it.
 const WEB_LOOK_SAMPLE_SECONDS = Math.fround(1 / 60);
 const WEB_LOOK_GAIN = Math.fround(0.03);
-const WEB_LOOK_ANGLE_CAP = WEB_LOOK_BUFFER_CAP / WEB_LOOK_GAIN;
+export const WEB_LOOK_ANGLE_CAP = WEB_LOOK_BUFFER_CAP / WEB_LOOK_GAIN;
+
+/**
+ * Creative Web angle estimate for one *applied* change in yaw/pitch.
+ * The same estimate is used for the legacy once-per-frame path and for
+ * optional pointer-event path accumulation. It is not a native MCD camera
+ * transform. The caller must pass post-clamp pitch, not raw mouse movement.
+ *
+ * @param {number} fromYaw Current yaw before the movement (radians).
+ * @param {number} fromPitch Current pitch before the movement (radians).
+ * @param {number} toYaw Resulting yaw after the movement (radians).
+ * @param {number} toPitch Resulting pitch after the movement (radians).
+ * @returns {number} Estimated angular travel, degrees.
+ */
+export function webLookDeltaDegrees(fromYaw, fromPitch, toYaw, toPitch) {
+  if (![fromYaw, fromPitch, toYaw, toPitch].every(Number.isFinite)) {
+    throw new RangeError('Web look angles must be finite');
+  }
+  const dot = Math.abs(
+    Math.cos((toYaw - fromYaw) / 2) * Math.cos((toPitch - fromPitch) / 2),
+  );
+  const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+  if (!Number.isFinite(degrees)) throw new RangeError('Web look travel must be finite');
+  return degrees;
+}
 
 /**
  * Default Containers runtime composition, without POWER/SlomoJump modifiers.
@@ -410,13 +434,23 @@ export function addMcdGameplayPulse(clock, duration, amount) {
  * PRIVATE provenance research #148 (artifact 13175262864); #162/#163/#174
  * only qualify the initial serialized Dojo hierarchy, not a runtime binding.
  * Without sourceLookSample, the existing Web yaw/pitch preview is unchanged.
+ *
+ * Optional lookPathDegrees is a WEB-ONLY camera path measured from actual
+ * pointer events since the previous frame. It fixes full aim reversals inside
+ * one RAF frame that disappear when only the final yaw/pitch are compared.
+ * When omitted, the legacy frame-angle estimate remains unchanged.
+ * Never combine the two (that would double-count the same rotation).
  */
 export function stepMcdGameplayClock(clock, {
   dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
-  sourceLookSample,
+  sourceLookSample, lookPathDegrees,
 }) {
   if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
     throw new RangeError('Gameplay time input must be finite with nonnegative dt');
+  }
+  if (lookPathDegrees !== undefined &&
+      (!Number.isFinite(lookPathDegrees) || lookPathDegrees < 0)) {
+    throw new RangeError('lookPathDegrees must be finite and nonnegative');
   }
   clock.realTime += dt;
   if (paused) {
@@ -464,8 +498,9 @@ export function stepMcdGameplayClock(clock, {
     // from the last ~60 Hz sample. On 120+ Hz displays a quick aim reversal
     // otherwise cancels out before the next time-shifter measurement.
     // This is a creative WEB-only estimator, never the native quaternion path.
-    const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
-    const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+    const degrees = lookPathDegrees === undefined
+      ? webLookDeltaDegrees(clock.yaw, clock.pitch, yaw, pitch)
+      : lookPathDegrees;
     clock.lookPendingDegrees = Math.min(WEB_LOOK_ANGLE_CAP, clock.lookPendingDegrees + degrees);
     clock.yaw = yaw; clock.pitch = pitch;
     if (Math.fround(clock.realTime - clock.lookMeasuredAt) >= WEB_LOOK_SAMPLE_SECONDS) {
