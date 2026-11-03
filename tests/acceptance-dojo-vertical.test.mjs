@@ -225,6 +225,46 @@ test('SH10 a corpse without a prior living frame is not a witnessed elimination'
 });
 
 
+
+test('SH10 each kill-counter increase must match a newly sampled live-to-dead actor, not a later corpse',()=>{
+  const data=complete();
+  // Deliberately advance every counter one sample *before* the death.
+  // Every integer 0..6 is still sampled; all six actors become dead later.
+  // The earlier gate passed this as six witnessed kills without per-kill sync.
+  for(let n=0;n<6;n++) {
+    const before=data.frames.find(f=>f.frameId===14+2*n);
+    before.gameplay.encounter.killed=n+1;
+  }
+  assert.equal(assessDojoPlaythrough(data).complete,true);
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.distinctDeadActorsObserved,true);
+  assert.equal(result.checks.aliveToDeadTransitionsObserved,true);
+  assert.equal(result.checks.everyKillCounterObserved,true);
+  assert.equal(result.checks.killCounterAlignedWithWitnessedDeaths,false);
+  assert.ok(result.observed.killDeathDesyncedFrameIds.length>=6);
+  assert.match(result.errors.join('\\n'),/kill-counter increments not aligned with sampled living-to-dead actor transitions/);
+  assert.equal(result.nativeParityVerdict,'UNKNOWN');
+});
+
+test('SH10 delayed counter after each death also fails closed, while an aligned 7-kill trace passes',()=>{
+  const delayed=complete(7);
+  for(let n=0;n<7;n++) {
+    const death=delayed.frames.find(f=>f.frameId===15+2*n);
+    death.gameplay.encounter.killed=n;
+  }
+  const result=report(delayed);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.aliveToDeadTransitionsObserved,true);
+  assert.equal(result.checks.killCounterAlignedWithWitnessedDeaths,false);
+  assert.match(result.errors.join('\\n'),/kill-counter increments not aligned/);
+
+  const aligned=report(complete(7));
+  assert.equal(aligned.status,DOJO_VERTICAL_STATUS.COMPLETE);
+  assert.equal(aligned.checks.killCounterAlignedWithWitnessedDeaths,true);
+  assert.deepEqual(aligned.observed.killDeathDesyncedFrameIds,[]);
+});
+
 test('SH10 cannot certify start→win→restart from counters without trusted browser UI receipts',()=>{
   const withoutStart=complete();
   withoutStart.uiActions=withoutStart.uiActions.filter(a=>a.type!=='start');
