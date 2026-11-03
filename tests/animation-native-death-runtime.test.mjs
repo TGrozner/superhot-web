@@ -175,3 +175,43 @@ test('a world-space off-centre impact rotates the struck bone but a centre hit d
   advanceNativeDeathRuntime(side,0.02);
   assert.ok(Array.from(side.boneModelMatrices).every(Number.isFinite));
 });
+
+
+test('ragdoll uses indexed authored collider bounds while honoring live enable state',()=>{
+  const colliders=[
+    {id:'support',worldMatrix:matrix(0,0.5,0),center:[0,0,0],size:[50,1,50]},
+    {id:'large-x-span-away-in-y',worldMatrix:matrix(0,100,0),
+      center:[0,0,0],size:[3000,1,1]},
+    ...Array.from({length:120},(_,i)=>({
+      id:'distant-'+i,worldMatrix:matrix(200+i*3,0,0),
+      center:[0,0,0],size:[1,1,1],
+    })),
+  ];
+  const scene=prepareNativeCollision(colliders);
+  let boundsVisited=0;
+  for(const box of scene.boxes){
+    let enabled=box.enabled;
+    Object.defineProperty(box,'enabled',{
+      configurable:true,
+      get(){boundsVisited++;return enabled;},
+      set(value){enabled=value;},
+    });
+  }
+  const runtime=create(scene),first=advanceNativeDeathRuntime(runtime,1/150);
+  assert.ok(first.contacts.some(contact=>contact.collider.id==='support'),
+    'the original, source-bounded support still resolves penetration');
+  assert.ok(boundsVisited<200,
+    'a local ragdoll should not scan 122 distant collider states per contact pass');
+  scene.boxes[0].enabled=false;
+  const disabled=create(scene),next=advanceNativeDeathRuntime(disabled,1/150);
+  assert.equal(next.contacts.some(contact=>contact.collider.id==='support'),false,
+    'the shared source enable state must remain live after indexing');
+  const near=prepareNativeCollision([{
+    id:'new-support',worldMatrix:matrix(0,0.5,0),
+    center:[0,0,0],size:[50,1,50],
+  }]);
+  scene.boxes.push(near.boxes[0]);
+  const extended=create(scene),added=advanceNativeDeathRuntime(extended,1/150);
+  assert.ok(added.contacts.some(contact=>contact.collider.id==='new-support'),
+    'changing the scene box list must invalidate the indexed broadphase');
+});
