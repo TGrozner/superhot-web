@@ -6,6 +6,7 @@ function mockBrowser() {
   const listeners = new Map();
   let seq=1, intervalCallback=null, cleared=false, screen='playing';
   let controlsHidden=true, killed=0;
+  const documentListeners = new Map();
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
   const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
     nativeScene:{source},gameplay:{encounter:{killed,killTarget:6,enemies:[]},
@@ -23,6 +24,8 @@ function mockBrowser() {
   };
   globalThis.window=fakeWindow;
   globalThis.document={
+    addEventListener(type,callback){documentListeners.set(type,callback);},
+    removeEventListener(type){documentListeners.delete(type);},
     getElementById(id){return id === 'scene-controls' ? {hidden:controlsHidden} : null;},
     createElement(){return {click(){}};},
   };
@@ -31,6 +34,9 @@ function mockBrowser() {
     setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
     setSceneBuildIndex(index){source.sceneBuildIndex=index;},
     tick(){intervalCallback();},
+    click(buttonId, trusted=true){documentListeners.get('click')?.({isTrusted:trusted,
+      target:{closest(selector){assert.equal(selector,'button');return {id:buttonId};}}});},
+    get documentListenerCount(){return documentListeners.size;},
     key(code,down=true,extra={}){listeners.get(down?'keydown':'keyup')?.({code,...extra});},
     get listenerCount(){return listeners.size;}, get cleared(){return cleared;},
     teardown(){delete globalThis.window;delete globalThis.document;},
@@ -191,5 +197,38 @@ test('SH10 armed recorder does not begin on pause/win or mid-combat resume',()=>
     mock.setKilled(0);mock.setFrame(4);mock.tick();
     assert.equal(recorder.ready,true);
     assert.equal(recorder.stop().frames[0].frameId,4);
+  } finally {mock.teardown();}
+});
+
+
+test('SH10 browser captures trusted Start and win-screen Replay clicks as bounded UI receipts',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.click('start-button',false); // JS-dispatched clicks do not prove UI interaction.
+    mock.click('start-button');
+    mock.setFrame(2);mock.setControlsHidden(true);mock.tick();
+    mock.setScreen('win');mock.setKilled(6);mock.setFrame(3);mock.tick();
+    mock.click('again-button');
+    mock.setScreen('playing');mock.setKilled(0);mock.setFrame(4);mock.tick();
+    const result=recorder.stop();
+    assert.deepEqual(result.uiActions,[
+      {type:'start',buttonId:'start-button',frameId:1,activeScreen:'playing'},
+      {type:'restart',buttonId:'again-button',frameId:3,activeScreen:'win'},
+    ]);
+    assert.equal(mock.documentListenerCount,0);
+  } finally {mock.teardown();}
+});
+
+test('SH10 does not accept an attempted Replay click outside win screen',()=>{
+  const mock=mockBrowser();
+  try {
+    const recorder=startDojoCapture();
+    mock.click('again-button');
+    mock.click('resume-button');
+    mock.click('again-button',false);
+    assert.deepEqual(recorder.stop().uiActions,[]);
+    assert.equal(mock.documentListenerCount,0);
   } finally {mock.teardown();}
 });
