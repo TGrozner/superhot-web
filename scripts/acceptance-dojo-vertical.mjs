@@ -140,8 +140,35 @@ export function assessDojoVertical(trace) {
     errors.push('base Dojo start/spawn/kills/win/restart must be complete first');
     return report(DOJO_VERTICAL_STATUS.INCOMPLETE);
   }
-  const active = frames.slice(start, win);
+  // Web encounter retains dead actors until the next reset. A kill counter can
+  // reach the quota even when the trace contains only one dead actor repeatedly;
+  // count distinct rendered Web enemy IDs instead of accepting that false proof.
+  // This is a Web receipt, not evidence of native MCD death causality.
   const target = get(frames[start]).encounter.killTarget;
+  const deadActorIds = new Set(), previousLiveness = new Map();
+  for (let i = start; i <= win; i++) {
+    const inFrame = new Set();
+    for (const actor of get(frames[i]).encounter.enemies) {
+      const id = itemKey(actor?.id);
+      if (!isRecord(actor) || !id || typeof actor.alive !== 'boolean' || inFrame.has(id)) {
+        errors.push('invalid/duplicate Web encounter actor ID or liveness at sample ' + i);
+        return report(DOJO_VERTICAL_STATUS.INVALID);
+      }
+      if (previousLiveness.get(id) === false && actor.alive) {
+        errors.push('dead Web encounter actor resurrected before restart at sample ' + i);
+        return report(DOJO_VERTICAL_STATUS.INVALID);
+      }
+      inFrame.add(id);
+      previousLiveness.set(id, actor.alive);
+      if (!actor.alive) deadActorIds.add(id);
+    }
+  }
+  checks.distinctDeadActorsObserved = deadActorIds.size >= target;
+  observed.distinctDeadActorIdsBeforeWin = deadActorIds.size;
+  if (!checks.distinctDeadActorsObserved) {
+    errors.push('fewer than kill quota distinct dead actor IDs observed in Web encounter');
+  }
+  const active = frames.slice(start, win);
   const witnessedKills = new Set(frames.slice(start, win + 1).map(f => get(f).encounter.killed));
   checks.everyKillCounterObserved = Array.from({length: target + 1}, (_, value) => value)
     .every(value => witnessedKills.has(value));

@@ -392,3 +392,21 @@ single real owner-local browser trace with spawn, armed ammo decrease,
 same-item pickup/release, 6/7 kills, win and restart; any missing step
 remains **INCOMPLETE** until observed. The native Dojo visual, gameplay
 and timing deltas remain **UNKNOWN** without paired original runtime evidence.
+
+### SH-10 P0: six or seven *distinct* dead Web actors (3 November 2026)
+
+The Dojo vertical gate now requires at least the configured **6 or 7 distinct
+Web encounter IDs observed with `alive:false`** before victory. The current
+Web owner retains corpses in `state.enemies` until restart, and its encounter
+assigns unique `native-encounter-N` IDs. A trace that repeats one dead actor
+while the kill counter climbs to six is **INCOMPLETE**, not a completed run.
+Duplicate IDs in one sampled frame, invalid liveness, or resurrection of a
+previously dead actor before restart is invalid telemetry. The result reports
+`distinctDeadActorIdsBeforeWin` separately from the kill counter.
+
+This is a stricter **Web-only observation**: a rendered dead actor is not proof
+of a native kill or its projectile/weapon cause. Sparse samples or a future Web
+cleanup policy that removes corpses may produce INCOMPLETE; do not fabricate
+missing actors or weaken the gate automatically. Authored Node tests validate
+the checker only; the owner-local Chromium 6–7 kill → win → restart and matched
+native/Web screenshots are still NOT OBSERVED by these tests.
