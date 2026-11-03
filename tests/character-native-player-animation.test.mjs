@@ -362,3 +362,29 @@ test('descriptor-only mode rejects unknown source clips and never activates with
     sourcePackage: pkg(), rig: rig(), clips: null,
   }), /explicit held and swing source clips/);
 });
+
+test('source unarmed pose can draw GPU hands without a held item', () => {
+  const packet = {
+    schemaVersion: 1, skin: { ...pkg(), weaponAttachment: undefined },
+    weaponBone: 1, states: [], profiles: { unarmed: { handsVisible: true } },
+  };
+  const { gl, calls } = mockGl();
+  const pass = createDojoPlayerAnimationPass(gl, { playerPacket: packet, rig: rig() });
+  const args = {
+    heldItem: null, profileId: 'unarmed',
+    descriptor: { clip: 'swingSource', playback: 'clamp', time: 0.5 },
+    modelMatrix: identity(), viewProjection: identity(),
+    shaderTime: 0, color: [1,1,1,1],
+  };
+  assert.equal(pass.draw({ ...args, descriptor: null }), null);
+  assert.equal(pass.draw({ ...args, profileId: 'pistol' }), null);
+  const receipt = pass.draw(args);
+  assert.equal(receipt.handsDrawCalls, 1);
+  assert.equal(receipt.sampledClip, 'swingSource');
+  assert.equal(receipt.katanaModelMatrix, null);
+  assert.equal(receipt.katanaTransformReady, false);
+  assert.equal(calls.filter(c => c[0] === 'draw').length, 1);
+  assert.throws(() => pass.draw({ ...args, katanaMeshLocalMatrix: identity() }),
+    /Unarmed Dojo hands/);
+  pass.dispose();
+});
