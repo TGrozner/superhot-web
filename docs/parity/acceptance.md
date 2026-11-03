@@ -576,3 +576,31 @@ A failure reports the *first reproducible Web receipt gap*; it does not prove
 whether the original MCD behaves identically. No new native asset, code or
 reference image is included.
 
+
+
+### SH-10 Dojo browser clock-rate receipt (3 November 2026)
+
+The Dojo rendered snapshot exposes `gameplay.timeScale` (the **next** Web
+scale) and `worldClock` (already accumulated using the **applied** scale).
+The opt-in browser sampler now records `sampledAtMs` from
+`window.performance.now()` and the app-reported `gameplay.timeScale`.
+These are bounded scalar metadata, never pixels or original assets. The
+independent `scripts/acceptance-dojo-clock.mjs` reports measured Web
+world-seconds/real-sampler-second for a stable idle span and a stable moving
+span, with 250 ms switch exclusion and >=300 ms observation per span:
+
+```sh
+node scripts/acceptance-dojo-clock.mjs --trace private/dojo-full-run.json
+```
+
+This is **diagnostic**, not a new mandatory 6–7 kill acceptance condition.
+Missing clocks/older recordings are INCOMPLETE, wrong Dojo scene or malformed
+timestamps INVALID, and sampled regimes merely OBSERVED. The sampler runs
+on a timer (not in the rAF callback); background throttling, look/shoot pulses,
+sampling gaps, shifter smoothing and the previous-scale application can bias
+ratios. Never assert `timeScale * sampledSeconds == worldDelta` as if one
+Web snapshot held the applied scale. No numeric MCD target is invented; the
+native replay's actual clock/time phase and matched inputs are still UNKNOWN.
+Five/six authored Node regressions validate only the observer, not a browser
+playthrough. SH-05/SH-02 own any runtime/time adjustment after a real
+owner-local trace identifies a reproducible discrepancy.
