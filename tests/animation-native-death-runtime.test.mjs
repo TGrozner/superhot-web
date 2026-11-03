@@ -267,10 +267,12 @@ test('Web corpses settle only on live grounded contact, sleep, then wake for rea
   assert.deepEqual(tick.contacts,[]);
   near(runtime.elapsed,beforeTime+1/30);
 
-  applyNativeDeathForce(runtime,{boneIndex:1,mode:'Impulse',vector:{x:12,y:0,z:0}});
+  const yBeforeHit=runtime.bodies[0].position.y;
+  applyNativeDeathForce(runtime,{boneIndex:1,mode:'Impulse',vector:{x:0,y:12,z:0}});
   assert.equal(runtime.resting,false,'a later projectile must wake the solved body');
   advanceNativeDeathRuntime(runtime,1/60,{limitWebFrameWork:true});
-  assert.ok(runtime.bodies[0].position.x>0.001,'woken impulse must move the body');
+  assert.ok(runtime.bodies[0].position.y>yBeforeHit+0.001,
+    'woken upward impulse must move the body away from its support');
 
   const displaced=grounded();
   const originalY=displaced.runtime.bodies[0].position.y;
