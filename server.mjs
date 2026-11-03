@@ -55,6 +55,36 @@ try {
   if (error.code !== 'ENOENT') throw error;
   localAssets.clear();
 }
+// A complete self-contained static pack takes precedence over owner-local assets.
+// Once included in the deployed site, it does not require private/ at runtime.
+const standaloneRoot = resolve(root, 'local-assets');
+let standaloneManifest = null;
+const standaloneFiles = new Map();
+try {
+  const raw = await readFile(resolve(standaloneRoot, 'manifest.json'), 'utf8');
+  const parsed = JSON.parse(raw);
+  if (parsed?.standaloneVersion !== 1 || !parsed.assets?.scenePackage ||
+      !parsed.assets?.enemyMerged || !parsed.assets?.enemyRig) {
+    throw new Error('Invalid standalone Dojo manifest');
+  }
+  const actualStandaloneRoot = await realpath(standaloneRoot);
+  for (const [id, asset] of Object.entries(parsed.assets)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id) ||
+        typeof asset?.path !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(asset.path) ||
+        !/^(image\/png|application\/(?:gzip|json|octet-stream)|audio\/wav)$/.test(asset.type)) {
+      throw new Error('Invalid standalone asset entry');
+    }
+    const file = await realpath(resolve(standaloneRoot, asset.path));
+    if (!inside(file, actualStandaloneRoot) || !(await stat(file)).isFile()) {
+      throw new Error('Standalone asset outside public pack');
+    }
+    standaloneFiles.set(asset.path, { file, type: asset.type });
+  }
+  standaloneManifest = raw;
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
 function send(res, status, type, body, head = false) {
   res.writeHead(status, {
     'Content-Type': type, 'Cache-Control': 'no-store',
@@ -81,6 +111,17 @@ const server = createServer(async (req, res) => {
         send(res, 403, 'text/plain', 'Same-origin access only'); return;
       }
       const id = pathname.slice('/local-assets/'.length);
+      if (standaloneManifest) {
+        if (id === 'manifest' || id === 'manifest.json') {
+          send(res, 200, 'application/json', standaloneManifest, req.method === 'HEAD'); return;
+        }
+        const requested = id.endsWith('.gz') || id.endsWith('.png') ||
+          id.endsWith('.wav') || id.endsWith('.json') || id.endsWith('.bc3')
+          ? id : ([...standaloneFiles.keys()].find(name => name.split('.')[0] === id));
+        const staticFile = standaloneFiles.get(requested);
+        if (!staticFile) { send(res, 404, 'text/plain', 'Asset not in standalone manifest'); return; }
+        send(res, 200, staticFile.type, await readFile(staticFile.file), req.method === 'HEAD'); return;
+      }
       if (id === 'manifest') {
         const assets = Object.fromEntries([...localAssets].map(([key, { name, type }]) => [key, { name, type }]));
         send(res, 200, 'application/json', JSON.stringify({ assets }), req.method === 'HEAD'); return;
