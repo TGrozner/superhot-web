@@ -151,11 +151,12 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     lastFrameId = snapshot.frameId;
     const g = snapshot.gameplay ?? {}, encounter = g.encounter;
     const items = Array.isArray(g.items) ? g.items : [];
+    const sampledAtMs = window.performance?.now?.();
     const changed = items.filter(i => i?.state !== 'static');
     frames.push({
       frameId: snapshot.frameId,
       // Sampler wall time, NOT the rAF timestamp or native Unity time.
-      sampledAtMs: Number.isFinite(window.performance?.now?.()) ? window.performance.now() : null,
+      sampledAtMs: Number.isFinite(sampledAtMs) ? sampledAtMs : null,
       activeScreen: snapshot.activeScreen,
       worldClock: snapshot.worldClock,
       nativeScene: snapshot.nativeScene ? { source: {
