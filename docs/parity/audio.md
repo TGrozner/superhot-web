@@ -927,3 +927,85 @@ d'AudioContext dans un Dojo complet restent à mesurer par SH-05 et
 Thomas sur leur session locale. Les observations antérieures ont
 seulement démontré WebAudio pickup/throw/shatter et les trois boucles
 d'ambiance de porte.
+
+
+## SH-07 — Dojo Katana source-qualified hit audio (2026-11-03)
+
+**PROUVÉ : source native statique et liaison sérialisée ; PAS lecture exécutée ni audition.**
+MCD Steam build 20299547, Unity 2018.4.14f1 ; Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`.
+Lectures bornées privées (aucune sortie brute ou WAV publiée) :
+
+- [research #185](https://github.com/TGrozner/superhot-research/issues/185),
+  `Katana.cs:1–220`, artifact `13233181619`, SHA-256 de l'extrait
+  `d1d654bfadd0e0206d4d26b60bb5a6d2aba4b2627aa11d7183ebb180e9f3d30b`.
+- [research #188](https://github.com/TGrozner/superhot-research/issues/188),
+  `Katana.cs:221–end`, artifact `13232868832`, SHA-256 de l'extrait
+  `f4b3abce0d4e4cf2d67e88234b79212884611e761396bc7931620a2b6`.
+- [research #186](https://github.com/TGrozner/superhot-research/issues/186),
+  `KatanaAudioResources.cs`, artifact `13232832862`, extrait SHA-256
+  `cfb361bcc747a3a61ba688b6dfb09627c5d35113e2b3be5489edfac2e39a534f`.
+- [research #189](https://github.com/TGrozner/superhot-research/issues/189),
+  `AudioResources.cs`, artifact `13233362662`, extrait SHA-256
+  `427da16aceb391e6ce77277b875a3109ba106f6176f5dfd87f3295548f2cf02d`.
+- [research #192](https://github.com/TGrozner/superhot-research/issues/192)
+  et [#193](https://github.com/TGrozner/superhot-research/issues/193), données
+  Unity sérialisées, artifact `13232858119` pour les identités finales.
+
+**Garde swing :** `Katana.Attack` exige une arme non lancée, prête, au moins
+une cible courante et le modificateur `NoTakedowns` inactif avant de
+demander le son `swingSounds[Random.Range(...)]`. `Katana.Start` complète
+l'ensemble depuis `AudioResources.Katana` **seulement si le tableau
+`swingSounds` entier est null** ; les trois entrées nulles sérialisées
+sur l'instance Dojo ne prouvent donc aucune lecture des trois ressources
+globales. Inventaire des **fallbacks non déclenchés** :
+`sharedassets0.assets:603` (`AC_Katana_Swing_01`),
+`sharedassets0.assets:629` (`AC_Katana_Swing_02`),
+`resources.assets:1644` (`AC_Katana_Swing_03`). Aucun son de swing inventé.
+
+**Producteur hit :** `Katana.AttackTarget` atteint
+`Katana.PlaySliceSound` pour quatre familles : `GunPickup`,
+`Shatterable`, `BreakGlass`, `PejAiBodyPart` vivant.
+La branche balle/protection **ne déclenche pas** `PlaySliceSound`.
+La méthode demande `AudioManager.PlayClip(AudioResources.Katana.Hit)`
+uniquement lorsque `Time.realtimeSinceStartup > lastSliceSound + 0.1f`
+(inégalité stricte, état par instance de Katana), puis, en cas de retour
+normal, met à jour `lastSliceSound` même si le moteur a refusé la lecture.
+`RandomizeAudioParameters(.1,.1,startFromBeginning:true,relativePitch:true)`
+est appliqué à l'intention de lecture. C'est une horloge Unity **REAL**,
+pas le temps `WORLD`, ni une durée d'animation. L'ordre exact des phases
+de rendu et les sons effectivement émis ne sont pas mesurés.
+
+**Identité précise du Hit (inventaire uniquement) :** `AudioResources.Katana`
+pointe vers l'objet `resources.assets:29451`, champ `Hit` :
+`resources.assets:1443` / `AC_Katana_Hit`, volume sérialisé
+`0.5`, pitch `1`, priorité `128`, référence mixer
+fileID `3` / pathID `659`. Une référence mixer n'atteste pas la chaîne
+DSP réellement active ; `Resources.Load`, le son décodé et la sortie
+haut-parleur restent **INCONNU**.
+
+**PROUVÉ WEB (contrat pur, tests Node uniquement) :**
+`src/sound/mcd-katana-event-intent.ts` et le runtime JS généré
+`mcd-katana-event-intent.js` fournissent
+`planMcdKatanaSliceSound`, exigeant la famille exacte de contact, l'horloge
+REAL, le précédent rest et l'état de décodage local explicite. La
+requête n'est admissible qu'avec le clip `resources.assets:1443`
+chargé **localement** et n'implique ni nouveau média ni synthèse.
+`tests/sound-mcd-katana-events.test.mjs` couvre les quatre producteurs,
+la branche exclue, les frontières temporelles, le clip manquant et les
+paramètres source. Un test réussi n'est pas une observation audio.
+
+**Passage SH-05 (fichiers réservés, non modifiés ici) :** actuellement,
+`src/main.js` appelle `audio.itemCue('swing')` sur chaque clic katana,
+et `audio.itemCue('slice')` seulement après son
+`findMeleeTarget()/killEnemy` Web. Ne pas considérer ces appels comme
+`Katana.Attack/AttackTarget` natifs. Qualifier le contact réellement
+accepté, conserver le contrôle d'animation, attendre le chemin
+`PlaySliceSound`, puis demander à `src/audio.js.itemCue('slice')`
+l'AudioClip privé identifié par `resources.assets:1443` seulement si
+le fichier local ignored/whitelisted et décodé existe. Ne pas modifier
+les trois swings nulls, ni inventer une piste de remplacement.
+Instrumenter `AudioContext.running`, ID/durée du buffer, démarrage
+`AudioBufferSourceNode` et pic d'analyseur non nul dans le Dojo.
+Ces mesures démontreraient le graphe navigateur, **pas** l'audition
+physique ni la parité temporelle Unity ; elles ne sont pas encore réalisées.
