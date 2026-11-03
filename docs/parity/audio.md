@@ -1033,3 +1033,43 @@ actuel n'établit pas ce contrat, donc brancher naïvement ce descripteur sur
 l'ancien clic produirait un faux positif. Mesurer `AudioBufferSourceNode.start`
 et le signal Chromium séparément : ni cette liaison ni un test Node n'attestent
 un son perçu ou une parité 1:1.
+
+
+### SH-07 — Katana Hit channel gate in the Web bridge (2026-11-03)
+
+**Concrete Web defect fixed:** the prior `planMcdKatanaHitSceneBinding`
+registered `items[itemId].slice` without `mixerGroup`. In
+`src/audio.js:playMcdClip`, that always makes `channelPresent=false`, so
+`planMcdPlayClip` returns `channel-null` even when a browser buffer
+has successfully decoded. This was a **Web request rejected**, not proof
+of silence at a physical speaker.
+
+**Static native evidence:** `AudioManager.PlayClip(AudioResource)` takes
+`AudioResource.Channel` (private research [#113](https://github.com/TGrozner/superhot-research/issues/113),
+`AudioManager.cs:574–577`; Assembly-CSharp SHA above).
+`AudioManager.PlayClip(AudioClip,...)` rejects a null channel before
+requesting `AudioSource.Play` (private [#112](https://github.com/TGrozner/superhot-research/issues/112),
+`AudioManager.cs:499–519`). For this Hit AudioResource, the serialized
+channel **reference** is fileID `3` / pathID `659`
+(private [#193](https://github.com/TGrozner/superhot-research/issues/193),
+`resources.assets:29451.Hit.Channel`). Source references prove only
+serialized identity, **not native runtime resolution or group name**.
+
+The SH-07 binding now supplies the browser-only routing label
+`source-mixer-ref:file3:path659`, derived solely from those serialized
+integers. The alias is deliberately **not** `Env SFX`, `Gunshots`,
+`Unscaled SFX`, a Unity mixer name or a claim of source pitch scaling.
+No DSP, Unity mixer or audible result is inferred. A targeted Node
+regression confirms that this descriptor reaches the **Web PlayClip
+request** rather than failing the null-channel guard; no browser test
+has been executed here. SH-05 still must qualify the original contact,
+load/decode an authorized asset, wire the scene and verify graph output.
+
+**Standalone gate:** at audited `main@f14b0fa72fc9`, the public Git tree
+has **no** `local-assets/manifest.json` after asset removal PR
+[#251](https://github.com/TGrozner/superhot-web/pull/251)
+(`.gitignore` excludes `/local-assets/`). The historical Pages pack
+is **not** proof that a current or future deployment serves this WAV.
+Do not republish proprietary media until redistribution rights are
+verified. Missing media must remain an explicit failure, never a
+synthetic substitute.
