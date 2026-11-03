@@ -182,11 +182,16 @@ export function createNativeActorSkinRuntime(skinPass) {
       throw new RangeError('Source-composable actor action unavailable: ' + String(action?.state));
     }
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose);
+    // Web game-feel: a hard impact reads instantly against the red crystalline
+    // silhouette. This pulse follows the live, already accepted hit state;
+    // it never fabricates a hit event, clip, or ragdoll motion.
+    const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
+      ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
     const draw = {
       instance: selected.instance, time: selected.time,
       modelMatrix, viewProjection, color, cameraPosition,
       transition, action, solvedPose,
-      webPoseLean: reaction,
+      webPoseLean: reaction, webHitFlash,
     };
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
@@ -198,7 +203,7 @@ export function createNativeActorSkinRuntime(skinPass) {
     return Object.freeze({
       ...report, actorId, actorSourceSelection: selected.identity,
       boneModelMatrices: matrices, weaponAttachmentMatrix: socket,
-      actorWebPoseReaction: reaction,
+      actorWebPoseReaction: reaction, actorWebHitFlash: webHitFlash,
       // A serialized controller/state name is NOT proof of active native
       // Mecanim runtime branch or of 1:1 gameplay animation behavior.
       nativeActorControllerExecutionVerified: false,
