@@ -15,6 +15,11 @@
 #hit-confirm i:nth-child(3){left:5px;bottom:10px;transform:rotate(-45deg)}
 #hit-confirm i:nth-child(4){right:5px;bottom:10px;transform:rotate(45deg)}
 #hit-confirm.kill i{background:#e20b31;width:16px;height:4px;box-shadow:0 0 7px rgba(216,19,57,.52)}
+/* Web-original near-miss reward; no native asset, no moving camera. */
+#dodge-pulse{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,transparent 43%,rgba(21,143,174,.06) 65%,rgba(16,151,180,.36) 100%);mix-blend-mode:multiply}
+#dodge-pulse[hidden]{display:none}
+#dodge-banner{position:absolute;top:30%;left:50%;transform:translateX(-50%);padding:8px 14px;white-space:nowrap;max-width:calc(100% - 30px);background:rgba(232,249,252,.89);border-left:3px solid #18a5b9;color:#096d81;box-shadow:0 4px 19px rgba(8,95,122,.12);font:900 clamp(11px,1.55vw,17px)/1.15 ui-monospace,Consolas,monospace;letter-spacing:.055em;pointer-events:none}
+#dodge-banner[hidden]{display:none}
 #chain-banner{position:absolute;top:23%;left:50%;transform:translateX(-50%);max-width:calc(100% - 48px);white-space:nowrap;padding:9px 16px;border-left:3px solid #df1c3d;background:rgba(241,245,248,.88);box-shadow:0 6px 22px rgba(32,44,54,.1);color:#b31334;font:900 clamp(12px,1.6vw,18px)/1.15 ui-monospace,Consolas,monospace;letter-spacing:.06em;text-align:center;pointer-events:none}
 #chain-banner[hidden]{display:none}
 #hud{position:absolute;inset:0;pointer-events:none;user-select:none}#hud[hidden],.overlay[hidden],[hidden]{display:none!important}
