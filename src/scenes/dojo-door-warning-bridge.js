@@ -131,20 +131,25 @@ function createWebWarningSweep(catalog, controller) {
     });
   }
 
-  function restore(id) {
-    const records = id == null ? bases.values() : [bases.get(id)];
-    for (const base of records) {
-      if (!base) continue;
-      const spotlight = base.packet.spotlight;
-      if (base.direction) {
-        for (let axis = 0; axis < 3; axis++) {
-          spotlight.direction[axis] = base.direction[axis];
-          spotlight.right[axis] = base.right[axis];
-        }
+  function restoreOne(base) {
+    if (!base) return;
+    const spotlight = base.packet.spotlight;
+    if (base.direction) {
+      for (let axis = 0; axis < 3; axis++) {
+        spotlight.direction[axis] = base.direction[axis];
+        spotlight.right[axis] = base.right[axis];
       }
-      spotlight.intensity = base.intensity;
-      if (!base.packet.active) spotlight.range = 0;
     }
+    spotlight.intensity = base.intensity;
+    if (!base.packet.active) spotlight.range = 0;
+  }
+
+  function restore(id) {
+    if (id != null) {
+      restoreOne(bases.get(id));
+      return;
+    }
+    for (const base of bases.values()) restoreOne(base);
   }
 
   function advance() {
