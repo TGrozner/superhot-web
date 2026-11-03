@@ -368,12 +368,20 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       cleanupRequested:false,droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
   }
   const contacts=[];
-  // Source dt retained for every executed substep. On a slow Web frame,
-  // dropping excess simulation time is preferable to a feedback loop of
-  // more work, lower FPS and ever larger deltas. Cleanup still uses world time.
+  // Web game-feel policy: at 30 fps, four exact 150 Hz source steps
+  // cover only 26.7 ms of a 33.3 ms frame. The corpse then falls in slow
+  // motion just when the GPU is busy. Spend up to 33.3 ms of simulation in
+  // four slightly larger SWEPT steps, preserving the normal source step for
+  // healthy frames. Longer hitches still discard catch-up work (not the
+  // cleanup clock) so multiple corpses cannot trigger a frame spiral.
+  // This variable-step policy is NOT an extracted Unity/PhysX scheduler.
   const budgetedDelta=limitWebFrameWork
-    ? Math.min(scaledDelta,WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta)
+    ? Math.min(scaledDelta,Math.max(
+      WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta,1/30))
     : scaledDelta;
+  const webStep=limitWebFrameWork
+    ? Math.max(runtime.definition.fixedDelta,budgetedDelta/WEB_MAX_DEATH_SUBSTEPS)
+    : runtime.definition.fixedDelta;
   // No further Web PBD work after the source's first cleanup trigger. The
   // HDR branch can extend *visibility* by one scaled second: only the host,
   // with the actual HDR flags, may choose when to hide/pool the mesh.
@@ -382,7 +390,7 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
   runtime.droppedWebSimulationTime=(runtime.droppedWebSimulationTime??0)+scaledDelta-budgetedDelta;
   let remaining=acceptedDelta;
   while(remaining>1e-12) {
-    const dt=Math.min(runtime.definition.fixedDelta,remaining);
+    const dt=Math.min(webStep,remaining);
     const contactStart=contacts.length;
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
