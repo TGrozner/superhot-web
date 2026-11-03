@@ -600,7 +600,8 @@ test('per-actor real GPU draws use source states, action, transition and solved 
   assert.throws(() => draw('enemy-X', { clip: 'not-in-rig', playback: 'loop', time: 0 }),
     /sampled clip unavailable/);
   assert.throws(() => draw('enemy-X', {
-    state: 'walk', time: .2, transition: { from: { state: 'idle', time: 0 }, elapsed: .05 },
+    clip: 'walk', playback: 'loop', time: .2,
+    transition: { from: { state: 'idle', time: 0 }, elapsed: .05 },
   }), /transition unavailable/);
   assert.throws(() => draw('enemy-X', {
     state: 'run', time: .2, action: { state: 'fire', time: 0, weight: 1 },
