@@ -48,6 +48,10 @@ function complete(target=6) {
   ];
   frames.at(-1).worldClock=.1;
   return {schemaVersion:2,captureKind:'SH10_DOJO_OWNER_BROWSER_V2',frames,
+    uiActions:[
+      {type:'start',buttonId:'start-button',frameId:0,activeScreen:'playing'},
+      {type:'restart',buttonId:'again-button',frameId:14+2*target,activeScreen:'win'},
+    ],
     marks:[
       {type:'door-before',frameId:2},{type:'door-after',frameId:4},
       {type:'stairs-bottom',frameId:5},{type:'stairs-top',frameId:7},
@@ -211,4 +215,22 @@ test('SH10 a corpse without a prior living frame is not a witnessed elimination'
   assert.equal(result.observed.distinctDeadActorIdsBeforeWin,6);
   assert.equal(result.observed.distinctAliveThenDeadActorIdsBeforeWin,5);
   assert.match(result.errors.join('\\n'),/sampled alive-to-dead actor transitions/);
+});
+
+
+test('SH10 cannot certify start→win→restart from counters without trusted browser UI receipts',()=>{
+  const withoutStart=complete();
+  withoutStart.uiActions=withoutStart.uiActions.filter(a=>a.type!=='start');
+  failure(withoutStart,/no trusted owner Start button click/);
+  const withoutRestart=complete();
+  withoutRestart.uiActions=withoutRestart.uiActions.filter(a=>a.type!=='restart');
+  failure(withoutRestart,/no trusted owner win-screen Replay button click/);
+});
+
+test('SH10 rejects Replay receipts recorded before victory, or unsupported UI metadata',()=>{
+  const early=complete();
+  early.uiActions[1].frameId=early.frames[10].frameId;
+  failure(early,/win-screen Replay button click/);
+  const invalid=complete();invalid.uiActions[1].buttonId='retry-button';
+  assert.equal(report(invalid).status,DOJO_VERTICAL_STATUS.INVALID);
 });

@@ -140,6 +140,28 @@ export function assessDojoVertical(trace) {
     errors.push('base Dojo start/spawn/kills/win/restart must be complete first');
     return report(DOJO_VERTICAL_STATUS.INCOMPLETE);
   }
+  // A win screen followed by zero kills is not itself a witnessed user restart.
+  // Require trusted DOM click receipts recorded by the real browser sampler.
+  // Missing receipts are INCOMPLETE rather than a native contradiction.
+  const actions = trace.uiActions;
+  if (actions !== undefined && (!Array.isArray(actions) || actions.length > 32 ||
+      actions.some(a => !isRecord(a) || !['start','restart'].includes(a.type) ||
+        !['start-button','play-original','again-button'].includes(a.buttonId) ||
+        !integer(a.frameId) || !['playing','menu','win'].includes(a.activeScreen)))) {
+    errors.push('invalid owner browser UI-click telemetry');
+    return report(DOJO_VERTICAL_STATUS.INVALID);
+  }
+  checks.startButtonClickObserved = Array.isArray(actions) && actions.some(a =>
+    a.type === 'start' && ['start-button','play-original'].includes(a.buttonId) &&
+    ['playing','menu'].includes(a.activeScreen) && a.frameId < frames[start].frameId);
+  checks.winRestartButtonClickObserved = Array.isArray(actions) && actions.some(a =>
+    a.type === 'restart' && a.buttonId === 'again-button' &&
+    a.activeScreen === 'win' && a.frameId >= frames[win].frameId &&
+    a.frameId < frames[restart].frameId);
+  if (!checks.startButtonClickObserved) errors.push('no trusted owner Start button click observed before first combat frame');
+  if (!checks.winRestartButtonClickObserved) errors.push('no trusted owner win-screen Replay button click between win and restart frames');
+  observed.uiClicks = Array.isArray(actions) ? actions.length : 0;
+
   // Web encounter retains dead actors until the next reset. A kill counter can
   // reach the quota even when the trace contains only one dead actor repeatedly;
   // count distinct rendered Web enemy IDs instead of accepting that false proof.

@@ -77,7 +77,7 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
   // Arming before Start avoids reopening DevTools after pointer lock.
   // Preview frames are not captured, even if they say activeScreen=playing.
   let ready = readiness.ready;
-  const frames = [], marks = [], pressed = new Set(), markerWarnings = [];
+  const frames = [], marks = [], uiActions = [], pressed = new Set(), markerWarnings = [];
   let lastFrameId = -1, timer = null, stopped = false;
   const onDown = event => {
     if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
@@ -90,8 +90,26 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     try { mark(type); }
     catch (error) { markerWarnings.push(event.code + ': ' + error.message); }
   };
+  // Capture actual trusted browser UI clicks (not inferred from a state change).
+  // This is still unauthenticated owner-supplied Web evidence, never native proof.
+  const onUiClick = event => {
+    if (stopped || event.isTrusted !== true) return;
+    const id = event.target?.closest?.('button')?.id;
+    const type = ['start-button', 'play-original'].includes(id) ? 'start'
+      : id === 'again-button' ? 'restart' : null;
+    if (!type || (type === 'start' && ready)) return;
+    let current;
+    try { current = window.__superhotGetRenderedFrameSnapshot?.(); }
+    catch { return; }
+    if (!Number.isSafeInteger(current?.frameId) || current.frameId < 0) return;
+    if (type === 'restart' && current.activeScreen !== 'win') return;
+    if (type === 'start' && !['playing','menu'].includes(current.activeScreen)) return;
+    uiActions.push({type, buttonId:id, frameId:current.frameId,
+      activeScreen:current.activeScreen});
+  };
   const onUp = event => pressed.delete(event.code);
   const onBlur = () => pressed.clear();
+  document.addEventListener('click', onUiClick, true);
   window.addEventListener('keydown', onDown, { passive: true });
   window.addEventListener('keyup', onUp, { passive: true });
   window.addEventListener('blur', onBlur);
@@ -142,13 +160,14 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     if (!stopped) {
       stopped = true;
       if (timer !== null) window.clearInterval(timer);
+      document.removeEventListener('click', onUiClick, true);
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('blur', onBlur);
       pressed.clear();
     }
     return { schemaVersion: 2, captureKind: 'SH10_DOJO_OWNER_BROWSER_V2',
-      frames: frames.slice(), marks: marks.slice(),
+      frames: frames.slice(), marks: marks.slice(), uiActions: uiActions.slice(),
       markerWarnings: markerWarnings.slice() };
   };
   function mark(type) {
