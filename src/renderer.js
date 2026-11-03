@@ -402,6 +402,7 @@ export function createRenderer(canvas) {
     skinClips = instances;
     skinStates = stateInstances;
     return nextSkin ? { bones: nextSkin.jointCount, weightedBones: nextSkin.weightedJointCount,
+      skinRig: nextSkin.rig,
       clips: nextSkin.availableClips, states: nextSkin.states, clipDurations: nextSkin.clipDurations,
       actionTiming: nextSkin.actionTiming,
       availableActions: nextSkin.availableActions,
@@ -411,7 +412,7 @@ export function createRenderer(canvas) {
         [key, sourcePackage.transitions[key].duration])) } : null;
   }
   function drawNativeSkin(modelMatrix, clip, time, {
-    statePlayback = false, transition = null, action = null, shaderTime = 0,
+    statePlayback = false, transition = null, action = null, solvedPose = null, shaderTime = 0,
     cameraPosition = currentCamera,
   } = {}) {
     if (!skinnedEnemy) return null;
@@ -422,7 +423,7 @@ export function createRenderer(canvas) {
       instance, modelMatrix, viewProjection, time: time * scale(clip),
       transition: transition ? { from: (statePlayback ? skinStates : skinClips)[transition.from],
         fromTime: transition.fromTime * scale(transition.from), elapsed: transition.elapsed } : null,
-      action, shaderTime, cameraPosition, sourceLighting: nativeSkinLighting,
+      action, solvedPose, shaderTime, cameraPosition, sourceLighting: nativeSkinLighting,
       color: [0.720588207244873, 0, 0, 1],
     });
     drawCalls += report.drawCalls;
