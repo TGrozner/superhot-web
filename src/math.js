@@ -1,18 +1,73 @@
 /** Small, dependency-free 3D math helpers. Coordinate system: Y up, camera faces -Z. */
+/**
+ * @typedef {{ x: number, y: number, z: number }} Vec3
+ * @typedef {{ x: number, z: number, w: number, d: number }} WalkSolid
+ */
+
+/**
+ * @param {number} value
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+/**
+ * @param {number} a
+ * @param {number} b
+ * @param {number} t
+ * @returns {number}
+ */
 export const lerp = (a, b, t) => a + (b - a) * t;
+/**
+ * @param {Vec3} v
+ * @returns {number}
+ */
 export const length3 = (v) => Math.hypot(v.x, v.y, v.z);
+/**
+ * @param {Vec3} v
+ * @returns {Vec3}
+ */
 export const normalize3 = (v) => {
   const length = length3(v) || 1;
   return { x: v.x / length, y: v.y / length, z: v.z / length };
 };
+/**
+ * @param {Vec3} a
+ * @param {Vec3} b
+ * @returns {Vec3}
+ */
 export const add3 = (a, b) => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
+/**
+ * @param {Vec3} a
+ * @param {Vec3} b
+ * @returns {Vec3}
+ */
 export const subtract3 = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+/**
+ * @param {Vec3} v
+ * @param {number} value
+ * @returns {Vec3}
+ */
 export const multiply3 = (v, value) => ({ x: v.x * value, y: v.y * value, z: v.z * value });
+/**
+ * @param {Vec3} a
+ * @param {Vec3} b
+ * @returns {number}
+ */
 export const distance3 = (a, b) => length3(subtract3(a, b));
+/**
+ * @param {Vec3} a
+ * @param {Vec3} b
+ * @returns {number}
+ */
 export const dot3 = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
 
 /** Forward/right/up camera axes. Positive pitch looks upward. */
+/**
+ * @param {number} yaw
+ * @param {number} pitch
+ * @returns {{forward: Vec3, right: Vec3, up: Vec3}}
+ */
 export const cameraAxes = (yaw, pitch) => {
   const sy = Math.sin(yaw), cy = Math.cos(yaw);
   const sp = Math.sin(pitch), cp = Math.cos(pitch);
@@ -24,6 +79,13 @@ export const cameraAxes = (yaw, pitch) => {
 };
 
 /** First intersection fraction along the segment, or null. */
+/**
+ * @param {Vec3} start
+ * @param {Vec3} end
+ * @param {Vec3} center
+ * @param {number} radius
+ * @returns {number | null}
+ */
 export const segmentSphere = (start, end, center, radius) => {
   const delta = subtract3(end, start);
   const offset = subtract3(start, center);
@@ -39,9 +101,16 @@ export const segmentSphere = (start, end, center, radius) => {
 };
 
 /** Axis-aligned bounds; min/max are 3D vectors. */
+/**
+ * @param {Vec3} start
+ * @param {Vec3} end
+ * @param {Vec3} min
+ * @param {Vec3} max
+ * @returns {number | null}
+ */
 export const segmentAabb = (start, end, min, max) => {
   let enter = 0, leave = 1;
-  for (const axis of ['x', 'y', 'z']) {
+  for (const axis of /** @type {const} */ (['x', 'y', 'z'])) {
     const delta = end[axis] - start[axis];
     if (Math.abs(delta) < 1e-8) {
       if (start[axis] < min[axis] || start[axis] > max[axis]) return null;
@@ -58,6 +127,12 @@ export const segmentAabb = (start, end, min, max) => {
 };
 
 /** Horizontal sliding collision against rectangular level obstacles. */
+/**
+ * @param {Vec3} position
+ * @param {number} radius
+ * @param {readonly WalkSolid[]} solids
+ * @returns {Vec3}
+ */
 export const resolveWalk = (position, radius, solids) => {
   const next = { ...position };
   for (const solid of solids) {
