@@ -105,8 +105,10 @@ export function collectNativeDojoSpawnerFactories(source) {
 export function planNativeDojoEnemyActivation(input) {
   const { template, qualifiedTemplates, difficulty, availableWeapons, currentEnemies,
     familySettings, baseSettings, campingPointsAvailable, random = Math.random } = input ?? {};
-  if (!Array.isArray(qualifiedTemplates) ||
-      !qualifiedTemplates.some(candidate => candidate.factoryId === template?.factoryId)) {
+  // Consume precisely the enumerated template object passed by the spawner.
+  // Reusing its id with a different selector must not launder an unqualified
+  // weapon code into the live spawn.
+  if (!Array.isArray(qualifiedTemplates) || !qualifiedTemplates.includes(template)) {
     return blocked('spawn-template-not-qualified');
   }
   if (!template || typeof template.weaponSelector !== 'string' ||
