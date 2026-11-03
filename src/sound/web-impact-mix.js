@@ -38,6 +38,18 @@ export function createWebImpactMix(context, maxVoices = 24) {
     const voices = new Set();
     let drone = null;
     let disposed = false;
+    let mixLevel = 1;
+    /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
+    function setMixLevel(level) {
+        if (!Number.isFinite(level) || level < 0 || level > 1)
+            throw new RangeError('mixLevel 0..1');
+        if (disposed)
+            return;
+        mixLevel = level;
+        const at = context.currentTime;
+        master.gain.cancelScheduledValues(at);
+        master.gain.setTargetAtTime(0.76 * level, at, 0.025);
+    }
     const priorityByCue = {
         // Creative Web mix priorities: melee/player fire survive overlapping steps.
         'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
@@ -63,7 +75,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         if (position && ![position.x, position.y, position.z].every(Number.isFinite)) {
             throw new TypeError('position must be finite');
         }
-        if (disposed || context.state !== 'running' || intensity === 0) {
+        if (disposed || context.state !== 'running' || intensity === 0 || mixLevel === 0) {
             return { status: 'blocked', source: 'web-original-synthesis', at: null, spatial: false };
         }
         const specs = {
@@ -153,7 +165,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         return { status: 'started', source: 'web-original-synthesis', at, spatial: panner !== null };
     }
     function startAmbience() {
-        if (drone || disposed || context.state !== 'running')
+        if (drone || disposed || context.state !== 'running' || mixLevel === 0)
             return false;
         const osc = context.createOscillator();
         const gain = context.createGain();
@@ -189,6 +201,6 @@ export function createWebImpactMix(context, maxVoices = 24) {
         dynamics.disconnect();
         master.disconnect();
     }
-    return Object.freeze({ emit, startAmbience, stopAmbience, dispose,
-        getActiveVoices: () => voices.size });
+    return Object.freeze({ emit, startAmbience, stopAmbience, dispose, setMixLevel,
+        getMixLevel: () => mixLevel, getActiveVoices: () => voices.size });
 }
