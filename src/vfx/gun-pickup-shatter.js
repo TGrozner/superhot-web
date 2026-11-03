@@ -271,8 +271,13 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
       }
     }
     if (runtime.physicsContext) {
-      // Swept source-shaped sphere contacts; never claim this solves native PhysX.
-      shard.contacts = advanceNativeFragmentBody(shard, scaledDelta, runtime.physicsContext);
+      // An already invisible HDR shard requires no further collision work.
+      // Frame-budgeting preserves swept contact without stalling the Dojo on
+      // long frames or after a browser tab resumes (creative Web policy).
+      shard.contacts = shard.visible
+        ? advanceNativeFragmentBody(shard, scaledDelta, {
+          ...runtime.physicsContext, limitWebFrameWork: true,
+        }) : [];
       for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
         shard.modelMatrix[index] = shard.position[axis] - shard.centerOffset[axis] * ratio;
       }
