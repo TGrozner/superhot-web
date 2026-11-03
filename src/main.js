@@ -1,5 +1,6 @@
 import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
+import { accumulateWebPointerLookPath } from './input.js';
 import { LEVELS, CONTAINERS_WEB_FALLBACK_SPAWN, buildContainersCollisionSolids, containersWalkSolids, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
 import { planLocalMesh6Draws } from './scenes/containers-mesh6-local-plan.js';
@@ -45,6 +46,7 @@ const shootFlash = $('shoot-flash');
 const audio = createAudio();
 // WEB game feel: unarmed punches recharge on real time, unlike source gun clocks.
 let unarmedFireDelayRealtime = false;
+let webPointerPath = 0;
 const nativeHud = createNativeHud(hud, crosshair, $('health'), id => assetUrl(id));
 let renderer;
 try { renderer = createRenderer(canvas); }
@@ -515,7 +517,7 @@ function setScreen(name) {
   dodgePulse.hidden = !playing;
   dodgeBanner.hidden = !playing || webDodgeFeedback.seconds<=0;
   for (const [key, screen] of Object.entries(screens)) screen.hidden = key !== name;
-  if (!playing) keys.clear();
+  if (!playing) { keys.clear(); webPointerPath = 0; }
 }
 
 /** Gameplay target exists only after the original OBJ has been authenticated
@@ -613,6 +615,7 @@ function loadLevel(index) {
   nativeHud.reset();
   state.reload = 0; state.fireDelay = 0;
   unarmedFireDelayRealtime = false;
+  webPointerPath = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   resetWebImpactFeedback(webImpactFeedback);
@@ -716,9 +719,16 @@ document.addEventListener('keydown', (event) => {
 document.addEventListener('keyup', (event) => keys.delete(event.code));
 document.addEventListener('mousemove', (event) => {
   if (state.screen !== 'playing' || document.pointerLockElement !== canvas) return;
+  const previousYaw = state.camera.yaw;
+  const previousPitch = state.camera.pitch;
   state.camera.yaw += event.movementX * .00245;
   const pitchLimit = nativeGameplay() ? 80 * Math.PI / 180 : 1.42;
   state.camera.pitch = clamp(state.camera.pitch - event.movementY * .00245, -pitchLimit, pitchLimit);
+  // Preserve opposing high-polling pointer events within one RAF; rejected
+  // pitch changes do not add imaginary world-speed input.
+  webPointerPath = accumulateWebPointerLookPath(webPointerPath, {
+    previousYaw, previousPitch, yaw: state.camera.yaw, pitch: state.camera.pitch,
+  });
   state.lookActivity = clamp(Math.hypot(event.movementX, event.movementY) / 34, .12, 1);
 });
 document.addEventListener('contextmenu', (event) => { if (state.screen === 'playing') event.preventDefault(); });
@@ -1157,7 +1167,10 @@ function update(dt) {
     const tick = stepMcdGameplayClock(nativeClock, {
       dt, x: horizontal, y: fwd, grounded: nativeGrounded,
       yaw: state.camera.yaw, pitch: state.camera.pitch,
+      lookPathDegrees: webPointerPath,
     });
+    // The Web look path is consumed once; don't queue acceleration on idle.
+    webPointerPath = 0;
     state.speed = tick.timeScale;
     worldDt = tick.worldDelta;
     // Slow-motion must not stretch the 360 ms unarmed punch recovery to 60s.
