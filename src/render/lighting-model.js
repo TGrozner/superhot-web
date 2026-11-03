@@ -356,3 +356,87 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
     cookieUv: Object.freeze(cookieUv),
   });
 }
+
+/**
+ * SH-13 / Dojo: bind the *existing* source warning controller to the already
+ * decoded scene textures and the exact layer of an authored world instance.
+ * This does NOT create a texture, light, asset URL or gameplay event.
+ *
+ * @param {object} scene - prepareNativeScene() output; must identify level10.
+ * @param {Map<string, ImageBitmap>} images - decoded by the scene loader.
+ * @returns {{cookieStatus: readonly object[], prepareForInstance:
+ *   (instanceId: string, packets: object[]) => object,
+ *   cookieImage: (textureId: string) => ImageBitmap | null}}
+ */
+export function createDojoDoorWarningSceneAdapter(scene, images) {
+  const source = scene?.source;
+  if (source?.sceneBuildIndex !== 10 || source.serializedOwner !== 'level10' ||
+      !source.scenePath?.endsWith('SHRL_Dojo2.unity')) {
+    throw new Error('Source-qualified Dojo build10 scene required');
+  }
+  if (!(scene.textures instanceof Map) || !(scene.instanceMap instanceof Map) ||
+      !(images instanceof Map)) {
+    throw new TypeError('Prepared scene texture/instance maps and decoded images required');
+  }
+  const doors = scene.gameplay?.audio?.doors;
+  if (!doors || typeof doors !== 'object' || Array.isArray(doors)) {
+    throw new TypeError('Source-qualified Dojo door catalog required');
+  }
+  // Source join: level10 spawner GO103/221/370 -> warning components
+  // 7089/7090/7091. Research #166/#167/#169/#170, SH-04 #198.
+  // Do not derive keys from scene anchors, spawnPoint.id or nearby geometry.
+  const qualifiedDoorKeys = new Set([
+    'level10::7089', 'level10::7090', 'level10::7091',
+  ].filter(key => Object.hasOwn(doors, key)));
+  const decodedCookies = new Set();
+  const cookieImages = new Map();
+  const cookieStatus = [];
+  for (const doorId of qualifiedDoorKeys) {
+    const textureId = doors[doorId]?.spotlight?.cookieTextureId;
+    const sourceTexturePresent = typeof textureId === 'string' &&
+      scene.textures.has(textureId);
+    const image = sourceTexturePresent ? images.get(textureId) : null;
+    // The production loader uses createImageBitmap. A descriptor or a
+    // compressed byte buffer is NOT proof of a decoded cookie image.
+    const decoded = Boolean(image &&
+      Number.isSafeInteger(image.width) && image.width > 0 &&
+      Number.isSafeInteger(image.height) && image.height > 0 &&
+      (typeof ImageBitmap !== 'function' || image instanceof ImageBitmap));
+    if (decoded) {
+      decodedCookies.add(textureId);
+      cookieImages.set(textureId, image);
+    }
+    cookieStatus.push(Object.freeze({
+      doorId,
+      textureId: typeof textureId === 'string' ? textureId : null,
+      sourceTexturePresent,
+      decoded,
+      reason: decoded ? 'scene-cookie-image-decoded' :
+        !sourceTexturePresent ? 'source-cookie-not-in-scene-textures' :
+          'source-cookie-image-not-decoded',
+    }));
+  }
+  return Object.freeze({
+    cookieStatus: Object.freeze(cookieStatus),
+    /**
+     * @param {string} instanceId - id of an authored source mesh instance.
+     * @param {object[]} packets - current SH-07 warning controller packets.
+     */
+    prepareForInstance(instanceId, packets) {
+      const instance = scene.instanceMap.get(instanceId);
+      if (!instance || !Number.isInteger(instance.layer) ||
+          instance.layer < 0 || instance.layer > 31) {
+        throw new TypeError('Authored world instance with source Unity layer required');
+      }
+      return prepareDojoDoorWarningLighting(source, packets, {
+        verifiedDoorKeys: qualifiedDoorKeys,
+        decodedCookies,
+        meshLayer: instance.layer,
+      });
+    },
+    /** Return only a previously decoded source scene cookie; no fallback. */
+    cookieImage(textureId) {
+      return cookieImages.get(textureId) ?? null;
+    },
+  });
+}
