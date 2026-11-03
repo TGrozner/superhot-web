@@ -911,11 +911,19 @@ function prepareDojoDeathPhysics(enemy) {
     enemy.deathPhysicsStatus='invalid-observed-web-velocity';
     return;
   }
+  // Only adjacent, same-actor sampled poses may seed per-limb momentum.
+  const poseDeltaSeconds=enemy.lastPoseWorldClock-(enemy.previousPoseWorldClock??NaN);
+  const sampledMotionReady=enemy.previousBoneModelMatrices?.length===enemy.lastBoneModelMatrices.length &&
+    enemy.previousActorModel?.length===16 &&
+    Number.isFinite(poseDeltaSeconds) && poseDeltaSeconds>1e-5 && poseDeltaSeconds<=0.2;
   try {
     enemy.deathRuntime=createNativeDeathRuntime({
       definition, boneModelMatrices:enemy.lastBoneModelMatrices,
       modelMatrix:enemy.lastActorModel, collisionScene:nativeEnemyCollision,
       initialVelocity,
+      previousBoneModelMatrices:sampledMotionReady?enemy.previousBoneModelMatrices:null,
+      previousModelMatrix:sampledMotionReady?enemy.previousActorModel:null,
+      poseDeltaSeconds:sampledMotionReady?poseDeltaSeconds:null,
     });
     enemy.deathRig=rig;
     enemy.deathBoneOrder=rig.boneOrder;
@@ -1459,6 +1467,19 @@ function drawEnemy(enemy) {
     if(nativeGameplay() && nativeEnemyStats?.boneModelMatrices) {
       if(enemy.alive && nativeEnemyStats.skinned) {
         const bones=nativeEnemyStats.boneModelMatrices;
+        // Keep exactly the two most recent GPU-owned poses of this actor.
+        // Capturing the previous pose BEFORE overwriting the current one
+        // preserves angular and translational motion across the Kill edge.
+        if(enemy.lastBoneModelMatrices?.length===bones.length &&
+            enemy.lastActorModel && Number.isFinite(enemy.lastPoseWorldClock) &&
+            state.worldClock>enemy.lastPoseWorldClock) {
+          if(!enemy.previousBoneModelMatrices || enemy.previousBoneModelMatrices.length!==bones.length)
+            enemy.previousBoneModelMatrices=new Float32Array(bones.length);
+          enemy.previousBoneModelMatrices.set(enemy.lastBoneModelMatrices);
+          if(!enemy.previousActorModel)enemy.previousActorModel=new Float32Array(16);
+          enemy.previousActorModel.set(enemy.lastActorModel);
+          enemy.previousPoseWorldClock=enemy.lastPoseWorldClock;
+        }
         if(!enemy.lastBoneModelMatrices || enemy.lastBoneModelMatrices.length!==bones.length)
           enemy.lastBoneModelMatrices=new Float32Array(bones.length);
         enemy.lastBoneModelMatrices.set(bones);

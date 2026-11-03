@@ -77,11 +77,12 @@ function jointFrame(source) {
 }
 
 /** Source bodies, anchors and angular bounds with a position-based Web solver.
- * NOT PhysX: scalar shape-derived inertia, rotation-vector box limits instead
+ * NOT PhysX: scalar shape-derived inertia, elliptical rotation-vector swing limits instead
  * of PhysX swing cones, sphere covers, no self/dynamic pairs or mesh cutting.
  * Source rest frames (not the death pose) define joint zero orientation.
  */
-export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatrix,collisionScene,initialVelocity}) {
+export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatrix,collisionScene,initialVelocity,
+  previousBoneModelMatrices=null,previousModelMatrix=null,poseDeltaSeconds=null}) {
   if(!definition||!Array.isArray(definition.boneParents)||!Array.isArray(definition.bodies)||
       !Array.isArray(definition.joints)||!collisionScene?.boxes||
       boneModelMatrices?.length!==definition.boneParents.length*16||
@@ -94,6 +95,17 @@ export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatr
     if(!Number.isInteger(parent)||parent>=i||parent< -1)throw new TypeError('Topologically ordered bones required');
     return multiplyMatrices(model,affine(boneModelMatrices.slice(i*16,i*16+16)));
   });
+  // Observed GPU poses, not guessed native PhysX velocities. Preserve
+  // articulated translation and angular motion when two consecutive, recent
+  // samples of the SAME actor exist. Otherwise retain the root fallback.
+  // Frame gap and motion guards are Web safety policies, not Unity constants.
+  const hasPreviousPose=previousBoneModelMatrices?.length===boneModelMatrices.length &&
+    previousModelMatrix?.length===16 && Number.isFinite(poseDeltaSeconds) &&
+    poseDeltaSeconds>1e-5 && poseDeltaSeconds<=0.2;
+  const previousWorld=hasPreviousPose
+    ? definition.boneParents.map((_,i)=>multiplyMatrices(
+      affine(previousModelMatrix),affine(previousBoneModelMatrices.slice(i*16,i*16+16))))
+    : null;
   const sourceLocal=sourceWorld.map((m,i)=>definition.boneParents[i]<0?m:multiplyMatrices(inverse(sourceWorld[definition.boneParents[i]]),m));
   const restWorld=[];
   for(let i=0;i<sourceWorld.length;i++) {
@@ -120,7 +132,14 @@ export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatr
       if(j.body===bodyIndex)extent=Math.max(extent,length(triple(j.anchor))*scale);
       if(j.connectedBody===bodyIndex)extent=Math.max(extent,length(triple(j.connectedAnchor))*scale);
     }
-    const body={source,position:point(world),world,collisionWorld:world.slice(),velocity:{...velocity},angularVelocity:zero(),forces:[],spheres,
+    const prior=previousWorld?.[source.boneIndex];
+    const measuredLinear=prior?mul(sub(point(world),point(prior)),1/poseDeltaSeconds):null;
+    const measuredAngular=prior?mul(rotationVector(multiplyMatrices(world,inverse(prior))),1/poseDeltaSeconds):null;
+    const measuredValid=measuredLinear && measuredAngular &&
+      length(measuredLinear)<=40 && length(measuredAngular)<=80;
+    const body={source,position:point(world),world,collisionWorld:world.slice(),
+      velocity:measuredValid?measuredLinear:{...velocity},
+      angularVelocity:measuredValid?measuredAngular:zero(),forces:[],spheres,
       inverseMass:1/source.mass,inverseInertia:extent>1e-8?1/(0.4*source.mass*extent*extent):0};
     byBone.set(source.boneIndex,body);return body;
   });
@@ -220,16 +239,27 @@ function solveAnchor(joint) {
 function solveLimits(joint) {
   const {a,b,frame}=joint,target=multiplyMatrices(b.world,joint.restRelative);
   const relative=multiplyMatrices(inverse(target),a.world),v=rotationVector(relative);
-  const l=joint.source.limits,r=Math.PI/180,bounds=[[l.lowTwist*r,l.highTwist*r],[-l.swing1*r,l.swing1*r],[-l.swing2*r,l.swing2*r]];
+  const l=joint.source.limits,r=Math.PI/180;
+  const twist=Math.max(l.lowTwist*r,Math.min(l.highTwist*r,dot(v,frame[0])));
+  let swing1=l.swing1>0?dot(v,frame[1]):0;
+  let swing2=l.swing2>0?dot(v,frame[2]):0;
+  // A coupled elliptical swing envelope is closer to a joint cone than
+  // independent rotation-vector boxes. This remains a Web approximation:
+  // PhysX computes a true angular swing/twist decomposition.
+  const swingRadius1=l.swing1*r,swingRadius2=l.swing2*r;
+  const swingExtent=(swingRadius1>0?swing1*swing1/(swingRadius1*swingRadius1):0)+
+    (swingRadius2>0?swing2*swing2/(swingRadius2*swingRadius2):0);
+  if(swingExtent>1){const scale=1/Math.sqrt(swingExtent);swing1*=scale;swing2*=scale;}
   const clamped=zero();
-  for(let i=0;i<3;i++) {
-    const value=Math.max(bounds[i][0],Math.min(bounds[i][1],dot(v,frame[i])));
+  for(let i=0;i<3;i++){
+    const value=[twist,swing1,swing2][i];
     for(const axis of axes)clamped[axis]+=frame[i][axis]*value;
   }
   const desired=multiplyMatrices(target,rotation(clamped));
   const error=rotationVector(multiplyMatrices(desired,inverse(a.world)));
-  const total=a.inverseMass+b.inverseMass;
-  rotateBody(a,mul(error,a.inverseMass/total));rotateBody(b,mul(error,-b.inverseMass/total));
+  const total=a.inverseInertia+b.inverseInertia;
+  if(total<=1e-12)return;
+  rotateBody(a,mul(error,a.inverseInertia/total));rotateBody(b,mul(error,-b.inverseInertia/total));
 }
 function composePose(runtime) {
   for(let i=0;i<runtime.sourceWorld.length;i++) {
