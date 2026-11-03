@@ -100,7 +100,14 @@ export async function verifyDojoRagdollPack(packDir) {
   let scene;
   try { scene = JSON.parse(gunzipSync(sceneBytes).toString('utf8')); }
   catch { fail('scenePackage gzip/JSON cannot be decoded'); }
-  return assertDojoDeathPhysics(scene, rigBytes);
+  const report = assertDojoDeathPhysics(scene, rigBytes);
+  const declared = manifest.features?.ragdoll;
+  if (declared?.bodies !== report.bodies ||
+      declared?.joints !== report.joints ||
+      declared?.rigSha256 !== report.rigSha256) {
+    fail('manifest features.ragdoll does not match the actual scene and rig');
+  }
+  return report;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
