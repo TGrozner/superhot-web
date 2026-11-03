@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNativePlayerAnimation, selectNativePlayerClip } from '../src/characters/native-player-controller.js';
+import { createNativePlayerAnimation, projectDojoPlayerFrame, selectNativePlayerClip } from '../src/characters/native-player-controller.js';
 
 // Entirely authored non-cuboid fixture. No MCD asset, native executable,
 // extracted animation curve or proprietary capture is shipped in tests.
@@ -132,4 +132,51 @@ test('unknown source equipment, bad packet and negative dt fail closed',()=>{
   assert.throws(()=>driver.equip('katana'),/unavailable/);
   assert.throws(()=>driver.update(-1,1),/clocks/);
   assert.throws(()=>driver.action('fire'),/firearm/);
+});
+
+test('camera-local recovered katana socket and GPU hands use one shared Web camera basis',()=>{
+  const driver=createNativePlayerAnimation(fixture(),{random:()=>0.5});
+  const heldItem={id:'pickup_4201',isKatana:true};
+  const cameraWorldMatrix=[-1,0,0,0,0,1,0,0,0,0,1,0,5,2,9,1];
+  driver.equip(heldItem.id,{animate:false});
+  driver.action('attack');
+  driver.update(0.1,1);
+  const first=projectDojoPlayerFrame({pose:driver.sample(),heldItem,cameraWorldMatrix});
+  assert.equal(first.descriptor.clip,'left');
+  near(first.modelMatrix[12],5); // handPosition * drawRoot * container only once
+  near(first.itemCameraLocalMatrix[12],-0.4); // restored controller X-row reflection
+  near(first.itemWorldMatrix[12],5.4); // camera basis X reflection also happens once
+  near(first.itemWorldMatrix[13],2);
+  assert.equal(first.bladeSocketAvailable,true);
+  assert.equal(first.nativeCameraActiveVerified,false);
+  assert.equal(first.nativeAnimatorExecutionVerified,false);
+
+  // This changes with the actual authored synthetic clip, not a fabricated
+  // katana swing curve. An item draw may consume the camera-local socket.
+  driver.update(0.1,1);
+  const next=projectDojoPlayerFrame({pose:driver.sample(),heldItem,cameraWorldMatrix});
+  near(next.itemCameraLocalMatrix[12],-0.8);
+  near(next.itemWorldMatrix[12],5.8);
+  // The earlier frame must not be replaced by the later pose/sample buffer.
+  near(first.itemWorldMatrix[12],5.4);
+});
+
+test('Dojo first-person projection keeps static blade fallback when source attachment is absent',()=>{
+  const driver=createNativePlayerAnimation(fixture());
+  const cameraWorldMatrix=identity();
+  const heldItem={id:'pickup_4201',isKatana:true};
+  driver.equip(heldItem.id,{animate:false});
+  const pose=driver.sample();
+  const fallback=projectDojoPlayerFrame({
+    pose:{...pose,itemMatrix:null},heldItem,cameraWorldMatrix,
+  });
+  assert.ok(fallback.modelMatrix);
+  assert.equal(fallback.bladeSocketAvailable,false);
+  assert.equal(fallback.itemCameraLocalMatrix,null);
+  assert.equal(fallback.itemWorldMatrix,null);
+  assert.equal(projectDojoPlayerFrame({pose,heldItem:{id:'pistol',isKatana:false},cameraWorldMatrix}),null);
+  assert.equal(projectDojoPlayerFrame({pose,heldItem:{id:'pickup_other',isKatana:true},cameraWorldMatrix}),null);
+  assert.throws(()=>projectDojoPlayerFrame({
+    pose,heldItem,cameraWorldMatrix:[...identity().slice(0,12),NaN,0,0,1],
+  }),/finite column-major affine/);
 });
