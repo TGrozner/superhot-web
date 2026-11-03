@@ -1813,7 +1813,7 @@ function frame(now) {
         clip:e.animation?.state ?? (e.walking ? 'walk' : 'idle'),clock:e.clock,
         poseFrozenAtDeath: !e.alive && !e.deathSolvedPose && Boolean(nativeSkinInfo),
         ragdollStatus: e.deathPhysicsStatus ?? (!e.alive ? 'no-verified-runtime' : 'alive'),
-        ragdollRendered: Boolean(nativeEnemyStats?.solvedPoseApplied),
+        ragdollPoseAvailable: Boolean(e.deathSolvedPose),
       })),
       ragdollPackVerified: Boolean(localAssetManifest?.features?.ragdoll &&
         nativeRigSha256 === nativeScene?.gameplay?.deathPhysicsRigSha256),
