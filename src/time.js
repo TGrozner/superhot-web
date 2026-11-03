@@ -382,8 +382,18 @@ export function addMcdGameplayPulse(clock, duration, amount) {
   });
 }
 
+/**
+ * Optional sourceLookSample routes a source-qualified CameraLookTimeControl
+ * frame to the actual Web gameplay shifter, without guessing camera binding.
+ * This is opt-in: SH-05 must provide persistent source state, the actual
+ * WORLD CameraAngle rotation, unscaled timestamp, and all four native gates.
+ * PRIVATE provenance research #148 (artifact 13175262864); #162/#163/#174
+ * only qualify the initial serialized Dojo hierarchy, not a runtime binding.
+ * Without sourceLookSample, the existing Web yaw/pitch preview is unchanged.
+ */
 export function stepMcdGameplayClock(clock, {
   dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
+  sourceLookSample,
 }) {
   if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
     throw new RangeError('Gameplay time input must be finite with nonnegative dt');
@@ -412,17 +422,33 @@ export function stepMcdGameplayClock(clock, {
     currentTimeModifier: jump.currentTimeModifier,
     targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: dt,
   });
-  if (clock.lookWarmup > 0) {
-    clock.yaw = yaw; clock.pitch = pitch; clock.lookWarmup--;
-  }
-  if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
-    // Quaternion.Angle for the yaw/pitch camera, not raw mouse-pixel distance.
-    const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
-    const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
-    clock.lookBuffer = Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03)));
-    look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
-    clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
-    clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
+  let lookSourceResult = null;
+  if (sourceLookSample !== undefined) {
+    if (sourceLookSample === null || typeof sourceLookSample !== 'object') {
+      throw new TypeError('sourceLookSample must provide source state and guards');
+    }
+    // Reuse the original source-model Update: WORLD rotation, explicit gates,
+    // warmup, delayed samples and buffered drain. Never invent a source camera.
+    lookSourceResult = advanceMcdSourceLookTimeshift(
+      sourceLookSample.state, sourceLookSample,
+    );
+    // The registered shifter retains its current value even on a skipped
+    // measurement or a locked source Update (which performs no write).
+    look.currentTimeModifier = lookSourceResult.state.currentTimeModifier;
+    clock.yaw = yaw; clock.pitch = pitch; // keep the Web-only fallback anchored
+  } else {
+    if (clock.lookWarmup > 0) {
+      clock.yaw = yaw; clock.pitch = pitch; clock.lookWarmup--;
+    }
+    if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
+      // PROVISIONAL Web look estimate, not the native CameraAngle transform.
+      const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
+      const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+      clock.lookBuffer = Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03)));
+      look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
+      clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
+      clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
+    }
   }
   for (const pulse of clock.source.shifters) {
     if (pulse.expiresAt !== undefined) pulse.terminated = clock.worldTime > pulse.expiresAt;
@@ -433,7 +459,10 @@ export function stepMcdGameplayClock(clock, {
     clock.timeScale = next.timeScale;
     clock.aggregate = next.aggregate;
   }
-  return { worldDelta, appliedTimeScale, timeScale: clock.timeScale, aggregate: clock.aggregate };
+  return {
+    worldDelta, appliedTimeScale, timeScale: clock.timeScale, aggregate: clock.aggregate,
+    ...(sourceLookSample === undefined ? {} : { lookSourceResult }),
+  };
 }
 
 /**
