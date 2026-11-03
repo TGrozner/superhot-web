@@ -2,6 +2,19 @@
 
 **État vérifié le 3 novembre 2026 : le Dojo SHRL_Dojo2 (build index 10) est accessible en standalone sur GitHub Pages.** Thomas a confirmé que la démo fonctionne depuis le site public : https://tgrozner.github.io/superhot-web/ . Déploiement initial validé sur `main`, commit `876a2cdde01845b685a81ccf818d965c78fb0c56` (historique, **toujours relire HEAD**). Ce fait ne prouve **pas** une parité native 1:1.
 
+## Direction produit — priorité au jeu réussi (03/11/2026)
+
+**Instruction de Thomas, prioritaire sur les anciennes missions « 1:1 » :** le Dojo Web n'a plus pour objectif de copier chaque comportement, temporisation ou effet du jeu MCD à l'identique. Le jeu original et le corpus privé sont des **références utiles**, pas des critères de validation bloquants. Si une mécanique Web est plus agréable, plus lisible, plus réactive ou plus performante, la préférer, même si elle diffère de l'original. Ne plus ouvrir de travaux de comparaison image-à-image ou mesure de parité 1:1 par défaut.
+
+- **Critères de réussite :** contrôle précis et agréable ; combats lisibles et impactants ; ragdolls crédibles, variés et stables ; ennemis et armes intéressants ; décors/éclairage cohérents ; pas de chute majeure de FPS ni de rupture de la baseline Dojo (déplacement, tirs, dégâts, F/E, victoire, REJOUER).
+- **Priorité de travail :** bugs visibles ou jouabilité > enrichissements à fort impact > fiabilité/performance > contrats/doc/tests supplémentaires. Faire une modification réellement perceptible et vérifiable, éviter les micro-PR théoriques et les inventaires de sources sans usage.
+- **Ragdoll :** améliorer intégration des impacts, inertie, articulations, contacts et qualité visuelle, sans chercher une simulation bit-exacte PhysX. Les paramètres provenant de l'original sont utiles mais les réglages créatifs Web sont désormais permis ; les déclarer comme réglages Web, jamais comme propriétés récupérées du jeu.
+- **Créativité encadrée :** possibilité d'ajouter ou d'ajuster des comportements, VFX, animations procédurales et valeurs de gameplay si cela améliore le résultat. Documenter brièvement l'intention et les compromis ; ne pas les présenter comme natifs ni inventer de provenance/source.
+- **Validation :** CI sur SHA exact + smoke navigateur et FPS + ressenti au jeu. Pas de comparaison 1:1 obligatoire. Utiliser des captures du jeu original seulement en cas de besoin précis de compréhension, pas comme gate de livraison. Décrire toute limite de vérification réellement non exécutée.
+- **Invariants maintenus :** même pack standalone en local/Pages, contrôle d'intégrité et hash du rig, erreur explicite si asset indispensable manquant, aucun fallback « Roblox », droits/licences, confidentialité des données de recherche, TypeScript strict des modules migrés, coordination par lanes et PR avec CI.
+
+Les anciennes notes `docs/parity/` et consignes de fidélité restent des **références historiques et techniques** ; elles ne doivent plus imposer un objectif de reproduction 1:1 ni empêcher une amélioration assumée du Web.
+
 ## Invariants de livraison
 
 - **Public = autonome.** Le navigateur doit charger le code et les assets de la même origine, sous `/superhot-web/` sur Pages. Pas de connexion au PC de Thomas, pas de tunnel Cloudflare, pas de dépendance runtime à `private/` ou à un serveur Node. `npm start` reste un outil de développement local.
