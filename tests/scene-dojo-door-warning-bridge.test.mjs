@@ -300,3 +300,47 @@ test('J4 nearby Dojo player draws only the already active warning beam toward th
   assert.deepEqual(beacon.spotlight.direction, initialDirection,
     'the beam and its targeting vanish at source warning completion');
 });
+
+test('J4 accepted Dojo spawn point turns the existing beacon into an incoming-route telegraph', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const packet = bridge.packets()[0];
+  const packets = bridge.packets();
+  const initialDirection = packet.spotlight.direction;
+  const target = { x: 10, y: 1.7, z: -14 };
+  const event = warning(103);
+  event.point.position = target;
+  assert.equal(bridge.accept(event).status, 'triggered');
+  target.z = 50; // Accepted event is snapshotted; later gameplay mutations must not redirect light.
+  bridge.advance(1);
+  assert.equal(bridge.packets(), packets, 'the live render packets are reused');
+  assert.equal(packet.spotlight.direction, initialDirection, 'the GPU-facing vector stays allocated');
+  assert.ok(packet.spotlight.direction[2] > 0.12,
+    'mid-warning cone now indicates the accepted spawn direction, not just a blind sweep');
+  assert.equal(bridge.packets().filter(p => p.active).length, 1,
+    'targeting never turns on a second door or a fabricated light');
+
+  bridge.reset();
+  assert.equal(bridge.accept(warning(103)).status, 'triggered');
+  bridge.advance(1);
+  assert.ok(Math.abs(packet.spotlight.direction[2]) < 0.001,
+    'REJOUER and a new point without coordinates do not reuse the previous target');
+
+  bridge.reset();
+  const behind = warning(103);
+  behind.point.position = { x: 19, y: 1.7, z: -14 };
+  assert.equal(bridge.accept(behind).status, 'triggered');
+  bridge.advance(1);
+  assert.ok(Math.abs(packet.spotlight.direction[2]) < 0.001,
+    'a spawn behind the source door does not turn the beam through the wall');
+
+  bridge.reset();
+  const invalid = warning(103);
+  invalid.point.position = { x: NaN, y: 1.7, z: -14 };
+  assert.equal(bridge.accept(invalid).status, 'triggered');
+  bridge.advance(1);
+  assert.ok(Math.abs(packet.spotlight.direction[2]) < 0.001,
+    'unqualified position never makes a fabricated spawn target');
+  bridge.advance(1);
+  assert.equal(packet.active, false);
+  assert.equal(packet.spotlight.range, 0);
+});
