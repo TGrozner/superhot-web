@@ -77,6 +77,109 @@ function addSerializedInitialWorldBases(catalog) {
 const BY_SPAWN_GO = new Map(DOJO_DOOR_SOURCE_BINDINGS.map(binding =>
   [binding.spawnGameObjectPathId, binding]));
 
+// J4 WEB CREATIVE TUNING, not a Unity light animation: one smooth warning
+// sweep with broad breathing highlights. Reuses only the three verified Dojo
+// light packets; adds no texture, proxy geometry, GPU pass or draw call.
+const WEB_WARNING_SWEEP_RADIANS = 0.30;
+const WEB_WARNING_RANGE_GAIN = 0.26;
+const WEB_WARNING_INTENSITY_GAIN = 0.20;
+const WEB_WARNING_MIN_CYCLE_SECONDS = 1.2;
+
+function finiteBasisVector(value) {
+  return (Array.isArray(value) || (ArrayBuffer.isView(value) && !(value instanceof DataView))) &&
+    value.length === 3 && Array.from(value).every(Number.isFinite);
+}
+
+/**
+ * Web-authored beacon presentation layered over SH-07's source timing. The
+ * source curve remains the authority for active/elapsed/range; no mutations of
+ * the private scene catalog or SH-07 source values are allowed.
+ * @param {object} catalog The prepared Dojo door catalog (read-only).
+ * @param {ReturnType<typeof createMcdDoorWarnings>} controller Live source controller.
+ * @returns {{advance: () => void, restore: (id?: string) => void}}
+ */
+function createWebWarningSweep(catalog, controller) {
+  const bases = new Map();
+  for (const packet of controller.packets()) {
+    const door = catalog[packet.id];
+    const spotlight = packet.spotlight;
+    const sourceDirection = spotlight.direction;
+    const sourceRight = spotlight.right;
+    let direction = null, right = null;
+    if (finiteBasisVector(sourceDirection) && finiteBasisVector(sourceRight) &&
+        finiteBasisVector(spotlight.up)) {
+      const dot = sourceDirection.reduce((sum, n, axis) =>
+        sum + n * sourceRight[axis], 0);
+      const directionLength = Math.hypot(...sourceDirection);
+      const rightLength = Math.hypot(...sourceRight);
+      if (Math.abs(dot) < 0.001 &&
+          Math.abs(directionLength - 1) < 0.001 &&
+          Math.abs(rightLength - 1) < 0.001) {
+        direction = Array.from(sourceDirection);
+        right = Array.from(sourceRight);
+        // Writable packet-owned vectors: never mutate vectors shared with
+        // the original private scene package.
+        spotlight.direction = [...direction];
+        spotlight.right = [...right];
+      }
+    }
+    bases.set(packet.id, {
+      packet, direction, right,
+      range: door.spotlight.range,
+      intensity: door.spotlight.intensity,
+      duration: door.curve.at(-1).time,
+    });
+  }
+
+  function restore(id) {
+    const records = id == null ? bases.values() : [bases.get(id)];
+    for (const base of records) {
+      if (!base) continue;
+      const spotlight = base.packet.spotlight;
+      if (base.direction) {
+        for (let axis = 0; axis < 3; axis++) {
+          spotlight.direction[axis] = base.direction[axis];
+          spotlight.right[axis] = base.right[axis];
+        }
+      }
+      spotlight.intensity = base.intensity;
+      if (!base.packet.active) spotlight.range = 0;
+    }
+  }
+
+  function advance() {
+    for (const base of bases.values()) {
+      const { packet } = base;
+      if (!packet.active) {
+        restore(packet.id);
+        continue;
+      }
+      // Do not accelerate the effect into a strobe for short source curves.
+      const phase = Math.min(packet.elapsed / Math.max(
+        base.duration, WEB_WARNING_MIN_CYCLE_SECONDS), 1);
+      const sweep = Math.sin(2 * Math.PI * phase);
+      const breathing = sweep * sweep;
+      // SH-07 has just sampled the original range; multiplication NEVER
+      // compounds from the previous frame. The source envelope still fades.
+      packet.spotlight.range *= 1 + WEB_WARNING_RANGE_GAIN * breathing;
+      if (Number.isFinite(base.intensity) && base.intensity >= 0) {
+        packet.spotlight.intensity = base.intensity *
+          (1 + WEB_WARNING_INTENSITY_GAIN * breathing);
+      }
+      if (!base.direction) continue;
+      const angle = WEB_WARNING_SWEEP_RADIANS * sweep;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      for (let axis = 0; axis < 3; axis++) {
+        packet.spotlight.direction[axis] =
+          base.direction[axis] * cos + base.right[axis] * sin;
+        packet.spotlight.right[axis] =
+          base.right[axis] * cos - base.direction[axis] * sin;
+      }
+    }
+  }
+  return Object.freeze({ advance, restore });
+}
+
 function dojoSource(source) {
   return source?.sceneBuildIndex === 10 && source?.serializedOwner === 'level10'
     && typeof source.scenePath === 'string' && /(?:^|\/)SHRL_Dojo2\.unity$/.test(source.scenePath);
@@ -115,10 +218,11 @@ export function createDojoDoorWarningBridge(scene) {
     !Array.isArray(catalog) && Object.keys(catalog).length > 0;
   const qualifiedWorldBasis = qualified &&
     scene?.coordinateSpace?.browserFromUnity === BROWSER_FROM_UNITY_X;
-  const controller = qualified && hasCatalog
-    ? createMcdDoorWarnings(qualifiedWorldBasis
-      ? addSerializedInitialWorldBases(catalog) : catalog)
+  const preparedCatalog = qualified && hasCatalog
+    ? (qualifiedWorldBasis ? addSerializedInitialWorldBases(catalog) : catalog)
     : null;
+  const controller = preparedCatalog ? createMcdDoorWarnings(preparedCatalog) : null;
+  const webSweep = controller ? createWebWarningSweep(preparedCatalog, controller) : null;
   const readiness = qualified ? (hasCatalog ? 'source-catalog-present' : 'missing-private-door-catalog')
     : 'not-dojo-build10-source';
 
@@ -134,6 +238,7 @@ export function createDojoDoorWarningBridge(scene) {
       return outcome('source-door-not-in-private-catalog', { spawnPathId, doorKey });
     }
     if (!controller.trigger(doorKey)) return outcome('source-controller-rejected', { spawnPathId, doorKey });
+    webSweep?.restore(doorKey); // Re-trigger starts centered, without stale sweep.
     return outcome('triggered', { spawnPathId, doorKey });
   }
 
@@ -143,7 +248,10 @@ export function createDojoDoorWarningBridge(scene) {
     if (!Number.isFinite(worldDeltaSeconds) || worldDeltaSeconds < 0) {
       throw new RangeError('worldDeltaSeconds must be finite and nonnegative');
     }
-    return controller ? controller.advance(worldDeltaSeconds) : [];
+    if (!controller) return [];
+    const packets = controller.advance(worldDeltaSeconds);
+    webSweep.advance();
+    return packets;
   }
 
   return Object.freeze({
@@ -151,6 +259,9 @@ export function createDojoDoorWarningBridge(scene) {
     accept,
     advance,
     packets: () => controller?.packets() ?? [],
-    reset: () => controller?.reset(),
+    reset: () => {
+      controller?.reset();
+      webSweep?.restore();
+    },
   });
 }
