@@ -151,6 +151,12 @@ try {
     standaloneVersion: 1,
     scene: 'SHRL_Dojo2',
     sceneBuildIndex: 10,
+    // Source-qualified release capability; both localhost and Pages consume
+    // this manifest and the exact rig/scene archive that it binds.
+    features: { ragdoll: {
+      bodies: ragdoll.bodies, joints: ragdoll.joints,
+      rigSha256: ragdoll.rigSha256,
+    } },
     assets,
   };
   await writeFile(join(tmp,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
