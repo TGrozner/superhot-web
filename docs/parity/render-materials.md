@@ -590,6 +590,20 @@ or a game comparison** until SH-05 inserts the GLSL in the actual pass.
 transforms. The preview consumes the already prepared world position;
 it does not require new vertices, UVs, or an OBJ copy.
 
+**Safe live wiring while private #175 is queued (2026-11-03):**
+`prepareDojoDoorWarningLighting` now treats an *absent* per-door world-space
+spotlight basis (`position/direction/right/up`) or absent false-light world
+position as a qualified omission rather than a Dojo gameplay exception.
+It reports `source-spotlight-world-basis-not-resolved` or
+`source-false-light-world-position-not-resolved` and emits no invented
+contribution for that light. Zero-range warnings require no spotlight
+basis. Explicitly **malformed** supplied values still throw, so the source
+schema cannot silently turn non-finite or zero directions into light.
+This is a **runtime fail-closed correctness guard, not a visible GPU fix**.
+SH-05 may connect the event/world clock without promising a red flash;
+only the private #175 result, parent-chain TRS conversion, original cookie
+availability, and the SH-05 GPU hookup can unlock its real projection.
+
 **Unresolved**: actual Unity cookie projection handedness and UV orientation,
 source spotlight attenuation/occlusion, false-light shader/slot global
 binding, active native variant, full Dojo-local ambient/fog/bake/SH,
