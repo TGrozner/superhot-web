@@ -19,7 +19,7 @@ export const DOJO_ROUTE_HOTKEYS = Object.freeze({
 /** A browser-only readiness receipt; not evidence of native gameplay or a complete run. */
 export function inspectDojoCaptureReadiness() {
   const reasons = [];
-  if (typeof window === 'undefined' ||
+  if (typeof window === 'undefined' || typeof document === 'undefined' ||
       typeof window.__superhotGetRenderedFrameSnapshot !== 'function') {
     return {ready:false,status:'WEB_DOJO_CAPTURE_NOT_READY',
       reasons:['RENDERED_FRAME_HOOK_UNAVAILABLE'],frameId:null};
@@ -31,6 +31,13 @@ export function inspectDojoCaptureReadiness() {
   if (!frame) reasons.push('RENDERED_FRAME_UNAVAILABLE');
   else {
     const source = frame.nativeScene?.source, g = frame.gameplay;
+    // Main starts in a playable *preview* without starting the encounter.
+    // The actual start/reset path hides these controls while playing.
+    // This is a Web UI receipt, never independent native or click evidence.
+    if (frame.activeScreen !== 'playing') reasons.push('DOJO_NOT_PLAYING');
+    if (document.getElementById?.('scene-controls')?.hidden !== true) {
+      reasons.push('DOJO_COMBAT_NOT_STARTED');
+    }
     const sceneName = typeof source?.scenePath === 'string'
       ? source.scenePath.replaceAll(String.fromCharCode(92), '/').split('/').at(-1).toLowerCase()
       : null;
@@ -41,6 +48,8 @@ export function inspectDojoCaptureReadiness() {
     if (![6,7].includes(g?.encounter?.killTarget) ||
         !Number.isSafeInteger(g?.encounter?.killed) || !Array.isArray(g?.encounter?.enemies)) {
       reasons.push('DOJO_ENCOUNTER_NOT_READY');
+    } else if (g.encounter.killed !== 0) {
+      reasons.push('DOJO_RUN_NOT_FRESH');
     }
     if (!Array.isArray(g?.items) || g.items.length === 0) reasons.push('SOURCE_PICKUP_ITEMS_UNAVAILABLE');
     if (!g?.feet || ![g.feet.x,g.feet.y,g.feet.z].every(Number.isFinite) ||
@@ -52,24 +61,28 @@ export function inspectDojoCaptureReadiness() {
     reasons,frameId:Number.isSafeInteger(frame?.frameId)?frame.frameId:null};
 }
 
-export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
+export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForStart = false } = {}) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     throw new Error('Dojo recorder requires a browser');
   }
   if (!Number.isInteger(intervalMs) || intervalMs < 50 || intervalMs > 5000 ||
-      !Number.isInteger(maxFrames) || maxFrames < 1 || maxFrames > 50000) {
+      !Number.isInteger(maxFrames) || maxFrames < 1 || maxFrames > 50000 ||
+      typeof waitForStart !== 'boolean') {
     throw new RangeError('invalid bounded Dojo capture settings');
   }
   const readiness = inspectDojoCaptureReadiness();
-  if (!readiness.ready) {
+  if (!readiness.ready && !waitForStart) {
     throw new Error('Dojo capture preflight failed: ' + readiness.reasons.join(', '));
   }
+  // Arming before Start avoids reopening DevTools after pointer lock.
+  // Preview frames are not captured, even if they say activeScreen=playing.
+  let ready = readiness.ready;
   const frames = [], marks = [], pressed = new Set(), markerWarnings = [];
   let lastFrameId = -1, timer = null, stopped = false;
   const onDown = event => {
     if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
     const type = DOJO_ROUTE_HOTKEYS[event.code];
-    if (!type || event.repeat || event.isComposing) return;
+    if (!type || !ready || event.repeat || event.isComposing) return;
     const target = event.target;
     if (target?.isContentEditable || ['INPUT','SELECT','TEXTAREA'].includes(target?.tagName)) return;
     // Hotkeys are meaningful only while the *actual* browser game is playing.
@@ -85,6 +98,10 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
 
   const sample = () => {
     if (stopped) return;
+    if (!ready) {
+      if (!inspectDojoCaptureReadiness().ready) return;
+      ready = true;
+    }
     const snapshot = window.__superhotGetRenderedFrameSnapshot();
     if (!snapshot || snapshot.frameId === lastFrameId) return;
     if (!Number.isSafeInteger(snapshot.frameId) || snapshot.frameId <= lastFrameId) return;
@@ -136,6 +153,7 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
   };
   function mark(type) {
     if (stopped) throw new Error('cannot mark a stopped Dojo capture');
+    if (!ready) throw new Error('Dojo capture is armed but the encounter has not started');
     if (!DOJO_ROUTE_MARKERS.includes(type)) throw new RangeError('unknown route marker');
     sample();
     if (!frames.length) throw new Error('no rendered frame available for route marker');
@@ -146,6 +164,7 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000 } = {}) {
   timer = window.setInterval(sample, intervalMs);
   sample();
   return Object.freeze({
+    get ready() { return ready; },
     get length() { return frames.length; },
     get stopped() { return stopped; },
     get markers() { return marks.map(mark => ({...mark})); },
