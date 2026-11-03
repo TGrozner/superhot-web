@@ -80,6 +80,14 @@ test('provisional cookie projector produces a visibly nonzero Web preview only i
   const graded = brightConcrete.map((base, i) =>
     Math.max(0, Math.min(1, base + center.rgb[i])));
   assert.ok(graded[0] - graded[1] > .25, 'bright Concrete receives visibly red warning contrast');
+  // J4 Web-only: Red Crystal's saturated base requires an additional pale
+  // warning glint. This changes the shader-injected uMode==3 path only.
+  const crystal = sampleDojoDoorWarningWebPreview(spot, [1, 2, 8], .4, 3);
+  assert.ok(crystal.rgb[1] > center.rgb[1] + .20);
+  assert.ok(crystal.rgb[2] > center.rgb[2] + .20);
+  assert.equal(crystal.rgb[0] > center.rgb[0], true);
+  assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [1, 2, 8], 0, 3).rgb, [0, 0, 0]);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /uMode == 3 && dangerRed > 0\\.0/);
   const near = sampleDojoDoorWarningWebPreview(spot, [1, 2, 4], .4);
   const far = sampleDojoDoorWarningWebPreview(spot, [1, 2, 12], .4);
   assert.ok(near.rgb[0] > center.rgb[0] && center.rgb[0] > far.rgb[0]);
