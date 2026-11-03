@@ -48,11 +48,15 @@ export const NATIVE_PROVENANCE = Object.freeze({
 
 const main = source['src/main.js'];
 const sourceAnchors = Object.freeze({
-  keyR: /if\s*\(\s*event\.code\s*===\s*['"]KeyR['"]\s*\)\s*reload\(\s*\)/.test(main),
+  // One guarded Web KeyR handler, NOT bound in source-backed Dojo.
+  keyRNonNativeReloadOnly: /if\s*\(\s*event\.code\s*===\s*['"]KeyR['"]\s*&&\s*!nativeGameplay\(\)\s*\)\s*reload\(\s*\)/.test(main) &&
+    [...main.matchAll(/event\.code\s*===\s*['"]KeyR['"]/g)].length === 1,
   reloadRefillsAmmo: /if\s*\(\s*state\.reload\s*<=\s*0\s*\)\s*\{\s*state\.reload\s*=\s*0;\s*state\.ammo\s*=\s*6/.test(main),
-  playerUsesRealDt: /state\.camera\.x\s*\+\s*sx\s*\*\s*norm\s*\*\s*velocity\s*\*\s*dt/.test(main) &&
+  prototypePlayerUsesRealDt: /state\.camera\.x\s*\+\s*sx\s*\*\s*norm\s*\*\s*velocity\s*\*\s*dt/.test(main) &&
     /state\.camera\.z\s*\+\s*sz\s*\*\s*norm\s*\*\s*velocity\s*\*\s*dt/.test(main),
-  worldScaleIsApplied: /const\s+worldDt\s*=\s*dt\s*\*\s*state\.speed/.test(main),
+  dojoPlayerUsesScaledDt: /mcdSourcePlayerPreConstraintMove\s*\(\s*\{/.test(main) &&
+    /scaledDeltaTime:\s*worldDt/.test(main) && /moveNativeCharacter\s*\(/.test(main),
+  worldScaleIsApplied: /worldDt\s*=\s*tick\.worldDelta/.test(main),
   singleAnimationFrameUpdate: /if\s*\(\s*state\.screen\s*===\s*['"]playing['"]\s*\)\s*update\(dt\)/.test(main) &&
     /requestAnimationFrame\(frame\)/.test(main),
   playerAndBulletInSameUpdate: /bullet\.speed\s*\*\s*worldDt/.test(main) &&
@@ -121,9 +125,9 @@ export function createAcceptanceReport() {
   );
   const initializerVerified = initializer?.scope === 'decompiled-field-initializer' &&
     initializer.runtimeValidated === false && initializer.value === 60;
-  const rAnchored = sourceAnchors.keyR && sourceAnchors.reloadRefillsAmmo;
-  const movementAnchored = sourceAnchors.playerUsesRealDt &&
-    sourceAnchors.worldScaleIsApplied;
+  const rAnchored = sourceAnchors.keyRNonNativeReloadOnly && sourceAnchors.reloadRefillsAmmo;
+  const movementAnchored = sourceAnchors.prototypePlayerUsesRealDt &&
+    sourceAnchors.dojoPlayerUsesScaledDt && sourceAnchors.worldScaleIsApplied;
   const phaseAnchored = sourceAnchors.singleAnimationFrameUpdate &&
     sourceAnchors.playerAndBulletInSameUpdate;
 
@@ -136,16 +140,19 @@ export function createAcceptanceReport() {
         provenance: 'WEB_SOURCE_AND_PURE_MODULE',
         sourceAnchorsPresent: rAnchored,
         moduleActionOnKeyR: rAction,
-        browserSourceCallsReload: sourceAnchors.keyR,
-        browserSourceRefillsMagazine: sourceAnchors.reloadRefillsAmmo,
+        moduleActionBoundToDojo: false,
+        browserDojoKeyRDispatch: sourceAnchors.keyRNonNativeReloadOnly
+          ? 'UNHANDLED_IN_DOJO_WEB' : 'UNKNOWN',
+        browserNonNativeKeyRCallsReload: sourceAnchors.keyRNonNativeReloadOnly,
+        browserNonNativeReloadRefillsMagazine: sourceAnchors.reloadRefillsAmmo,
         browserMeasurement: false,
       },
       qualifyReportedGap({
         sourceVerified: rAnchored,
         comparison: 'action',
-        differs: rAction !== 'replay',
+        differs: sourceAnchors.keyRNonNativeReloadOnly,
       }),
-      'SH-02: expose active profile actions (Replay vs reload); SH-05: wire browser key handler and verify by actual play; obtain native dispatch proof before claiming parity.',
+      'SH-02: confirm active native Dojo input profile; SH-05: connect Replay to active browser KeyR (currently unhandled) and verify by actual play. Prototype reload helper is not the Dojo dispatcher.',
     ),
     scenario(
       'MCD-ACCEPT-02-CONTAINERS-FIXED-STEP', 'P1', 'SH-01 / SH-05',
@@ -205,19 +212,23 @@ export function createAcceptanceReport() {
         tickInputRealSeconds: realSeconds,
         webWorldScaleAfterTick: tick.timeScale,
         webWorldDeltaSeconds: tick.worldDelta,
-        webPlayerUsesRealSeconds: tick.realDelta,
-        webPlayerDistanceWorldUnits: realDistance,
-        scaledDtCounterfactualWorldUnits: scaledDistance,
-        ratioRealToScaledCounterfactual: realDistance / scaledDistance,
+        webDojoDeltaDomain: 'tick.worldDelta (scaled frame delta)',
+        webDojoUsesScaledWorldDelta: sourceAnchors.dojoPlayerUsesScaledDt &&
+          sourceAnchors.worldScaleIsApplied,
+        webDojoMeasuredDisplacementMeters: null,
+        prototypeOnlyRealSeconds: tick.realDelta,
+        prototypeOnlyHelperDistanceWorldUnits: realDistance,
+        prototypeOnlyScaledCounterfactualWorldUnits: scaledDistance,
+        prototypeOnlyRatioRealToScaled: realDistance / scaledDistance,
         counterfactualIsNativeMeasurement: false,
         browserMeasurement: false,
       },
       qualifyReportedGap({
         sourceVerified: movementAnchored,
         comparison: 'movement',
-        differs: Math.abs(realDistance - scaledDistance) > 1e-12,
+        differs: false,
       }),
-      'SH-02: express movement with game delta and bound shifter; SH-05: wire only after native movement method and measured speed/scene contract, compare matched input traces.',
+      'Dojo Web already supplies tick.worldDelta to pre-constraint motion. SH-02/SH-05: prove native active time and collision plus matched browser movement/phase; unconnected prototype distances are not Dojo observations.',
     ),
     scenario(
       'MCD-ACCEPT-05-PROJECTILE-PHASES', 'P0', 'SH-03 / SH-05',
