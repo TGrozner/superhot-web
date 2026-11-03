@@ -11,5 +11,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Syntax and unit tests
+      - name: Install development tooling
+        run: npm ci --ignore-scripts
+      - name: Syntax, unit tests and TypeScript checks
         run: npm run check
