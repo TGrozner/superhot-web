@@ -662,3 +662,103 @@ Holding an axis against a wall **does not prove translation**; the
 clock-slope observer remains only an input-regime diagnostic, not a native
 movement/physics verdict. Existing 6–7 kill/restart acceptance is unchanged;
 no game/corpus binary or private runner was invoked for authored Node tests.
+
+
+### SH-10 — opt-in *real pixel* Dojo/build10 pair, not only GPU draw counters (3 November 2026)
+
+The existing `acceptance-dojo-visible.mjs` sees **GPU receipts only**. It
+cannot show whether the Dojo looks like MCD. The independent **owner-local**
+`scripts/acceptance-dojo-pixels.mjs` consumes **four actual screenshots**,
+two browser and two *separately captured, owner-authorized, privately retained*
+MCD native screenshots, with identical dimensions and chosen ROI rectangles:
+*before* and *after* the same event (e.g. door light OFF → ON).
+It reads local PNGs only; there is **no native screenshot in Git, CI,
+this document or the script**. It neither executes the native game nor
+requests Unity/Frida, a runner or a private corpus workflow.
+
+Capture using the browser's **real tab screenshot** (not
+`canvas.toDataURL()` after a WebGL draw with
+`preserveDrawingBuffer:false`, which may be blank), ideally in Chromium at a
+fixed resolution, alongside the browser receipt's frame ID. Collect the
+native screenshot *legally and privately*, from the **same MCD Dojo scene,
+viewpoint, actor pose, action phase, viewport and HUD inclusion**. Native
+camera pose/FOV and precise action timing are currently **UNKNOWN**, so
+don't mark either as independently verified. Disable automatic OS scaling,
+avoid cursor/DevTools overlays, use the same crop and do not upload originals.
+
+Place only an **untracked private** manifest and PNGs in the same directory,
+such as `private/dojo-visual/`:
+
+```json
+{
+  "schemaVersion": 1,
+  "target": {
+    "game": "SUPERHOT: MIND CONTROL DELETE",
+    "scene": "SHRL_Dojo2",
+    "sceneBuildIndex": 10,
+    "serializedOwner": "level10"
+  },
+  "rois": [
+    {"id": "world", "x": 0, "y": 0, "width": 1280, "height": 720},
+    {"id": "door", "x": 200, "y": 80, "width": 260, "height": 250},
+    {"id": "enemy", "x": 620, "y": 140, "width": 220, "height": 460}
+  ],
+  "pairs": [
+    {
+      "id": "before", "webFrameId": 120,
+      "webPng": "web-before.png", "nativePng": "native-before.png",
+      "webProvenance": "owner-local-browser",
+      "nativeProvenance": "owner-authorized-native",
+      "cameraMatch": "unknown", "timeMatch": "unknown"
+    },
+    {
+      "id": "after", "webFrameId": 178,
+      "webPng": "web-after.png", "nativePng": "native-after.png",
+      "webProvenance": "owner-local-browser",
+      "nativeProvenance": "owner-authorized-native",
+      "cameraMatch": "unknown", "timeMatch": "unknown"
+    }
+  ]
+}
+```
+
+**These numbers are a schema example, NOT recovered Dojo camera/ROI
+coordinates or a native reference.** Replace all four PNGs, frame IDs and ROIs
+with genuine private evidence. `owner-declared-matched` is accepted instead of
+`unknown` for camera/time metadata only if the owner manually aligned them;
+it still is **not independently authenticated**.
+
+```sh
+node scripts/acceptance-dojo-pixels.mjs --manifest private/dojo-visual/pairs.json
+```
+
+Output is JSON scalar metrics only: RGB/brightness MAE per ROI,
+edge-map overlap and centroid position drift (**generic pixel structure,
+not automatically a person silhouette, nor a camera matrix**),
+and native/Web *before→after* brightness changes with differential error.
+Comparison of the door ROI at both times can expose a **real lighting gap**;
+world/enemy ROIs help prioritize placement/shape/color. The PNG reader
+rejects alpha, palette, non-8-bit/interlaced or malformed files instead
+of guessing the display composite. No thresholds, viewport registration,
+native-trust proof, sRGB-linear photometric calibration or gameplay/physics
+equivalence have been invented.
+
+- `OWNER_SUPPLIED_PRIVATE_PNG_DELTA_MEASURED_NOT_PARITY` (exit 0) means
+  **pixels were decoded and metrics computed**, **NOT** a passing 1:1 gate.
+- `PRIVATE_NATIVE_WEB_IMAGE_PAIR_MISSING_OR_UNDECODABLE` (exit 2) means
+  no usable pair: e.g. absent private native screenshot, unsupported PNG,
+  mismatched dimensions or invalid ROI. This is **INCOMPLETE**, not refuted.
+- `PRIVATE_PIXEL_PAIR_METADATA_INVALID` (exit 2) means wrong build,
+  unsupported provenance or inconsistent capture ordering.
+- `nativeParityVerdict:"UNKNOWN"` remains invariant. Native execution and
+  a camera pose verified independently of owner-provided labels remain absent.
+
+CI only runs *synthetic in-memory PNG* tests proving decoder, gap arithmetic
+and fail-closed behavior. It does **not** ship, process or claim any original
+screenshot. This is a **nonblocking diagnostic** until SH-05/Thomas supply
+real private matched frames; there is no red pixel threshold on routine PRs.
+Owner assignments: **SH-05** native-world warning GPU cookie/layer8 hook;
+**SH-14/SH-06** animated body/hands/death clips; **Thomas/SH-15** owner-local
+and native matching/ROI evidence; **SH-10** acceptance metrics/provenance
+and first reproducible differences. Protect the previously manually validated
+7/7 Dojo loop, including F/E, kills, victory and REJOUER.
