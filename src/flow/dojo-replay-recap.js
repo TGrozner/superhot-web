@@ -4,6 +4,7 @@
  * Consumes the scoreboard maintained by SH-05; does not award points, count
  * kills, modify the encounter quota, reset combat or own timers/inputs.
  * A completed 6-kill round and a 7-kill round have SEPARATE records.
+ * Creative Web streaks are stored in the existing per-quota localStorage key.
  * Caller owns persistence and UI. No assets or private data required.
  */
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -30,15 +31,29 @@ export function readDojoReplayBest(json, quota) {
     catch {
         return null;
     }
-    if (!isRecord(value) || value['schemaVersion'] !== 1 || value['quota'] !== quota ||
-        !isCount(value['victories']) || value['victories'] < 1 ||
+    if (!isRecord(value) ||
+        (value['schemaVersion'] !== 1 && value['schemaVersion'] !== 2) ||
+        value['quota'] !== quota || !isCount(value['victories']) || value['victories'] < 1 ||
         !isCount(value['bestScore']) || !isSeconds(value['fastestSeconds']))
         return null;
+    // Existing v1 personal records cannot establish any past streak. Upgrade
+    // without fabricating wins or discarding a saved best score/time.
+    let currentStreak = 0, bestStreak = 0;
+    if (value['schemaVersion'] === 2) {
+        const current = value['currentStreak'];
+        const record = value['bestStreak'];
+        if (!isCount(current) || !isCount(record) ||
+            current > record || record > value['victories'])
+            return null;
+        currentStreak = current;
+        bestStreak = record;
+    }
     return Object.freeze({
-        schemaVersion: 1, quota,
+        schemaVersion: 2, quota,
         victories: value['victories'],
         bestScore: value['bestScore'],
         fastestSeconds: value['fastestSeconds'],
+        currentStreak, bestStreak,
     });
 }
 function validateRun(value) {
@@ -78,29 +93,41 @@ function gradeDojoStyle(run) {
  * `best` comes from `readDojoReplayBest` for the SAME quota. No side effects.
  * The SH-05 glue invokes this once on `finish(win)`, formats `text` into the
  * existing stats node and persists `JSON.stringify(result.best)` only when
- * `shouldPersist`. Never call from per-frame updates or from `killEnemy`.
+ * `shouldPersist`, including losses that break an active streak. Never call from
+ * per-frame updates or from `killEnemy`.
  */
 export function createDojoReplayRecap(snapshot, best = null) {
     const run = validateRun(snapshot);
-    if (best !== null && (best.schemaVersion !== 1 || best.quota !== run.quota ||
+    if (best !== null && (best.schemaVersion !== 2 || best.quota !== run.quota ||
         !isCount(best.victories) || best.victories < 1 ||
-        !isCount(best.bestScore) || !isSeconds(best.fastestSeconds))) {
+        !isCount(best.bestScore) || !isSeconds(best.fastestSeconds) ||
+        !isCount(best.currentStreak) || !isCount(best.bestStreak) ||
+        best.currentStreak > best.bestStreak || best.bestStreak > best.victories)) {
         throw new TypeError('Dojo replay record does not match this quota');
     }
     let milestone = 'retry';
     let nextBest = best;
+    const previousStreak = best?.currentStreak ?? 0;
     if (run.victory) {
         const first = best === null;
         const scoreRecord = first || run.score > best.bestScore;
         const speedRecord = first || run.elapsedSeconds < best.fastestSeconds;
         milestone = first ? 'first-clear' : scoreRecord && speedRecord ? 'double-record'
             : scoreRecord ? 'score-record' : speedRecord ? 'speed-record' : 'clear';
+        const currentStreak = Math.min(Number.MAX_SAFE_INTEGER, previousStreak + 1);
         nextBest = Object.freeze({
-            schemaVersion: 1, quota: run.quota,
-            victories: first ? 1 : best.victories + 1,
+            schemaVersion: 2, quota: run.quota,
+            victories: first ? 1 : Math.min(Number.MAX_SAFE_INTEGER, best.victories + 1),
             bestScore: first ? run.score : Math.max(run.score, best.bestScore),
             fastestSeconds: first ? run.elapsedSeconds : Math.min(run.elapsedSeconds, best.fastestSeconds),
+            currentStreak,
+            bestStreak: Math.max(currentStreak, best?.bestStreak ?? 0),
         });
+    }
+    else if (best !== null && previousStreak > 0) {
+        // finish(false) is already wired to write when shouldPersist is true.
+        // A defeat breaks the chain but never deletes PB score/time or wins.
+        nextBest = Object.freeze({ ...best, currentStreak: 0 });
     }
     const title = {
         'retry': 'REJOUE POUR PRENDRE TA REVANCHE',
@@ -122,12 +149,18 @@ export function createDojoReplayRecap(snapshot, best = null) {
             : ' · QUOTA ATTEINT, MAIS RUN PERDU'
         : style.nextTarget === null ? ' · STYLE S — RANG MAX'
             : ` · STYLE ${style.grade} · PROCHAIN RANG : ${style.nextTarget} PTS`;
+    const streakText = run.victory && nextBest !== null && nextBest.currentStreak >= 2
+        ? ` · SÉRIE ${nextBest.currentStreak}${nextBest.currentStreak > (best?.bestStreak ?? 0)
+            ? ' · RECORD SÉRIE' : ''}`
+        : !run.victory && previousStreak > 0 ? ` · SÉRIE ${previousStreak} BRISÉE` : '';
     return Object.freeze({
-        text: `${metrics} · ${title[milestone]}${styleText}${recordText}`,
+        text: `${metrics} · ${title[milestone]}${styleText}${streakText}${recordText}`,
         milestone, best: nextBest,
-        shouldPersist: run.victory,
+        shouldPersist: run.victory || previousStreak > 0,
         provenance: 'WEB_ONLY',
         styleGrade: style?.grade ?? null,
         nextStyleTarget: style?.nextTarget ?? null,
+        currentStreak: nextBest?.currentStreak ?? 0,
+        bestStreak: nextBest?.bestStreak ?? 0,
     });
 }
