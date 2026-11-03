@@ -438,11 +438,14 @@ export function createRenderer(canvas) {
     nativePlayerHands = createDojoPlayerAnimationPass(gl, { playerPacket, rig, clips });
     return true;
   }
-  function drawDojoPlayerHands({ heldItem, modelMatrix, phase = 'held',
+  function drawDojoPlayerHands({ heldItem, profileId = null, modelMatrix, phase = 'held',
       sourceClipTime, descriptor = null } = {}) {
-    if (!nativePlayerHands || heldItem?.isKatana !== true) return null;
+    // Source profile validation remains inside the GPU pass. In particular,
+    // only explicit, source-visible unarmed descriptors may render after throw.
+    const sourceUnarmed=heldItem == null && profileId === 'unarmed';
+    if (!nativePlayerHands || (!sourceUnarmed && heldItem?.isKatana !== true)) return null;
     const report = nativePlayerHands.draw({
-      heldItem, phase, sourceClipTime, modelMatrix,
+      heldItem, profileId, phase, sourceClipTime, modelMatrix,
       descriptor, viewProjection, cameraPosition: currentCamera,
       shaderTime: currentSceneClock.unscaledTime,
       // Diagnostic Web-lit tint: no claim of native hands shader parity.
