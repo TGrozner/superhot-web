@@ -1,6 +1,6 @@
 # SH-03 — MCD combat / enemy behavior parity ledger
 
-**Scope:** SUPERHOT: MIND CONTROL DELETE (MCD), **not** SUPERHOT (2016). Last checked: 2026-11-02.
+**Scope:** SUPERHOT: MIND CONTROL DELETE (MCD), **not** SUPERHOT (2016). Last checked: 2026-11-03.
 
 ## Evidence policy
 
@@ -941,3 +941,55 @@ la requête arme et SFX peuvent précéder un **projectile arrêté par le
 mur**, tandis que le Web actuel ne produit aucun projectile.
 Pooler/pertes de shot, PhysX, ordre des phases et instance runtime
 demeurent **INCONNUS** jusqu'à trace native et browser appariés.
+
+
+## SH-03 update — 2026-11-03, gun sound versus collision phase
+
+**New private primary evidence inspected (read-only):** `superhot-research`
+#71, artifact `13138660437` (`managed/Assembly-CSharp/GunPejAiWeapon.cs`,
+full method-level read), and #102, artifact `13141705847`
+(`managed/Assembly-CSharp/Bullet.cs`, scoped collision/update section).
+These are MCD build 20299547 source-level observations, **not** a captured
+live Dojo shot or successful native bullet-pool allocation. No private source
+text, binary, audio or scene assets are included here.
+
+- **SOURCE-PROVEN (Pistol/Gun base):** accepted `Shoot` requests fire audio,
+  a nearby-enemy alert and a deferred bullet spawn. Audio request occurs
+  before the deferred projectile can traverse and collide with a wall.
+  A late weapon-socket pose supplies bullet origin/direction. Pool allocation
+  can still fail, so a spawn request is not a witnessed projectile.
+- **SOURCE-PROVEN (Bullet):** bullet travel and collision sweep are separate
+  phases. The collision sweep is in `FixedUpdate`, uses a small-radius
+  sphere cast between recorded positions, sorts contacts and dispatches
+  material/actor handling. It does not constitute a precondition on the
+  earlier firing sound. Exact Dojo material-layer overrides, hit reactions,
+  and actual bullet-to-enemy damage remain **UNKNOWN** here.
+- **SOURCE-PROVEN (AI shotgun scope):** prior `ShotGunPejAiWeapon`
+  evidence/test contract produces `pelletCount` AI projectile requests
+  (distinct from the player's `ShotGun` 1+`pelletsCount` path).
+  The current animated forward/muzzle must be provided at late emission.
+- **WEB-OBSERVED defect:** `src/main.js` currently consumes pending enemy
+  shots inside `drawEnemy`; an unobstructed muzzle-to-target segment is
+  required before both the Web bullet and sound are emitted. This
+  reverses the source firing/collision relationship, couples physics to
+  rendering, and never consumes the restored AI shotgun volley.
+- **INTEGRATION CANDIDATE (SH-03 PR #223):** only
+  `src/combat/native-enemy-fire-phase.js` and its scenario test. It emits
+  separate accepted-attack cue intents and late-pose bullet requests,
+  retains a deferred request when pose is unavailable, and never tests
+  line of sight to veto it. Test geometry and timing values are synthetic.
+  Pistol and Shotgun sound behavior are in scope; other weapon-family
+  sound rules fail closed. **The module is not live gameplay until SH-05
+  wires the shared simulation/render boundary.**
+
+**Critical missing native evidence:** private query #173 (factory/Spawner
+hierarchy) remains queued at this audit. Do not reinterpret serialized
+`templates=[]` as an empty live factory population or invent actual
+Dojo weapon distribution, difficulty, HP or collision material rules.
+
+**Required acceptance after SH-05 wiring:** an actual Dojo browser run
+must witness an accepted Pistol attack and its sound request, a projectile
+colliding with a wall without retroactively suppressing the shot, one
+unobstructed projectile reaching the actor and a distinct subsequent death,
+then 6–7 distinct deaths/victory. Passing Node fixtures alone is **not**
+native gameplay or audio parity.
