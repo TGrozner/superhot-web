@@ -327,3 +327,40 @@ test('J3 Web strafes: armed enemies alternate safe lateral lanes instead of camp
   assert.ok(Math.hypot(sideEnemy.x-blocker.x,sideEnemy.z-blocker.z)>=.8,
     'no crowd clipping or actor teleport');
 });
+
+test('J3 Web peeking: a body-visible enemy sidesteps low cover until its real muzzle line clears',()=>{
+  // Fabricated cover and values, not an MCD claim. The already-live encounter
+  // loop updates the actor; no new main.js input, traces or weapon rules.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,5),playerPosition:p(8,1.6,5)};
+  const encounter=setup(data,[box(5,.65,5,.15,1.3,1.5)]);
+  const enemy=firstSpawn(encounter,near);
+  enemy.z=5;
+  const originalZ=enemy.z;
+  let opened=false;
+  for(let step=0;step<13;step++) {
+    enemy.clock=1.6+step*.2;
+    // In the browser SH-14 supplies the updated animated muzzle each frame.
+    enemy.muzzlePosition=p(enemy.x,.3,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    advanceNativeEncounter(encounter,input([enemy],{...near,scaledDeltaTime:.2}));
+    assert.equal(enemy.encounter.visible,true,'eye remains over fabricated cover');
+    if(step===0) {
+      assert.equal(enemy.encounter.canAttack,false,'blocked muzzle cannot fire');
+      assert.ok(Math.abs(enemy.z-originalZ)>.05,'actor seeks a safe side lane instead of freezing');
+    }
+    if(enemy.encounter.canAttack) { opened=true; break; }
+  }
+  assert.ok(opened,'repositioning reveals an actual unobstructed muzzle ray');
+  assert.ok(Math.abs(enemy.z-originalZ)>1,'actor physically moved rather than bypassing collision');
+  assert.ok(enemy.x<4.5,'capsule never jumps through the low cover while peeking');
+
+  const missing=setup(data,[box(5,.65,5,.15,1.3,1.5)]);
+  const blind=firstSpawn(missing,near);
+  blind.z=5; blind.clock=1.6;
+  advanceNativeEncounter(missing,input([blind],{...near,scaledDeltaTime:.2}));
+  assert.equal(blind.encounter.canAttack,false);
+  assert.deepEqual(p(blind.x,blind.y,blind.z),p(2,0,5),
+    'unknown muzzle does not authorize speculative peeking or shooting');
+});
