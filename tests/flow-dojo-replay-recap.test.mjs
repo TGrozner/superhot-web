@@ -35,8 +35,10 @@ test('death, corrupted storage and invalid scoreboard preserve playable restart'
     score:450, elapsedSeconds:18.5,
   }, record);
   assert.equal(failed.milestone, 'retry');
-  assert.equal(failed.best, record);
-  assert.equal(failed.shouldPersist, false);
+  assert.equal(failed.best.bestScore, record.bestScore);
+  assert.equal(failed.best.currentStreak, 0, 'death breaks the active winning streak');
+  assert.equal(failed.best.bestStreak, 1, 'best streak is retained');
+  assert.equal(failed.shouldPersist, true, 'death must persist a broken streak');
   assert.match(failed.text, /record : 750 pts/);
   assert.throws(() => result(7, {kills:5}), /contradicts/);
   assert.throws(() => result(7, {elapsedSeconds:Infinity}), /finite/);
@@ -66,4 +68,39 @@ test('existing Dojo finish screens expose Web style grades and actionable retry 
   assert.equal(loss.nextStyleTarget, null);
   assert.match(loss.text, /3 ENNEMIS RESTANTS/);
   assert.equal(loss.shouldPersist, false);
+});
+
+test('Dojo win streak survives reload, upgrades legacy personal bests and resets on loss', () => {
+  const legacy = readDojoReplayBest(JSON.stringify({
+    schemaVersion:1, quota:6, victories:8, bestScore:1900, fastestSeconds:19.4,
+  }), 6);
+  assert.equal(legacy.schemaVersion, 2);
+  assert.equal(legacy.currentStreak, 0, 'legacy history cannot prove a streak');
+  assert.equal(legacy.bestStreak, 0);
+  const one = result(6, {best:legacy, score:700, elapsedSeconds:25});
+  assert.equal(one.currentStreak, 1);
+  assert.equal(one.best.victories, 9);
+  assert.equal(one.best.bestScore, 1900);
+  const two = result(6, {best:readDojoReplayBest(JSON.stringify(one.best), 6)});
+  assert.equal(two.currentStreak, 2);
+  assert.equal(two.bestStreak, 2);
+  assert.match(two.text, /SÉRIE 2.*RECORD SÉRIE/);
+  assert.equal(readDojoReplayBest(JSON.stringify(two.best), 7), null);
+  const defeat = createDojoReplayRecap({
+    quota:6, victory:false, kills:4, shots:5, dodges:2,
+    score:450, elapsedSeconds:30,
+  }, readDojoReplayBest(JSON.stringify(two.best), 6));
+  assert.equal(defeat.shouldPersist, true);
+  assert.equal(defeat.currentStreak, 0);
+  assert.equal(defeat.bestStreak, 2);
+  assert.equal(defeat.best.victories, 10);
+  assert.equal(defeat.best.bestScore, 1900);
+  assert.match(defeat.text, /SÉRIE 2 BRISÉE/);
+  const afterLoss = result(6, {best:readDojoReplayBest(JSON.stringify(defeat.best), 6)});
+  assert.equal(afterLoss.currentStreak, 1);
+  assert.equal(afterLoss.bestStreak, 2);
+  assert.doesNotMatch(afterLoss.text, /RECORD SÉRIE/);
+  assert.equal(readDojoReplayBest(JSON.stringify({
+    ...defeat.best, currentStreak:4, bestStreak:2,
+  }), 6), null, 'corrupt streak must not advance a record');
 });
