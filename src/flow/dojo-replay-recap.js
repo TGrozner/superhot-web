@@ -73,7 +73,6 @@ function gradeDojoStyle(run) {
         return { grade: 'B', nextTarget: aScore };
     return { grade: 'C', nextTarget: bScore };
 }
-
 /**
  * Generate end-screen feedback from ACTUAL Web counters, independent of MCD.
  * `best` comes from `readDojoReplayBest` for the SAME quota. No side effects.
