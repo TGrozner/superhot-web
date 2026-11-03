@@ -160,12 +160,22 @@ export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatr
 
 /** Real reaction command only: Kill adds no invented kick. Exact hit bone wins;
  * a part fallback selects its first authored Rigidbody. */
-export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:force,duration}) {
+export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:force,duration,point:hitPoint=null}) {
   const body=boneIndex==null?runtime.bodies.find(b=>b.source.partId===partId):runtime.byBone.get(boneIndex);
   if(!body)throw new RangeError('Impact has no source Rigidbody');
   const value=vector(force);
-  if(mode==='Impulse')for(const axis of axes)body.velocity[axis]+=value[axis]*body.inverseMass;
-  else if(mode==='ConstantForce') {
+  if(mode==='Impulse') {
+    for(const axis of axes)body.velocity[axis]+=value[axis]*body.inverseMass;
+    if(hitPoint!==null) {
+      // An actual world-space contact generates torque about the body origin.
+      // Capping the angular kick is a Web stability/feel choice, not PhysX.
+      const lever=sub(vector(hitPoint),body.position);
+      const angularKick=mul(cross(lever,value),body.inverseInertia);
+      const speed=length(angularKick);
+      const bounded=speed>12?mul(angularKick,12/speed):angularKick;
+      for(const axis of axes)body.angularVelocity[axis]+=bounded[axis];
+    }
+  } else if(mode==='ConstantForce') {
     if(!Number.isFinite(duration)||duration<0)throw new TypeError('Source force duration required');
     body.forces.push({vector:value,until:runtime.elapsed+duration});
   } else throw new TypeError('Only source Impulse/ConstantForce supported');
