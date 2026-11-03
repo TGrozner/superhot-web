@@ -79,6 +79,8 @@ test('shotgun emits one source-qualified gun cue and all deferred pellet request
 
 test('melee Attack is only an animation intent; even native melee kill decision cannot apply damage without the event/contact gate', () => {
   const state = setup('Melee');
+  // Explicit synthetic range (not a Dojo scene setting); no implicit default.
+  state.weaponSettings.meleeAttackDistance = 1;
   const meleeInput = {
     active: true, playerAlive: true, inFront: true,
     enemyPosition: p(), playerPosition: p(.2), weaponPosition: p(),
