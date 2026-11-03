@@ -259,3 +259,44 @@ test('J4 Web beacons sweep real Dojo door cones smoothly without new packets or 
   assert.equal(noPrecomputedWorldCatalog['level10::7089'].spotlight.position, undefined,
     'the original source catalog remains untouched');
 });
+
+test('J4 nearby Dojo player draws only the already active warning beam toward the threat', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const packets = bridge.packets();
+  const beacon = packets[0];
+  const initialDirection = [...beacon.spotlight.direction];
+  const vectors = [beacon.spotlight.direction, beacon.spotlight.right, beacon.spotlight.up];
+
+  bridge.accept(warning(103));
+  bridge.advance(1, { x: 9, y: 1.8, z: -15 });
+  assert.equal(bridge.packets(), packets, 'reactive lighting never creates draw packets');
+  assert.equal(packets.filter(packet => packet.active).length, 1);
+  assert.ok(beacon.spotlight.direction[2] > 0.10,
+    'a nearby player in front of doorway 103 attracts its active beam');
+  vectors.forEach((axis, index) => {
+    assert.equal(axis, [beacon.spotlight.direction, beacon.spotlight.right, beacon.spotlight.up][index],
+      'the existing GPU-facing vector buffers are reused');
+    assert.ok(Math.abs(Math.hypot(...axis) - 1) < 1e-9);
+  });
+  assert.equal(beacon.spotlight.range, 10, 'the source envelope is untouched');
+  assert.equal(packets[1].active, false);
+  assert.equal(packets[2].active, false);
+
+  bridge.reset();
+  assert.deepEqual(beacon.spotlight.direction, initialDirection);
+  bridge.accept(warning(103));
+  bridge.advance(1, { x: 30, y: 1.8, z: -15 });
+  assert.ok(Math.abs(beacon.spotlight.direction[2]) < 0.001,
+    'a player behind the light does not become an x-ray aim target');
+
+  bridge.reset();
+  bridge.accept(warning(103));
+  bridge.advance(1, { x: 9, y: Number.NaN, z: -15 });
+  assert.ok(Math.abs(beacon.spotlight.direction[2]) < 0.001,
+    'an invalid camera position falls back to the original Web sweep');
+
+  bridge.advance(1);
+  assert.equal(beacon.active, false);
+  assert.deepEqual(beacon.spotlight.direction, initialDirection,
+    'the beam and its targeting vanish at source warning completion');
+});
