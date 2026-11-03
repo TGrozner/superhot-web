@@ -103,6 +103,10 @@ export function stepNativeDojoActorCombat(input) {
     // pending shot. Bind the derived muzzle to that SAME snapshot by identity;
     // lack of source pose keeps the shot pending. The actual muzzle-local
     // transform and Web collider sweep remain SH-05's separate responsibilities.
+    if (runtime.pendingShot && pose === null) {
+      return { actorId, phase, status: 'awaiting-late-pose',
+        animationIntents: [], projectileRequests: [], pendingShot: true };
+    }
     if (runtime.pendingShot && (
       actorFrame?.actorId !== actorId ||
       actorFrame.actorPoseOwnedSnapshot !== true ||
