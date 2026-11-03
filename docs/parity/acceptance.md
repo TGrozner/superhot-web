@@ -554,3 +554,25 @@ Chromium victory/restart, physical speaker output or matched MCD frame.
 Owners: SH-10 acceptance protocol; SH-05 owns any runtime fix after an
 actual failed private owner-local trace, and SH-07 owns native/Web audio
 source-provenance questions.
+
+### SH-10 P0: F pistol discard is not the same as F object throw (3 November 2026)
+
+The Dojo/build10 owner-browser vertical gate requires the **ordered** sequence
+**armed primary-fire click and ammo decrease → F pistol discard with a witnessed
+armed-to-unarmed state change → E source-item pickup → F same-item release**.
+The real Web `src/main.js` `nearbyPickup()` refuses a pickup while armed;
+`throwWeapon()` drops the gun on F only while the player holds no source item.
+A later F that releases the held item **cannot** stand in for the earlier F.
+Input receipts are browser-recorded attempts and retain order even if both
+key presses occur between two render samples. An absent/incorrectly ordered F
+or missing weapon-state transition is **WEB_DOJO_VERTICAL_INCOMPLETE**, never
+native refutation. Authored Node fixtures validate the gate, not a live run.
+
+For SH-05/Thomas: record the actual owner-local run with the existing
+`startDojoCapture({ waitForStart:true, intervalMs:50, maxFrames:30000 })`
+before clicking Start, preserve the private `dojo-full-run.json`, and run
+`node scripts/acceptance-dojo-vertical.mjs --trace private/dojo-full-run.json`.
+A failure reports the *first reproducible Web receipt gap*; it does not prove
+whether the original MCD behaves identically. No new native asset, code or
+reference image is included.
+
