@@ -52,6 +52,13 @@ function complete(target=6) {
       {type:'start',buttonId:'start-button',frameId:0,activeScreen:'playing'},
       {type:'restart',buttonId:'again-button',frameId:14+2*target,activeScreen:'win'},
     ],
+    inputActions:[
+      {kind:'fire',frameId:10,activeScreen:'playing'},
+      {kind:'throw',frameId:11,activeScreen:'playing'}, // discard gun before E
+      {kind:'pickup',frameId:11,activeScreen:'playing'},
+      {kind:'throw',frameId:12,activeScreen:'playing'}, // release held item
+    ],
+    inputActionsTruncated:false,
     marks:[
       {type:'door-before',frameId:2},{type:'door-after',frameId:4},
       {type:'stairs-bottom',frameId:5},{type:'stairs-top',frameId:7},
@@ -233,4 +240,33 @@ test('SH10 rejects Replay receipts recorded before victory, or unsupported UI me
   failure(early,/win-screen Replay button click/);
   const invalid=complete();invalid.uiActions[1].buttonId='retry-button';
   assert.equal(report(invalid).status,DOJO_VERTICAL_STATUS.INVALID);
+});
+
+
+test('SH10 Dojo input attempts must align with observed Web shot, E pickup and F release',()=>{
+  for (const [kind,pattern] of [
+    ['fire',/primary-fire input receipt/],
+    ['pickup',/trusted E input receipt/],
+  ]) {
+    const data=complete();
+    data.inputActions=data.inputActions.filter(a=>a.kind!==kind);
+    failure(data,pattern);
+  }
+  const missingItemThrow=complete();
+  missingItemThrow.inputActions=missingItemThrow.inputActions.filter(a=>
+    !(a.kind==='throw' && a.frameId===12));
+  failure(missingItemThrow,/trusted F input receipt aligned with same-item release/);
+  const earlyFire=complete();
+  earlyFire.inputActions.find(a=>a.kind==='fire').frameId=2;
+  failure(earlyFire,/primary-fire input receipt/);
+});
+
+test('SH10 legacy or truncated owner input traces cannot pass by counters alone',()=>{
+  const legacy=complete();delete legacy.inputActions;delete legacy.inputActionsTruncated;
+  failure(legacy,/input receipts absent or truncated/);
+  const truncated=complete();truncated.inputActionsTruncated=true;
+  failure(truncated,/input receipts absent or truncated/);
+  const forged=complete();forged.inputActions[0].kind='teleport';
+  assert.equal(report(forged).status,DOJO_VERTICAL_STATUS.INVALID);
+  assert.match(report(forged).errors.join(' '),/invalid browser input-attempt telemetry/);
 });
