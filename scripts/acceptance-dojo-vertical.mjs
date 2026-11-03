@@ -186,8 +186,14 @@ export function assessDojoVertical(trace) {
   // This is a Web receipt, not evidence of native MCD death causality.
   const target = get(frames[start]).encounter.killTarget;
   const deadActorIds = new Set(), liveActorIds = new Set(), witnessedDeathIds = new Set(), previousLiveness = new Map();
+  // Web killEnemy() updates enemy.alive and the kill counter in one call.
+  // A counter rising before or after the observed death is not a witnessed
+  // per-kill transition, even if both eventually reach the same total.
+  const desyncedDeathFrames = [];
+  let previousKilled = get(frames[start]).encounter.killed;
   for (let i = start; i <= win; i++) {
     const inFrame = new Set();
+    let newWitnessedDeaths = 0;
     for (const actor of get(frames[i]).encounter.enemies) {
       const id = itemKey(actor?.id);
       if (!isRecord(actor) || !id || typeof actor.alive !== 'boolean' || inFrame.has(id)) {
@@ -205,9 +211,24 @@ export function assessDojoVertical(trace) {
         deadActorIds.add(id);
         // A corpse first seen dead is not a sampled kill transition. Sparse
         // sampling may miss a short-lived actor, so this is INCOMPLETE.
-        if (liveActorIds.has(id)) witnessedDeathIds.add(id);
+        if (liveActorIds.has(id) && !witnessedDeathIds.has(id)) {
+          witnessedDeathIds.add(id);
+          newWitnessedDeaths++;
+        }
       }
     }
+    if (i > start) {
+      const killed = get(frames[i]).encounter.killed;
+      if (killed - previousKilled !== newWitnessedDeaths) {
+        desyncedDeathFrames.push(frames[i].frameId);
+      }
+      previousKilled = killed;
+    }
+  }
+  checks.killCounterAlignedWithWitnessedDeaths = desyncedDeathFrames.length === 0;
+  observed.killDeathDesyncedFrameIds = desyncedDeathFrames.slice(0, 20);
+  if (!checks.killCounterAlignedWithWitnessedDeaths) {
+    errors.push('kill-counter increments not aligned with sampled living-to-dead actor transitions');
   }
   checks.distinctDeadActorsObserved = deadActorIds.size >= target;
   observed.distinctDeadActorIdsBeforeWin = deadActorIds.size;
