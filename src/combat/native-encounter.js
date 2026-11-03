@@ -85,7 +85,9 @@ export function createNativeEncounter(scene, collision, rng = Math.random, {
   const spawnerPosition = fromMatrix(spawner.worldMatrix);
   if (![spawnerPosition.x, spawnerPosition.y, spawnerPosition.z].every(Number.isFinite)) throw new TypeError('source spawner worldMatrix required');
   return {
-    limitation:'Source-geometry/source-timing Web pistol encounter; weighted native weapon families and full native behavior tree are out of scope.',
+    limitation:sourceFactoryPlan.status === 'qualified'
+      ? 'Source factory selection is conditional on active prefab evidence; Web health, animation and full behavior tree remain provisional.'
+      : 'Source-geometry/source-timing Web pistol encounter; weighted native weapon families and full native behavior tree are out of scope.',
     collision, sightCollision, nav, body, maxSnapDistance, points, spawnerPosition, spawnerSettings, enemySettings,
     sourceFactoryPlan,
     spawner:createNativeSpawnerState(spawnerSettings, rng), rng, killTarget, killed:0,
@@ -140,9 +142,9 @@ function nearestEnemy(enemies, point) {
   return nearest;
 }
 // This descriptor is a *caller attestation*, not inferred from the Web scene.
- // Unknown active difficulty, prefab identity or per-family values cannot be
- // filled from the serialized level10 defaults. No additional random draw is
- // performed until an actual source SpawnOrder activates at its door.
+// Unknown active difficulty, prefab identity or per-family values cannot be
+// filled from the serialized level10 defaults. No additional random draw is
+// performed until an actual source SpawnOrder activates at its door.
 function prepareSourceFactoryPlan(context) {
   if (context === null) return { status: 'blocked', reason: 'active-factory-evidence-not-supplied' };
   if (!context || typeof context !== 'object' ||
