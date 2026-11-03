@@ -2,6 +2,12 @@
 
 **Adaptation WebGL2 jouable de la scène `SHRL_Dojo2` / build 10 de SUPERHOT: MIND CONTROL DELETE.** Le site est désormais autonome sur GitHub Pages, avec son pack de scène, les textures, les modèles, rigs, animations et clips présents dans le manifeste hébergé. **Non affilié à SUPERHOT Team ; aucune parité native 1:1 complète revendiquée.**
 
+## Objectif produit
+
+**Un FPS Web inspiré de MCD, mais libre de devenir meilleur.** Depuis le 3 novembre 2026, la priorité n'est plus la parité 1:1 avec Unity : on favorise le ressenti des armes et des impacts, des ragdolls crédibles et variés, une IA intéressante, un rendu soigné et des FPS stables. Les modèles et données source conservés constituent une base ; les réglages et améliorations propres au Web sont autorisés, sans les faire passer pour des comportements natifs.
+
+Les critères de livraison sont désormais la qualité réelle du Dojo jouable, le bon fonctionnement sur Pages et en local, et les performances mesurées. Les études de parité restent de la documentation historique, pas un passage obligé.
+
 ## Jouer
 
 **[Ouvrir le Dojo — GitHub Pages](https://tgrozner.github.io/superhot-web/)**
