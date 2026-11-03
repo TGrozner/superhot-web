@@ -45,8 +45,10 @@ function complete(target=6) {
     ]).flat(),
     f(14+2*target,p(1.51,.35),{target,screen:'win',kills:target,enemies:deadThrough(target),weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
     f(15+2*target,p(0),{target,moving:false}),
+    f(16+2*target,p(0),{target,moving:false}),
   ];
-  frames.at(-1).worldClock=.1;
+  frames.at(-2).worldClock=.1;
+  frames.at(-1).worldClock=.2;
   return {schemaVersion:2,captureKind:'SH10_DOJO_OWNER_BROWSER_V2',frames,
     uiActions:[
       {type:'start',buttonId:'start-button',frameId:0,activeScreen:'playing'},
@@ -309,4 +311,55 @@ test('SH10 legacy or truncated owner input traces cannot pass by counters alone'
   const forged=complete();forged.inputActions[0].kind='teleport';
   assert.equal(report(forged).status,DOJO_VERTICAL_STATUS.INVALID);
   assert.match(report(forged).errors.join(' '),/invalid browser input-attempt telemetry/);
+});
+
+
+test('SH10 Dojo reset needs two observed post-restart renders, not a single lucky zero-leak frame',()=>{
+  const data=complete();
+  data.frames.pop();
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.postRestartSettledSamples,false);
+  assert.match(result.errors.join(' '),/two rendered post-restart samples/);
+});
+
+test('SH10 zero scene ambience before and after restart is missing sound, not a passing leak test',()=>{
+  const data=complete();
+  data.frames.forEach(f=>{f.gameplay.audioAmbienceSources=0;});
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.audioAmbienceNoLeak,false);
+  assert.match(result.errors.join(' '),/three stable Dojo WebAudio scene ambiences/);
+  assert.deepEqual(result.observed.ambientSourcesBeforeAndAfter,[0,0]);
+});
+
+test('SH10 late duplicate WebAudio source after apparently clean restart is observed as a leak',()=>{
+  const data=complete();
+  data.frames.at(-1).gameplay.audioAmbienceSources=6;
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.audioAmbienceNoLeak,false);
+  assert.deepEqual(result.observed.overBudgetAudioFrameIds,[data.frames.at(-1).frameId]);
+});
+
+test('SH10 asynchronous ambience init can settle to three on two later post-restart renders',()=>{
+  const data=complete();
+  const final=data.frames.at(-1);
+  const extraFrame=f(final.frameId+1,p(0),{moving:false});
+  extraFrame.worldClock=.3;
+  data.frames.push(extraFrame);
+  data.frames.at(-3).gameplay.audioAmbienceSources=0;
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.COMPLETE,JSON.stringify(result.errors));
+  assert.equal(result.checks.audioAmbienceNoLeak,true);
+  assert.deepEqual(result.observed.postRestartAudioSourceCounts,[0,3,3]);
+});
+
+test('SH10 reset is not complete when an object reappears changed after a clean first frame',()=>{
+  const data=complete();
+  data.frames.at(-1).gameplay.itemStates=[{id:'cup-1',state:'broken'}];
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.itemPoolReset,false);
+  assert.match(result.errors.join(' '),/item pool\/held item\/fragments not restored and stable/);
 });
