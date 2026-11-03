@@ -28,7 +28,10 @@ function requireDojoRig(rig, loaded, weaponBoneIndex = loaded.weaponAttachment?.
   }
 }
 
-function sourceClipBindings(clips, loaded) {
+function sourceClipBindings(clips, loaded, { descriptorOnly = false } = {}) {
+  // The recovered scene controller supplies per-frame clip descriptors.
+  // It does not require fabricated global `held` / `swing` aliases.
+  if (descriptorOnly && clips == null) return null;
   if (!clips || typeof clips !== 'object' || Array.isArray(clips)) {
     throw new TypeError('Dojo hands require explicit held and swing source clips');
   }
@@ -98,23 +101,25 @@ export function createDojoPlayerAnimationPass(gl, {
     throw new Error('Conflicting Dojo source weapon-bone attachments');
   }
   requireDojoRig(rig, loaded, weaponBoneIndex);
-  const names = sourceClipBindings(clips, loaded);
+  const names = sourceClipBindings(clips, loaded, { descriptorOnly: playerPacket !== null });
 
   const diagnosticPackage = loaded.mesh.hasSourceUV0
     ? { ...sourceSkin, mesh: { ...sourceSkin.mesh, uv0: undefined } }
     : sourceSkin;
   const pass = createNativeSkinPass(gl, diagnosticPackage, { lighting });
-  let held;
-  let swing;
+  let held = null;
+  let swing = null;
   try {
-    held = pass.createInstance({ clip: names.held, playback: 'loop' });
-    swing = pass.createInstance({ clip: names.swing, playback: 'clamp' });
+    if (names !== null) {
+      held = pass.createInstance({ clip: names.held, playback: 'loop' });
+      swing = pass.createInstance({ clip: names.swing, playback: 'clamp' });
+    }
   } catch (error) {
     pass.dispose();
     throw error;
   }
 
-  const sourceInstances = new Map([
+  const sourceInstances = new Map(names === null ? [] : [
     [names.held + '/loop', held],
     [names.swing + '/clamp', swing],
   ]);
@@ -141,6 +146,9 @@ export function createDojoPlayerAnimationPass(gl, {
     let sampleTime;
     let transition = null;
     if (descriptor === null) {
+      if (names === null) {
+        throw new TypeError('Dojo source controller descriptor required without held/swing clip bindings');
+      }
       if (phase !== 'held' && phase !== 'swing') {
         throw new TypeError('Dojo katana phase must be held or swing');
       }
