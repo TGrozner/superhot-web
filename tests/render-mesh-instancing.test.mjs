@@ -55,13 +55,13 @@ test('SH-12/J4: 48 transformed non-cubic cylinders share geometry, submit 1 inst
   const same = Array.from({length:48},(_,i)=>model(i));
   batch.setMatrices(same); // Rebuilding an identical world list also skips GPU upload.
   assert.equal(calls.filter(c=>c[0]==='bufferSubData').length,1);
-  same[20] = model(420); // One moving body: transfer only its 100-byte record.
+  same[20] = model(420); // Translation only: upload 12 B; normals/model basis are unchanged.
   batch.setMatrices(same);
   const movedUploads = calls.filter(c=>c[0]==='bufferSubData');
   assert.equal(movedUploads.length,2);
-  assert.equal(movedUploads[1][2],20*100);
-  assert.equal(movedUploads[1][3].length,25);
-  assert.equal(movedUploads[1][3][12],420);
+  assert.equal(movedUploads[1][2],20*100 + 48);
+  assert.equal(movedUploads[1][3].length,3);
+  assert.equal(movedUploads[1][3][0],420);
   batch.setMatrices(same.slice(0,18)); // Shrinking needs no transfer.
   assert.equal(calls.filter(c=>c[0]==='bufferSubData').length,2);
   batch.setMatrices(same); // Regrowing uploads records no longer in active range.
@@ -72,17 +72,24 @@ test('SH-12/J4: 48 transformed non-cubic cylinders share geometry, submit 1 inst
   const sparse = same.slice();
   sparse[0] = model(700);
   sparse[47] = model(900);
-  batch.setMatrices(sparse); // Two distant corpses: 200 bytes, not 4,800.
+  batch.setMatrices(sparse); // Two distant moving bodies: 24 bytes, no extra GL calls.
   const sparseUploads = calls.filter(c=>c[0]==='bufferSubData').slice(3);
-  assert.deepEqual(sparseUploads.map(c=>[c[2],c[3].length]),[[0,25],[4700,25]]);
-  assert.equal(sparseUploads[0][3][12],700);
-  assert.equal(sparseUploads[1][3][12],900);
+  assert.deepEqual(sparseUploads.map(c=>[c[2],c[3].length]),[[48,3],[4748,3]]);
+  assert.equal(sparseUploads[0][3][0],700);
+  assert.equal(sparseUploads[1][3][0],900);
   const dense = sparse.map((_,i)=>model(1000+i));
   batch.setMatrices(dense); // Every instance moves: still one GL transfer.
   const allUploads = calls.filter(c=>c[0]==='bufferSubData');
   assert.equal(allUploads.length,6);
   assert.equal(allUploads[5][2],0);
   assert.equal(allUploads[5][3].length,48*25);
+  const scaled = dense.slice();
+  scaled[20] = model(1020, 3); // Non-translation affine change must upload normals too.
+  batch.setMatrices(scaled);
+  const scaleUpload = calls.filter(c=>c[0]==='bufferSubData').at(-1);
+  assert.equal(scaleUpload[2],20*100);
+  assert.equal(scaleUpload[3].length,25);
+  assert.ok(Math.abs(scaleUpload[3][16] - 1/3) < 1e-6);
   batch.setMatrices([]);
   assert.deepEqual(batch.draw(),{drawCalls:0,instances:0,triangles:0});
   gpu.dispose();
