@@ -639,7 +639,7 @@ test('Web-only hit/melee accents lean the real sampled GPU rig, socket and hit p
   assert.ok(struck.weaponAttachmentMatrix[13] > .1);
   assert.ok(struck.boneModelMatrices[16 + 13] > .1);
   const hitPalette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
-  assert.ok(hitPalette[16 + 13] > .1, 'GPU palette follows the same lean as collision/socket');
+  assert.ok(hitPalette[16 + 1] > .1, 'GPU skin rotation follows the same lean as collision/socket');
 
   const opposite = draw(2, { state: 'hit', time: .16 });
   assert.ok(opposite.weaponAttachmentMatrix[13] < -.1, 'distinct actors react in opposite directions');
