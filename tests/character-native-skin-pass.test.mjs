@@ -319,8 +319,10 @@ function mockGl({ uniformLimit = 256 } = {}) {
     useProgram: value => { program = value; calls.push(['program', value]); },
     frontFace: value => { winding = value; calls.push(['winding', value]); },
     uniformMatrix4fv: (location, _transpose, value) => calls.push(['matrix', location.name, Array.from(value)]),
-    uniform3f: () => {}, uniform2f: () => {}, uniform4f: () => {},
-    uniform1f: (location, value) => calls.push(['uniform1f', location.name, value]),
+    uniform3f: () => {}, uniform2f: () => {},
+    uniform4f: (location, first) => {
+      if (location.name === 'uWebHitFlash') calls.push(['hitFlash', location.name, first]);
+    },
     drawElements: (mode, count, type, offset) => calls.push(['draw', mode, count, type, offset]),
     deleteBuffer: value => calls.push(['deleteBuffer', value]),
     deleteVertexArray: value => calls.push(['deleteVao', value]),
@@ -753,7 +755,7 @@ test('Web-only impact glow hits the actual GPU material once, fades, and spares 
   const solved = draw(.05, { rig: pass.rig, provenance: 'authored death fixture',
     boneModelMatrices: new Float32Array([...identity(), ...identity()]) });
   assert.equal(solved.actorWebHitFlash, 0, 'ragdoll never flashes from the hit pose');
-  assert.deepEqual(calls.filter(call => call[0] === 'uniform1f' && call[1] === 'uWebHitFlash')
+  assert.deepEqual(calls.filter(call => call[0] === 'hitFlash' && call[1] === 'uWebHitFlash')
     .map(call => call[2]), [1, fading.actorWebHitFlash, 0, 0]);
   assert.equal(calls.filter(call => call[0] === 'draw').length, 4,
     'the full-body crystal hit pulse requires no second draw');
