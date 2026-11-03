@@ -72,7 +72,14 @@ test('provisional cookie projector produces a visibly nonzero Web preview only i
   const center = sampleDojoDoorWarningWebPreview(spot, [1, 2, 8], .4);
   assert.deepEqual(center.cookieUv, [.5, .5]);
   assert.ok(Math.abs(center.rgb[0] - (2 / 3)) < 1e-12); // Web highlight-compressed, never 12x clipped red.
-  assert.deepEqual(center.rgb.slice(1), [0, 0]);
+  // Web creative art direction: signed red grading is visible on near-white
+  // Concrete, where additive red alone would clamp and barely change hue.
+  assert.ok(Math.abs(center.rgb[1] + (2 / 3) * .32) < 1e-12);
+  assert.ok(Math.abs(center.rgb[2] + (2 / 3) * .32) < 1e-12);
+  const brightConcrete = [.9, .9, .9];
+  const graded = brightConcrete.map((base, i) =>
+    Math.max(0, Math.min(1, base + center.rgb[i])));
+  assert.ok(graded[0] - graded[1] > .25, 'bright Concrete receives visibly red warning contrast');
   const near = sampleDojoDoorWarningWebPreview(spot, [1, 2, 4], .4);
   const far = sampleDojoDoorWarningWebPreview(spot, [1, 2, 12], .4);
   assert.ok(near.rgb[0] > center.rgb[0] && center.rgb[0] > far.rgb[0]);
@@ -83,6 +90,7 @@ test('provisional cookie projector produces a visibly nonzero Web preview only i
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /texture\(sourceCookie, cookieUv\)\.a/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /radius > sourceRange/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /dojoWebWarningCompression/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /dojoWebWarningContrast/);
 });
 
 test('source layer-mask, loaded original cookie, and verified door identity gate visibility', () => {
@@ -256,6 +264,8 @@ test('opt-in Web-only glow retains real door joins, masks, envelopes and missing
   const inCone = sampleDojoDoorWarningWebGlow(fallback.spotlights[0], [1, 2, 8]);
   const outsideCone = sampleDojoDoorWarningWebGlow(fallback.spotlights[0], [9, 2, 4]);
   assert.ok(inCone.rgb[0] > 0 && inCone.rgb[0] < 1);
+  assert.ok(inCone.rgb[1] < 0 && inCone.rgb[2] < 0,
+    'cookie-free warning uses the same Web red-contrast grading');
   assert.deepEqual(outsideCone.rgb, [0, 0, 0]);
   assert.equal(sampleDojoDoorWarningWebGlow(fallback.spotlights[0], [1, 2, 13]).rgb[0], 0);
   assert.equal(prepareDojoDoorWarningLighting(scene, records,

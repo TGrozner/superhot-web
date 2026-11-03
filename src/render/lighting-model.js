@@ -169,6 +169,13 @@ float dojoWebWarningFalloff(float radius, float range, float along, float cosHal
 float dojoWebWarningCompression(float energy) {
   return energy / (3.0 + energy);
 }
+// J4 Web art direction: red warning light must stay readable on bright
+// Concrete instead of clipping into nearly-white additive RGB. This is
+// deliberately signed colour grading, NOT physically additive Unity light.
+vec3 dojoWebWarningContrast(vec3 sourceColor, float strength) {
+  float dangerRed = max(sourceColor.r - max(sourceColor.g, sourceColor.b), 0.0);
+  return strength * (sourceColor - vec3(0.0, 0.32 * dangerRed, 0.32 * dangerRed));
+}
 // Web visual design: soft cone, distance fade and highlight compression.
 // Serialized world basis, cookie, color and controller envelope stay untouched.
 vec3 dojoDoorWarningSpotWebPreview(
@@ -193,7 +200,7 @@ vec3 dojoDoorWarningSpotWebPreview(
   float feather = dojoWebWarningSmooth(edge / 0.06);
   float energy = sourceIntensity * texture(sourceCookie, cookieUv).a * feather
     * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
-  return sourceColor * dojoWebWarningCompression(max(energy, 0.0));
+  return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
 }
 // Web-authored optional visual cue, NOT an MCD cookie substitute.
 // Requires explicit per-spot Web-mode opt-in from the GPU integration owner.
@@ -209,7 +216,7 @@ vec3 dojoDoorWarningSpotWebGlow(
   if (along <= 0.0 || along / radius < cosHalfAngle) return vec3(0.0);
   float energy = sourceIntensity
     * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
-  return sourceColor * dojoWebWarningCompression(max(energy, 0.0));
+  return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
 }`.trim();
 
 const sourceDoorId = value =>
@@ -374,7 +381,8 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
 /**
  * CPU preview of the matching clean GLSL projection. Synthetic sampled alpha
  * is an explicit argument; never assumes a missing source PNG is white.
- * This returns UNCLAMPED additive Web-preview RGB, not a native color result.
+ * Returns signed, UNCLAMPED creative Web-grade RGB. A red warning may reduce
+ * green/blue so it stays visible against bright Concrete; NOT native lighting.
  */
 const dojoWebWarningSmooth = value => {
   const t = clamp01(value);
@@ -385,6 +393,18 @@ const dojoWebWarningWeight = (spotlight, radius, along) =>
   dojoWebWarningSmooth(((along / radius - spotlight.cosHalfAngle) /
     Math.max(1 - spotlight.cosHalfAngle, .0001)) / .2);
 const zeroWebWarning = () => Object.freeze({ rgb: Object.freeze([0, 0, 0]), cookieUv: null });
+// Exact CPU counterpart of the shader's deliberately nonphysical red grading.
+const webWarningContrast = (color, strength) => {
+  // Suppressed/fully transparent warnings must be exact +0 in the CPU
+  // contract; multiplying a negative colour component by zero gives -0.
+  if (strength === 0) return Object.freeze([0, 0, 0]);
+  const dangerRed = Math.max(color[0] - Math.max(color[1], color[2]), 0);
+  return Object.freeze([
+    color[0] * strength,
+    (color[1] - .32 * dangerRed) * strength,
+    (color[2] - .32 * dangerRed) * strength,
+  ]);
+};
 
 /** CPU mirror of the deliberately Web-styled, cookie-bearing GPU preview. */
 export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha) {
@@ -409,7 +429,7 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
     dojoWebWarningSmooth(edge / .06) * dojoWebWarningWeight(spotlight, radius, along);
   const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: Object.freeze(spotlight.color.map(channel => channel * glow)),
+    rgb: webWarningContrast(spotlight.color, glow),
     cookieUv: Object.freeze(cookieUv),
   });
 }
@@ -432,7 +452,7 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition) {
   const energy = spotlight.intensity * dojoWebWarningWeight(spotlight, radius, along);
   const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: Object.freeze(spotlight.color.map(channel => channel * glow)),
+    rgb: webWarningContrast(spotlight.color, glow),
     cookieUv: null,
   });
 }
