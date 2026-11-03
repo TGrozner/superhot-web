@@ -96,6 +96,16 @@ const WEB_WARNING_TRACK_FACING_FULL = 0.85;
 const WEB_WARNING_TRACK_STRENGTH = 0.75;
 const WEB_WARNING_TRACK_MAX_YAW = 0.43;
 const WEB_WARNING_TRACK_MAX_PITCH = 0.22;
+// J4 Web gameplay: the *accepted* spawn order already supplies its real
+// world-space destination. During the warning's final half, steer the
+// existing door beam toward that incoming route, rather than sweeping past
+// it. This is creative telegraphing, NOT a serialized Unity animation.
+const WEB_WARNING_SPAWN_MAX_METERS = 20;
+const WEB_WARNING_SPAWN_MIN_FACING = 0.60;
+const WEB_WARNING_SPAWN_FULL_FACING = 0.85;
+const WEB_WARNING_SPAWN_MAX_YAW = 0.48;
+const WEB_WARNING_SPAWN_MAX_PITCH = 0.24;
+const WEB_WARNING_SPAWN_BLEND = 0.8;
 
 function smooth01(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -142,7 +152,7 @@ function createWebWarningSweep(catalog, controller) {
       }
     }
     bases.set(packet.id, {
-      packet, direction, right, up,
+      packet, direction, right, up, spawnTarget: null,
       intensity: door.spotlight.intensity,
       spotAngle: door.spotlight.spotAngle,
       duration: door.curve.at(-1).time,
@@ -151,6 +161,7 @@ function createWebWarningSweep(catalog, controller) {
 
   function restoreOne(base) {
     if (!base) return;
+    base.spawnTarget = null; // No previous encounter target can survive REJOUER.
     const spotlight = base.packet.spotlight;
     if (base.direction) {
       for (let axis = 0; axis < 3; axis++) {
@@ -170,6 +181,17 @@ function createWebWarningSweep(catalog, controller) {
       return;
     }
     for (const base of bases.values()) restoreOne(base);
+  }
+
+  function setSpawnTarget(id, position) {
+    const base = bases.get(id);
+    if (!base) return;
+    // A source-qualified SpawnerPoint identity alone is not enough to aim:
+    // require the actual finite position from that same accepted event.
+    base.spawnTarget = position &&
+      Number.isFinite(position.x) && Number.isFinite(position.y) &&
+      Number.isFinite(position.z)
+      ? [position.x, position.y, position.z] : null;
   }
 
   function advance(playerWorldPosition) {
@@ -209,6 +231,35 @@ function createWebWarningSweep(catalog, controller) {
       // the normal lighthouse motion. This is a local light-direction cue,
       // NOT a line-of-sight test or permission to draw through walls.
       const origin = packet.spotlight.position;
+      if (base.spawnTarget && finiteBasisVector(origin)) {
+        const dx = base.spawnTarget[0] - origin[0];
+        const dy = base.spawnTarget[1] - origin[1];
+        const dz = base.spawnTarget[2] - origin[2];
+        const distance = Math.hypot(dx, dy, dz);
+        if (distance > 1e-6 && distance < WEB_WARNING_SPAWN_MAX_METERS) {
+          const forward = (dx * base.direction[0] + dy * base.direction[1] +
+            dz * base.direction[2]) / distance;
+          if (forward > WEB_WARNING_SPAWN_MIN_FACING) {
+            const across = (dx * base.right[0] + dy * base.right[1] +
+              dz * base.right[2]) / distance;
+            const vertical = (dx * base.up[0] + dy * base.up[1] +
+              dz * base.up[2]) / distance;
+            const focus = WEB_WARNING_SPAWN_BLEND *
+              smooth01((phase - 0.2) / 0.55) *
+              smooth01((forward - WEB_WARNING_SPAWN_MIN_FACING) /
+                (WEB_WARNING_SPAWN_FULL_FACING - WEB_WARNING_SPAWN_MIN_FACING));
+            const aimYaw = Math.max(-WEB_WARNING_SPAWN_MAX_YAW,
+              Math.min(WEB_WARNING_SPAWN_MAX_YAW, Math.atan2(across, forward)));
+            const aimPitch = Math.max(-WEB_WARNING_SPAWN_MAX_PITCH,
+              Math.min(WEB_WARNING_SPAWN_MAX_PITCH,
+                Math.atan2(vertical, Math.hypot(across, forward))));
+            yaw += (aimYaw - yaw) * focus;
+            pitch += (aimPitch - pitch) * focus;
+          }
+        }
+      }
+      // Camera targeting gets the final say when the player is near the
+      // warning. Distant players see the incoming spawn route instead.
       if (playerKnown && finiteBasisVector(origin)) {
         const dx = playerWorldPosition.x - origin[0];
         const dy = playerWorldPosition.y - origin[1];
@@ -254,7 +305,7 @@ function createWebWarningSweep(catalog, controller) {
       }
     }
   }
-  return Object.freeze({ advance, restore });
+  return Object.freeze({ advance, restore, setSpawnTarget });
 }
 
 function dojoSource(source) {
@@ -316,6 +367,7 @@ export function createDojoDoorWarningBridge(scene) {
     }
     if (!controller.trigger(doorKey)) return outcome('source-controller-rejected', { spawnPathId, doorKey });
     webSweep?.restore(doorKey); // Re-trigger starts centered, without stale sweep.
+    webSweep?.setSpawnTarget(doorKey, event.point?.position);
     return outcome('triggered', { spawnPathId, doorKey });
   }
 
