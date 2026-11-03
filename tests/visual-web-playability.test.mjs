@@ -13,7 +13,7 @@ test('Web Dojo QA reports real draw-call/frame-time receipts and only feedback c
     boxes:[
       {id:'stage-banner',left:95,top:45,width:160,height:50},
       {id:'chain-banner',left:100,top:55,width:140,height:28},
-      {id:'dodge-banner',left:100,top:197,width:170,height:38},
+      {id:'dodge-banner',left:100,top:217,width:170,height:38},
       {id:'crosshair',left:151,top:111,width:20,height:20},
     ],
   });
