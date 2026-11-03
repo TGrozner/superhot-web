@@ -6,6 +6,15 @@
 #damage-flash{opacity:0;background:radial-gradient(circle,transparent 10%,rgba(227,27,51,.55));transition:opacity .25s}
 #shoot-flash{opacity:0;background:radial-gradient(circle at 57% 65%,rgba(255,255,255,.9),rgba(255,245,192,.18) 28%,transparent 60%);transition:opacity .12s}
 #crosshair{position:absolute;left:50%;top:50%;width:32px;height:32px;transform:translate(-50%,-50%);pointer-events:none;opacity:0;transition:opacity .16s}#crosshair i{position:absolute;background:#1c2429;box-shadow:0 0 2px white}#crosshair i:nth-child(1){left:15px;top:2px;width:2px;height:8px}#crosshair i:nth-child(2){left:15px;bottom:2px;width:2px;height:8px}#crosshair i:nth-child(3){left:2px;top:15px;height:2px;width:8px}#crosshair i:nth-child(4){right:2px;top:15px;height:2px;width:8px}#crosshair span{position:absolute;top:14px;left:14px;width:4px;height:4px;border-radius:50%;background:#db2742}#crosshair.target i,#crosshair.target span{background:#dc1836}
+/* FRAME//BREAK Web-only hit confirm; distinct from the source HUD crosshair. */
+#hit-confirm{position:absolute;left:50%;top:50%;width:52px;height:52px;transform:translate(-50%,-50%);pointer-events:none;opacity:0}
+#hit-confirm[hidden]{display:none}
+#hit-confirm i{position:absolute;display:block;width:13px;height:3px;background:#b31636;box-shadow:0 1px 1px rgba(255,255,255,.85);border-radius:1px}
+#hit-confirm i:nth-child(1){left:5px;top:10px;transform:rotate(45deg)}
+#hit-confirm i:nth-child(2){right:5px;top:10px;transform:rotate(-45deg)}
+#hit-confirm i:nth-child(3){left:5px;bottom:10px;transform:rotate(-45deg)}
+#hit-confirm i:nth-child(4){right:5px;bottom:10px;transform:rotate(45deg)}
+#hit-confirm.kill i{background:#e20b31;width:16px;height:4px;box-shadow:0 0 7px rgba(216,19,57,.52)}
 #hud{position:absolute;inset:0;pointer-events:none;user-select:none}#hud[hidden],.overlay[hidden],[hidden]{display:none!important}
 .top-bar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:start;padding:35px 45px;background:linear-gradient(rgba(241,246,248,.76),transparent)}.brand b{display:block;font-size:23px;line-height:1;letter-spacing:-.07em;font-weight:950}.brand b span{color:#db233d}.brand small{display:block;font:700 9px ui-monospace,monospace;letter-spacing:.19em;padding-top:8px;color:#8b9aa5}.level-indicator{text-align:right}.eyebrow{font:700 10px ui-monospace,Consolas,monospace;letter-spacing:.16em;color:#697d8b}.level-indicator strong{display:block;font-size:15px;letter-spacing:.1em;margin-top:5px}
 .side-caption{position:absolute;left:30px;top:50%;writing-mode:vertical-rl;transform:rotate(180deg) translateY(50%);font:700 9px ui-monospace,monospace;letter-spacing:.25em;color:#98a8b0}
