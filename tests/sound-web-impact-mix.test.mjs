@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {createWebImpactMix} from '../src/sound/web-impact-mix.js';
+
+function fakeAudio(state = 'running') {
+  const nodes = [];
+  const param = (value = 0) => ({value,
+    setValueAtTime(v) { this.value = v; },
+    exponentialRampToValueAtTime(v) { this.value = v; },
+    linearRampToValueAtTime(v) { this.value = v; },
+    cancelScheduledValues() {}, setTargetAtTime(v) { this.value = v; }});
+  const base = () => ({connect(dst) { return dst; }, disconnect() {}});
+  const source = () => {
+    const n = {...base(), frequency: param(), onended: null,
+      start(...args) { this.startArgs = args; }, stop() { this.stopped = true; }};
+    nodes.push(n); return n;
+  };
+  const ctx = {state, currentTime: 2.25, sampleRate: 8000, destination: base(),
+    createGain: () => ({...base(), gain: param()}),
+    createDynamicsCompressor: () => ({...base(), threshold: param(), ratio: param(),
+      attack: param(), release: param()}),
+    createBuffer: (_channels, length) => ({getChannelData: () => new Float32Array(length)}),
+    createBufferSource: source, createOscillator: source,
+    createBiquadFilter: () => ({...base(), frequency: param()}),
+    createPanner: () => ({...base(), positionX: param(), positionY: param(),
+      positionZ: param()}),
+  };
+  return {ctx, nodes};
+}
+
+test('original Web gunshot is scheduled with HRTF and kept inside the voice budget', () => {
+  const {ctx, nodes} = fakeAudio();
+  const layer = createWebImpactMix(ctx, 2);
+  assert.equal(layer.startAmbience(), true);
+  const r = layer.emit('player-shot', {position: {x: 1, y: 0, z: -3}});
+  assert.deepEqual(r, {status: 'started', source: 'web-original-synthesis',
+    at: 2.25, spatial: true});
+  assert.equal(nodes.length, 3); // drone + two one-shot layers
+  assert.equal(nodes[1].startArgs.length, 3); // noise buffer region, not file audio
+  for (let i = 0; i < 8; i++) layer.emit('impact');
+  assert.equal(layer.getActiveVoices(), 2);
+  layer.stopAmbience();
+  layer.dispose();
+  assert.equal(layer.getActiveVoices(), 0);
+});
+
+test('suspended context schedules nothing and invalid position fails explicitly', () => {
+  const {ctx, nodes} = fakeAudio('suspended');
+  const layer = createWebImpactMix(ctx);
+  assert.equal(layer.emit('shatter').status, 'blocked');
+  assert.equal(nodes.length, 0);
+  ctx.state = 'running';
+  assert.throws(() => layer.emit('katana', {position: {x: Infinity, y: 0, z: 0}}), /position/);
+  assert.equal(layer.emit('katana').status, 'started');
+  layer.dispose();
+  assert.equal(layer.emit('katana').status, 'blocked');
+});
