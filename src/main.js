@@ -14,7 +14,8 @@ import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativ
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
-import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
+import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
+import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests } from './combat/native-enemy-fire-phase.js';
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
 import { createNativeHud } from './render/native-hud.js';
 import { createNativePlayerAnimation, projectDojoPlayerFrame } from './characters/native-player-controller.js';
@@ -1052,7 +1053,22 @@ function update(dt) {
         weaponInRightPosition:enemy.encounter.canAttack,allowAttacking:true,canShot:true,
         active:enemy.alive&&enemy.reaction.hasWeapon&&enemy.reaction.stunRemaining===0,animationTarget:toUnity(aimed.position),
       });
-      if(attack.shot)enemy.attackIntentAt=state.worldClock;
+      if(attack.shot) {
+        enemy.attackIntentAt=state.worldClock;
+        const family=nativeEncounter.enemySettings.family;
+        // Attack's sound request precedes animation/IK and cannot be vetoed
+        // by the later bullet collision. Other weapon families remain silent
+        // until their original cue/alert contracts are verified.
+        if(family==='Pistol' || family==='Shotgun') {
+          const shooterPosition=enemy.muzzlePoseFrame===renderedFrameId
+            ? enemy.muzzlePosition : vec(enemy.x,enemy.y+1.2,enemy.z);
+          for(const request of nativeEnemyFireAttackRequests(attack,family,shooterPosition)) {
+            if(request.type==='fire-sfx-request')audio.enemyShoot({position:request.position});
+            // The native enemy-alert request is not routed to provisional Web
+            // AI here; its receiver contract is a separate integration gate.
+          }
+        }
+      }
       if(!enemy.reaction.hasWeapon && enemy.reaction.stunRemaining===0 &&
           distance3(enemy,nativeFeet)<nativeEncounter.unarmedStopDistance+.15 &&
           !nativeSegmentHit(nativeSightCollision,vec(enemy.x,enemy.y+1.2,enemy.z),state.camera) &&
@@ -1236,6 +1252,8 @@ function enemyFireAction(enemy, animationClock) {
 }
 
 function drawEnemy(enemy) {
+  // A stale frame's muzzle must never authorize a deferred projectile.
+  if(nativeGameplay())enemy.muzzlePoseFrame=null;
   if (containersPreviewEnabled && localNativeEnemy) {
     const angle = (nativeSkinInfo ? Math.PI : 0) - enemy.face, c = Math.cos(angle), s = Math.sin(angle);
     const mirror = nativeSkinInfo ? -1 : 1;
@@ -1292,12 +1310,12 @@ function drawEnemy(enemy) {
         enemy.muzzleForward=normalize3(vec(socket[0]*local[8]+socket[4]*local[9]+socket[8]*local[10],
           socket[1]*local[8]+socket[5]*local[9]+socket[9]*local[10],
           socket[2]*local[8]+socket[6]*local[9]+socket[10]*local[10]));
-        if(state.screen==='playing' && enemy.runtime?.pendingShot) {
-          const shot=consumeNativeEnemyShot(enemy.runtime,enemy.muzzlePosition);
-          if(!nativeSegmentHit(nativeShotCollision,shot.position,shot.target)) {
-            addBullet(shot.position,shot.direction,false);audio.enemyShoot({position:shot.position});
-          }
-        }
+        // Pose sampled by the renderer. The accepted attack's pending shot
+        // is consumed only AFTER render(), by flushDojoEnemyLateShots().
+        // A wall cannot pre-veto emission; the subsequent swept bullet
+        // collision handles that wall in the next simulation tick.
+        if(nativeGameplay() && nativeEnemyStats?.drawCalls>0)
+          enemy.muzzlePoseFrame=renderedFrameId+1;
       }
     }
     return;
@@ -1596,6 +1614,31 @@ function render() {
   };
 }
 
+// Web analogue of the native late firing phase: the active skinned weapon
+// socket is only known after this frame's posed character draw. Do NOT use a
+// previously cached muzzle, test line-of-sight before creation, or mutate
+// projectile state inside drawEnemy(). The resulting Web collision is still
+// not an executed Unity FixedUpdate/PhysX parity proof.
+function flushDojoEnemyLateShots() {
+  if(!nativeGameplay() || !nativeCombatStarted || state.screen!=='playing')return;
+  const settings=nativeEncounter?.enemySettings;
+  if(!settings)return;
+  for(const enemy of state.enemies) {
+    if(!enemy.alive || !enemy.reaction?.hasWeapon || !enemy.runtime?.pendingShot)continue;
+    if(enemy.muzzlePoseFrame!==renderedFrameId)continue;
+    const emission=nativeEnemyFireLateRequests(enemy.runtime,settings,{
+      muzzlePosition:enemy.muzzlePosition,weaponForward:enemy.muzzleForward,
+    });
+    for(const request of emission.requests) {
+      if(request.type!=='projectile-spawn-request')continue;
+      const bullet=addBullet(request.position,request.direction,false);
+      // Preserve the active source weapon's requested launch speed, not the
+      // generic fallback speed inside addBullet().
+      bullet.speed=request.speed;
+    }
+  }
+}
+
 // Open the local-model view immediately, without audio or pointer-lock activation.
 loadLevel(0);
 setScreen('playing');
@@ -1609,6 +1652,7 @@ function frame(now) {
   }
   if(state.screen==='playing') update(dt);
   render();
+  if(state.screen==='playing') flushDojoEnemyLateShots();
   if (visualPreviewEnabled && now >= metricsNextAt && measuredFrameMs.length) {
     metricsNextAt = now + 1000;
     const sorted = [...measuredFrameMs].sort((a, b) => a - b);
