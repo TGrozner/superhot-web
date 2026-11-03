@@ -121,7 +121,9 @@ export function auditDojoStaticWiring({ main, renderer, server } = {}) {
       main.includes('nativeCollisionView(') && main.includes('nativeSphereHit('),
     enemyEncounterPath: main.includes('createNativeEncounter(') &&
       main.includes('advanceNativeEncounter(') && main.includes('readyForVictory('),
-    shooterAndReactionPath: main.includes('consumeNativeEnemyShot(') &&
+    shooterAndReactionPath: main.includes('nativeEnemyFireAttackRequests(') &&
+      main.includes('nativeEnemyFireLateRequests(') &&
+      main.includes('flushDojoEnemyLateShots()') &&
       main.includes('hitNativeBody('),
     victoryAndRestartPath: main.includes("setScreen(win ? 'win' : 'dead')") &&
       main.includes("$('again-button').addEventListener('click', start)"),
