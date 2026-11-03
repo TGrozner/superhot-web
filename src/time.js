@@ -367,6 +367,11 @@ export function mcdSourcePlayerTimeTargets({
  * source-qualified model intentionally preserves the native buffer semantics.
  */
 const WEB_LOOK_BUFFER_CAP = Math.fround(0.6);
+// Creative Web sampler: account for a full 60 Hz window in float32 terms.
+// A JS 1/60 dt is slightly below Math.fround(1/60), so `>` missed it.
+const WEB_LOOK_SAMPLE_SECONDS = Math.fround(1 / 60);
+const WEB_LOOK_GAIN = Math.fround(0.03);
+const WEB_LOOK_ANGLE_CAP = WEB_LOOK_BUFFER_CAP / WEB_LOOK_GAIN;
 
 /**
  * Default Containers runtime composition, without POWER/SlomoJump modifiers.
@@ -382,7 +387,7 @@ export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
     source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
     // Web-only: start with the caller's actual view as the comparison anchor.
     // Do not discard the first ten simulation frames after start/replay.
-    lookBuffer: 0, lookMeasuredAt: 0, yaw, pitch,
+    lookBuffer: 0, lookPendingDegrees: 0, lookMeasuredAt: 0, yaw, pitch,
   };
 }
 
@@ -415,6 +420,8 @@ export function stepMcdGameplayClock(clock, {
   }
   clock.realTime += dt;
   if (paused) {
+    // Do not turn an interrupted/focus-lost camera jump into a look pulse.
+    clock.lookPendingDegrees = 0;
     clock.yaw = yaw; clock.pitch = pitch;
     return { worldDelta: 0, appliedTimeScale: 0, timeScale: 0, aggregate: clock.aggregate };
   }
@@ -450,18 +457,24 @@ export function stepMcdGameplayClock(clock, {
     // The registered shifter retains its current value even on a skipped
     // measurement or a locked source Update (which performs no write).
     look.currentTimeModifier = lookSourceResult.state.currentTimeModifier;
+    clock.lookPendingDegrees = 0;
     clock.yaw = yaw; clock.pitch = pitch; // keep the Web-only fallback anchored
   } else {
-    if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
-      // PROVISIONAL Web look estimate, not the native CameraAngle transform.
-      const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
-      const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
-      // Web-authored anti-linger: large flicks must not keep the world
-      // accelerated for many frames after the player stops turning.
+    // Count the path between *simulation* frames, not just the net angle
+    // from the last ~60 Hz sample. On 120+ Hz displays a quick aim reversal
+    // otherwise cancels out before the next time-shifter measurement.
+    // This is a creative WEB-only estimator, never the native quaternion path.
+    const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
+    const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+    clock.lookPendingDegrees = Math.min(WEB_LOOK_ANGLE_CAP, clock.lookPendingDegrees + degrees);
+    clock.yaw = yaw; clock.pitch = pitch;
+    if (Math.fround(clock.realTime - clock.lookMeasuredAt) >= WEB_LOOK_SAMPLE_SECONDS) {
+      // Keep the #281 Web anti-linger cap: two short samples maximum.
       clock.lookBuffer = Math.min(
         WEB_LOOK_BUFFER_CAP,
-        Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03))),
+        Math.fround(clock.lookBuffer + Math.fround(clock.lookPendingDegrees * WEB_LOOK_GAIN)),
       );
+      clock.lookPendingDegrees = 0;
       look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
       // Web-only start/replay responsiveness: TimeControl's first two
       // delayed writes cannot apply this look impulse. Keep it pending until
@@ -470,7 +483,7 @@ export function stepMcdGameplayClock(clock, {
       if (clock.source.delayedUpdates === 0) {
         clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
       }
-      clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
+      clock.lookMeasuredAt = clock.realTime;
     }
   }
   for (const pulse of clock.source.shifters) {
