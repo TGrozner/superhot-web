@@ -8,7 +8,7 @@
  * const qa = installWebVisualQa();  // qa.stop() removes all diagnostics.
  */
 
-/** @typedef {{id:string,left:number,top:number,width:number,height:number}} VisibleBox */
+/** @typedef {{id:string,left:number,top:number,width:number,height:number,textBounds?:{left:number,top:number,width:number,height:number}}} VisibleBox */
 const BANNERS = ['stage-banner', 'chain-banner', 'dodge-banner', 'pickup-prompt'];
 const INTERSECTION_FRACTION = 0.12;
 
@@ -53,10 +53,30 @@ export function assessWebVisualReadability({
     [box.left,box.top,box.width,box.height].every(Number.isFinite) &&
     box.width > 0 && box.height > 0);
   for (const box of visible) {
-    const insideWidth = Math.max(0, Math.min(width, box.left + box.width) - Math.max(0, box.left));
-    const insideHeight = Math.max(0, Math.min(height, box.top + box.height) - Math.max(0, box.top));
-    if (insideWidth * insideHeight < box.width * box.height * 0.9) {
-      warnings.push({kind:'clipped-banner',ids:[box.id],detail:'Feedback text partly outside viewport'});
+    // getBoundingClientRect() only measures the CSS banner box. On a narrow
+    // viewport, the white-space:nowrap chain label can paint OUTSIDE that box.
+    // Range bounds measure its actual laid-out text, not a guessed font width.
+    const text = box.textBounds;
+    const hasTextBounds = text && [text.left,text.top,text.width,text.height].every(Number.isFinite) &&
+      text.width > 0 && text.height > 0;
+    const ink = hasTextBounds ? text : box;
+    const left = Math.min(box.left, ink.left), top = Math.min(box.top, ink.top);
+    const right = Math.max(box.left + box.width, ink.left + ink.width);
+    const bottom = Math.max(box.top + box.height, ink.top + ink.height);
+    const insideWidth = Math.max(0, Math.min(width, right) - Math.max(0, left));
+    const insideHeight = Math.max(0, Math.min(height, bottom) - Math.max(0, top));
+    const clippedInk = hasTextBounds && (
+      ink.left < -2 || ink.top < -2 || ink.left + ink.width > width + 2 ||
+      ink.top + ink.height > height + 2);
+    if (insideWidth * insideHeight < (right-left) * (bottom-top) * 0.9 || clippedInk) {
+      warnings.push({kind:'clipped-banner',ids:[box.id],
+        detail:'Feedback banner or its rendered text extends outside viewport'});
+    } else if (hasTextBounds && (
+      ink.left < box.left - 2 || ink.top < box.top - 2 ||
+      ink.left + ink.width > box.left + box.width + 2 ||
+      ink.top + ink.height > box.top + box.height + 2)) {
+      warnings.push({kind:'text-outside-banner',ids:[box.id],
+        detail:'Rendered feedback text extends beyond its own readable background'});
     }
   }
   for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) {
@@ -88,7 +108,17 @@ function readVisibleBoxes(windowRef, documentRef) {
     if (css.display === 'none' || css.visibility === 'hidden' || Number(css.opacity) < 0.1) continue;
     const rect=element.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
-      boxes.push({id,left:rect.left,top:rect.top,width:rect.width,height:rect.height});
+      const box={id,left:rect.left,top:rect.top,width:rect.width,height:rect.height};
+      if (typeof documentRef.createRange === 'function' && element.textContent?.trim()) {
+        const range=documentRef.createRange();
+        range.selectNodeContents(element);
+        const ink=range.getBoundingClientRect();
+        if ([ink.left,ink.top,ink.width,ink.height].every(Number.isFinite) &&
+            ink.width > 0 && ink.height > 0) {
+          box.textBounds={left:ink.left,top:ink.top,width:ink.width,height:ink.height};
+        }
+      }
+      boxes.push(box);
     }
   }
   return boxes;
@@ -131,7 +161,8 @@ export function installWebVisualQa({
       if(current.state==='WEB_DOJO_VISIBLE_QA_NOT_BROWSER_VERIFIED') {
         observedSamples++;
         for(const w of current.warnings) {
-          if(w.kind!=='overlapping-feedback' && w.kind!=='clipped-banner')continue;
+          if(w.kind!=='overlapping-feedback' && w.kind!=='clipped-banner' &&
+             w.kind!=='text-outside-banner')continue;
           const key=w.kind+':'+w.ids.join('/');
           const previous=transient.get(key);
           transient.set(key,{
