@@ -391,10 +391,11 @@ export function stepMcdGameplayClock(clock, {
   clock.realTime += dt;
   if (paused) {
     clock.yaw = yaw; clock.pitch = pitch;
-    return { worldDelta: 0, timeScale: 0, aggregate: clock.aggregate };
+    return { worldDelta: 0, appliedTimeScale: 0, timeScale: 0, aggregate: clock.aggregate };
   }
   // Update consumes the previously applied scale; LateUpdate writes the next.
-  const worldDelta = Math.fround(Math.fround(dt) * clock.timeScale);
+  const appliedTimeScale = clock.timeScale;
+  const worldDelta = Math.fround(Math.fround(dt) * appliedTimeScale);
   clock.worldTime += worldDelta;
   const targets = mcdSourcePlayerTimeTargets({
     processedX: x, processedY: y, isGrounded: grounded,
@@ -432,7 +433,7 @@ export function stepMcdGameplayClock(clock, {
     clock.timeScale = next.timeScale;
     clock.aggregate = next.aggregate;
   }
-  return { worldDelta, timeScale: clock.timeScale, aggregate: clock.aggregate };
+  return { worldDelta, appliedTimeScale, timeScale: clock.timeScale, aggregate: clock.aggregate };
 }
 
 /**
