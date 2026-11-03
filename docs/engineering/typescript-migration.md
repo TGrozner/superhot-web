@@ -1,23 +1,36 @@
-# TypeScript migration — incremental JS typechecking
+# SUPERHOT Web: strict TypeScript migration
 
-Status: **initial opt-in, not a TypeScript rewrite**. This public browser game continues to run native JavaScript ES modules with no runtime dependencies or transpilation. Original game assets stay private.
+**Policy (Thomas, 2026-11-03): real TypeScript, no `any`, no hiding diagnostics.** Migration remains incremental because the browser and private-asset loader currently consume native ES modules without bundling. Each converted module is **authored in `.ts`**. Its checked-in `.js` counterpart is generated output, never a second manually maintained implementation.
 
-## Current enforced baseline
+## First working slice
 
-- `npm ci` installs **dev-only** TypeScript 5.8.3.
-- `npm run typecheck` runs `tsc --noEmit -p tsconfig.json`.
-- `npm run check` now includes syntax checks, the existing Node test suite, and this typecheck. CI runs `npm ci` first.
-- `tsconfig.json` deliberately lists **only `src/math.js`** for now. It has explicit JSDoc contracts for numbers, vectors, solids, and geometric intersections. The remaining repository is **not** claimed type-safe.
-- Runtime behavior, URLs, script loading, WebGL, the private asset bridge, and the owners of existing files are unchanged.
+- **Source of truth:** `src/math.ts` (typed `Vec3`, `WalkSolid` and all 13 exported math functions).
+- **Browser/Node runtime:** generated `src/math.js`; existing imports ending in `.js` stay valid.
+- **Every file under `src/**/*.ts`** is part of the compiler check automatically; no single-file allowlist.
+- **No runtime dependencies:** TypeScript 5.8.3 is dev-only; the deployed game consumes ordinary JavaScript.
+- `tsconfig.json` enables `strict`, `noImplicitAny`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitReturns`, `noUnusedLocals`, `noUnusedParameters`, `noPropertyAccessFromIndexSignature`, `noFallthroughCasesInSwitch`, `noUncheckedSideEffectImports`, `noImplicitOverride`, `useUnknownInCatchVariables`, `isolatedModules`, `verbatimModuleSyntax`, and `erasableSyntaxOnly`.
+- `scripts/enforce-types.mjs` additionally fails on **explicit `any`**, and `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error` in TypeScript source. Compiler `strict` by itself does **not** ban explicit `any`.
+- `npm run check` includes typechecking and checks that every emitted runtime `.js` file is byte-for-byte synchronized with its `.ts` source.
 
-## Rules for all SH agents
+## Commands
 
-1. **Keep implementing gameplay, graphics and parity work.** Do not wait for a rewrite, change the game bootstrap, add a bundler, or blanket-convert files to `.ts`.
-2. Existing reserved files remain owned by their assigned lanes. Do not modify `tsconfig.json`, `package.json`, `package-lock.json`, or `.github/workflows/verify.yml` independently; coordinate changes with SH-05, the integrator, before editing shared tooling.
-3. For *new or modified public JS APIs*, document meaningful inputs and outputs using JSDoc (`@typedef`, `@param`, `@returns`, and explicit `null` / optional values). Prioritize module boundaries: combat intent/state, animation/rig transforms, geometry, material uniforms, audio event requests, and local-asset manifest data.
-4. **Do not treat inferred native data as a type fact.** Encode only proven field structure and optionality; uncertain semantics remain documented as uncertain and validated at runtime. Types do not replace parity evidence, input validation, or tests.
-5. A file enters the enforced baseline **only in a focused SH-05-coordinated PR** after `npm run typecheck` and `npm run check` pass. Expand the `files` list incrementally rather than enabling `checkJs` across the whole repository in one go. Imported dependencies may also need JSDoc.
-6. Do not hide problems with broad `any`, blanket `@ts-nocheck`, `@ts-ignore`, or disabled strictness. If a boundary is too dynamic, document the open issue and keep it out of the checked baseline until its contract is proven.
-7. No private research files, proprietary assets, or code from decompilation should be committed. SH-05 alone coordinates cross-lane integration and merges.
+```bash
+npm ci
+npm run typecheck       # strict TS + no-any/suppression policy
+npm run build:typed     # compile TS and refresh the checked-in JS runtime files
+npm run check           # current Node tests, typecheck, generated-output freshness
+```
 
-**First next candidates:** small leaf utility modules, then explicit contracts around the combat/animation/render/audio boundaries. Validate each slice; never claim full-game TypeScript coverage before it is actually checked.
+You still start the game with `npm start` and without a production build. The intermediate `.generated/ts` directory is ignored.
+
+## Mandatory instructions to every SH lane
+
+1. Continue gameplay, visuals, native parity and tests. **No big-bang rewrite.** Existing non-migrated `.js` stays runnable. Avoid extra build steps on the user's play path.
+2. For new modules or explicitly converted leaf modules, **prefer `.ts`**. No explicit `any`, no implicit any, no blanket `@ts-` suppressions, no disabling strictness. Unknown external data starts as `unknown`, then receives runtime validation before narrowing.
+3. Do not introduce untyped public APIs to a migrated TypeScript module. Type cross-lane input/output boundaries; for untyped JS dependencies, coordinate conversion or a precise `.d.ts` backed by runtime evidence rather than silently accepting an `any` boundary.
+4. JS output generated from TypeScript must stay committed for zero-build web loading. After editing `.ts`, run `npm run build:typed` and commit both typed source and generated JS. **Never manually patch generated `.js`.**
+5. SH-05 owns the shared toolchain files (`tsconfig.json`, `package.json`, `package-lock.json`, scripts/checks, and CI). Other lanes propose narrow PRs, keep reserved modules in their lanes, and coordinate when changing files used by other agents.
+6. Proven native structure is distinct from guessed semantics. Types describe what evidence supports, not imagined game behavior. Preserve runtime guards, tests, proof provenance and private-data restrictions.
+7. SH-05 merges only when the exact head CI is green. A green TS check covers the `.ts` files, **not yet the rest of the legacy JS application**. Expand source coverage as modules are migrated, without unsound casts.
+
+Next candidates: pure utility/domain leaf modules, then combat events and animation/rig contracts, then rendering/audio boundaries with owners' agreement. Scope every migration as a testable behavior-preserving change.
