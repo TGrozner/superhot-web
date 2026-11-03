@@ -1658,7 +1658,8 @@ function render() {
     }
   }
   if (containersPreviewEnabled && nativeScene) {
-    manifestStats = nativeInspection ? null : renderer.drawNativeWorld();
+    manifestStats = nativeInspection ? null : renderer.drawNativeWorld(
+      nativeDoorWarningBridge?.packets() ?? []);
     if (nativeInspection) {
       drawInspectedEnemy();
     }
@@ -1700,7 +1701,10 @@ function render() {
         readiness:nativeDoorWarningBridge?.readiness ?? 'unavailable',
         lastEventStatus:nativeDoorWarningStatus,
         activeEnvelopes:nativeDoorWarningBridge?.packets().filter(packet=>packet.active).length ?? 0,
-        renderedSpotlights:0, // GPU world basis/cookie hook still pending.
+        renderedSpotlights:manifestStats?.warningPreviewSpotlights ?? 0,
+        sourceCookiePreviewDrawCalls:manifestStats?.warningPreviewDrawCalls ?? 0,
+        sourceCookieStatus:manifestStats?.warningCookieStatus ?? [],
+        nativeProjectorParityVerified:false,
       }:null,
       encounter:nativeEncounter?{killTarget:nativeEncounter.killTarget,killed:nativeEncounter.killed,pending:nativeEncounter.spawner.pending.length,
         enemies:state.enemies.map(e=>({id:e.id,x:e.x,y:e.y,z:e.z,alive:e.alive,walking:e.walking,stun:e.reaction.stunRemaining,
