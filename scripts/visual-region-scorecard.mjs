@@ -145,13 +145,52 @@ export function measureRegisteredRegion(nativeImage, webImage, nativeMask, webMa
   const visibilityStatus = !shape.webArea ? 'NATIVE_ONLY_VISIBLE'
     : !shape.nativeArea ? 'WEB_ONLY_VISIBLE' : 'BOTH_VISIBLE';
   const intersection = [], union = [];
-  for (let p = 0; p < viewport[0] * viewport[1]; p++) {
-    const n = nativeMask.rgb[3 * p] >= 128;
-    const w = webMask.rgb[3 * p] >= 128;
-    if (n && w) intersection.push(p);
-    if (n || w) union.push(p);
+  // Screen-space extents catch a shifted hand/katana whose high IoU or
+  // centroid could otherwise conceal a visibly misplaced silhouette edge.
+  // Pixel coordinates are inclusive, top-left origin, NOT Unity world units.
+  const nb = {left:viewport[0],top:viewport[1],right:-1,bottom:-1};
+  const wb = {left:viewport[0],top:viewport[1],right:-1,bottom:-1};
+  for (let y = 0; y < viewport[1]; y++) {
+    for (let x = 0; x < viewport[0]; x++) {
+      const p = y * viewport[0] + x;
+      const n = nativeMask.rgb[3 * p] >= 128;
+      const w = webMask.rgb[3 * p] >= 128;
+      if (n) {
+        nb.left=Math.min(nb.left,x); nb.top=Math.min(nb.top,y);
+        nb.right=Math.max(nb.right,x); nb.bottom=Math.max(nb.bottom,y);
+      }
+      if (w) {
+        wb.left=Math.min(wb.left,x); wb.top=Math.min(wb.top,y);
+        wb.right=Math.max(wb.right,x); wb.bottom=Math.max(wb.bottom,y);
+      }
+      if (n && w) intersection.push(p);
+      if (n || w) union.push(p);
+    }
   }
+  const bounds = b => b.right < 0 ? null : ({
+    left:b.left,top:b.top,right:b.right,bottom:b.bottom,
+    width:b.right-b.left+1,height:b.bottom-b.top+1,
+  });
+  const nativeBoundingBox=bounds(nb), webBoundingBox=bounds(wb);
+  const bothBounds=!!nativeBoundingBox && !!webBoundingBox;
+  const boundingBoxIntersectionPixels=bothBounds
+    ? Math.max(0,Math.min(nb.right,wb.right)-Math.max(nb.left,wb.left)+1)
+      * Math.max(0,Math.min(nb.bottom,wb.bottom)-Math.max(nb.top,wb.top)+1)
+    : 0;
+  const boundingBoxUnionPixels=bothBounds
+    ? nativeBoundingBox.width*nativeBoundingBox.height
+      +webBoundingBox.width*webBoundingBox.height-boundingBoxIntersectionPixels
+    : null;
   return {
+    nativeBoundingBox,webBoundingBox,
+    boundingBoxIou:bothBounds
+      ? boundingBoxIntersectionPixels/boundingBoxUnionPixels : null,
+    maxBoundingEdgeDeltaPx:bothBounds
+      ? Math.max(Math.abs(nb.left-wb.left),Math.abs(nb.top-wb.top),
+        Math.abs(nb.right-wb.right),Math.abs(nb.bottom-wb.bottom)) : null,
+    boundingBoxCenterDistancePx:bothBounds
+      ? Math.hypot((nb.left+nb.right-wb.left-wb.right)/2,
+        (nb.top+nb.bottom-wb.top-wb.bottom)/2) : null,
     maskThreshold: 128,
     visibilityStatus,
     nativeAreaPixels: shape.nativeArea,
@@ -194,14 +233,15 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
     method: 'EXPLICIT_GRAYSCALE_MASKS_THRESHOLD_128_INTERSECTION_AND_UNION_RGB',
     regions: [], topMaterialColorDifferences: [], topSilhouetteDifferences: [],
     topUnionColorDifferences: [], topScreenWeightedUnionColorDifferences: [],
-    topAbsoluteSilhouetteDifferences: [], sourcePoseMismatchCount: 0,
+    topAbsoluteSilhouetteDifferences: [], topBoundingEdgeDifferences: [], sourcePoseMismatchCount: 0,
     sourcePoseMatrixTolerance: SOURCE_POSE_MATRIX_TOLERANCE,
     materialSharedAreaThreshold: MIN_MATERIAL_SHARED_AREA_FRACTION, global: null,
     limitations: [
       'Only regions declared by owner; unmasked geometry and occlusion remain unscored',
       'Captures and native execution are not independently authenticated',
       'Screenshots must have matching active camera, projection, scene and state',
-      'A fully absent region on one side has IoU 0, null centroid delta, and no material-intersection RGB',
+      'A fully absent region on one side has IoU 0, null centroid/edge deltas, and no material-intersection RGB',
+      'Bounding boxes measure top-left-origin inclusive pixel extents, not exact object contour distance',
       'Material RGB is excluded when source world matrices differ or masks share less than half the smaller silhouette',
       'Screen-weighted region ranks can overlap and must not be summed as global image error',
       'No 1:1 inference or overall gameplay acceptance',
@@ -260,6 +300,8 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
     r => r.screenWeightedUnionRgbMae01);
   header.topAbsoluteSilhouetteDifferences = rank(header.regions,
     r => r.symmetricDifferencePixels);
+  header.topBoundingEdgeDifferences = rank(header.regions,
+    r => r.maxBoundingEdgeDeltaPx);
   return header;
 }
 function cli(args) {
