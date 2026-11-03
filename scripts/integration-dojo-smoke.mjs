@@ -113,8 +113,9 @@ export function auditDojoStaticWiring({ main, renderer, server } = {}) {
     prepareAndBindSourceWorld: main.includes('prepareNativeScene(source)') &&
       main.includes('renderer.replaceNativeWorld(prepared, images)') &&
       main.includes('nativeScene = prepared'),
-    sourceWorldGpuPath: main.includes('renderer.drawNativeWorld()') &&
-      renderer.includes('function drawNativeWorld()'),
+    // World renderer accepts source-warning packets while retaining its native GPU path.
+    sourceWorldGpuPath: main.includes('renderer.drawNativeWorld(') &&
+      renderer.includes('function drawNativeWorld('),
     skinnedEnemyDraw: main.includes('renderer.drawNativeSkin(') &&
       renderer.includes('function drawNativeSkin('),
     colliderAndProjectilePath: main.includes('prepareNativeCollision(nativeScene.colliders)') &&
