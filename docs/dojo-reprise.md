@@ -1,5 +1,7 @@
 # Dojo — reprise après stabilisation
 
+> **État courant (2026-11-03) :** ce fichier conserve l'historique des récupérations locales. La démo Dojo est désormais **standalone sur GitHub Pages**, avec 52 assets source-qualifiés hébergés et un manifeste. Thomas l'a confirmée fonctionnelle. Pour les invariants de livraison et les nouveaux assets, voir [../AGENTS.md](../AGENTS.md) et [standalone-dojo-pages.md](standalone-dojo-pages.md). Les mentions ci-dessous de localhost seulement sont historiques ; aucune parité 1:1 native n'est revendiquée.
+
 ## Décision de livraison
 
 À la demande du propriétaire, priorité à une version stable sur `main`, plutôt qu’à publier les raccordements 1:1 inachevés. La base conservée est `af46193a6f8d33889eb940dda032988a365fcc3d` (`feat: wire source-backed Dojo encounters, collisions and pickups`), augmentée des sons source et de cette documentation. **La vertical slice 1:1 n’est pas terminée.**

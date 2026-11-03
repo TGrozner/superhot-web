@@ -1,5 +1,7 @@
 # SH-05 — Reproductible Web baseline (pas un certificat de parité)
 
+> **Mise à jour déploiement (2026-11-03) :** le vrai pack source-qualifié SHRL_Dojo2/build10 est hébergé en autonome sur [GitHub Pages](https://tgrozner.github.io/superhot-web/) ; voir [AGENTS.md](../../AGENTS.md) et [standalone-dojo-pages.md](../standalone-dojo-pages.md). Le rapport Web ci-dessous est un **outil historique de tests**, pas la description de l'actuel rendu Pages et toujours pas une preuve de parité 1:1.
+
 Ce dossier sert au merge train de [superhot-web](https://github.com/TGrozner/superhot-web/issues/5).
 Le projet actuel est **FRAME//BREAK**, un prototype original de FPS navigateur. Son code, ses
 scènes et ses règles ne sont **pas** une copie validée de SUPERHOT: MIND CONTROL DELETE.
