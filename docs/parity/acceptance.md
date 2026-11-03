@@ -478,3 +478,36 @@ INCOMPLETE; increase capture frequency within the supported 50–5000 ms range
 rather than inventing unseen transitions. Synthetic Node fixture passes
 remain tests of the detector only, not a complete localhost Chromium run.
 
+
+
+### SH-10 P0: Kill counters and observed deaths must coincide (3 November 2026)
+
+The Dojo Web source `src/main.js:killEnemy()` changes `enemy.alive=false`
+and increments `state.kills` **in the same synchronous function call**. A
+trace with 0→6 individual counter values and six distinct living→dead Web
+actor IDs could previously pass even if the six count increments happened
+*before* (or after) the six deaths. That is not a witnessed sequence of six
+eliminations. This is a **Web source consistency requirement**, not proof of
+a native damage path.
+
+The opt-in `assessDojoVertical` now additionally requires **each adjacent
+rendered-frame interval** to have matching deltas:
+
+- Change in observed kill counter = number of actor IDs **first** observed
+  dead in that frame after being observed alive earlier in this run.
+- No count change may silently accompany a newly observed death, and no
+  counter increase may occur without the corresponding new death receipt.
+- The report includes `checks.killCounterAlignedWithWitnessedDeaths` and
+  up to twenty `observed.killDeathDesyncedFrameIds` for owner-local diagnosis.
+  These IDs are Web frame counters, not original-native evidence.
+
+A mismatch is `WEB_DOJO_VERTICAL_INCOMPLETE`, **not native REFUTED**.
+Sparse sampling, a skipped rendered frame, actor despawn or telemetry delay
+can make an otherwise completed playthrough **incomplete as evidence**. The
+owner may repeat the game capture at 50 ms and inspect the first flagged
+frame; SH-05 should investigate a reproducible counter/death discrepancy in
+the actual browser path, without weakening the gate or modifying SH-10
+runtime. Counter alignment does **not** establish weapon causality, hitbox
+parity, MCD physics or an executable-native observation. The accompanying
+Node fixtures deliberately include counter-before-death and
+counter-after-death traces; they are authored fixtures, **not Chromium games**.
