@@ -5,9 +5,10 @@ import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS } fro
 function mockBrowser() {
   const listeners = new Map();
   let seq=1, intervalCallback=null, cleared=false, screen='playing';
+  let controlsHidden=true, killed=0;
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
   const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
-    nativeScene:{source},gameplay:{encounter:{killed:0,killTarget:6,enemies:[]},
+    nativeScene:{source},gameplay:{encounter:{killed,killTarget:6,enemies:[]},
       weapon:true,ammo:6,heldItem:null,items:[{id:'cup-1',name:'PRIVATE_NAME',state:'static'},
         {id:'cup-2',name:'PRIVATE_NAME',state:'held'}],originalFragmentCount:2,
       audio:{sceneAmbienceSources:3,assets:{PRIVATE:'not serialized'}},
@@ -21,9 +22,13 @@ function mockBrowser() {
     removeEventListener(type){listeners.delete(type);},
   };
   globalThis.window=fakeWindow;
-  globalThis.document={createElement(){return {click(){}};}};
+  globalThis.document={
+    getElementById(id){return id === 'scene-controls' ? {hidden:controlsHidden} : null;},
+    createElement(){return {click(){}};},
+  };
   return {
     setFrame(n){seq=n;}, setScreen(value){screen=value;},
+    setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
     setSceneBuildIndex(index){source.sceneBuildIndex=index;},
     tick(){intervalCallback();},
     key(code,down=true,extra={}){listeners.get(down?'keydown':'keyup')?.({code,...extra});},
@@ -139,5 +144,52 @@ test('SH10 duplicate keyboard marker surfaces a warning rather than silently rep
     assert.deepEqual(recorder.markers,[{type:'door-before',frameId:1}]);
     assert.match(recorder.markerWarnings.join(' '),/duplicate route marker/);
     assert.equal(recorder.stop().markerWarnings.length,1);
+  } finally {mock.teardown();}
+});
+
+
+test('SH10 readiness refuses the initial Dojo preview even if scene, items and encounter are loaded',()=>{
+  const mock=mockBrowser();
+  try {
+    // src/main.js initializes a rendered playing preview before start()/resetGame().
+    mock.setControlsHidden(false);
+    const receipt=inspectDojoCaptureReadiness();
+    assert.equal(receipt.ready,false);
+    assert.ok(receipt.reasons.includes('DOJO_COMBAT_NOT_STARTED'));
+    assert.throws(()=>startDojoCapture(),/DOJO_COMBAT_NOT_STARTED/);
+  } finally {mock.teardown();}
+});
+
+test('SH10 can arm once before Start, then samples only post-start rendered frames',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    assert.equal(recorder.ready,false);
+    assert.equal(recorder.length,0);
+    mock.setFrame(2);mock.tick(); // Still an initial scene preview.
+    assert.equal(recorder.length,0);
+    assert.deepEqual(recorder.markers,[]);
+    mock.setControlsHidden(true);mock.setFrame(3);mock.tick();
+    assert.equal(recorder.ready,true);
+    assert.equal(recorder.length,1);
+    assert.equal(recorder.stop().frames[0].frameId,3);
+    assert.equal(mock.listenerCount,0);
+  } finally {mock.teardown();}
+});
+
+test('SH10 armed recorder does not begin on pause/win or mid-combat resume',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setScreen('win');mock.setKilled(6);mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.setFrame(2);mock.tick();
+    assert.equal(recorder.length,0);
+    mock.setScreen('playing');mock.setControlsHidden(true);mock.setFrame(3);mock.tick();
+    assert.equal(recorder.length,0);
+    assert.deepEqual(inspectDojoCaptureReadiness().reasons,['DOJO_RUN_NOT_FRESH']);
+    mock.setKilled(0);mock.setFrame(4);mock.tick();
+    assert.equal(recorder.ready,true);
+    assert.equal(recorder.stop().frames[0].frameId,4);
   } finally {mock.teardown();}
 });
