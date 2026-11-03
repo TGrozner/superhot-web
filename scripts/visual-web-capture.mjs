@@ -2,6 +2,8 @@
  * SH-15 private-user browser capture. No network calls or game assets shipped.
  * Captures only the WebGL canvas, never authenticates a native MCD frame.
  */
+import { collectDojoVisibleComposition } from './integration-dojo-visible.mjs';
+
 const SIGNATURE = Uint8Array.of(137,80,78,71,13,10,26,10);
 const KEY = 'SH15Capture';
 const encoder = new TextEncoder();
@@ -169,6 +171,45 @@ export function requireContainersWebEvidence({metrics,frame,expectedCamera,expec
   };
 }
 /**
+ * Pair an already-captured WebGL frame with the DOM that is live in the SAME
+ * render callback. The HUD/crosshair are DOM siblings of canvas#scene:
+ * this is observability, not a screenshot of the composited viewport.
+ * Does not read local assets, fetch files or export private scene data.
+ */
+export function captureDojoCompositionAtFrame(windowRef, rendered) {
+  const source = rendered?.nativeScene?.source;
+  const scenePath = String(source?.scenePath ?? '').replaceAll(String.fromCharCode(92), '/');
+  if (source?.sceneBuildIndex !== 10 || source?.serializedOwner !== 'level10' ||
+      !scenePath.endsWith('/SHRL_Dojo2.unity')) return null;
+  const observed = collectDojoVisibleComposition(windowRef);
+  if (observed.frameId !== rendered.frameId ||
+      observed.activeScreen !== rendered.activeScreen) {
+    throw new Error('Dojo HUD/DOM receipt does not match captured WebGL frame');
+  }
+  return {
+    status: observed.status,
+    hud: {
+      sourceClassesActive: observed.hud.sourceClassesActive,
+      overlayVisible: observed.hud.overlayVisible,
+      crosshairElementVisible: observed.hud.crosshairElementVisible,
+      sourceCrosshairMaskId: observed.hud.sourceCrosshairMaskId,
+      heartElements: observed.hud.heartElements,
+      canvasWidth: observed.hud.canvasWidth,
+      canvasHeight: observed.hud.canvasHeight,
+    },
+    hands: {
+      appReportedIndexedDrawCalls: observed.hands.appReportedIndexedDrawCalls,
+      appReportedTriangles: observed.hands.appReportedTriangles,
+      appReportedSourcePoseSampled: observed.hands.appReportedSourcePoseSampled,
+    },
+    evidence: 'SAME_RENDER_CALLBACK_DOM_STATE_NOT_COMPOSITED_PIXELS',
+    webglCanvasIncludesDomOverlay: false,
+    fullViewportScreenshotCaptured: false,
+    nativeParityVerdict: 'UNASSESSED',
+  };
+}
+
+/**
  * Synchronously copies the default WebGL2 framebuffer AFTER the application's
  * render callback into JS-owned pixels. This avoids the canvas.toBlob() timing
  * ambiguity when preserveDrawingBuffer=false and gameplay keeps rendering.
@@ -254,7 +295,7 @@ export async function captureContainersWeb({
   });
   evidence();
   if(webCommit!==null&&!/^[a-f0-9]{7,40}$/i.test(webCommit))throw new Error('Invalid Web commit SHA');
-  let report;
+  let report,domComposition=null;
   const startingFrameId=getFrame().frameId;
   // SH-05 schedules its render rAF before DevTools calls this function. We
   // accept only a NEW completed frame, and synchronously read GPU pixels in
@@ -273,6 +314,7 @@ export async function captureContainersWeb({
           finalFrame.worldClock!==report.worldClock){
         throw new Error('Web rendered frame changed during synchronous GPU readback');
       }
+      domComposition=captureDojoCompositionAtFrame(windowRef,report);
       resolve(pixels);
     }catch(error){reject(error);}
   }));
@@ -296,13 +338,14 @@ export async function captureContainersWeb({
   const metadata={
     schemaVersion:1,origin:'web',status:'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING',
     source:'WEBGL_CANVAS_NOT_MCD',scene,
-    capturedAt,webCommit:webCommit??'UNRECORDED',...report,rawCanvasSha256:toHex(digest),
+    capturedAt,webCommit:webCommit??'UNRECORDED',...report,domComposition,rawCanvasSha256:toHex(digest),
     rawFrameRgbaSha256:toHex(rgbaDigest),
     captureMethod:'WEBGL2_READ_PIXELS_SYNCHRONOUS_COMPLETED_FRAME',
     pixelEncoding:'RGBA8_DEFAULT_FRAMEBUFFER_TO_2D_SRGB_PNG',
     limitations:['No executed native MCD capture or paired active camera',
       'Web world clock/animation is not a matched native pose, even when the camera is fixed',
       'Original geometry does not establish native material, lighting or runtime parity',
+      'WebGL readPixels excludes DOM HUD and crosshair; DOM receipt is not a compositor screenshot',
       'No native/Web RGB, silhouette or 1:1 score computed'],
   };
   const marked=embedWebCaptureMetadata(base,metadata);
@@ -318,5 +361,5 @@ export async function captureContainersWeb({
   return{status:metadata.status,...report,rawCanvasSha256:metadata.rawCanvasSha256,
     rawFrameRgbaSha256:metadata.rawFrameRgbaSha256,captureMethod:metadata.captureMethod,
     screenshotBytes:marked.length,cameraStatus:metadata.camera.status,
-    downloadRequested:Boolean(download),intendedFilename};
+    downloadRequested:Boolean(download),intendedFilename,domComposition};
 }
