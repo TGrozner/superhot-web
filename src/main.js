@@ -16,6 +16,8 @@ import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
 import { createNativeDeathRuntime, applyNativeDeathForce } from './animation/native-death-runtime.js';
 import { createWebImpactFeedback, resetWebImpactFeedback, recordWebImpact, advanceWebImpactFeedback } from './vfx/web-combat-feedback.js';
+import { detectWebCleanDodge, WEB_DODGE_SCORE } from './combat/web-near-miss.js';
+import { createWebDodgeFeedback, resetWebDodgeFeedback, recordWebDodge, advanceWebDodgeFeedback } from './vfx/web-dodge-feedback.js';
 import { advanceDojoDeathSkinFrame } from './animation/native-gameplay-pose-bridge.js';
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests } from './combat/native-enemy-fire-phase.js';
@@ -34,6 +36,8 @@ const overlay = $('overlay');
 const hud = $('hud');
 const crosshair = $('crosshair');
 const hitConfirm = $('hit-confirm');
+const dodgePulse = $('dodge-pulse');
+const dodgeBanner = $('dodge-banner');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
@@ -476,8 +480,10 @@ const state = {
   recoil: 0, muzzle: 0, hop: 0, verticalSpeed: 0, walkCycle: 0,
   kills: 0, damage: 0, instructions: false,
   chain: 0, lastChainKillAt: -Infinity, chainBonus: 0,
+  dodges: 0,
 };
 const webImpactFeedback = createWebImpactFeedback();
+const webDodgeFeedback = createWebDodgeFeedback();
 let nativeClock = createMcdGameplayClock();
 const nativeVelocity = { x: 0, z: 0 };
 let nativeJumpAt = 0;
@@ -502,6 +508,8 @@ function setScreen(name) {
   overlay.hidden = playing;
   crosshair.style.opacity = playing ? '1' : '0';
   hitConfirm.hidden = !playing;
+  dodgePulse.hidden = !playing;
+  dodgeBanner.hidden = !playing || webDodgeFeedback.seconds<=0;
   for (const [key, screen] of Object.entries(screens)) screen.hidden = key !== name;
   if (!playing) keys.clear();
 }
@@ -603,6 +611,8 @@ function loadLevel(index) {
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   resetWebImpactFeedback(webImpactFeedback);
+  resetWebDodgeFeedback(webDodgeFeedback);
+  state.dodges=0;
   state.chain=0;state.lastChainKillAt=-Infinity;state.chainBonus=0;
   $('ammo-hint').textContent = nativeGameplay() ? '/ CHANGER D’ARME UNE FOIS VIDE' : '/ R POUR RECHARGER';
   audio.setOriginalMode(Boolean(containersPreviewEnabled && nativeScene));
@@ -1084,6 +1094,7 @@ function update(dt) {
   state.muzzle = Math.max(0, state.muzzle - dt);
   state.recoil = Math.max(0, state.recoil - dt * 4.8);
   advanceWebImpactFeedback(webImpactFeedback,dt);
+  advanceWebDodgeFeedback(webDodgeFeedback,dt);
   if (!nativeGameplay()) state.fireDelay = Math.max(0, state.fireDelay - dt);
   if (state.reload > 0) {
     state.reload -= dt;
@@ -1362,7 +1373,26 @@ function update(dt) {
       state.bullets.splice(i,1);
     } else if (bullet.ttl<=0 || Math.abs(end.x)>40 || Math.abs(end.z)>48 || end.y>12 || end.y<-.5) {
       state.bullets.splice(i,1);
-    } else bullet.pos=end;
+    } else {
+      // SHOOT/DODGE Web mechanic: only enemy projectiles with NO collision
+      // can score after fully crossing the player's closest-approach plane.
+      // No hypothetical prediction, no hit cancellation or invulnerability.
+      if(native && !bullet.friendly && !bullet.webDodgeChecked) {
+        const clean=detectWebCleanDodge(start,end,{
+          x:state.camera.x,y:state.camera.y-.3,z:state.camera.z,
+        });
+        if(clean) {
+          bullet.webDodgeChecked=true;
+          if(recordWebDodge(webDodgeFeedback,{
+            realTime:state.runClock,distance:clean.distance,
+          })) {
+            state.dodges++;
+            state.score+=WEB_DODGE_SCORE;
+          }
+        }
+      }
+      bullet.pos=end;
+    }
     if (state.screen!=='playing') return;
   }
   for (let i=state.fragments.length-1;i>=0;i--) {
@@ -1429,6 +1459,10 @@ function updateHud(dt = 0) {
     chainLabel.textContent=`×${state.chain} ENCHAÎNEMENT  ·  +${state.chainBonus}`;
     chainLabel.style.opacity=String(Math.min(1,chainTime*2));
   }
+  const dodgeOpacity=clamp(webDodgeFeedback.seconds/.16,0,1);
+  dodgePulse.style.opacity=String(dodgeOpacity*.32);
+  dodgeBanner.style.opacity=String(dodgeOpacity);
+  dodgeBanner.hidden=webDodgeFeedback.seconds<=0;
   hitConfirm.style.opacity=String(clamp(webImpactFeedback.hitSeconds/.12,0,1));
   hitConfirm.classList.toggle('kill',webImpactFeedback.hitKind==='kill');
   if (nativeGameplay() && nativeHudReady) {
@@ -1828,6 +1862,7 @@ function render() {
     gameplay: { timeScale: state.speed, nativeClock: nativeGameplay(),
       webImpactFx: {active:webImpactFeedback.particles.length,contacts:webImpactFeedback.impactCount},
       chain:state.chain,chainBonus:state.chainBonus,
+      cleanDodges:state.dodges,dodgePulseSeconds:webDodgeFeedback.seconds,
       ammo: state.ammo, fireDelay: state.fireDelay, weapon: state.weapon,
       initialEquipment: nativeGameplay() ? nativeScene.initialEquipment : null,
       feet:nativeGameplay()?{...nativeFeet}:null,grounded:nativeGameplay()?nativeGrounded:null,
