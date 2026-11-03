@@ -20,6 +20,23 @@ function boxIntersectionFraction(a, b) {
 }
 
 /**
+ * A nowrap label can paint past the narrower CSS box. For overlap checks,
+ * include the measured DOM Range ink, not just the background rectangle.
+ */
+function paintedBounds(box) {
+  const ink=box.textBounds;
+  const hasInk=ink && [ink.left,ink.top,ink.width,ink.height].every(Number.isFinite) &&
+    ink.width>0 && ink.height>0;
+  if (!hasInk) return box;
+  const left=Math.min(box.left,ink.left), top=Math.min(box.top,ink.top);
+  return {
+    left, top,
+    width:Math.max(box.left+box.width,ink.left+ink.width)-left,
+    height:Math.max(box.top+box.height,ink.top+ink.height)-top,
+  };
+}
+
+/**
  * Evaluates actual Web frame counters and DOM rectangle collisions.
  * No RGB or VRAM measurements: WebGL does not expose total allocated VRAM.
  * 33.3ms is an explicitly WEB-authored 30 FPS readability warning, not MCD.
@@ -82,7 +99,7 @@ export function assessWebVisualReadability({
   for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) {
     const a = visible[i], b = visible[j];
     if (a.id === b.id) continue;
-    const fraction = boxIntersectionFraction(a, b);
+    const fraction = boxIntersectionFraction(paintedBounds(a), paintedBounds(b));
     if (fraction >= INTERSECTION_FRACTION) {
       warnings.push({kind:'overlapping-feedback',ids:[a.id,b.id],
         overlapFraction:Math.round(fraction*1000)/1000,

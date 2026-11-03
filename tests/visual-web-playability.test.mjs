@@ -130,3 +130,18 @@ test('Web QA reads real text ink bounds: nowrap banner may overflow its CSS box'
   qa.stop();
   assert.equal(timers.size,0);
 });
+
+test('painted nowrap ink conflicts even when CSS feedback boxes do not touch',()=>{
+  const r=assessWebVisualReadability({
+    frame:playing,metrics:{p95FrameMs:16.3},width:320,height:240,
+    boxes:[
+      {id:'chain-banner',left:20,top:22,width:80,height:24,
+        textBounds:{left:20,top:22,width:170,height:22}},
+      {id:'pickup-prompt',left:155,top:23,width:45,height:24},
+    ],
+  });
+  assert.deepEqual(r.warnings.map(w=>w.kind),
+    ['text-outside-banner','overlapping-feedback']);
+  assert.deepEqual(r.warnings[1].ids,['chain-banner','pickup-prompt']);
+  assert.ok(r.warnings[1].overlapFraction>0.7);
+});
