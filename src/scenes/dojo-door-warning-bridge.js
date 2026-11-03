@@ -206,8 +206,8 @@ function createWebWarningSweep(catalog, controller) {
       // Interactive Web lighting: if a player is close enough to the beam
       // and actually in FRONT of its source, ease its sweep toward that
       // player during the warning's middle. Far/behind players preserve
-      // the normal lighthouse motion; there is no wall-penetrating target
-      // indicator or invented source spawn geometry.
+      // the normal lighthouse motion. This is a local light-direction cue,
+      // NOT a line-of-sight test or permission to draw through walls.
       const origin = packet.spotlight.position;
       if (playerKnown && finiteBasisVector(origin)) {
         const dx = playerWorldPosition.x - origin[0];
