@@ -21,6 +21,7 @@ import { createNativeHud } from './render/native-hud.js';
 import { createNativePlayerAnimation, projectDojoPlayerFrame } from './characters/native-player-controller.js';
 import { multiplyMatrices } from './scenes/graph.js';
 import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
+import { createDojoDoorWarningBridge } from './scenes/dojo-door-warning-bridge.js';
 import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -58,6 +59,8 @@ let nativeScene = null;
 let nativeSkinInfo = null;
 let localAssetManifest = null;
 let nativeHudReady = false;
+let nativeDoorWarningBridge = null;
+let nativeDoorWarningStatus = 'not-loaded';
 let nativeHandsController = null;
 let nativeHandsEquippedId = 'unarmed';
 let nativeHandsStatus = 'PLAYER_HANDS_SOURCE_UNAVAILABLE';
@@ -470,6 +473,8 @@ function loadLevel(index) {
     fireTimer: rand(1.6, 2.7) + e.delay, strafe: rand(-1, 1), phase: rand(0, Math.PI * 2),
   }));
   nativeCollision=null;nativeEncounter=null;nativeItems=null;
+  nativeDoorWarningBridge = null;
+  nativeDoorWarningStatus = 'not-loaded';
   audio.setOriginalMode(false);
   nativePlayerCollision=null;nativeEnemyCollision=null;nativeShotCollision=null;
   nativeSightCollision=null;nativeItemCollision=null;
@@ -506,6 +511,15 @@ function loadLevel(index) {
         gravity:nativeScene.gameplay.physics.gravity,
       });
       nativeEncounter = createNativeEncounter(nativeScene,nativeEnemyCollision,Math.random,{sightCollision:nativeSightCollision});
+      // Source spawner events, not inferred Web proxies. Keep unsupported
+      // warning packets from interrupting the owner-validated Dojo round.
+      try {
+        nativeDoorWarningBridge = createDojoDoorWarningBridge(nativeScene);
+        nativeDoorWarningStatus = nativeDoorWarningBridge.readiness;
+      } catch {
+        nativeDoorWarningBridge = null;
+        nativeDoorWarningStatus = 'source-warning-catalog-rejected';
+      }
     } else if (!nativeScene && !nativeInspection && !localAssetManifest?.assets?.scenePackage) {
       state.solids = buildContainersCollisionSolids();
       resetContainersTarget();
@@ -929,6 +943,9 @@ function update(dt) {
     audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
     audio.advanceWorldTime(worldDt);
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
+    // Advance existing warning envelopes before accepting fresh commands.
+    // This preserves trigger()'s first source-clock sample.
+    nativeDoorWarningBridge?.advance(worldDt);
     if (nativeHandsController) {
       try {
         const heldId = nativeItems?.held?.id ?? 'unarmed';
@@ -1029,7 +1046,14 @@ function update(dt) {
       scaledDeltaTime:worldDt,unscaledDeltaTime:dt,playerPosition:state.camera,
       playerForward:cameraAxes(state.camera.yaw,state.camera.pitch).forward,playerFeet:nativeFeet,enemies:state.enemies,
     });
-    for(const event of events)if(event.type==='spawn') {
+    for(const event of events) {
+      if(event.type==='door-warning') {
+        // The bridge requires the source SpawnerPoint GO, not a Web anchor.
+        const receipt = nativeDoorWarningBridge?.accept(event);
+        if(receipt) nativeDoorWarningStatus = receipt.status;
+        continue;
+      }
+      if(event.type!=='spawn') continue;
       // The existing encounter's only selected template is 'web-pistol'.
       // Bind an explicit per-actor Web fallback family for both Attack and
       // late weapon-pose emission. Native Dojo factory selection is UNKNOWN.
@@ -1615,6 +1639,12 @@ function render() {
       ammo: state.ammo, fireDelay: state.fireDelay, weapon: state.weapon,
       initialEquipment: nativeGameplay() ? nativeScene.initialEquipment : null,
       feet:nativeGameplay()?{...nativeFeet}:null,grounded:nativeGameplay()?nativeGrounded:null,
+      doorWarning:nativeGameplay()?{
+        readiness:nativeDoorWarningBridge?.readiness ?? 'unavailable',
+        lastEventStatus:nativeDoorWarningStatus,
+        activeEnvelopes:nativeDoorWarningBridge?.packets().filter(packet=>packet.active).length ?? 0,
+        renderedSpotlights:0, // GPU world basis/cookie hook still pending.
+      }:null,
       encounter:nativeEncounter?{killTarget:nativeEncounter.killTarget,killed:nativeEncounter.killed,pending:nativeEncounter.spawner.pending.length,
         enemies:state.enemies.map(e=>({id:e.id,x:e.x,y:e.y,z:e.z,alive:e.alive,walking:e.walking,stun:e.reaction.stunRemaining,
           armed:e.reaction.hasWeapon,canAttack:e.encounter.canAttack,spawnPoint:e.encounter.spawnPointId,muzzle:e.muzzlePosition,forward:e.muzzleForward}))}:null,
