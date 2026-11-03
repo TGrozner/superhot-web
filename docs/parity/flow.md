@@ -208,3 +208,14 @@ Les fonctions n'exécutent aucune intention, n'écrivent ni save, ni UI, ni scè
 **BLOQUÉ — intégration P0.** Le jeu public ne possède pas encore un reçu Dojo live `EndRunLevel` avec `SHRLGame.GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `CurrentRun.SkipDefragBetweenLevels`, plus objet de run natif/équivalent de sauvegarde, captures, événement et LevelLoad reliés. **SH-05** doit confirmer la route natif → callback différé → services autoritatifs avant de l'invoquer dans `src/main.js`. Ne pas substituer `readyForVictory` ou le compteur 6/7 Web : conserver le parcours Web 7/7 tant que ces entrées manquent. Le code ajouté n'active donc **pas** encore la fin native et n'est **pas** un smoke Pages, une capture de partie ou une revendication 1:1.
 
 Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages séparément; aucun asset/source Unity privé n'est requis par cette fonction ni publié avec elle.
+
+
+## SH-08 / J3 — Web replay score and personal records (2026-11-03)
+
+**PROUVÉ — source Web at main@1c1f308ac796:** `src/main.js` already owns kill-chain scoring (#271), clean-dodge points (#274), elapsed run seconds, shots, kills and 6/7 source-selected quota. The existing `finish(win)` currently shows only kills/shots/time. No native MCD run save is used for that screen.
+
+**IMPLÉMENTÉ — Web original, not native:** `src/flow/dojo-replay-recap.ts` + generated JS compute a deterministic end-of-round message from the actual Web counters, with first-clear / best-score / fastest-clear milestones. Separate 6- and 7-kill personal records avoid comparing unequal enemy quotas. Death never changes the stored best. This module does **not** award score, replace the combo, alter spawns, delay victory, persist data on its own or call MCD flow transitions.
+
+**SH-05 UI integration (shared file reserved):** in `finish(win)`, after selecting the confirmed Dojo and checking `nativeEncounter.killTarget` is 6 or 7, use `readDojoReplayBest(localStorage.getItem('framebreak-dojo-record-v1-'+quota), quota)`, then `createDojoReplayRecap({quota, victory:win, kills:state.kills, shots:state.shots, dodges:state.dodges, score:state.score, elapsedSeconds:state.runClock}, previous)`. Set the existing `win-stats` / `death-stats` text from `recap.text`. If `recap.shouldPersist`, store `JSON.stringify(recap.best)` at the **same quota-specific key**. Catch unavailable localStorage reads/writes and retain the ordinary end screen; do not gate death, victory or REJOUER on storage. No DOM/style/new asset is required. Don't call from kill handler or from frame update.
+
+**OBSERVÉ — targeted Node only:** two focused tests cover separate 6/7 records, faster vs higher score, malformed storage and loss preserving previous best. **INCONNU — browser UX/FPS:** no smoke of the updated end screen has been performed. SH-05 owns the actual main glue and Pages release; the module alone does not change the rendered game.
