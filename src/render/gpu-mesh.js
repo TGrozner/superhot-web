@@ -202,8 +202,25 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
             try {
               gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
               for (const [first, last] of ranges) {
-                gl.bufferSubData(gl.ARRAY_BUFFER, first * 100,
-                  pending.subarray(first * 25, (last + 1) * 25));
+                // A lone rigid body moving without rotation/scale changes
+                // touches only mat4 column 3.xyz (12 bytes), not its full
+                // 100-byte model + normal record. This keeps the same number
+                // of GL submissions; combined/dense runs still use one upload.
+                let translationOnly = first === last && first < count;
+                const record = first * 25;
+                for (let component = 0; translationOnly && component < 25; component++) {
+                  if (component !== 12 && component !== 13 && component !== 14 &&
+                      !Object.is(pending[record + component], staging[record + component])) {
+                    translationOnly = false;
+                  }
+                }
+                if (translationOnly) {
+                  gl.bufferSubData(gl.ARRAY_BUFFER, first * 100 + 48,
+                    pending.subarray(record + 12, record + 15));
+                } else {
+                  gl.bufferSubData(gl.ARRAY_BUFFER, first * 100,
+                    pending.subarray(first * 25, (last + 1) * 25));
+                }
               }
             } finally {
               gl.bindBuffer(gl.ARRAY_BUFFER, previous);
