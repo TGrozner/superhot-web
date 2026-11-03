@@ -277,17 +277,43 @@ export function assessDojoVertical(trace) {
   if (!checks.throwInputObserved) errors.push('no trusted F input receipt aligned with same-item release');
 
   const initial = get(frames[start]), after = get(frames[restart]);
+  const postRestart = frames.slice(restart);
+  // One immediate reset snapshot can precede asynchronous WebAudio startup or
+  // miss a later duplicate source. Require a settled, observed *Web* reset,
+  // not merely 0 === 0 or a one-frame 3 === 3 coincidence.
+  const enoughResetSamples = postRestart.length >= 2;
+  checks.postRestartSettledSamples = enoughResetSamples;
+  if (!enoughResetSamples) errors.push('at least two rendered post-restart samples required to observe settled reset');
   checks.itemPoolReset = initial.itemsTotal > 0 && initial.itemStates.length === 0 &&
-    after.itemsTotal === initial.itemsTotal && after.itemStates.length === 0 &&
-    after.heldItem === null && after.originalFragmentCount === 0;
-  if (!checks.itemPoolReset) errors.push('item pool/held item/fragments not restored after victory restart');
-  checks.audioAmbienceNoLeak = initial.audioAmbienceSources === after.audioAmbienceSources;
-  if (!checks.audioAmbienceNoLeak) errors.push('ambient native WebAudio source count changed across restart');
-  checks.weaponRestored = after.weapon === initial.weapon && after.ammo === initial.ammo;
-  if (!checks.weaponRestored) errors.push('starting weapon/ammo not restored after victory restart');
+    enoughResetSamples && postRestart.every(f => f.activeScreen === 'playing' &&
+      get(f).itemsTotal === initial.itemsTotal && get(f).itemStates.length === 0 &&
+      get(f).heldItem === null && get(f).originalFragmentCount === 0);
+  if (!checks.itemPoolReset) errors.push('item pool/held item/fragments not restored and stable after victory restart');
+  // Owner's documented *Web* Dojo baseline is three persistent scene ambiences
+  // (docs/dojo-reprise.md). This is NOT an MCD native audio parity target.
+  const expectedAmbience = 3;
+  const preWin = frames.slice(start, win);
+  const twoConsecutiveAmbiences = samples => samples.some((f, i) => i > 0 &&
+    get(f).audioAmbienceSources === expectedAmbience &&
+    get(samples[i - 1]).audioAmbienceSources === expectedAmbience);
+  const overBudgetAudioSamples = [...preWin, ...postRestart].filter(f =>
+    get(f).audioAmbienceSources > expectedAmbience);
+  checks.audioAmbienceNoLeak = enoughResetSamples && twoConsecutiveAmbiences(preWin) &&
+    twoConsecutiveAmbiences(postRestart) &&
+    get(postRestart.at(-1)).audioAmbienceSources === expectedAmbience &&
+    overBudgetAudioSamples.length === 0;
+  if (!checks.audioAmbienceNoLeak) {
+    errors.push('three stable Dojo WebAudio scene ambiences not observed before/after restart, or duplicate sources observed');
+  }
+  checks.weaponRestored = enoughResetSamples && postRestart.every(f =>
+    get(f).weapon === initial.weapon && get(f).ammo === initial.ammo);
+  if (!checks.weaponRestored) errors.push('starting weapon/ammo not restored and stable after victory restart');
   checks.worldClockReset = frames[restart].worldClock < frames[win].worldClock;
   if (!checks.worldClockReset) errors.push('worldClock did not reset after victory');
   observed.ambientSourcesBeforeAndAfter = [initial.audioAmbienceSources, after.audioAmbienceSources];
+  observed.postRestartSampleCount = postRestart.length;
+  observed.postRestartAudioSourceCounts = postRestart.slice(0, 16).map(f => get(f).audioAmbienceSources);
+  observed.overBudgetAudioFrameIds = overBudgetAudioSamples.slice(0, 16).map(f => f.frameId);
   observed.itemsBeforeAndAfter = [initial.itemsTotal, after.itemsTotal];
   observed.killTarget = get(frames[start]).encounter.killTarget;
   observed.pickupItemId = picked?.id ?? null;
