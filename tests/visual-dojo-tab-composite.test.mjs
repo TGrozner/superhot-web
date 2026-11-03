@@ -84,12 +84,13 @@ test('temporary capture control does not request permission until owner clicks i
   const documentRef={
     body:{append:node=>{added=node;}},
     createElement:()=>({
-      setAttribute(){},addEventListener:(type,fn)=>{handler={type,fn};},
+      style:{cssText:''},setAttribute(){},addEventListener:(type,fn)=>{handler={type,fn};},
     }),
   };
   const button=installDojoFullTabCaptureButton({documentRef,windowRef:{},expectedCamera:cam});
   assert.equal(added,button);
   assert.equal(button.type,'button');
+  assert.match(button.style.cssText,/z-index:2147483647/);
   assert.match(button.textContent,/capture privée/);
   assert.equal(handler.type,'click');
   assert.equal(typeof handler.fn,'function');
