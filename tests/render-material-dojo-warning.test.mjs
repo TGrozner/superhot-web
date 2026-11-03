@@ -4,6 +4,7 @@ import { createMcdDoorWarnings } from '../src/sound/mcd-door-warning.js';
 import {
   DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
   prepareDojoDoorWarningLighting,
+  createDojoDoorWarningSceneAdapter,
   sampleDojoDoorWarningWebPreview,
 } from '../src/render/lighting-model.js';
 
@@ -183,4 +184,52 @@ test('rejects malformed inputs rather than publishing phantom light uniforms', (
   assert.throws(() => prepareDojoDoorWarningLighting(scene,
     [{ ...active[0], spotlight: { ...active[0].spotlight, direction: [0,0,0] }}], options),
   /Zero or invalid direction/);
+});
+
+test('source scene cookie adapter requires decoded image and authored layer8, never a phantom spotlight', () => {
+  const key = 'level10::7089';
+  const doors = { [key]: sourceDoor };
+  const makeScene = textures => ({
+    source: scene,
+    textures,
+    gameplay: { audio: { doors } },
+    instanceMap: new Map([
+      ['native-instance-8', { id: 'native-instance-8', layer: 8 }],
+      ['native-instance-9', { id: 'native-instance-9', layer: 9 }],
+    ]),
+  });
+  const warnings = createMcdDoorWarnings(doors);
+  warnings.trigger(key);
+  warnings.advance(1);
+  const records = warnings.packets();
+  const textureId = sourceDoor.spotlight.cookieTextureId;
+  const sourceTextures = new Map([[textureId, { id: textureId }]]);
+  // This is an explicit unit-test image stand-in. The browser adapter
+  // requires a real ImageBitmap when ImageBitmap exists globally.
+  const decodedImage = { width: 2, height: 2 };
+  const loaded = createDojoDoorWarningSceneAdapter(makeScene(sourceTextures),
+    new Map([[textureId, decodedImage]]));
+  assert.equal(loaded.cookieStatus[0].decoded, true);
+  assert.equal(loaded.cookieImage(textureId), decodedImage);
+  assert.equal(loaded.prepareForInstance('native-instance-8', records).spotlights.length, 1);
+  assert.equal(loaded.prepareForInstance('native-instance-9', records).spotlights.length, 0);
+  assert.equal(loaded.prepareForInstance('native-instance-9', records).omissions[0].reason,
+    'source-spotlight-layer-mask');
+
+  for (const [textures, images, expected] of [
+    [sourceTextures, new Map(), 'source-cookie-image-not-decoded'],
+    [sourceTextures, new Map([[textureId, new Uint8Array(4)]]),
+      'source-cookie-image-not-decoded'],
+    [new Map(), new Map([[textureId, decodedImage]]),
+      'source-cookie-not-in-scene-textures'],
+  ]) {
+    const unresolved = createDojoDoorWarningSceneAdapter(makeScene(textures), images);
+    assert.equal(unresolved.cookieStatus[0].reason, expected);
+    assert.equal(unresolved.cookieImage(textureId), null);
+    assert.equal(unresolved.prepareForInstance('native-instance-8', records).spotlights.length, 0);
+  }
+  assert.throws(() => loaded.prepareForInstance('invented-id', records),
+    /Authored world instance/);
+  assert.throws(() => createDojoDoorWarningSceneAdapter(
+    makeScene(sourceTextures), []), /decoded images required/);
 });
