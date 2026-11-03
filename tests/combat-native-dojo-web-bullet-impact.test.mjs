@@ -23,15 +23,17 @@ const params = (type, bullet = playerBullet, contact = {}) => ({
 test('Dojo first Web sweep: wall blocks, source bodypart distinguishes stun/kill, player collider requests death; unknown native receipt cannot injure', () => {
   const wall = planDojoWebBulletImpact(params('wall', playerBullet, { nativeLayer: 'Environment' }));
   assert.equal(wall.status, 'source-requests');
-  assert.equal(wall.consumesWebBullet, true);
+  assert.equal(wall.stopsContactTraversal, true);
   assert.ok(wall.nativeEvents.some(event => event.type === 'environment-handler-request'));
   assert.ok(!wall.nativeEvents.some(event => /kill-request/.test(event.type)));
+  assert.equal(wall.bulletDestroyRequested, false, 'native loop stop does not establish destruction');
 
   const enemyContact = { nativeLayer: 'Enemies', enemyBodyPart: part, piercingShotActive: false };
   const killed = planDojoWebBulletImpact(params('enemy', playerBullet, enemyContact));
   assert.equal(killed.status, 'source-requests');
-  assert.equal(killed.consumesWebBullet, true);
+  assert.equal(killed.stopsContactTraversal, true);
   assert.ok(killed.nativeEvents.some(event => event.type === 'enemy-body-kill-request'));
+  assert.equal(killed.bulletDestroyRequested, true, 'separate native destroy request');
   const armored = planDojoWebBulletImpact(params('enemy', playerBullet, {
     ...enemyContact, enemyBodyPart: { ...part, isBulletProof: true },
   }));
@@ -50,7 +52,7 @@ test('Dojo first Web sweep: wall blocks, source bodypart distinguishes stun/kill
   }));
   assert.equal(noComponent.status, 'blocked');
   assert.deepEqual(noComponent.nativeEvents, []);
-  assert.equal(noComponent.consumesWebBullet, false);
+  assert.equal(noComponent.stopsContactTraversal, false);
 
   const noOwnership = planDojoWebBulletImpact(params('player',
     { ...enemyBullet, ownerControllerInstanceId: undefined }, {
