@@ -1,0 +1,64 @@
+name: Deploy verified Dojo
+on:
+  workflow_run:
+    workflows: ["Verify prototype"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  package:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Checkout exact successful main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Refuse an obsolete or superseded release
+        shell: bash
+        run: |
+          CURRENT="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$CURRENT" != "$RELEASE_SHA" ]; then
+            echo "::error::Release $RELEASE_SHA is no longer the main HEAD ($CURRENT)."
+            exit 1
+          fi
+      - name: Verify actual deployable Dojo package
+        run: node scripts/verify-pages-pack.mjs
+      - name: Verify code on manual release
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: npm ci --ignore-scripts && npm run check
+      - name: Assemble only the static site
+        run: |
+          mkdir -p _site
+          cp -a index.html style.css .nojekyll src local-assets _site/
+          test -s _site/local-assets/manifest.json
+          test -s _site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

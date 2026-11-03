@@ -1,0 +1,371 @@
+{
+  "standaloneVersion": 1,
+  "scene": "SHRL_Dojo2",
+  "sceneBuildIndex": 10,
+  "assets": {
+    "audioEnemyFire": {
+      "name": "audioEnemyFire.wav",
+      "type": "audio/wav",
+      "path": "audioEnemyFire.wav",
+      "size": 88156,
+      "sha256": "257be75ff714d3fe8a3828a7a4142f8bcbbd60659a86653c532871fa1bf3e11a"
+    },
+    "audioEnemyShatter": {
+      "name": "audioEnemyShatter.wav",
+      "type": "audio/wav",
+      "path": "audioEnemyShatter.wav",
+      "size": 134562,
+      "sha256": "fe572d43b03c3dd58153db486eb7090eed5028aa277076846cf8913ca0ecd2a7"
+    },
+    "audioNative_resources_assets_1424": {
+      "name": "audioNative_resources_assets_1424.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1424.wav",
+      "size": 44190,
+      "sha256": "08988cabe481cd1ce4a20b8289a7b6174c09d088f8a30a1e6ea49d1b73e7882d"
+    },
+    "audioNative_resources_assets_1443": {
+      "name": "audioNative_resources_assets_1443.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1443.wav",
+      "size": 70016,
+      "sha256": "e8dfb3648f28e61a0a5a5db70e84c20e734905c121d113f4c49feddcd37ed358"
+    },
+    "audioNative_resources_assets_1458": {
+      "name": "audioNative_resources_assets_1458.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1458.wav",
+      "size": 44190,
+      "sha256": "e4cdf517b7bd075922ceccd27b59a7b85e99043fd23a05eb8c591e39114e81b4"
+    },
+    "audioNative_resources_assets_1589": {
+      "name": "audioNative_resources_assets_1589.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1589.wav",
+      "size": 65644,
+      "sha256": "d791eb40cb0d300591c1a7fa907aae7105ce8b232b3a6c59200daf9b319abbf3"
+    },
+    "audioNative_resources_assets_1610": {
+      "name": "audioNative_resources_assets_1610.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1610.wav",
+      "size": 65644,
+      "sha256": "e32f150c3ab70a8e1d260c6705a351f94639a72a1f75a57b19215ff0ad009db9"
+    },
+    "audioNative_resources_assets_1611": {
+      "name": "audioNative_resources_assets_1611.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1611.wav",
+      "size": 36884,
+      "sha256": "2f9e3d2589b9515292af434c79d800c06a78ab22b1417a70c0e9e4cd6eccca05"
+    },
+    "audioNative_resources_assets_1675": {
+      "name": "audioNative_resources_assets_1675.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1675.wav",
+      "size": 142842,
+      "sha256": "78a307a05bb01a62e9b2a3489b151801e387af07da8f4aa927b287bd4a1ca657"
+    },
+    "audioNative_resources_assets_1697": {
+      "name": "audioNative_resources_assets_1697.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1697.wav",
+      "size": 44190,
+      "sha256": "f805e3e98641c4308319fc2288e64f4a9239948f56fab9ab0945645f70e1ac04"
+    },
+    "audioNative_resources_assets_1710": {
+      "name": "audioNative_resources_assets_1710.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1710.wav",
+      "size": 65644,
+      "sha256": "f5f7695c1d40874e094d4289449e5039a26e7ee908b265328d9f85b06a51184e"
+    },
+    "audioNative_resources_assets_1730": {
+      "name": "audioNative_resources_assets_1730.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1730.wav",
+      "size": 484524,
+      "sha256": "f4a6cefcdde45ace5314f3d363c61fd9dd02205b4dc1ea1cb6e2f93c4cada524"
+    },
+    "audioNative_resources_assets_1768": {
+      "name": "audioNative_resources_assets_1768.wav",
+      "type": "audio/wav",
+      "path": "audioNative_resources_assets_1768.wav",
+      "size": 367550,
+      "sha256": "1f49f9dc33249c3c47a8e98bc13767e4a48863e08362adf231985d85fdd9e593"
+    },
+    "audioNative_sharedassets0_assets_599": {
+      "name": "audioNative_sharedassets0_assets_599.wav",
+      "type": "audio/wav",
+      "path": "audioNative_sharedassets0_assets_599.wav",
+      "size": 171272,
+      "sha256": "78eba582c221959ba65089ec54663f796a0cf324d2aa702e00b795b9d6dd21d4"
+    },
+    "audioNative_sharedassets0_assets_600": {
+      "name": "audioNative_sharedassets0_assets_600.wav",
+      "type": "audio/wav",
+      "path": "audioNative_sharedassets0_assets_600.wav",
+      "size": 55806,
+      "sha256": "8fab8e5d46cdbb9edd960634162e0898a8177e47f0375e386c1b71668c9dcb8e"
+    },
+    "audioNative_sharedassets0_assets_612": {
+      "name": "audioNative_sharedassets0_assets_612.wav",
+      "type": "audio/wav",
+      "path": "audioNative_sharedassets0_assets_612.wav",
+      "size": 109610,
+      "sha256": "fa4dcfa8fa3efd77114791c96e6b58c12a5733c1abcbf5501d576401903c8120"
+    },
+    "audioNative_sharedassets0_assets_614": {
+      "name": "audioNative_sharedassets0_assets_614.wav",
+      "type": "audio/wav",
+      "path": "audioNative_sharedassets0_assets_614.wav",
+      "size": 37952,
+      "sha256": "e90a49ca40e75ce217b1f0ca29a646ea6f35ec3159bde91f363d25fae90659f2"
+    },
+    "audioNative_sharedassets0_assets_627": {
+      "name": "audioNative_sharedassets0_assets_627.wav",
+      "type": "audio/wav",
+      "path": "audioNative_sharedassets0_assets_627.wav",
+      "size": 35244,
+      "sha256": "24f70af322366747bba97868b16f0b8ab97adb01ed69dde0eb72d877d147baca"
+    },
+    "audioPistolEmpty": {
+      "name": "audioPistolEmpty.wav",
+      "type": "audio/wav",
+      "path": "audioPistolEmpty.wav",
+      "size": 17864,
+      "sha256": "d34b6eec30dd0d5cebf6f068218746eceea2469e20521a2a59036ea73441f981"
+    },
+    "audioPistolFireAlternate": {
+      "name": "audioPistolFireAlternate.wav",
+      "type": "audio/wav",
+      "path": "audioPistolFireAlternate.wav",
+      "size": 96044,
+      "sha256": "490e3368ffa8a7b2d91f12cc0d30f0a72b8b6e60a6efe3d134b6bcee9c505586"
+    },
+    "audioPistolFirePrimary": {
+      "name": "audioPistolFirePrimary.wav",
+      "type": "audio/wav",
+      "path": "audioPistolFirePrimary.wav",
+      "size": 88156,
+      "sha256": "257be75ff714d3fe8a3828a7a4142f8bcbbd60659a86653c532871fa1bf3e11a"
+    },
+    "audioPistolPickup": {
+      "name": "audioPistolPickup.wav",
+      "type": "audio/wav",
+      "path": "audioPistolPickup.wav",
+      "size": 39942,
+      "sha256": "5a63c70fd30b439b90aff96bafab1ecbd7d828b4643d18177e22d2d48ea1e18d"
+    },
+    "audioPistolPickupReloaded": {
+      "name": "audioPistolPickupReloaded.wav",
+      "type": "audio/wav",
+      "path": "audioPistolPickupReloaded.wav",
+      "size": 21582,
+      "sha256": "4d7fd7d57a6c513d2113eae1056594be42bbfdbfd90850310e988d16d8447044"
+    },
+    "audioPistolReady": {
+      "name": "audioPistolReady.wav",
+      "type": "audio/wav",
+      "path": "audioPistolReady.wav",
+      "size": 24184,
+      "sha256": "77867205c7d9081bdfbb7aa041fecb8de11a2453688347be947f5a3559500d22"
+    },
+    "audioPistolThrow": {
+      "name": "audioPistolThrow.wav",
+      "type": "audio/wav",
+      "path": "audioPistolThrow.wav",
+      "size": 55806,
+      "sha256": "8fab8e5d46cdbb9edd960634162e0898a8177e47f0375e386c1b71668c9dcb8e"
+    },
+    "audioPlayerHit": {
+      "name": "audioPlayerHit.wav",
+      "type": "audio/wav",
+      "path": "audioPlayerHit.wav",
+      "size": 346804,
+      "sha256": "f5f10a0a276ed6beaec892ffd186ef553c2caba852a05b1de1a0c05bc02099a9"
+    },
+    "enemyHeadless": {
+      "name": "EnemyMergedHeadless.obj.gz",
+      "type": "application/gzip",
+      "path": "enemyHeadless.obj.gz",
+      "size": 103229,
+      "sha256": "d28936a6d5d1a49293309bb7be4a02106a135cce064c30ce81825c805babc51b"
+    },
+    "enemyHeadlessRig": {
+      "name": "enemy-merged-headless-animated.json",
+      "type": "application/json",
+      "path": "enemyHeadlessRig.json",
+      "size": 5938221,
+      "sha256": "4f4264a043a6ded1798475b74a2cd61715620b60b4f21f219a315711f2f8ab69"
+    },
+    "enemyMerged": {
+      "name": "EnemyMerged.obj.gz",
+      "type": "application/gzip",
+      "path": "enemyMerged.obj.gz",
+      "size": 110391,
+      "sha256": "e7cde671af5c46baf553f629988b39a19ffb13c4f7df1a6a0602ab403884e6cf"
+    },
+    "enemyRig": {
+      "name": "enemy-merged-animated.json",
+      "type": "application/json",
+      "path": "enemyRig.json",
+      "size": 6002291,
+      "sha256": "0857e802ec1d24d09da3afdc071a271df18365ef6c466ae2e37317bf898b49fb"
+    },
+    "mesh6": {
+      "name": "containers-mesh6.obj.gz",
+      "type": "application/gzip",
+      "path": "mesh6.obj.gz",
+      "size": 632318,
+      "sha256": "ff59d8e1548448926a6431d27578310f3a68f6e35d272cbe63576a1df8034941"
+    },
+    "mesh7": {
+      "name": "containers-mesh7.obj.gz",
+      "type": "application/gzip",
+      "path": "mesh7.obj.gz",
+      "size": 878903,
+      "sha256": "59166c0c21221654fc996624ba9085caa4d64b4af0187a13749c68007699d116"
+    },
+    "sceneConcreteFogGradient": {
+      "name": "sceneConcreteFogGradient.png",
+      "type": "image/png",
+      "path": "sceneConcreteFogGradient.png",
+      "size": 864,
+      "sha256": "ae93788dc13f6bfb46bbe07a585775caf6e7965d25f9a08b81f0ce8074fa004a"
+    },
+    "sceneConcreteMicroseam": {
+      "name": "sceneConcreteMicroseam.png",
+      "type": "image/png",
+      "path": "sceneConcreteMicroseam.png",
+      "size": 9871,
+      "sha256": "cc7cee10a6b682c79194ab62863eb1fa7cfc21f7f8420ece018d751332fc309d"
+    },
+    "sceneConcretePore": {
+      "name": "sceneConcretePore.png",
+      "type": "image/png",
+      "path": "sceneConcretePore.png",
+      "size": 864491,
+      "sha256": "9a7639a3b1e219a5f3d5a9cd43efb55252d4fd079ca000011a783cc741616136"
+    },
+    "sceneLightmapBc3": {
+      "name": "sceneLightmap_000.bc3",
+      "type": "application/octet-stream",
+      "path": "sceneLightmapBc3.bc3",
+      "size": 22369648,
+      "sha256": "09e8edbb55496a92314d11258eb8a16e4c8185aca82f62c9a20d76247411e9db"
+    },
+    "sceneLightmap_000": {
+      "name": "sceneLightmap_000.png",
+      "type": "image/png",
+      "path": "sceneLightmap_000.png",
+      "size": 3540381,
+      "sha256": "72cd5dcbc275842c9dc3badababf2968937ca9237ad947c4c55c12bd0193a91c"
+    },
+    "scenePackage": {
+      "name": "native-scene.json.gz",
+      "type": "application/gzip",
+      "path": "scenePackage.json.gz",
+      "size": 3504085,
+      "sha256": "1acfb33298ce76345365888ca0d0dee8e6f2fb800f738d490d2ac8d592718622"
+    },
+    "sceneTexture_000": {
+      "name": "sceneTexture_000.png",
+      "type": "image/png",
+      "path": "sceneTexture_000.png",
+      "size": 134583,
+      "sha256": "187deb044a41e5e04e5fc9716cddf67fad280f95f0c037ee100c11448437f774"
+    },
+    "sceneTexture_001": {
+      "name": "sceneTexture_001.png",
+      "type": "image/png",
+      "path": "sceneTexture_001.png",
+      "size": 77585,
+      "sha256": "92834c9b0409e5d1c37b0b07b592f17a689543fa3494327ce79cda71c9a80611"
+    },
+    "sceneTexture_002": {
+      "name": "sceneTexture_002.png",
+      "type": "image/png",
+      "path": "sceneTexture_002.png",
+      "size": 8549,
+      "sha256": "160fd57dca817c7a43b2252823567519845594a401f0b15f932d8254fa2bf881"
+    },
+    "sceneTexture_003": {
+      "name": "sceneTexture_003.png",
+      "type": "image/png",
+      "path": "sceneTexture_003.png",
+      "size": 18960,
+      "sha256": "b88f250094b234f2c8fcbae1219336e23187959e2e5a4fa990d6c98ca52c2b33"
+    },
+    "sceneTexture_004": {
+      "name": "sceneTexture_004.png",
+      "type": "image/png",
+      "path": "sceneTexture_004.png",
+      "size": 19096,
+      "sha256": "784a621a864f666f229a1eee441eec118dfabb7130dec15acb67eda690b92d68"
+    },
+    "sceneTexture_005": {
+      "name": "sceneTexture_005.png",
+      "type": "image/png",
+      "path": "sceneTexture_005.png",
+      "size": 5956,
+      "sha256": "bcee45882c6225b177de9375a5dc21bb4f208abf920a03a545e0b2ba4e941e25"
+    },
+    "sceneTexture_006": {
+      "name": "sceneTexture_006.png",
+      "type": "image/png",
+      "path": "sceneTexture_006.png",
+      "size": 79972,
+      "sha256": "6253e3ffe2e95bc7d80a8c0a02408e0d6fb97b0dcdf26e4cd6189385efd02206"
+    },
+    "sceneTexture_007": {
+      "name": "sceneTexture_007.png",
+      "type": "image/png",
+      "path": "sceneTexture_007.png",
+      "size": 41476,
+      "sha256": "a14ca61e5f9e7ecfad060b4a38496e80818a3cc82fc1ad5556b9f6cb6db414f6"
+    },
+    "sceneTexture_008": {
+      "name": "sceneTexture_008.png",
+      "type": "image/png",
+      "path": "sceneTexture_008.png",
+      "size": 56282,
+      "sha256": "48d1c4f161b9a0a054c2ff6839153575f676b9f8228ba9e4df77e11f838df58d"
+    },
+    "sceneTexture_009": {
+      "name": "sceneTexture_009.png",
+      "type": "image/png",
+      "path": "sceneTexture_009.png",
+      "size": 1448,
+      "sha256": "0fcf689bdc10feab36c5c08d0731629fd3cb8b1215fd65b9cf2a5f872be9db4c"
+    },
+    "sceneTexture_010": {
+      "name": "sceneTexture_010.png",
+      "type": "image/png",
+      "path": "sceneTexture_010.png",
+      "size": 155858,
+      "sha256": "fff61ab5b94c139ba88815b6484eb3ea0a7b7ad41b02f4946a8235faf7eb11e0"
+    },
+    "sceneTexture_011": {
+      "name": "sceneTexture_011.png",
+      "type": "image/png",
+      "path": "sceneTexture_011.png",
+      "size": 518873,
+      "sha256": "938ca8bb01e5d4822c4b2fd16b8172b085a97e77f5a93395a3c1ea6e1a62c7cc"
+    },
+    "sceneTexture_012": {
+      "name": "sceneTexture_012.png",
+      "type": "image/png",
+      "path": "sceneTexture_012.png",
+      "size": 42921,
+      "sha256": "ed5c2802c1b9d988fc5eddf099afee16d32e38e54161610aebbbfc7dc53dade2"
+    },
+    "texture": {
+      "name": "concrete.png",
+      "type": "image/png",
+      "path": "texture.png",
+      "size": 1448,
+      "sha256": "0fcf689bdc10feab36c5c08d0731629fd3cb8b1215fd65b9cf2a5f872be9db4c"
+    }
+  }
+}

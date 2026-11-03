@@ -108,7 +108,8 @@ try {
   git(checkout, ['config', 'core.autocrlf', 'false']);
   git(checkout, ['config', 'user.name', author]);
   git(checkout, ['config', 'user.email', email]);
-  git(checkout, ['add', '--', 'local-assets']);
+  // The generated pack is ignored for local safety. Force-add ONLY after validation.
+  git(checkout, ['add', '-f', '-A', '--', 'local-assets']);
   if (git(checkout, ['diff', '--cached', '--quiet'], {fail:false}).ok) {
     console.log('Already published: static asset pack matches origin/main.');
     process.exitCode = 0;
