@@ -194,18 +194,74 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   } else throw new TypeError('Only source Impulse/ConstantForce supported');
 }
 
-// Broadphase before expensive triangle/penetration sweeps. Collider boxes
-// are authored and the candidate corridor is conservative for each sphere.
-// This still handles the source geometry, not simplified replacement geometry.
+// The static Dojo collider AABBs do not move during a round; only enabled
+// changes (shared with nativeCollisionView). Index their X intervals once per
+// collision view, instead of scanning every authored box for every sphere,
+// contact correction and joint iteration of every corpse. This is a Web-only
+// broadphase: original source boxes, contacts and sweep order remain intact.
+// Rebuild if the host replaces or changes the length of scene.boxes.
+const deathCollisionIndexes = new WeakMap();
+function deathBoxIntervalTree(entries) {
+  if(entries.length===0)return null;
+  const mids=entries.map(entry=>entry.box.min.x/2+entry.box.max.x/2)
+    .sort((a,b)=>a-b);
+  const center=mids[Math.floor(mids.length/2)];
+  const left=[],right=[],crossing=[];
+  for(const entry of entries) {
+    if(entry.box.max.x<center)left.push(entry);
+    else if(entry.box.min.x>center)right.push(entry);
+    else crossing.push(entry);
+  }
+  return {
+    center,
+    left:deathBoxIntervalTree(left),
+    right:deathBoxIntervalTree(right),
+    byMin:crossing.slice().sort((a,b)=>a.box.min.x-b.box.min.x||a.index-b.index),
+    byMax:crossing.slice().sort((a,b)=>b.box.max.x-a.box.max.x||a.index-b.index),
+  };
+}
+function deathCollisionIndex(scene) {
+  const cached=deathCollisionIndexes.get(scene);
+  if(cached?.boxes===scene.boxes && cached.length===scene.boxes.length)return cached.root;
+  const root=deathBoxIntervalTree(scene.boxes.map((box,index)=>({box,index})));
+  deathCollisionIndexes.set(scene,{boxes:scene.boxes,length:scene.boxes.length,root});
+  return root;
+}
+function deathBoxCandidates(node,minX,maxX,entries) {
+  if(!node)return;
+  if(maxX<node.center) {
+    for(const entry of node.byMin) {
+      if(entry.box.min.x>maxX)break;
+      entries.push(entry);
+    }
+    deathBoxCandidates(node.left,minX,maxX,entries);
+  } else if(minX>node.center) {
+    for(const entry of node.byMax) {
+      if(entry.box.max.x<minX)break;
+      entries.push(entry);
+    }
+    deathBoxCandidates(node.right,minX,maxX,entries);
+  } else {
+    entries.push(...node.byMin);
+    deathBoxCandidates(node.left,minX,maxX,entries);
+    deathBoxCandidates(node.right,minX,maxX,entries);
+  }
+}
+// Broadphase before expensive triangle/penetration sweeps. Preserve the
+// original scene.boxes order for equal-time hit tie-breaking and keep enabled
+// dynamic: toggling a source collider must be visible without rebuilding.
 function nearbyStaticBoxes(scene,start,end,radius) {
   const min={x:Math.min(start.x,end.x)-radius,y:Math.min(start.y,end.y)-radius,
     z:Math.min(start.z,end.z)-radius};
   const max={x:Math.max(start.x,end.x)+radius,y:Math.max(start.y,end.y)+radius,
     z:Math.max(start.z,end.z)+radius};
-  return { boxes:scene.boxes.filter(box=>box.enabled &&
+  const entries=[];
+  deathBoxCandidates(deathCollisionIndex(scene),min.x,max.x,entries);
+  entries.sort((a,b)=>a.index-b.index);
+  return {boxes:entries.map(({box})=>box).filter(box=>box.enabled &&
     box.max.x>=min.x && box.min.x<=max.x &&
     box.max.y>=min.y && box.min.y<=max.y &&
-    box.max.z>=min.z && box.min.z<=max.z) };
+    box.max.z>=min.z && box.min.z<=max.z)};
 }
 function contactsFor(runtime,body,displacement,contacts) {
   // Sweep the shape centers from the last collision-admitted pose, including
