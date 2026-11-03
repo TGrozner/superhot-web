@@ -381,7 +381,7 @@ export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
   return {
     source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
     // Web-only: start with the caller's actual view as the comparison anchor.
-    // Do not discard the first ten mouse turns after start/replay.
+    // Do not discard the first ten simulation frames after start/replay.
     lookBuffer: 0, lookMeasuredAt: 0, yaw, pitch,
   };
 }
