@@ -129,11 +129,18 @@ test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotl
       assert.ok(Math.abs(value - expected.spot[axis]) < 0.00001));
     packet.falseLight.position.forEach((value, axis) =>
       assert.ok(Math.abs(value - expected.falseLight[axis]) < 0.00001));
-    packet.spotlight.direction.forEach((value, axis) =>
-      assert.ok(Math.abs(value - expected.forward[axis]) < 0.0001));
-    assert.ok(Math.abs(packet.spotlight.direction.reduce((sum, v, i) =>
-      sum + v * packet.spotlight.right[i], 0)) < 0.00001);
-    assert.deepEqual(packet.spotlight.up, [0, 1, 0]);
+    // The 1-second pose is deliberately Web-animated: verify a valid
+    // live 3D cookie basis, not a frozen source direction.
+    const basis = [packet.spotlight.direction, packet.spotlight.right, packet.spotlight.up];
+    for (const axis of basis) {
+      assert.ok(Math.abs(Math.hypot(...axis) - 1) < 0.00001);
+    }
+    for (let a = 0; a < basis.length; a++) {
+      for (let b = a + 1; b < basis.length; b++) {
+        assert.ok(Math.abs(basis[a].reduce((sum, v, i) =>
+          sum + v * basis[b][i], 0)) < 0.00001);
+      }
+    }
   });
 
   // SH-13 adapter receives data ONLY: renderer still needs source cookie
@@ -149,6 +156,12 @@ test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotl
   assert.equal(lights.nativeLightingParity, false);
   bridge.reset();
   assert.equal(bridge.packets().filter(packet => packet.active).length, 0);
+  packets.forEach((packet, index) => {
+    packet.spotlight.direction.forEach((value, axis) =>
+      assert.ok(Math.abs(value - expectedWorld[index].forward[axis]) < 0.0001));
+    assert.deepEqual(packet.spotlight.up, [0, 1, 0]);
+    assert.equal(packet.spotlight.spotAngle, 99);
+  });
 });
 
 test('world-basis enrichment fails closed on unverified coordinates, and never overrides private runtime basis', () => {
