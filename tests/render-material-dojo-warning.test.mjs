@@ -6,6 +6,7 @@ import {
   prepareDojoDoorWarningLighting,
   createDojoDoorWarningSceneAdapter,
   sampleDojoDoorWarningWebPreview,
+  sampleDojoDoorWarningWebGlow,
 } from '../src/render/lighting-model.js';
 
 // Synthetic geometry and curve: no private coordinates, cookie PNG or native shader.
@@ -70,13 +71,18 @@ test('provisional cookie projector produces a visibly nonzero Web preview only i
   const spot = prepareDojoDoorWarningLighting(scene, activeWarning().packets(), options).spotlights[0];
   const center = sampleDojoDoorWarningWebPreview(spot, [1, 2, 8], .4);
   assert.deepEqual(center.cookieUv, [.5, .5]);
-  assert.deepEqual(center.rgb, [12, 0, 0]);
+  assert.ok(Math.abs(center.rgb[0] - (2 / 3)) < 1e-12); // Web highlight-compressed, never 12x clipped red.
+  assert.deepEqual(center.rgb.slice(1), [0, 0]);
+  const near = sampleDojoDoorWarningWebPreview(spot, [1, 2, 4], .4);
+  const far = sampleDojoDoorWarningWebPreview(spot, [1, 2, 12], .4);
+  assert.ok(near.rgb[0] > center.rgb[0] && center.rgb[0] > far.rgb[0]);
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [1, 2, 8], 0).rgb, [0, 0, 0]);
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [1, 2, 14], 1).rgb, [0, 0, 0]);
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [9, 2, 4], 1).rgb, [0, 0, 0]);
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [1, 2, 2], 1).rgb, [0, 0, 0]);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /texture\(sourceCookie, cookieUv\)\.a/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /radius > sourceRange/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /dojoWebWarningCompression/);
 });
 
 test('source layer-mask, loaded original cookie, and verified door identity gate visibility', () => {
@@ -232,4 +238,30 @@ test('source scene cookie adapter requires decoded image and authored layer8, ne
     /Authored world instance/);
   assert.throws(() => createDojoDoorWarningSceneAdapter(
     makeScene(sourceTextures), []), /decoded images required/);
+});
+
+// J4 Web choice: make an authored red warning visible without inventing a cookie
+// asset. Rendering is opt-in at the SH-05 WebGL integration boundary.
+test('opt-in Web-only glow retains real door joins, masks, envelopes and missing-cookie evidence', () => {
+  const records = activeWarning().packets();
+  const withoutCookie = { ...options, decodedCookies: new Set() };
+  assert.equal(prepareDojoDoorWarningLighting(scene, records, withoutCookie).spotlights.length, 0);
+  const fallback = prepareDojoDoorWarningLighting(scene, records,
+    { ...withoutCookie, allowWebCookieFreeGlow: true });
+  assert.equal(fallback.spotlights.length, 1);
+  assert.equal(fallback.spotlights[0].webPreviewMode, 'web-procedural-no-cookie');
+  assert.equal(fallback.spotlights[0].sourceCookieDecoded, false);
+  assert.equal(fallback.spotlights[0].shaderParity, 'web-authored-creative-light-not-MCD');
+  assert.equal(fallback.omissions[0].reason, 'source-cookie-not-decoded');
+  const inCone = sampleDojoDoorWarningWebGlow(fallback.spotlights[0], [1, 2, 8]);
+  const outsideCone = sampleDojoDoorWarningWebGlow(fallback.spotlights[0], [9, 2, 4]);
+  assert.ok(inCone.rgb[0] > 0 && inCone.rgb[0] < 1);
+  assert.deepEqual(outsideCone.rgb, [0, 0, 0]);
+  assert.equal(sampleDojoDoorWarningWebGlow(fallback.spotlights[0], [1, 2, 13]).rgb[0], 0);
+  assert.equal(prepareDojoDoorWarningLighting(scene, records,
+    { ...withoutCookie, meshLayer: 9, allowWebCookieFreeGlow: true }).spotlights.length, 0);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /vec3 dojoDoorWarningSpotWebGlow\(/);
+  assert.throws(() => sampleDojoDoorWarningWebGlow(
+    prepareDojoDoorWarningLighting(scene, records, options).spotlights[0], [1, 2, 8]),
+  /Explicit Web procedural/);
 });
