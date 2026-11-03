@@ -5,7 +5,7 @@ import { webcrypto } from 'node:crypto';
 import {
   embedWebCaptureMetadata, readWebCaptureMetadata,
   requireContainersWebEvidence, readRenderedWebglRgba, captureContainersWeb,
-  captureDojoCompositionAtFrame,
+  captureDojoCompositionAtFrame, requireDojoStartedVisualFrame,
 } from '../scripts/visual-web-capture.mjs';
 
 // Synthetic, never native-game, test image and telemetry.
@@ -162,6 +162,7 @@ test('corrupted PNG bytes or false native parity metadata are refused',()=>{
 function fakeBrowser({
   blank=false,beforeFrame,beforeEncodeComplete,sceneMetrics=nativeMetrics,
   gpuError=0,bufferMismatch=false,boundFramebuffer=false,initialFrame=frame,
+  sceneControlsHidden=true,
 }={}){
   const original=png(1920,1080);
   const requested=[];
@@ -191,9 +192,10 @@ function fakeBrowser({
   const canvas={width:1920,height:1080,getContext(type){
     assert.equal(type,'webgl2');return gl;
   }};
+  const sceneControls={hidden:sceneControlsHidden};
   const doc={
     body:{append(){}},
-    getElementById(id){return id==='scene'?canvas:null;},
+    getElementById(id){return id==='scene'?canvas:id==='scene-controls'?sceneControls:null;},
     createElement(name){
       if(name==='a')return{click(){requested.push({filename:this.download,blob:encodedBlob});},remove(){}};
       if(name==='canvas')return{
@@ -223,7 +225,7 @@ function fakeBrowser({
     URL:{createObjectURL(blob){encodedBlob=blob;return'blob:local';},revokeObjectURL(){}},
     setTimeout(callback){callback();},
   };
-  return{windowRef:win,documentRef:doc,expectedCamera,requested,
+  return{windowRef:win,documentRef:doc,expectedCamera,requested,sceneControls,
     getEncodedFrames:()=>encodedFrames,getPixelReads:()=>pixelReads};
 }
 test('synchronous WebGL2 readPixels vertically flips rows and rejects unreadable buffers',()=>{
@@ -394,11 +396,50 @@ test('Dojo WebGL PNG embeds same-render DOM status without claiming HUD pixels',
   const mock=fakeBrowser({sceneMetrics:dojoSceneMetrics,initialFrame:current});
   const receipt=await captureContainersWeb({...mock,expectedScreen:'playing',webCommit:'abcdef0'});
   assert.equal(receipt.frameId,2);
+  assert.equal(receipt.dojoStartUiGuard,'DOJO_START_UI_GUARD_ONLY_NOT_NATIVE_PARITY');
   assert.equal(receipt.domComposition.status,'SOURCE_HUD_DOM_NOT_ACTIVE');
   assert.equal(receipt.domComposition.fullViewportScreenshotCaptured,false);
   const pngBytes=new Uint8Array(await mock.requested[0].blob.arrayBuffer());
   const embedded=readWebCaptureMetadata(pngBytes).metadata;
   assert.equal(embedded.domComposition.status,receipt.domComposition.status);
   assert.equal(embedded.domComposition.webglCanvasIncludesDomOverlay,false);
+  assert.equal(embedded.dojoStartUiGuard,'DOJO_START_UI_GUARD_ONLY_NOT_NATIVE_PARITY');
   assert.match(embedded.limitations.join(' '),/WebGL readPixels excludes DOM HUD/);
+});
+test('Dojo visual capture refuses pre-Start preview despite playing screen and valid source metrics',async()=>{
+  const current={...frame,activeScreen:'playing',frameId:1,
+    nativeScene:dojoSceneMetrics.nativeScene};
+  const mock=fakeBrowser({sceneMetrics:dojoSceneMetrics,initialFrame:current,
+    sceneControlsHidden:false});
+  await assert.rejects(captureContainersWeb({...mock,expectedScreen:'playing'}),
+    /pre-Start preview/);
+  assert.equal(mock.getPixelReads(),0);
+  assert.equal(mock.requested.length,0);
+  assert.equal(mock.getEncodedFrames(),0);
+});
+test('Dojo visual capture rechecks Start gate in GPU callback to reject changed UI',async()=>{
+  const current={...frame,activeScreen:'playing',frameId:1,
+    nativeScene:dojoSceneMetrics.nativeScene};
+  let mock;
+  mock=fakeBrowser({sceneMetrics:dojoSceneMetrics,initialFrame:current,
+    beforeFrame:set=>{
+      set({...current,frameId:2});
+      mock.sceneControls.hidden=false;
+    }});
+  await assert.rejects(captureContainersWeb({...mock,expectedScreen:'playing'}),
+    /pre-Start preview/);
+  assert.equal(mock.getPixelReads(),0);
+  assert.equal(mock.requested.length,0);
+});
+test('Dojo screenshot Start gate is only a UI witness and leaves non-Dojo captures unchanged',()=>{
+  const current={...frame,activeScreen:'playing',frameId:1,
+    nativeScene:dojoSceneMetrics.nativeScene};
+  const report={nativeScene:current.nativeScene};
+  assert.equal(requireDojoStartedVisualFrame({getElementById:()=>({hidden:true})},report),
+    'DOJO_START_UI_GUARD_ONLY_NOT_NATIVE_PARITY');
+  assert.throws(()=>requireDojoStartedVisualFrame({getElementById:()=>null},report),
+    /pre-Start preview/);
+  assert.equal(requireDojoStartedVisualFrame({getElementById:()=>null},
+    {nativeScene:nativeMetrics.nativeScene}),null);
+  assert.equal(requireDojoStartedVisualFrame({getElementById:()=>null},report,'menu'),null);
 });

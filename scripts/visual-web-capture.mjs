@@ -210,6 +210,26 @@ export function captureDojoCompositionAtFrame(windowRef, rendered) {
 }
 
 /**
+ * Dojo can have activeScreen:'playing' before Start has armed its encounter:
+ * main.js loads the level and calls setScreen('playing') on initial boot.
+ * The scene-controls DOM guard is set hidden only after Start/reset. This
+ * blocks a pre-Start *preview* from being mislabeled as a combat screenshot.
+ * A DOM flag can be changed by the page; it is NOT independent native proof.
+ */
+export function requireDojoStartedVisualFrame(documentRef, report, expectedScreen='playing') {
+  const source=report?.nativeScene?.source;
+  const path=String(source?.scenePath ?? '').replaceAll(String.fromCharCode(92), '/');
+  if (expectedScreen!=='playing' || source?.sceneBuildIndex!==10 ||
+      source?.serializedOwner!=='level10' || !path.endsWith('/SHRL_Dojo2.unity')) {
+    return null;
+  }
+  if (documentRef?.getElementById?.('scene-controls')?.hidden!==true) {
+    throw new Error('Dojo visual capture refused: pre-Start preview or unverified combat UI');
+  }
+  return 'DOJO_START_UI_GUARD_ONLY_NOT_NATIVE_PARITY';
+}
+
+/**
  * Synchronously copies the default WebGL2 framebuffer AFTER the application's
  * render callback into JS-owned pixels. This avoids the canvas.toBlob() timing
  * ambiguity when preserveDrawingBuffer=false and gameplay keeps rendering.
@@ -293,9 +313,9 @@ export async function captureContainersWeb({
     width:canvas.width,height:canvas.height,dpr:windowRef.devicePixelRatio,
     strictViewport,
   });
-  evidence();
+  requireDojoStartedVisualFrame(documentRef,evidence(),expectedScreen);
   if(webCommit!==null&&!/^[a-f0-9]{7,40}$/i.test(webCommit))throw new Error('Invalid Web commit SHA');
-  let report,domComposition=null;
+  let report,domComposition=null,dojoStartUiGuard=null;
   const startingFrameId=getFrame().frameId;
   // SH-05 schedules its render rAF before DevTools calls this function. We
   // accept only a NEW completed frame, and synchronously read GPU pixels in
@@ -304,6 +324,7 @@ export async function captureContainersWeb({
   const rgba=await new Promise((resolve,reject)=>windowRef.requestAnimationFrame(()=>{
     try{
       report=evidence();
+      dojoStartUiGuard=requireDojoStartedVisualFrame(documentRef,report,expectedScreen);
       if(report.frameId<=startingFrameId){
         throw new Error('No new completed Web render before framebuffer capture');
       }
@@ -338,7 +359,8 @@ export async function captureContainersWeb({
   const metadata={
     schemaVersion:1,origin:'web',status:'WEB_ONLY_CAPTURE_NATIVE_PAIR_MISSING',
     source:'WEBGL_CANVAS_NOT_MCD',scene,
-    capturedAt,webCommit:webCommit??'UNRECORDED',...report,domComposition,rawCanvasSha256:toHex(digest),
+    capturedAt,webCommit:webCommit??'UNRECORDED',...report,domComposition,dojoStartUiGuard,
+    rawCanvasSha256:toHex(digest),
     rawFrameRgbaSha256:toHex(rgbaDigest),
     captureMethod:'WEBGL2_READ_PIXELS_SYNCHRONOUS_COMPLETED_FRAME',
     pixelEncoding:'RGBA8_DEFAULT_FRAMEBUFFER_TO_2D_SRGB_PNG',
@@ -361,5 +383,5 @@ export async function captureContainersWeb({
   return{status:metadata.status,...report,rawCanvasSha256:metadata.rawCanvasSha256,
     rawFrameRgbaSha256:metadata.rawFrameRgbaSha256,captureMethod:metadata.captureMethod,
     screenshotBytes:marked.length,cameraStatus:metadata.camera.status,
-    downloadRequested:Boolean(download),intendedFilename,domComposition};
+    downloadRequested:Boolean(download),intendedFilename,domComposition,dojoStartUiGuard};
 }
