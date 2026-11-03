@@ -257,16 +257,17 @@ export function readRenderedWebglRgba(canvas) {
   if(gl.getError()!==gl.NO_ERROR){
     throw new Error('WebGL readPixels failed; GPU screenshot is unverified');
   }
-  const samples=new Set();
-  for(let y=0;y<36&&samples.size<4;y++){
-    const sy=Math.min(height-1,Math.floor((y+.5)*height/36));
-    for(let x=0;x<64&&samples.size<4;x++){
-      const sx=Math.min(width-1,Math.floor((x+.5)*width/64));
-      const at=4*(sy*width+sx);
-      samples.add(raw[at]+256*raw[at+1]+65536*raw[at+2]);
+  // MCD's mostly white/black/red art can form a genuine two-tone scene,
+  // including a very small silhouette missed by a sparse sample grid.
+  // Reject only an entirely uniform RGB framebuffer; this is a Web-only
+  // sanity check, NOT independent evidence of a rendered native scene.
+  let varies=false;
+  for(let i=4;i<raw.length;i+=4){
+    if(raw[i]!==raw[0]||raw[i+1]!==raw[1]||raw[i+2]!==raw[2]){
+      varies=true;break;
     }
   }
-  if(samples.size<4)throw new Error('WebGL screenshot appears blank/uniform; no image proof');
+  if(!varies)throw new Error('WebGL screenshot appears blank/uniform; no image proof');
   const rgba=new Uint8ClampedArray(raw.length);
   const rowBytes=width*4;
   for(let y=0;y<height;y++){
