@@ -6,14 +6,14 @@ import { assessDojoPlaythrough } from '../scripts/acceptance-dojo-playthrough.mj
 const source = { scenePath:'Assets/Scenes/SHRL_Dojo2.unity', sceneBuildIndex:10, serializedOwner:'level10' };
 const p = (x,y=0,z=0) => ({x,y,z});
 function f(frameId, feet=p(0), {screen='playing', kills=0, enemies=[], heldItem=null,
-  itemStates=[], ammo=6, fragments=0, audio=3, moving=true, target=6}={}) {
+  itemStates=[], ammo=6, weapon=true, fragments=0, audio=3, moving=true, target=6}={}) {
   return {
     frameId, activeScreen:screen, worldClock:frameId*.1,
     nativeScene:{source:{...source}},
     gameplay:{encounter:{killTarget:target,killed:kills,enemies},
       heldItem, itemStates, itemsTotal:2, itemsTruncated:false,
       originalFragmentCount:fragments, audioAmbienceSources:audio,
-      weapon:true, ammo, feet, grounded:true, moving},
+      weapon, ammo, feet, grounded:true, moving},
   };
 }
 function complete(target=6) {
@@ -29,14 +29,14 @@ function complete(target=6) {
     f(8,p(1.5,.35),{target}),
     f(9,p(1.51,.35),{target}),
     f(10,p(1.51,.35),{target}),
-    f(11,p(1.51,.35),{target,enemies:alive}),
-    f(12,p(1.51,.35),{target,enemies:alive,heldItem:'cup-1',itemStates:[{id:'cup-1',state:'held'}]}),
-    f(13,p(1.51,.35),{target,enemies:alive,itemStates:[{id:'cup-1',state:'broken'}],fragments:25}),
+    f(11,p(1.51,.35),{target,enemies:alive,ammo:5}),
+    f(12,p(1.51,.35),{target,enemies:alive,weapon:false,ammo:0,heldItem:'cup-1',itemStates:[{id:'cup-1',state:'held'}]}),
+    f(13,p(1.51,.35),{target,enemies:alive,weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:25}),
     ...Array.from({length:target}, (_, n) => f(14+n,p(1.51,.35),{
-      target,kills:n+1,enemies:dead,ammo:n < 2 ? 5-n : 4,
+      target,kills:n+1,enemies:dead,weapon:false,ammo:0,
       itemStates:[{id:'cup-1',state:'broken'}],fragments: n < 2 ? 25 : 10,
     })),
-    f(14+target,p(1.51,.35),{target,screen:'win',kills:target,enemies:dead,ammo:4,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
+    f(14+target,p(1.51,.35),{target,screen:'win',kills:target,enemies:dead,weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
     f(15+target,p(0),{target,moving:false}),
   ];
   frames.at(-1).worldClock=.1;
@@ -83,8 +83,11 @@ test('SH10 baseline alone does not prove pickup, gun or route',()=>{
 });
 
 test('SH10 missing pistol fire counter is not silently treated as an equipped fired gun',()=>{
-  const data=complete();data.frames.forEach(f=>f.gameplay.ammo=6);
-  failure(data,/pistol-equipment\/ammo-consumption/);
+  const data=complete();
+  // F throws the pistol and zeroes its ammo: this must NOT count as firing.
+  data.frames[10].gameplay.ammo=6;
+  assert.equal(assessDojoPlaythrough(data).complete,true);
+  failure(data,/armed ammo decrease.*gun discard is not a shot/);
 });
 
 test('SH10 same-item release requires observed changed state before victory',()=>{
@@ -93,7 +96,7 @@ test('SH10 same-item release requires observed changed state before victory',()=
 });
 
 test('SH10 rejects leftover fragment/shard pool and held item after restart',()=>{
-  for(const mutate of [f=>{f.gameplay.originalFragmentCount=4;},f=>{f.gameplay.heldItem='cup-1';},f=>{f.gameplay.itemsTotal=3;}]){
+  for(const mutate of [f=>{f.gameplay.originalFragmentCount=4;},f=>{f.gameplay.heldItem='cup-1';f.gameplay.weapon=false;},f=>{f.gameplay.itemsTotal=3;}]){
     const data=complete();mutate(data.frames.at(-1));
     failure(data,/item pool\/held item\/fragments/);
   }
@@ -161,4 +164,12 @@ test('SH10 a quota of six is not proved by one large unobserved counter jump',()
   const data=complete();
   data.frames=data.frames.filter(f=>f.gameplay.encounter.killed < 3 || f.gameplay.encounter.killed === 6);
   failure(data,/individual kill-counter transitions/);
+});
+
+test('SH10 rejects simultaneous gun-equipped and source-item-held telemetry',()=>{
+  const data=complete();
+  data.frames[11].gameplay.weapon=true;
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INVALID);
+  assert.match(result.errors.join('\n'),/invalid Dojo v2 runtime telemetry/);
 });

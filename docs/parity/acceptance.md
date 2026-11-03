@@ -325,3 +325,30 @@ new runner was invoked to build this Web-only gate.
 **Delivery verification scope:** synthetic Node tests; no original-native
 execution, owner-local browser playthrough, screenshot comparison, GPU pixel
 score or native 1:1 claim.
+
+### SH-10: gun discard must not satisfy the firing gate (3 November 2026)
+
+**Observed Web-source behavior:** in `src/main.js` the actual `shoot()`
+path decrements `state.ammo` while the pistol remains equipped; `throwWeapon()`
+also sets `state.ammo = 0`, but **clears `state.weapon`**. Previously the
+vertical gate could accept a Dojo trace with an initial armed pistol and a later
+ammunition decrease caused *only by pressing F to discard the gun*. That is
+a false firing receipt, even if spawn/kill/victory/restart are otherwise recorded.
+
+The gun criterion now requires **two consecutive sampled playing frames, both
+armed, with a positive pre-transition ammo count and lower post-transition
+ammo count**. A transition from `weapon=true` to `false` never certifies a
+gunshot. The synthetic positive fixture now models the actual Web order:
+armed ammo drop → disarm via gun throw → pick up source item unarmed →
+release same item → 6/7 kills → win → reset. A source item held while the
+pistol is still equipped is rejected as invalid for **current Web wiring**,
+because `nearbyPickup()` explicitly rejects pickup while armed.
+
+**Remaining evidence limit:** frame sampling may miss an instantaneous
+gunshot, or conceal intervening discard/re-pickup between two screenshots;
+an ammo transition alone still does **not independently certify a projectile
+or its impact**. The opt-in acceptance gate reports INCOMPLETE on
+insufficient sampling, not a native contradiction. For a stronger browser
+receipt SH-05 may expose a read-only *monotonic shot counter* from the active
+runtime, stamped in the rendered-frame snapshot; SH-10 cannot modify that
+shared file. No native executed gun event or original screenshot is claimed.
