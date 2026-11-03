@@ -174,7 +174,16 @@ float dojoWebWarningCompression(float energy) {
 // deliberately signed colour grading, NOT physically additive Unity light.
 vec3 dojoWebWarningContrast(vec3 sourceColor, float strength) {
   float dangerRed = max(sourceColor.r - max(sourceColor.g, sourceColor.b), 0.0);
-  return strength * (sourceColor - vec3(0.0, 0.32 * dangerRed, 0.32 * dangerRed));
+  vec3 graded = strength * (sourceColor - vec3(0.0, 0.32 * dangerRed, 0.32 * dangerRed));
+  // J4 Web-only crystal glow: a strong warning warms the translucent-looking
+  // red facets toward a pale pink core. With purely red additive light, the
+  // existing saturated Red Crystal pass barely changes colour on warning.
+  // Uses the already-bound world-pass uMode; no new uniform, pass or texture.
+  if (uMode == 3 && dangerRed > 0.0) {
+    float heat = dojoWebWarningSmooth((strength - 0.26) / 0.44);
+    graded += vec3(0.12, 0.26, 0.30) * (heat * dangerRed);
+  }
+  return graded;
 }
 // Web visual design: soft cone, distance fade and highlight compression.
 // Serialized world basis, cookie, color and controller envelope stay untouched.
@@ -394,20 +403,28 @@ const dojoWebWarningWeight = (spotlight, radius, along) =>
     Math.max(1 - spotlight.cosHalfAngle, .0001)) / .2);
 const zeroWebWarning = () => Object.freeze({ rgb: Object.freeze([0, 0, 0]), cookieUv: null });
 // Exact CPU counterpart of the shader's deliberately nonphysical red grading.
-const webWarningContrast = (color, strength) => {
+const webWarningContrast = (color, strength, webMaterialMode = 2) => {
   // Suppressed/fully transparent warnings must be exact +0 in the CPU
   // contract; multiplying a negative colour component by zero gives -0.
   if (strength === 0) return Object.freeze([0, 0, 0]);
   const dangerRed = Math.max(color[0] - Math.max(color[1], color[2]), 0);
-  return Object.freeze([
+  const rgb = [
     color[0] * strength,
     (color[1] - .32 * dangerRed) * strength,
     (color[2] - .32 * dangerRed) * strength,
-  ]);
+  ];
+  // CPU counterpart of the GPU's Web-authored Red Crystal-only heat grade.
+  if (webMaterialMode === 3 && dangerRed > 0) {
+    const heat = dojoWebWarningSmooth((strength - .26) / .44) * dangerRed;
+    rgb[0] += .12 * heat;
+    rgb[1] += .26 * heat;
+    rgb[2] += .30 * heat;
+  }
+  return Object.freeze(rgb);
 };
 
 /** CPU mirror of the deliberately Web-styled, cookie-bearing GPU preview. */
-export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha) {
+export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha, webMaterialMode = 2) {
   const point = sourceLightVec3(worldPosition, 'warning sample worldPosition');
   if (!Number.isFinite(cookieAlpha) || cookieAlpha < 0 || cookieAlpha > 1) {
     throw new RangeError('cookie alpha must be within [0,1]');
@@ -429,7 +446,7 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
     dojoWebWarningSmooth(edge / .06) * dojoWebWarningWeight(spotlight, radius, along);
   const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: webWarningContrast(spotlight.color, glow),
+    rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
     cookieUv: Object.freeze(cookieUv),
   });
 }
@@ -439,7 +456,7 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
  * It deliberately requires an explicit Web fallback packet, never a phantom
  * Unity cookie. No image, mesh, URL or runtime event is generated here.
  */
-export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition) {
+export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMaterialMode = 2) {
   if (spotlight?.webPreviewMode !== 'web-procedural-no-cookie') {
     throw new TypeError('Explicit Web procedural warning packet required');
   }
@@ -452,7 +469,7 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition) {
   const energy = spotlight.intensity * dojoWebWarningWeight(spotlight, radius, along);
   const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: webWarningContrast(spotlight.color, glow),
+    rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
     cookieUv: null,
   });
 }
