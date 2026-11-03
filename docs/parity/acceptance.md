@@ -452,3 +452,29 @@ without `uiActions` remain inspectable but cannot satisfy this stronger full
 run gate. Even a browser-trusted click is not a cryptographic signature, and
 authored Node tests still only test the validator; a genuine completed Dojo
 Chromium trace and an executed matched native MCD capture remain **UNKNOWN**.
+
+
+### SH-10: browser input attempts must accompany the Dojo actions (3 November 2026)
+
+The local Dojo source (`src/main.js`) binds primary fire to a left mouse-down
+**only after pointer lock**; the first mouse click merely requests the lock.
+`E` requests pickup and `F` throws an equipped gun or held source item.
+The v2 owner-local capture now adds bounded `inputActions` receipts (only
+`fire`, `pickup`, `throw`, rendered frame ID and screen), excludes synthetic
+`isTrusted=false` events and editable targets, and marks 256-action overflow
+with `inputActionsTruncated`. No original assets, names or raw key data are
+serialized. A receipt is an **input attempt**, never independent proof of
+successful firing, item interaction or native MCD behavior.
+
+The vertical gate now requires the actual Web state changes **and** a matching
+browser input attempt between adjacent samples: equipped ammo decrease with
+pointer-locked primary fire, the same source item becoming held after `E`, and
+that held item being released after `F`. A gun-drop `F` cannot satisfy the
+separate item-release receipt; an early fire click cannot validate a later
+ammo decrease. Older v2 traces without input receipts (or with a truncated
+input buffer) yield **INCOMPLETE**, not an invented successful playthrough.
+Transient actions that begin and end between captures may also yield
+INCOMPLETE; increase capture frequency within the supported 50–5000 ms range
+rather than inventing unseen transitions. Synthetic Node fixture passes
+remain tests of the detector only, not a complete localhost Chromium run.
+
