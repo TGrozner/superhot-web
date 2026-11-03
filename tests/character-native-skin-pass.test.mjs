@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createNativeActorSkinRuntime } from '../src/characters/native-actor-skin.js';
 import assert from 'node:assert/strict';
 import {
   createNativeSkinPass, loadNativeSkinPackage, sampleNativeSkinPalette,
@@ -535,5 +536,76 @@ test('solved pose refuses wrong rig, invalid affine bones and double clip overla
   assert.throws(() => pass.draw({ ...input, solvedPose: { ...right, boneModelMatrices: inf } }),
     /finite/);
   assert.equal(drawCount(), initial, 'all bad solved poses rejected without issuing a draw');
+  pass.dispose();
+});
+
+test('per-actor real GPU draws use source states, action, transition and solved death socket without sharing poses', () => {
+  const { gl, calls } = mockGl();
+  const pkg = transitionPackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic source-bone attachment', coordinates: 'synthetic mesh-local transform',
+  };
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, pose) => actors.drawActor({
+    actorId, pose, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8,.1,.2,1],
+  });
+  const first = draw('enemy-A', { state: 'idle', time: 0 });
+  const firstSocket = Array.from(first.weaponAttachmentMatrix);
+  const second = draw('enemy-B', {
+    state: 'run', time: .2,
+    transition: { from: { state: 'idle', time: 0 }, elapsed: .05 },
+  });
+  assert.equal(second.sampledTime, .2 * 2.25);
+  assert.equal(second.transition, 'idle->run');
+  assert.equal(second.transitionWeight, .5);
+  assert.equal(second.actorId, 'enemy-B');
+  assert.equal(second.actorSourceSelection.kind, 'state');
+  assert.notEqual(first.boneModelMatrices, second.boneModelMatrices);
+  assert.notDeepEqual(Array.from(first.boneModelMatrices), Array.from(second.boneModelMatrices));
+
+  // A third actor's recovered, MODEL-space final pose, not a guessed death
+  // clip. The child global X=5 and inverse bind X=-1 require GPU palette X=4;
+  // the matching weapon socket must still use X=5, not the palette X=4.
+  const finalChild = identity();
+  finalChild[12] = 5;
+  const death = draw('enemy-C', {
+    state: 'idle', time: 0,
+    solvedPose: {
+      rig: pass.rig, provenance: 'synthetic source-qualified death receipt',
+      boneModelMatrices: new Float32Array([...identity(), ...finalChild]),
+    },
+  });
+  const palettes = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  assert.equal(palettes.length, 3);
+  near(palettes[2][2].slice(28, 31), [4,0,0]);
+  near(Array.from(death.weaponAttachmentMatrix.slice(12, 15)), [5,0,0]);
+  assert.equal(death.solvedPoseApplied, true);
+  assert.equal(death.nativeActorControllerExecutionVerified, false);
+  assert.equal(death.actorPoseOwnedSnapshot, true);
+  assert.deepEqual(Array.from(first.weaponAttachmentMatrix), firstSocket);
+  assert.deepEqual(Array.from(first.boneModelMatrices.slice(12, 15)), [0,0,0]);
+  assert.notEqual(first.weaponAttachmentMatrix, second.weaponAttachmentMatrix);
+
+  const attack = draw('enemy-A', {
+    state: 'run', time: .2,
+    action: { state: 'punch', time: 0, weight: 1 },
+  });
+  assert.equal(attack.action, 'punch');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 4);
+  assert.deepEqual(Array.from(first.weaponAttachmentMatrix), firstSocket);
+
+  assert.throws(() => draw('enemy-X', { clip: 'not-in-rig', playback: 'loop', time: 0 }),
+    /sampled clip unavailable/);
+  assert.throws(() => draw('enemy-X', {
+    clip: 'walk', playback: 'loop', time: .2,
+    transition: { from: { state: 'idle', time: 0 }, elapsed: .05 },
+  }), /transition unavailable/);
+  assert.throws(() => draw('enemy-X', {
+    state: 'run', time: .2, action: { state: 'fire', time: 0, weight: 1 },
+  }), /action unavailable/);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 4);
   pass.dispose();
 });
