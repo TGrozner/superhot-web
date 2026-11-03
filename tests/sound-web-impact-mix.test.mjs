@@ -55,3 +55,26 @@ test('suspended context schedules nothing and invalid position fails explicitly'
   layer.dispose();
   assert.equal(layer.emit('katana').status, 'blocked');
 });
+
+
+test('a saturated combat mix prioritizes shots over footsteps, not the oldest shot', () => {
+  const first = fakeAudio();
+  const loud = createWebImpactMix(first.ctx, 2);
+  assert.equal(loud.emit('player-shot').status, 'started');
+  assert.equal(loud.emit('katana').status, 'started');
+  const before = first.nodes.length;
+  assert.equal(loud.emit('step').status, 'blocked');
+  assert.equal(first.nodes.length, before); // A dropped cue schedules nothing.
+  loud.dispose();
+
+  const second = fakeAudio();
+  const mix = createWebImpactMix(second.ctx, 2);
+  mix.emit('step');
+  mix.emit('pickup');
+  const stepNoise = second.nodes[0];
+  assert.equal(stepNoise.stopped, undefined);
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.equal(stepNoise.stopped, true); // Lower-priority voice was stopped.
+  assert.equal(mix.getActiveVoices(), 2);
+  mix.dispose();
+});

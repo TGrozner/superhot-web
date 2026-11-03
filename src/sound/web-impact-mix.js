@@ -38,6 +38,11 @@ export function createWebImpactMix(context, maxVoices = 24) {
     const voices = new Set();
     let drone = null;
     let disposed = false;
+    const priorityByCue = {
+        // Creative Web mix priorities: melee/player fire survive overlapping steps.
+        'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
+        katana: 5, step: 1, pickup: 2, throw: 3,
+    };
     function release(voice) {
         voices.delete(voice);
         for (const src of voice.sources) {
@@ -75,10 +80,17 @@ export function createWebImpactMix(context, maxVoices = 24) {
         if (!Object.hasOwn(specs, cue))
             throw new TypeError('unknown Web cue');
         const [duration, cutoff, startHz, endHz, volume] = specs[cue];
+        const priority = priorityByCue[cue];
         if (voices.size >= maxVoices) {
-            const oldest = voices.values().next().value;
-            if (oldest)
-                release(oldest);
+            let victim = null;
+            for (const voice of voices) {
+                if (victim === null || voice.priority < victim.priority)
+                    victim = voice;
+            }
+            if (victim === null || victim.priority > priority) {
+                return { status: 'blocked', source: 'web-original-synthesis', at: null, spatial: false };
+            }
+            release(victim);
         }
         const out = context.createGain();
         out.gain.value = intensity;
@@ -99,7 +111,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         else {
             out.connect(cue === 'step' ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
         }
-        const voice = { sources: [], gain: out, panner, pending: 2 };
+        const voice = { sources: [], gain: out, panner, pending: 2, priority };
         voices.add(voice);
         const ended = () => {
             voice.pending--;

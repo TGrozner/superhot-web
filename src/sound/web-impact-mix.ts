@@ -13,6 +13,7 @@ interface Voice {
   readonly sources: AudioScheduledSourceNode[];
   readonly gain: GainNode;
   readonly panner: PannerNode | null;
+  readonly priority: number;
   pending: number;
 }
 
@@ -53,6 +54,11 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   const voices = new Set<Voice>();
   let drone: {osc: OscillatorNode; gain: GainNode} | null = null;
   let disposed = false;
+  const priorityByCue: Record<WebImpactCue, number> = {
+    // Creative Web mix priorities: melee/player fire survive overlapping steps.
+    'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
+    katana: 5, step: 1, pickup: 2, throw: 3,
+  };
 
   function release(voice: Voice): void {
     voices.delete(voice);
@@ -87,9 +93,16 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     };
     if (!Object.hasOwn(specs, cue)) throw new TypeError('unknown Web cue');
     const [duration, cutoff, startHz, endHz, volume] = specs[cue];
+    const priority = priorityByCue[cue];
     if (voices.size >= maxVoices) {
-      const oldest = voices.values().next().value;
-      if (oldest) release(oldest);
+      let victim: Voice | null = null;
+      for (const voice of voices) {
+        if (victim === null || voice.priority < victim.priority) victim = voice;
+      }
+      if (victim === null || victim.priority > priority) {
+        return {status: 'blocked', source: 'web-original-synthesis', at: null, spatial: false};
+      }
+      release(victim);
     }
     const out = context.createGain();
     out.gain.value = intensity;
@@ -109,7 +122,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     } else {
       out.connect(cue === 'step' ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
     }
-    const voice: Voice = {sources: [], gain: out, panner, pending: 2};
+    const voice: Voice = {sources: [], gain: out, panner, pending: 2, priority};
     voices.add(voice);
     const ended = () => {
       voice.pending--;
