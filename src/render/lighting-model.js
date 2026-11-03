@@ -395,6 +395,9 @@ const dojoWebWarningWeight = (spotlight, radius, along) =>
 const zeroWebWarning = () => Object.freeze({ rgb: Object.freeze([0, 0, 0]), cookieUv: null });
 // Exact CPU counterpart of the shader's deliberately nonphysical red grading.
 const webWarningContrast = (color, strength) => {
+  // Suppressed/fully transparent warnings must be exact +0 in the CPU
+  // contract; multiplying a negative colour component by zero gives -0.
+  if (strength === 0) return Object.freeze([0, 0, 0]);
   const dangerRed = Math.max(color[0] - Math.max(color[1], color[2]), 0);
   return Object.freeze([
     color[0] * strength,
