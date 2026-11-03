@@ -113,6 +113,13 @@ export function planMcdKatanaHitSceneBinding({
     throw new Error('pre-existing Katana clip or slice cue must not be overwritten');
   }
   const hit = MCD_KATANA_AUDIO.hit;
+  // Web routing label derived *only* from the serialized non-null
+  // AudioResource.Channel reference (fileID 3/pathID 659). It is NOT a
+  // decoded Unity mixer name, DSP parity or observed native channel load.
+  // createAudio().playMcdClip rejects cues without a mixerGroup at the
+  // AudioManager.PlayClip channel-present guard. The label deliberately
+  // does not claim either 'Gunshots' or 'Env SFX' pitch-scaler routing.
+  const sourceChannelLabel = `source-mixer-ref:file${hit.mixerReference.fileId}:path${hit.mixerReference.pathId}`;
   return Object.freeze({
     ...base,
     clips: Object.freeze({...clips, [key]: Object.freeze({
@@ -121,6 +128,7 @@ export function planMcdKatanaHitSceneBinding({
     items: Object.freeze({...items, [itemId]: Object.freeze({
       ...priorItem, slice: Object.freeze({
         clipId: key, gain: hit.serializedVolume, pitch: hit.serializedPitch,
+        mixerGroup: sourceChannelLabel,
         gainRandomization: hit.volumeRandomization,
         pitchRandomization: hit.pitchRandomization,
         relativePitch: hit.relativePitch,
