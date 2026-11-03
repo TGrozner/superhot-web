@@ -1,41 +1,37 @@
-# FRAME//BREAK — browser FPS prototype
+# FRAME//BREAK — SUPERHOT MCD Dojo sur Web
 
-**A playable, dependency-free browser FPS prototype inspired by the time-manipulation mechanic of SUPERHOT.** Original source code, generated geometry, synthesized audio and custom levels. **Not affiliated with SUPERHOT Team.** No copyrighted game files, character models, textures or sounds are included.
+**Adaptation WebGL2 jouable de la scène `SHRL_Dojo2` / build 10 de SUPERHOT: MIND CONTROL DELETE.** Le site est désormais autonome sur GitHub Pages, avec son pack de scène, les textures, les modèles, rigs, animations et clips présents dans le manifeste hébergé. **Non affilié à SUPERHOT Team ; aucune parité native 1:1 complète revendiquée.**
 
-![License: MIT](https://img.shields.io/badge/license-MIT-darkred) ![WebGL 2](https://img.shields.io/badge/rendering-WebGL%202-222) ![No dependencies](https://img.shields.io/badge/runtime_dependencies-0-brightgreen)
+## Jouer
 
-## Play
+**[Ouvrir le Dojo — GitHub Pages](https://tgrozner.github.io/superhot-web/)**
 
-Open the published GitHub Pages URL once Pages is enabled. On Windows, unzip the project and double-click `start.cmd` (Node.js 20+ required). For local play from a terminal:
+Thomas a confirmé le 3 novembre 2026 que la démo Pages démarrait et fonctionnait. Le premier pack standalone comporte **52 assets (47 872 002 octets)** sous `local-assets/`, plus `manifest.json` ; les hashes et fichiers ont été publiés avec le commit `876a2cdde01845b685a81ccf818d965c78fb0c56` (jalon historique, non nécessairement le HEAD courant). La construction et le déploiement GitHub Pages ont réussi sur ce commit.
 
-```bash
+Les visiteurs n'ont besoin ni du PC du propriétaire, ni de Node, ni d'un tunnel ni du dossier `private/`. Le navigateur charge les fichiers depuis l'origine Pages, sous `/superhot-web/local-assets/`.
+
+Pour jouer localement et vérifier la même version déjà packagée :
+
+```powershell
 npm start
+# http://localhost:4173/
 ```
 
-Then visit **http://localhost:4173/**, with no query parameters. On the owner's configured machine, the selected private scene currently opens **Dojo (`SHRL_Dojo2`, build index 10)** with original local scenery and textures, from the viewpoint observed in the running replay. Click **Jouer dans SHRL_Dojo2** to start the Web encounter. The source equipment baseline is unarmed; common original pistol models remain available for enemy weapons and pickups. **Cadrer le modèle** isolates the character for inspection. Original data is **not distributed in this repository**. No `npm install` needed; do not open `index.html` as `file://`.
+Le serveur Node local privilégie le pack `local-assets/` s'il est présent ; `private/browser-assets.json` est un **outil de sourcing/export**, pas une dépendance de production. Ne pas ouvrir `index.html` avec `file://`.
 
-The visible **Vue** menu also offers **Anciennes salles de démonstration** and **Scène de contrôle générée**. These retain their generated geometry. There are no URL feature flags. Original geometry and sampled animations do not imply native gameplay, physics, lighting or shader parity.
+Si un asset indispensable manque ou si la scène n'est pas le Dojo attendu, l'interface doit afficher **une erreur explicite** et ne jamais basculer silencieusement sur les anciennes salles générées / proxies « Roblox ».
 
-### Local original-asset configuration
+### Comment livrer une mise à jour
 
-The ignored `private/browser-assets.json` maps `mesh6`, `mesh7`, `texture`,
-`enemyMerged`, `enemyHeadless`, `enemyRig`, `enemyHeadlessRig`, `scenePackage`,
-numbered `sceneTexture_NNN` IDs, `sceneLightmap_000`, `sceneLightmapBc3`,
-and the `sceneConcrete*` textures to relative paths inside `private/`.
-The rig JSON contains original geometry, skin weights, inverse binds, a 62-bone
-hierarchy and native sampled local poses. The gzip scene package contains
-source-qualified geometry, submeshes, materials, placements and collider records,
-scene identity, initial equipment, lightmap dimensions/mips and an optional observed
-entry camera. Captured map-variant exclusions retain their separate runtime provenance.
-Only configured, recognized IDs are exposed through `/local-assets/<id>`, on
-`127.0.0.1`; host and same-origin checks reject cross-site access. The private
-directory itself is not served. Restart `npm start` after changing this map.
-No original data or machine-specific paths should be committed.
+- **Code uniquement :** travailler en branche/PR, valider la CI, fusionner sur `main` via SH-05. Le workflow GitHub Pages redéploie automatiquement le site à la même adresse.
+- **Nouveaux assets / nouvelles animations / nouveaux sons :** ils ne sont **pas** synchronisés depuis le poste local lors des merges. Préparer un pack source-qualifié, mettre à jour `local-assets/manifest.json`, et publier explicitement les fichiers autorisés. Depuis la machine qui possède le corpus : `node scripts/vendor-dojo-assets.mjs` puis `node scripts/publish-dojo-pages.mjs`.
+- **Après livraison :** vérifier la CI **et** le déploiement Pages sur le SHA, puis faire un smoke navigateur du Dojo. CI verte n'est pas preuve d'un rendu correct.
 
-Without that private configuration (including a public static deployment),
-the page explicitly reports that originals are unavailable. Personal files
-can still be selected under **Remplacer les fichiers locaux**; it does not
-upload them. The generated playable prototype remains available in **Vue**.
+Procédure complète : [Standalone / GitHub Pages](docs/standalone-dojo-pages.md). Consignes applicables à **tous les agents** : [AGENTS.md](AGENTS.md).
+
+### Assets et recherche
+
+La publication est **statique** : les 52 fichiers publiés sont téléchargeables depuis le dépôt ou Pages. Aucune dépendance technique au corpus de recherche privé ne subsiste pour les visiteurs. La recherche inverse, les dumps, les scripts propriétaires, les fichiers secrets et les versions locales non publiées restent dans leurs espaces privés. Vérifier les droits de redistribution avant d'ajouter de nouveaux fichiers issus du jeu : licence MIT du code Web ≠ licence des assets originaux.
 
 ## Playable prototype controls
 
@@ -64,48 +60,22 @@ When the private scene package supplies recovered audio descriptors, object pick
 
 **Reprise du travail : [état vérifié, sauvegarde des travaux incomplets et prochaines étapes](docs/dojo-reprise.md).** This is a stabilized Web adaptation, not a completed 1:1 vertical slice.
 
-## Files
+## Structure et validation
 
-- `index.html` — entry point and UI
-- `style.css` — responsive HUD / menus
-- `src/renderer.js` — tiny WebGL 2 renderer, procedural box and crystal geometry
-- `src/main.js` — simulation, player controls, enemies, hit detection, levels
-- `src/levels.js` — original level layouts and procedural architecture
-- `src/math.js` — camera, collision and vector math
-- `src/audio.js` — local source-backed native audio and separate procedural prototype effects
-- `server.mjs` — zero-dependency local HTTP server
-- `tests/` — Node native unit tests
-- `.github/workflows/verify.yml` — lightweight CI
-- `publish.ps1` — GitHub repository creation and GitHub Pages setup
+- `index.html`, `style.css`, `src/main.js`, `src/renderer.js` : client WebGL et gameplay.
+- `local-assets/manifest.json` et fichiers voisins : pack **hébergé**, autonome, même origine.
+- `server.mjs` : serveur HTTP de développement uniquement ; `private/` est un dossier d'extraction non requis en production.
+- `scripts/vendor-dojo-assets.mjs` : export source-qualifié depuis la configuration locale vers le pack statique.
+- `scripts/publish-dojo-pages.mjs` : publie explicitement le pack vérifié depuis un clone Git isolé, sans toucher aux autres worktrees.
+- `.github/workflows/verify.yml` : CI de validation ; publication Pages sur les commits de `main`.
+- `docs/dojo-reprise.md` : historique de la reprise du Dojo ; les consignes de déploiement actuelles sont dans `AGENTS.md`.
 
-## Private research material
-
-Local reverse-engineering evidence and original game material belong in the ignored `/private/` directory, outside this public project's distributable files. Authorized research access uses a separate private, read-only corpus gateway. Never publish that corpus, decompiled source, or original assets in this repository, its issues, logs, or GitHub Pages; they are not covered by this project's MIT license.
-
-## Validation
-
-```bash
-npm run check
-```
-
-It runs JavaScript syntax checks and built-in Node tests. GitHub Actions runs this on every push and PR.
-
-## Publish to GitHub in one step
-
-**Windows:** double-click `publish.cmd`. Or run this from PowerShell in the project directory:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\publish.ps1
-```
-
-Requires [GitHub CLI](https://cli.github.com/) (`gh`) and Git installed; the script checks and guides you. It creates the **public** repository `TGrozner/superhot-web` on your account (if missing), commits, pushes `main`, enables GitHub Pages from root, and prints the expected page URL. GitHub Pages may take a minute to build the first time; the URL is not verified until deployed.
-
-> Publishing as a public repository is intentional so GitHub Pages is accessible without account-specific paid entitlements. The script will not overwrite a nonempty unrelated repository.
+Validation du code : `npm run check` (vérifications JS/TS et tests). Les changements visuels/jouables demandent également un smoke navigateur.
 
 ## Known limitations
 
-This is **not a full recreation of SUPERHOT MCD**. The configured local route uses original assets and original leaf-clip poses, but AI, movement/collision, gun rules, spawning, death physics and audio remain Web implementations. Original controller transitions, layered blending, FinalIK, root motion, native lighting/shadows/post-processing and complete shader equivalence are not reproduced. Desktop keyboard/mouse only. Public static hosting cannot automatically access the owner's private files; automatic original loading requires the loopback Node server.
+Le site standalone exécute **une adaptation Web** et non Unity/PhysX. IA, gameplay, collisions, IK, transitions Mecanim, ragdoll natif, shaders et audio peuvent encore différer du jeu source. Une capture Dojo fonctionnelle ne prouve pas une parité native 1:1. Contrôler l'état des chantiers et les preuves dans `docs/parity/`.
 
 ## License
 
-MIT for original project code and assets generated by this project. SUPERHOT and related names are trademarks of their respective owners. This project makes no claim over them.
+MIT pour le code original de cette adaptation et les éventuels éléments créés spécifiquement pour elle ; les fichiers commerciaux provenant de SUPERHOT ne sont **pas** couverts par cette licence MIT. SUPERHOT et les noms associés sont des marques de leurs propriétaires respectifs.
