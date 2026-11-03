@@ -60,6 +60,26 @@ test('pause holds bone attachments and cleanup is requested once on scaled sourc
   assert.equal(advanceNativeDeathRuntime(runtime,0).cleanupRequested,false);
 });
 
+test('Web PBD stops at the sourced Kill cleanup edge instead of burning FPS on pooled bodies',()=>{
+  const def=definition();def.cleanupAfterSeconds=0.04;
+  const atEdge=create({boxes:[]},def),overrun=create({boxes:[]},def);
+  advanceNativeDeathRuntime(atEdge,0.04);
+  const due=advanceNativeDeathRuntime(overrun,0.2);
+  assert.equal(due.cleanupRequested,true);
+  assert.deepEqual(Array.from(overrun.boneModelMatrices),Array.from(atEdge.boneModelMatrices),
+    'the solver must not advance physics beyond the requested native cleanup time');
+  const saved=Array.from(overrun.boneModelMatrices);
+  applyNativeDeathForce(overrun,{partId:'Torso',mode:'Impulse',vector:{x:50,y:0,z:0}});
+  const after=advanceNativeDeathRuntime(overrun,1);
+  assert.equal(after.cleanupRequested,false,'the host receives only one cleanup request');
+  assert.deepEqual(after.contacts,[]);
+  assert.deepEqual(Array.from(overrun.boneModelMatrices),saved,
+    'the Web-only freeze must not keep simulating an unconsumed cleanup request');
+  near(overrun.elapsed,1.2);
+  assert.equal(overrun.droppedWebSimulationTime,0,
+    'time after a source cleanup deadline is not a frame-budget drop');
+});
+
 test('constant force expires on its own source duration rather than continuing until cleanup',()=>{
   const def=definition();def.bodies=def.bodies.slice(0,1);def.joints=[];def.gravity={x:0,y:0,z:0};
   const runtime=createNativeDeathRuntime({definition:def,collisionScene:{boxes:[]},
