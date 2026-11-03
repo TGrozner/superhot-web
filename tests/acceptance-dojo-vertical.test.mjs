@@ -96,7 +96,7 @@ test('SH10 same-item release requires observed changed state before victory',()=
 });
 
 test('SH10 rejects leftover fragment/shard pool and held item after restart',()=>{
-  for(const mutate of [f=>{f.gameplay.originalFragmentCount=4;},f=>{f.gameplay.heldItem='cup-1';},f=>{f.gameplay.itemsTotal=3;}]){
+  for(const mutate of [f=>{f.gameplay.originalFragmentCount=4;},f=>{f.gameplay.heldItem='cup-1';f.gameplay.weapon=false;},f=>{f.gameplay.itemsTotal=3;}]){
     const data=complete();mutate(data.frames.at(-1));
     failure(data,/item pool\/held item\/fragments/);
   }
