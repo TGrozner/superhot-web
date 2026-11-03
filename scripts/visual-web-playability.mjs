@@ -95,49 +95,93 @@ function readVisibleBoxes(windowRef, documentRef) {
 }
 
 /**
- * Installs a removable Web-only diagnostics panel. Polls receipts (no GPU
- * readPixels: expensive synchronous readback would alter the FPS being measured).
- * Not enabled by default; no new gameplay path or asset dependency.
+ * Installs an opt-in Web QA panel. Brief combat banners can disappear between
+ * 1s metrics updates; sample their real DOM bounds more frequently while
+ * keeping the readable panel update at 1Hz. No GPU readback or gameplay writes.
+ *
+ * transientWarnings counts samples (NOT distinct gameplay occurrences);
+ * only warnings observed in the browser during an active Dojo are retained.
  */
 export function installWebVisualQa({
   windowRef=globalThis.window, documentRef=globalThis.document,
-  refreshMs=1000, frameBudgetMs=33.3,
+  refreshMs=1000, sampleMs=100, frameBudgetMs=33.3,
 } = {}) {
-  if (!windowRef || !documentRef?.body || typeof windowRef.__superhotGetRenderedFrameSnapshot !== 'function' ||
-      !Number.isFinite(refreshMs) || refreshMs < 500) {
-    throw new Error('Live Dojo browser frame getter and refresh >=500ms required');
+  if (!windowRef || !documentRef?.body ||
+      typeof windowRef.__superhotGetRenderedFrameSnapshot !== 'function' ||
+      !Number.isFinite(refreshMs) || refreshMs < 500 ||
+      !Number.isFinite(sampleMs) || sampleMs < 50 || sampleMs > refreshMs) {
+    throw new Error('Live Dojo browser getter, refresh >=500ms and 50ms <= sample <= refresh required');
   }
   const panel=documentRef.createElement('aside');
   panel.setAttribute('aria-label','Web Dojo visual QA diagnostics');
   panel.style.cssText='position:fixed;right:8px;bottom:8px;z-index:2147483646;max-width:min(330px,75vw);padding:9px 12px;background:rgba(15,20,27,.93);color:#fff;border-left:4px solid #27c5de;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;pointer-events:none;box-shadow:0 2px 12px #0006';
   documentRef.body.append(panel);
   let stopped=false, lastReport=null;
-  const update=()=>{
+  const transient=new Map();
+  let observedSamples=0;
+  const sample=()=>{
     if(stopped)return;
     try {
       const frame=windowRef.__superhotGetRenderedFrameSnapshot();
-      lastReport=assessWebVisualReadability({
+      const current=assessWebVisualReadability({
         frame, metrics:windowRef.__superhotSceneMetrics,
         boxes:readVisibleBoxes(windowRef,documentRef),
         width:windowRef.innerWidth,height:windowRef.innerHeight,frameBudgetMs,
       });
-      const m=lastReport;
-      const warn=m.warnings.slice(0,3).map(w=>'! '+w.kind+(w.ids?' '+w.ids.join('/'):''));
-      panel.style.borderLeftColor=m.warnings.length?'#ff506a':'#27c5de';
-      panel.textContent=[
-        'WEB DOJO · LIVE QA (opt-in)',
-        'frame '+(m.frameId??'?')+' · draws '+(m.drawCalls??'?')+
-          ' · p95 '+(m.p95FrameMs?.toFixed(1)??'?')+'ms',
-        m.state==='WEB_FRAME_NOT_READY'?'Not started / wrong scene':'Web scene ready',
-        ...warn,
-        'VRAM not measurable via WebGL2',
-      ].join('\n');
-    } catch (error) { panel.textContent='WEB QA ERROR: '+error.message; }
+      if(current.state==='WEB_DOJO_VISIBLE_QA_NOT_BROWSER_VERIFIED') {
+        observedSamples++;
+        for(const w of current.warnings) {
+          if(w.kind!=='overlapping-feedback' && w.kind!=='clipped-banner')continue;
+          const key=w.kind+':'+w.ids.join('/');
+          const previous=transient.get(key);
+          transient.set(key,{
+            kind:w.kind,ids:w.ids,
+            samplesWithWarning:(previous?.samplesWithWarning??0)+1,
+            peakOverlapFraction:Math.max(previous?.peakOverlapFraction??0,w.overlapFraction??0),
+            firstFrameId:previous?.firstFrameId??current.frameId,
+            lastFrameId:current.frameId,
+          });
+        }
+      }
+      const transientWarnings=[...transient.values()].sort(
+        (a,b)=>b.samplesWithWarning-a.samplesWithWarning
+          || b.peakOverlapFraction-a.peakOverlapFraction
+      );
+      lastReport={...current,observedSamples,transientWarnings};
+    } catch(error) {
+      panel.textContent='WEB QA ERROR: '+error.message;
+    }
   };
-  update();
-  const timer=windowRef.setInterval(update,refreshMs);
+  const render=()=>{
+    if(stopped || !lastReport)return;
+    const m=lastReport;
+    const warn=m.warnings.filter(w=>w.kind!=='overlapping-feedback' && w.kind!=='clipped-banner')
+      .slice(0,2).map(w=>'! '+w.kind);
+    const seen=m.transientWarnings.slice(0,3).map(w=>
+      '! '+w.kind+' '+w.ids.join('/')+' · '+w.samplesWithWarning+' samples'
+    );
+    panel.style.borderLeftColor=m.warnings.length || m.transientWarnings.length?'#ff506a':'#27c5de';
+    panel.textContent=[
+      'WEB DOJO · LIVE QA (opt-in)',
+      'frame '+(m.frameId??'?')+' · draws '+(m.drawCalls??'?')+
+        ' · p95 '+(m.p95FrameMs?.toFixed(1)??'?')+'ms',
+      m.state==='WEB_FRAME_NOT_READY'?'Not started / wrong scene':'Web scene ready',
+      ...warn, ...seen,
+      'VRAM not measurable via WebGL2',
+    ].join('\n');
+  };
+  sample();
+  render();
+  const sampleTimer=windowRef.setInterval(sample,sampleMs);
+  const renderTimer=windowRef.setInterval(render,refreshMs);
   return Object.freeze({
     getReport:()=>lastReport && structuredClone(lastReport),
-    stop:()=>{if(stopped)return;stopped=true;windowRef.clearInterval(timer);panel.remove();},
+    stop:()=>{
+      if(stopped)return;
+      stopped=true;
+      windowRef.clearInterval(sampleTimer);
+      windowRef.clearInterval(renderTimer);
+      panel.remove();
+    },
   });
 }
