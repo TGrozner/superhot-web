@@ -65,6 +65,57 @@ export function selectNativePlayerClip(state, parameters) {
   throw new RangeError('Cyclic player blend tree');
 }
 
+
+/**
+ * Convert the restored Web controller's camera-local sample into one
+ * first-person draw frame. The shared Dojo integrator supplies the actual
+ * browser camera basis; this does not assert which native Unity camera ran.
+ *
+ * The restored controller has already applied its X-output reflection to
+ * itemMatrix. Reusing that camera-local matrix in nativeItemDraws() avoids
+ * recomputing an unmirrored bone * itemFromBone socket or applying the hands
+ * container offset twice. No original katana mesh or pose is included here.
+ */
+export function projectDojoPlayerFrame({ pose, heldItem, cameraWorldMatrix } = {}) {
+  if (heldItem?.isKatana !== true || !pose?.handsVisible ||
+      pose.profileId !== heldItem.id) return null;
+  if (!pose.descriptor || typeof pose.descriptor.clip !== 'string') {
+    throw new TypeError('Dojo held player frame requires a source clip descriptor');
+  }
+  function requireAffine(value, label) {
+    if (!value || value.length !== 16 ||
+        !Array.from(value).every(Number.isFinite) ||
+        value[3] !== 0 || value[7] !== 0 || value[11] !== 0 || value[15] !== 1) {
+      throw new TypeError(label + ' must be a finite column-major affine matrix');
+    }
+    const d = value[0]*(value[5]*value[10]-value[6]*value[9])
+      - value[4]*(value[1]*value[10]-value[2]*value[9])
+      + value[8]*(value[1]*value[6]-value[2]*value[5]);
+    if (!Number.isFinite(d) || Math.abs(d) < 1e-12) {
+      throw new RangeError(label + ' must be invertible');
+    }
+  }
+  requireAffine(cameraWorldMatrix, 'Dojo active Web camera matrix');
+  requireAffine(pose.handsMatrix, 'Dojo controller handsMatrix');
+  if (pose.itemMatrix !== null && pose.itemMatrix !== undefined) {
+    requireAffine(pose.itemMatrix, 'Dojo controller itemMatrix');
+  }
+  const modelMatrix = new Float32Array(multiplyMatrices(cameraWorldMatrix, pose.handsMatrix));
+  // nativeItemDraws() already multiplies cameraWorldMatrix by heldMatrix;
+  // returning a camera-LOCAL matrix prevents an accidental double camera.
+  const itemCameraLocalMatrix = pose.itemMatrix == null ? null
+    : new Float32Array(pose.itemMatrix);
+  const itemWorldMatrix = itemCameraLocalMatrix == null ? null
+    : new Float32Array(multiplyMatrices(cameraWorldMatrix, itemCameraLocalMatrix));
+  return Object.freeze({
+    heldItem, modelMatrix, descriptor: pose.descriptor,
+    itemCameraLocalMatrix, itemWorldMatrix,
+    bladeSocketAvailable: itemCameraLocalMatrix !== null,
+    nativeCameraActiveVerified: false,
+    nativeAnimatorExecutionVerified: false,
+  });
+}
+
 /** Archived Dojo Hands + weapon container Web state machine.
  * Actions must be driven by accepted gameplay events. It does not infer
  * native Animator state, execute Unity or synthesize missing source clips.
