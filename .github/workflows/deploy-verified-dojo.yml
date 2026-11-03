@@ -36,7 +36,7 @@ jobs:
             exit 1
           fi
       - name: Verify actual deployable Dojo package
-        run: node scripts/verify-pages-pack.mjs
+        run: node scripts/verify-pages-pack.mjs --require-ragdoll
       - name: Verify code on manual release
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: npm ci --ignore-scripts && npm run check
