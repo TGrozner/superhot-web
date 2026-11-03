@@ -63,7 +63,7 @@ function recordingGl() {
   return { gl, draws, state };
 }
 
-function fixture({ withFragment = false, withFirstPerson = false } = {}) {
+function fixture({ withFragment = false, withFirstPerson = false, warning = false } = {}) {
   const mesh = defineIndexedMesh({ positions: [0,0,0, 1,0,0, 0,1,0],
     normals: [0,0,1, 0,0,1, 0,0,1], uvs: [0,0, 1,0, 0,1], indices: [0,1,2, 0,2,1] });
   const instances = ['bowl', 'shuriken'].map((id, i) => {
@@ -103,6 +103,19 @@ function fixture({ withFragment = false, withFirstPerson = false } = {}) {
     };
   }
   const images = new Map(['reflection', 'micro', 'pore', 'fog'].map(id => [id, {}]));
+  if (warning) {
+    // Entirely synthetic source-shape fixture: no original PNG/coordinates.
+    scene.source = { sceneBuildIndex:10, serializedOwner:'level10',
+      scenePath:'Assets/Scenes/SHRL/SHRL_Dojo2.unity' };
+    scene.gameplay = { audio:{ doors:{ 'level10::7089':{
+      spotlight:{ cookieTextureId:'synthetic-cookie' },
+    } } } };
+    scene.instances[0].layer = 8;
+    scene.instances[1].layer = 9;
+    scene.instanceMap = new Map(scene.instances.map(instance => [instance.id, instance]));
+    scene.textures = new Map([['synthetic-cookie', {id:'synthetic-cookie'}]]);
+    images.set('synthetic-cookie', {width:2,height:2});
+  }
   const context = recordingGl();
   return { ...context, scene, pass: createNativeWorldPass(context.gl, scene, images) };
 }
@@ -214,5 +227,32 @@ test('held rendering refuses missing source first-person material instead of dra
   assert.throws(() => pass.drawHeldInstance('bowl', identity(), identity(), camera),
     /requires source first-person material/);
   assert.equal(draws.length, 0);
+  pass.dispose();
+});
+
+test('Dojo source warning reaches only layer-8 GPU draw, and switches off without stale cookies', () => {
+  const { pass, draws, state, gl } = fixture({ warning: true });
+  const packet = {
+    id:'level10::7089',active:true,
+    spotlight: {
+      enabled:true, position:[1,2,3], direction:[0,0,1],
+      right:[1,0,0], up:[0,1,0], range:10,intensity:2,
+      color:[1,0,0], spotAngle:90,cullingMask:256,
+      cookieTextureId:'synthetic-cookie',
+    },
+  };
+  const lit = pass.draw(identity(), camera, {}, [packet]);
+  assert.equal(lit.warningPreviewSpotlights, 1);
+  assert.equal(lit.warningPreviewDrawCalls, 1);
+  assert.equal(lit.nativeLightingParity, false);
+  assert.equal(draws[0].uniforms.get('uDoorWarningCount'), 1);
+  assert.equal(draws[0].uniforms.get('uDoorRange0'), 10);
+  assert.equal(draws[1].uniforms.get('uDoorWarningCount'), 0);
+  assert.equal(state.get(gl.ACTIVE_TEXTURE), 107, 'cookie units restore prior binding state');
+  draws.length = 0;
+  const off = pass.draw(identity(), camera, {}, []);
+  assert.equal(off.warningPreviewSpotlights, 0);
+  assert.equal(off.warningPreviewDrawCalls, 0);
+  assert.equal(draws[0].uniforms.get('uDoorWarningCount'), 0);
   pass.dispose();
 });
