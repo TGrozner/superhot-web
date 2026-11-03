@@ -135,7 +135,11 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
         gl.bindVertexArray(savedVao);
         gl.bindBuffer(gl.ARRAY_BUFFER, savedArray);
       }
+      // Keep the last committed GPU payload separate from the next validated set.
+      // A repeated static set can skip bufferSubData entirely; a single moved
+      // rigid body uploads just its 100-byte record rather than all instances.
       const staging = new Float32Array(capacity * 25);
+      const pending = new Float32Array(capacity * 25);
       let count = 0, mirrored = false, batchDisposed = false;
       const batch = {
         get instanceCount() { return count; },
@@ -151,22 +155,44 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
             throw new RangeError('Instance matrices exceed capacity');
           }
           let nextMirror = false;
+          let firstDirty = matrices.length, lastDirty = -1;
           for (let i = 0; i < matrices.length; i++) {
             const item = meshModelMatrices(matrices[i]);
             if (i && nextMirror !== item.mirrored) {
               throw new RangeError('Mixed mirrored instances require separate batches');
             }
             if (!i) nextMirror = item.mirrored;
-            staging.set(item.model, i * 25);
-            staging.set(item.normal, i * 25 + 16);
+            const start = i * 25;
+            pending.set(item.model, start);
+            pending.set(item.normal, start + 16);
+            let changed = i >= count;
+            if (!changed) {
+              for (let component = 0; component < 25; component++) {
+                if (!Object.is(pending[start + component], staging[start + component])) {
+                  changed = true;
+                  break;
+                }
+              }
+            }
+            if (changed) {
+              firstDirty = Math.min(firstDirty, i);
+              lastDirty = i;
+            }
           }
-          const previous = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
-          try {
-            gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
-            if (matrices.length) gl.bufferSubData(gl.ARRAY_BUFFER, 0, staging.subarray(0, matrices.length * 25));
-          } finally {
-            gl.bindBuffer(gl.ARRAY_BUFFER, previous);
+          // One contiguous upload per changed run avoids per-instance GL call
+          // overhead. Shrinking a batch or replaying identical transforms
+          // requires no transfer. Growing it always uploads the new records.
+          if (lastDirty >= firstDirty) {
+            const previous = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+            try {
+              gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
+              gl.bufferSubData(gl.ARRAY_BUFFER, firstDirty * 100,
+                pending.subarray(firstDirty * 25, (lastDirty + 1) * 25));
+            } finally {
+              gl.bindBuffer(gl.ARRAY_BUFFER, previous);
+            }
           }
+          staging.set(pending.subarray(0, matrices.length * 25));
           count = matrices.length;
           mirrored = nextMirror;
           return batch;
