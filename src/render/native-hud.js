@@ -8,7 +8,7 @@ const assetId = /^sceneHud_\d{3}$/;
  * kind is a source crosshair type, not a weapon name; hand means a usable pickup.
  * DOM luminance masks are not the native fullscreen composition shader.
  */
-export function createNativeHud(element, crosshair, health) {
+export function createNativeHud(element, crosshair, health, resolveAsset = id => `/local-assets/${id}`) {
   let source = null, active = false, type = null, punchRemaining = 0;
   let fade = 0, moved = false, fadeDirection = 0, wasCooling = false;
   let lastHealth = -1, lastCapacity = -1;
@@ -93,7 +93,7 @@ export function createNativeHud(element, crosshair, health) {
     const changed = kind !== type;
     if (changed) {
       type = kind;
-      crosshair.style.maskImage = `url("/local-assets/${binding.textureId}")`;
+      crosshair.style.maskImage = `url("${resolveAsset(binding.textureId)}")`;
       punchRemaining = 0;
       wasCooling = false;
     }
@@ -124,7 +124,7 @@ export function createNativeHud(element, crosshair, health) {
       for (let index = 0; index < capacity; index++) {
         const heart = health.ownerDocument.createElement('i');
         heart.setAttribute('aria-hidden', 'true');
-        heart.style.backgroundImage = `url("/local-assets/${source.heartTextureId}")`;
+        heart.style.backgroundImage = `url("${resolveAsset(source.heartTextureId)}")`;
         health.append(heart);
       }
     }

@@ -7,6 +7,16 @@
   <meta name="description" content="FRAME//BREAK — un prototype de FPS low-poly dans lequel le temps avance quand vous bougez. Jouable gratuitement dans votre navigateur." />
   <title>FRAME//BREAK — Browser FPS Prototype</title>
   <link rel="stylesheet" href="./style.css" />
+  <style>
+    #boot-blocker { position:fixed;inset:0;z-index:999;display:grid;place-items:center;padding:22px;
+      background:#edf1f3;color:#1c2832;font-family:system-ui,sans-serif;text-align:center; }
+    #boot-blocker[hidden] { display:none; }
+    #boot-blocker .boot-panel { max-width:650px;padding:36px;border:1px solid #c8d2d8;background:#fff;
+      box-shadow:0 14px 65px #24364321; }
+    #boot-blocker h2 { font-size:clamp(26px,5vw,44px);letter-spacing:-1.5px;margin:4px 0 16px; }
+    #boot-blocker .boot-kicker { color:#b41e37;font-size:12px;letter-spacing:2px;font-weight:900; }
+    #boot-blocker p { line-height:1.6; }
+  </style>
 </head>
 <body>
   <main id="game-shell">
@@ -71,9 +81,7 @@
     <aside id="scene-controls" style="position:absolute;top:12px;right:12px;z-index:5;max-width:min(350px,90vw);max-height:calc(100% - 24px);overflow:auto;padding:12px;background:rgba(242,247,250,.95);border:1px solid #9aabb4;font:12px/1.5 ui-monospace,monospace;color:#23313a;">
       <label for="scene-mode">Vue</label>
       <select id="scene-mode">
-        <option value="original">Scène originale locale</option>
-        <option value="prototype">Anciennes salles de démonstration</option>
-        <option value="synthetic">Scène de contrôle générée</option>
+        <option value="original">Dojo original — SHRL_Dojo2</option>
       </select>
       <div id="private-mesh-controls" hidden>
         <strong id="native-scene-title" style="display:block;margin-top:10px">SCÈNE LOCALE · MODÈLES ORIGINAUX</strong>
@@ -120,6 +128,14 @@
     </aside>
     <div id="error" role="alert" hidden></div>
   </main>
+  <section id="boot-blocker" role="status" aria-live="polite">
+    <div class="boot-panel">
+      <p class="boot-kicker">FRAME//BREAK · SHRL_DOJO2</p>
+      <h2>Chargement du Dojo original</h2>
+      <p id="boot-message">Lecture du pack de scène, des textures et des animations depuis cet hébergement…</p>
+      <p>Pas de décor de substitution : si les données nécessaires manquent, la démo ne démarre pas.</p>
+    </div>
+  </section>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>
