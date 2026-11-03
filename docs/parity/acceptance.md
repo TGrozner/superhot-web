@@ -210,24 +210,42 @@ recorder output and fails closed unless each observable milestone is present:
 ### Owner-local browser procedure (after SH-05 merges; not executed by SH-10)
 
 Run the **existing** `node server.mjs` and open
-`http://localhost:4173/` with the private Dojo scene configured. Before
-starting the encounter, in DevTools (the recorder is opt-in):
+`http://localhost:4173/` with the private Dojo scene configured. In
+DevTools **before clicking Start**, arm the opt-in recorder once:
 
 ```js
 const { inspectDojoCaptureReadiness, startDojoCapture } =
   await import('/scripts/acceptance-dojo-browser.mjs');
-inspectDojoCaptureReadiness();  // ready:true is prerequisites only, NOT a passed run
-window.dojoRun = startDojoCapture({ intervalMs: 50, maxFrames: 30000 });
+inspectDojoCaptureReadiness(); // pre-Start preview is NOT a started combat
+window.dojoRun = startDojoCapture({
+  intervalMs: 50, maxFrames: 30000, waitForStart: true,
+});
 ```
+
+**Now click Start / Play original in the actual UI without reopening DevTools.**
+The armed recorder does not save frames from the initial rendered
+`activeScreen='playing'` preview. It starts sampling only when the source
+identity and prerequisites match, the Web screen is `playing`, the
+encounter counter is still zero **and** `#scene-controls.hidden === true`.
+This last flag is controlled by `setScreen('playing')` on the actual
+`start() → resetGame()` path in `src/main.js`; in the initial preview the
+controls are still visible. A paused/won or partially played run is rejected.
+The recorder's `dojoRun.ready` property becomes true after the first valid
+post-start sample. There is no need to inspect it during pointer lock.
 
 The recorder is a **read-only browser timer**, using the already exposed
 `__superhotGetRenderedFrameSnapshot()`; it does not automate the original
-game, move characters or create fake kills. **If readiness is false, do not
-record a false run:** check the returned reason codes (missing/wrong Dojo
-scene/build10, missing encounter, source items, feet or ambience telemetry)
-and ensure the private Dojo scene is loaded. No private files are uploaded.
+game, move characters or create fake kills. With `waitForStart: true`,
+a preflight failure means **zero frames collected until readiness becomes
+true**, not a fabricated preview playthrough. Without this option,
+`startDojoCapture()` fails immediately with specific reason codes:
+`DOJO_COMBAT_NOT_STARTED`, `DOJO_NOT_PLAYING`,
+`DOJO_RUN_NOT_FRESH` or missing scene/encounter/items/feet/audio telemetry.
+The controls-hidden witness is a mutable **Web DOM/UX indicator**,
+not independent proof of a click, an executable original, or native parity.
+No private files are uploaded.
 
-Start the actual Dojo encounter; shoot once to observe ammo consumption, then
+After Start, shoot once to observe ammo consumption, then
 **press F to throw the equipped pistol** (the current main's `nearbyPickup()`
 refuses all pickups while `state.weapon` is true), face a source item and
 press **E** to pick it up, then **F** again to throw that same item. Continue
@@ -352,3 +370,25 @@ insufficient sampling, not a native contradiction. For a stronger browser
 receipt SH-05 may expose a read-only *monotonic shot counter* from the active
 runtime, stamped in the rendered-frame snapshot; SH-10 cannot modify that
 shared file. No native executed gun event or original screenshot is claimed.
+
+### SH-10 P0: pre-Start preview must not count as a played Dojo (3 November 2026)
+
+`src/main.js` calls `loadLevel(0); setScreen('playing')` at page
+initialization, *before* `start()` sets `nativeCombatStarted=true` and
+resets the scene. The previous sampler only required a matching Dojo
+scene, finite encounter, items, feet and an integer ambience count;
+these can be visible in the initial, **non-combat** preview. Recording
+then could silently label a preview frame as the first started run.
+The new opt-in `waitForStart:true` mode arms before the owner clicks
+Start, without touching gameplay or pointer lock, and ignores preview,
+paused/win and already-progressed states until a fresh playing
+encounter's DOM receipt is present.
+
+**Acceptance proof level:** authored Node fixtures demonstrate the
+recorder gating and deferred activation, **not** that a full browser
+Dojo run was executed. The DOM hidden state can be changed manually
+and does not authenticate the session. SH-05 must still check a
+single real owner-local browser trace with spawn, armed ammo decrease,
+same-item pickup/release, 6/7 kills, win and restart; any missing step
+remains **INCOMPLETE** until observed. The native Dojo visual, gameplay
+and timing deltas remain **UNKNOWN** without paired original runtime evidence.
