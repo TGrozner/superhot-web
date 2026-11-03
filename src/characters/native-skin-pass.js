@@ -636,6 +636,40 @@ function multiplyInto(a, aOffset, b, bOffset, output, outputOffset) {
   }
 }
 
+/**
+ * Web-only hit/melee readability layer, applied AFTER sampled source clips.
+ * Every global bone receives the same rigid lean around the sampled hips;
+ * this keeps the GPU skin palette, socket, hit shapes and death handoff in
+ * exactly the same pose. No new keyframes, source claims or GPU draws.
+ */
+function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll) {
+  const globals = scratch.globals;
+  const pivot = pivotBone * 16;
+  const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  for (let bone = 0; bone < loaded.jointCount; bone++) {
+    const offset = bone * 16;
+    for (let column = 0; column < 4; column++) {
+      const entry = offset + column * 4;
+      const translation = column === 3;
+      const x = globals[entry] - (translation ? px : 0);
+      const y = globals[entry + 1] - (translation ? py : 0);
+      const z = globals[entry + 2] - (translation ? pz : 0);
+      const pitchedY = cp * y - sp * z;
+      globals[entry] = cr * x - sr * pitchedY + (translation ? px : 0);
+      globals[entry + 1] = sr * x + cr * pitchedY + (translation ? py : 0);
+      globals[entry + 2] = sp * y + cp * z + (translation ? pz : 0);
+    }
+  }
+  // A model-space bone matrix is NOT the GPU palette. Rebuild after the lean.
+  for (let index = 0; index < loaded.weightedBoneIndices.length; index++) {
+    const bone = loaded.weightedBoneIndices[index];
+    multiplyInto(globals, bone * 16, loaded.mesh.inverseBindMatrices, bone * 16,
+      scratch.palette, index * 16);
+  }
+}
+
 function composeInto(position, rotation, scale, output) {
   const x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3];
   const xx = x*x, yy = y*y, zz = z*z, xy = x*y, xz = x*z, yz = y*z;
@@ -1217,6 +1251,11 @@ export function createNativeSkinPass(gl, sourcePackage, {
     boneOrder: Object.freeze(loaded.bones.map(bone => bone.name)),
     parents: Object.freeze(loaded.bones.map(bone => bone.parent)),
   });
+  // The Web-only reaction pivot stays attached to source hips where present.
+  // Older validated rigs without a named pelvis/spine use their root bone.
+  const hip = loaded.bones.findIndex(bone => /hip|pelvis/i.test(bone.name));
+  const spine = loaded.bones.findIndex(bone => /spine/i.test(bone.name));
+  const webLeanPivot = hip >= 0 ? hip : spine >= 0 ? spine : 0;
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1245,7 +1284,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const camera = new Float32Array(3);
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
                   cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
-                  color, transition = null, action = null, solvedPose = null } = {}) {
+                  color, transition = null, action = null, solvedPose = null,
+                  webPoseLean = null } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1288,6 +1328,16 @@ export function createNativeSkinPass(gl, sourcePackage, {
     }
     if (solvedPose !== null && (action !== null || transition !== null)) {
       throw new TypeError('solvedPose already contains the final pose: no clip transition or action overlay');
+    }
+    if (webPoseLean !== null) {
+      if (!webPoseLean || typeof webPoseLean !== 'object' ||
+          !Number.isFinite(webPoseLean.pitch) || !Number.isFinite(webPoseLean.roll) ||
+          Math.abs(webPoseLean.pitch) > .32 || Math.abs(webPoseLean.roll) > .32) {
+        throw new RangeError('Web-only pose lean requires bounded pitch/roll radians');
+      }
+      if (solvedPose !== null) {
+        throw new TypeError('A solved death pose cannot also receive a Web-only animation lean');
+      }
     }
     let palette;
     let actionLayer = null;
@@ -1352,6 +1402,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
       palette = evaluatePalette(loaded, loaded.clips[instance.clip], time, instance.playback, scratch,
         actionLayer ? actionPose : null, actionLayer?.mask, actionWeight);
     }
+    if (webPoseLean !== null) {
+      applyWebPoseLean(loaded, scratch, webLeanPivot, webPoseLean.pitch, webPoseLean.roll);
+    }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
       // precomposed fire path has already composed the same final hand pose here.
@@ -1394,6 +1447,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       nativeClipSampled: solvedPose === null, runtimeEnemyInstanceVerified: false,
       solvedPoseApplied: solvedPose !== null,
       solvedPoseProvenance: solvedPose?.provenance ?? null,
+      webPoseLeanApplied: webPoseLean !== null,
+      webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
       weaponAttachmentMatrix,
