@@ -18,7 +18,7 @@ const fail = message => { throw new Error('DOJO RAGDOLL PACK INVALID: ' + messag
 
 export function assertDojoDeathPhysics(scene, rigBytes) {
   if (scene?.source?.sceneBuildIndex !== 10 ||
-      !/SHRL_Dojo2\\.unity$/i.test(scene.source?.scenePath ?? '')) {
+      !/SHRL_Dojo2\.unity$/i.test(scene.source?.scenePath ?? '')) {
     fail('expected SHRL_Dojo2 / build10');
   }
   let rig;
