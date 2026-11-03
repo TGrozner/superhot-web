@@ -145,7 +145,7 @@ export function assessDojoVertical(trace) {
   // count distinct rendered Web enemy IDs instead of accepting that false proof.
   // This is a Web receipt, not evidence of native MCD death causality.
   const target = get(frames[start]).encounter.killTarget;
-  const deadActorIds = new Set(), previousLiveness = new Map();
+  const deadActorIds = new Set(), liveActorIds = new Set(), witnessedDeathIds = new Set(), previousLiveness = new Map();
   for (let i = start; i <= win; i++) {
     const inFrame = new Set();
     for (const actor of get(frames[i]).encounter.enemies) {
@@ -160,13 +160,24 @@ export function assessDojoVertical(trace) {
       }
       inFrame.add(id);
       previousLiveness.set(id, actor.alive);
-      if (!actor.alive) deadActorIds.add(id);
+      if (actor.alive) liveActorIds.add(id);
+      else {
+        deadActorIds.add(id);
+        // A corpse first seen dead is not a sampled kill transition. Sparse
+        // sampling may miss a short-lived actor, so this is INCOMPLETE.
+        if (liveActorIds.has(id)) witnessedDeathIds.add(id);
+      }
     }
   }
   checks.distinctDeadActorsObserved = deadActorIds.size >= target;
   observed.distinctDeadActorIdsBeforeWin = deadActorIds.size;
+  observed.distinctAliveThenDeadActorIdsBeforeWin = witnessedDeathIds.size;
+  checks.aliveToDeadTransitionsObserved = witnessedDeathIds.size >= target;
   if (!checks.distinctDeadActorsObserved) {
     errors.push('fewer than kill quota distinct dead actor IDs observed in Web encounter');
+  }
+  if (!checks.aliveToDeadTransitionsObserved) {
+    errors.push('fewer than kill quota sampled alive-to-dead actor transitions in Web encounter');
   }
   const active = frames.slice(start, win);
   const witnessedKills = new Set(frames.slice(start, win + 1).map(f => get(f).encounter.killed));
