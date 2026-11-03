@@ -139,7 +139,11 @@ export function measureRegisteredRegion(nativeImage, webImage, nativeMask, webMa
   checkGrayscaleMask(nativeMask, 'native mask');
   checkGrayscaleMask(webMask, 'Web mask');
   const shape = silhouetteMetrics(nativeMask, webMask, 128);
-  if (!shape.nativeArea || !shape.webArea) invalid('Both masks must have positive visible area');
+  // A missing actor/light is itself a large visible difference, not an error.
+  // Only a region absent on BOTH captures is not a measurable visual region.
+  if (!shape.nativeArea && !shape.webArea) invalid('Both masks have no visible pixels');
+  const visibilityStatus = !shape.webArea ? 'NATIVE_ONLY_VISIBLE'
+    : !shape.nativeArea ? 'WEB_ONLY_VISIBLE' : 'BOTH_VISIBLE';
   const intersection = [], union = [];
   for (let p = 0; p < viewport[0] * viewport[1]; p++) {
     const n = nativeMask.rgb[3 * p] >= 128;
@@ -149,12 +153,14 @@ export function measureRegisteredRegion(nativeImage, webImage, nativeMask, webMa
   }
   return {
     maskThreshold: 128,
+    visibilityStatus,
     nativeAreaPixels: shape.nativeArea,
     webAreaPixels: shape.webArea,
     intersectionPixels: shape.intersection,
     unionPixels: shape.union,
     symmetricDifferencePixels: shape.union - shape.intersection,
-    sharedFractionOfSmallerMask: shape.intersection / Math.min(shape.nativeArea, shape.webArea),
+    sharedFractionOfSmallerMask: Math.min(shape.nativeArea, shape.webArea) > 0
+      ? shape.intersection / Math.min(shape.nativeArea, shape.webArea) : 0,
     silhouetteIou: shape.iou,
     centroidDistancePx: shape.centroidDistancePx,
     materialIntersection: compactPixelMetrics(nativeImage, webImage, intersection),
@@ -195,6 +201,7 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
       'Only regions declared by owner; unmasked geometry and occlusion remain unscored',
       'Captures and native execution are not independently authenticated',
       'Screenshots must have matching active camera, projection, scene and state',
+      'A fully absent region on one side has IoU 0, null centroid delta, and no material-intersection RGB',
       'Material RGB is excluded when source world matrices differ or masks share less than half the smaller silhouette',
       'Screen-weighted region ranks can overlap and must not be summed as global image error',
       'No 1:1 inference or overall gameplay acceptance',
@@ -216,8 +223,10 @@ export function scoreVisualRegions(nativePath, webPath, regionsPath) {
       invalid('Native and Web region masks must refer to different files');
     }
     const measured = measureRegisteredRegion(n, w, nm, wm);
-    const materialMeasurementStatus = !measured.intersectionPixels
-      ? 'NO_SHARED_SURFACE'
+    const materialMeasurementStatus = measured.visibilityStatus !== 'BOTH_VISIBLE'
+      ? 'BLOCKED_MISSING_VISIBLE_SURFACE'
+      : !measured.intersectionPixels
+        ? 'NO_SHARED_SURFACE'
       : source.poseAligned === false
         ? 'BLOCKED_SOURCE_POSE_MISMATCH'
         : measured.sharedFractionOfSmallerMask < MIN_MATERIAL_SHARED_AREA_FRACTION
