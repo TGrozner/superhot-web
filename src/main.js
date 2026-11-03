@@ -610,7 +610,7 @@ function loadLevel(index) {
     ? `${nativeSceneName()} · GÉOMÉTRIE ORIGINALE · COMBAT WEB`
     : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
   $('stage-banner').textContent = containersPreviewEnabled
-    ? `${nativeSceneName()} · COLLISIONS ET COMBAT WEB · PAS DE PARITÉ NATIVE`
+    ? `${nativeSceneName()} · LE TEMPS EST TON ARME`
     : `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
       (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
 }
