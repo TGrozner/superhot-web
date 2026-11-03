@@ -2,36 +2,41 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-// The source adapter already has GPU-mock tests in character-native-player-animation.
-// These checks cover the SH-05 executable wiring only; no owner-local assets
-// or browser pixels are available to hosted CI.
+// Source-wiring checks only. SH-14 has separate synthetic GPU tests; real
+// Dojo screenshot, camera parity and player Animator execution remain unverified.
 const main=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
 const renderer=readFileSync(new URL('../src/renderer.js',import.meta.url),'utf8');
 
-test('Dojo hands pass is created on the existing WebGL2 context and disposed on replacement',()=>{
+test('Dojo hands WebGL2 pass is replaced/disposed and accepts source descriptors only',()=>{
   assert.match(renderer,/createDojoPlayerAnimationPass\(gl, \{ playerPacket, rig, clips \}\)/);
   assert.match(renderer,/nativePlayerHands\?\.dispose\(\)/);
   assert.match(renderer,/function replaceDojoPlayerHands/);
   assert.match(renderer,/if \(!nativePlayerHands \|\| heldItem\?\.isKatana !== true\) return null/);
   assert.match(renderer,/drawCalls \+= report\.handsDrawCalls/);
   assert.match(main,/renderer\.replaceDojoPlayerHands\(null\)/);
+  assert.match(main,/renderer\.replaceDojoPlayerHands\(packet, rig\)/);
 });
-test('live source packet must carry exact Dojo identity, explicit clips and authored camera-local matrix',()=>{
-  assert.match(main,/prepared\.source\.sceneBuildIndex === 10/);
-  assert.match(main,/prepared\.source\.serializedOwner === 'level10'/);
-  assert.match(main,/\.endsWith\('\/SHRL_Dojo2\.unity'\)/);
-  assert.match(main,/typeof clips\?\.held === 'string'/);
-  assert.match(main,/typeof clips\?\.swing === 'string'/);
-  assert.match(main,/const modelMatrix = multiplyMatrices\(basis, nativeHandsCameraLocal\)/);
-  assert.match(main,/nativeHandsStatus = 'DOJO_HANDS_SOURCE_CLIPS_OR_MATRIX_MISSING'/);
+
+test('Dojo live packet must identify source scene and select authored item profiles, no invented global clip alias',()=>{
+  assert.match(main,/isDojoBuild10Source\(prepared\.source\)/);
+  assert.match(main,/createNativePlayerAnimation\(packet\)/);
+  assert.match(main,/nativeHandsController\.equip\(heldId, \{ animate:heldId !== 'unarmed' \}\)/);
+  assert.match(main,/nativeHandsEquippedId !== heldId/);
+  assert.doesNotMatch(main,/packet\.profiles\?\.katana/);
+  assert.doesNotMatch(main,/nativeHandsCameraLocal/);
+  assert.match(main,/DOJO_HANDS_SOURCE_PACKET_REJECTED_FALLBACK/);
 });
-test('a held katana requests sampled hands without inventing a swing, pistol hands or second sword',()=>{
-  assert.match(main,/if \(nativeItems\.held\.isKatana && nativeHandsCameraLocal\)/);
-  assert.match(main,/phase:'held'/);
-  assert.match(main,/sourceClipTime:state\.worldClock/);
+
+test('accepted katana attack/throw and applied clock feed real source pose; static sword remains until socket basis proof',()=>{
+  assert.match(main,/nativeHandsController\.update\(dt, tick\.appliedTimeScale\)/);
+  assert.match(main,/nativeHandsController\.action\('attack'\)/);
+  assert.match(main,/nativeHandsController\.action\('throw'\)/);
+  assert.match(main,/if \(nativeItems\.held\.isKatana && nativeHandsController/);
+  assert.match(main,/const modelMatrix = multiplyMatrices\(basis, sample\.handsMatrix\)/);
+  assert.match(main,/descriptor:sample\.descriptor/);
   assert.match(main,/for\(const draw of nativeItemDraws\(nativeItems,camera\)\.held\)renderer\.drawNativeInstance/);
   assert.match(main,/nativeHands: nativeHandsStats/);
-  assert.match(main,/nativeHandsStatus/);
-  assert.match(renderer,/sourceClipTime, modelMatrix/);
+  assert.match(main,/DOJO_HANDS_DRAWN_WEB_CAMERA_DIAGNOSTIC_NOT_1_TO_1/);
+  assert.doesNotMatch(main,/katanaMeshLocalMatrix:sample\.itemMatrix/);
   assert.doesNotMatch(main,/phase:'swing'|phase:"swing"/);
 });
