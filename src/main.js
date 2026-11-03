@@ -14,6 +14,7 @@ import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativ
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
+import { advanceWebEnemyPunch, createWebEnemyPunchState } from './combat/web-enemy-punch.js';
 import { createNativeDeathRuntime, applyNativeDeathForce } from './animation/native-death-runtime.js';
 import { createWebImpactFeedback, resetWebImpactFeedback, recordWebImpact, advanceWebImpactFeedback } from './vfx/web-combat-feedback.js';
 import { detectWebCleanDodge, WEB_DODGE_SCORE } from './combat/web-near-miss.js';
@@ -1310,12 +1311,27 @@ function update(dt) {
           }
         }
       }
-      if(!enemy.reaction.hasWeapon && enemy.reaction.stunRemaining===0 &&
-          distance3(enemy,nativeFeet)<nativeEncounter.unarmedStopDistance+.15 &&
-          !nativeSegmentHit(nativeSightCollision,vec(enemy.x,enemy.y+1.2,enemy.z),state.camera) &&
-          state.worldClock>=(enemy.nextPunchAt??0)) {
-        enemy.nextPunchAt=state.worldClock+.75;enemy.punchAt=state.worldClock;damagePlayer();
-        if(state.screen!=='playing')return;
+      // Web J3 melee: a visible windup precedes an actual contact event.
+      // Recheck reach, cover, stun and weapon state on EVERY world tick;
+      // attack intent alone must never decrement player health.
+      const punch = advanceWebEnemyPunch(
+        enemy.webPunch ??= createWebEnemyPunchState(), {
+          scaledDeltaTime: worldDt,
+          attackerActive: enemy.active !== false,
+          attackerAlive: enemy.alive,
+          playerAlive: state.screen === 'playing' && state.health > 0,
+          unarmed: !enemy.reaction.hasWeapon,
+          stunned: enemy.reaction.stunRemaining > 0 || Boolean(enemy.reaction.stunnedThisFrame),
+          inReach: distance3(enemy,nativeFeet) < nativeEncounter.unarmedStopDistance + .15,
+          lineClear: !nativeSegmentHit(nativeSightCollision,
+            vec(enemy.x,enemy.y+1.2,enemy.z),state.camera),
+        },
+      );
+      if(punch.event === 'started') enemy.punchAt = state.worldClock;
+      else if(punch.event === 'cancelled') enemy.punchAt = -Infinity;
+      else if(punch.event === 'contact') {
+        damagePlayer();
+        if(state.screen !== 'playing') return;
       }
       continue;
     }
