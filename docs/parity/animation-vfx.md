@@ -321,3 +321,48 @@ Le chemin `PejAiBody.Kill` retourne **sans effet** si `controller.IsDead`. Sinon
 **Contrat Web conditionnel :** `src/animation/enemy-body-kill-plan.js::planPejAiBodyKill` produit exclusivement les commandes directes ci-dessus, sans exécuter Unity, l'animation, les découpes ni l'audio. Les tests couvrent les gardes, le dog, le boss, le focus, le son demandé et les IK. Il ne faut pas confondre absence de commande directe `Animator.Kill` et absence de réaction transitive : `Body.Kill` appelle `Controller.Kill`, qui déclenche `OnKill` ; l'Animator abonné y appelle son propre `Kill` (`PejAiAnimator.cs:557,735–738`). Il ne faut donc ni exclure cette réaction, ni ajouter un deuxième appel direct au plan Body.Kill. La découpe Head/Shatter directe reste conditionnée au flag dog ; `Body.Explode` et `Body.Stun` demeurent des chemins distincts.
 
 **INCONNU / réfutation et intégration #5 :** prouver un appel réel à `PejAiBody.Kill` sur l'ennemi chargé dans Containers, `shouldExplodeFromDog`, `IsDead`, rendu des RendererWrapper, sortie du `Controller.Kill`, et mesurer son/image sur vrai navigateur. Si un tir appelle seulement un autre chemin, ce plan n'est **pas applicable**. Si la tête est visiblement fracturée sans flag dog dans une trace native, chercher un autre producteur (notamment `Explode` / `RemoveBodyPart`) plutôt que rendre chaque mort shatter par défaut. SH-05 reste seul owner de `main.js`/`renderer.js` ; aucune intégration navigateur ni parité 1:1 n'est revendiquée ici.
+
+
+## SH-06 — Dojo source pose→combat / source pose→death GPU bridge (2026-11-03)
+
+**Implementation owner SH-06**: `src/animation/native-gameplay-pose-bridge.js` and
+`tests/animation-gameplay-pose-bridge.test.mjs`. This is a callable integration
+path, **not a browser validation or native PhysX equivalence claim**. SH-05
+alone integrates into `src/main.js`/`src/renderer.js`; SH-14 owns GPU pass.
+
+- `advanceRenderedDojoPunchGate` feeds **actual GPU draw receipt
+  `report.sampledTime`** (source-clip seconds already multiplied by the
+  controller state speed in SH-05's renderer) into the existing SH-06
+  `advanceDojoPunchContactGate`. It refuses a different clip, a partially
+  blended crossfade, an active solved/death pose, missing receiver/preparation
+  evidence, and any unqualified geometry contact. No distance-only damage or
+  unverified source clip binding is inferred. It emits requests for SH-05,
+  never directly changes player health. Source windows: private research #46
+  / artifact 13135780460, method mapping #152, event order #29.
+- `advanceDojoDeathSkinFrame` advances the existing source-parameterized Web
+  death solver, checks authored bone order and parent indices against SH-14's
+  active pass-specific rig, then returns a **copy of model-space bone matrices**
+  and that exact `rig` for PR #242's opt-in `solvedPose` GPU input. Source
+  Rigidbody/joint definition and provenance are mandatory at construction.
+  If no runtime exists, it returns `solvedPose:null` and retains the present
+  freeze fallback; **never synthesize masses, joints or impulses**.
+
+**SH-05 wiring needed for a visible delta:** after the rendered enemy frame,
+use the real `report.clip` / `report.sampledTime`, a privately verified
+owner/pathID binding and a timestamped SH-03 hitbox sweep; consume the gate's
+single contact request rather than calling `damagePlayer()` at attack intent.
+Upon an actual native-source-qualified death, construct the existing death
+runtime from the full private actor definition + sampled pose, then advance
+it with scaled world time, forward `solvedPose` to SH-14's draw override and
+use the same returned matrices for hitboxes and weapon socket. If the complete
+binding is absent, leave the current frozen death pose untouched. No arbitrary
+VFX are spawned by this bridge; existing native item/shard path is unchanged.
+
+**Evidence boundary (new)**: existing private research #172 yielded the
+`browser-scene/` directory inventory. Private research #202/#203 read the
+same directory's `manifest.json` (SHA/source recorded privately); it contains
+package paths, assets and scene counts but **no authored death-body/joint
+physics definition**. A full source-qualified Dojo physics packet is still
+missing. Separate owner receipt must verify bone names/parents and the actual
+active enemy prefab, not just the source-wide 22/21/18 counts. IK, native
+crossfade dispatch and PhysX/CCD remain UNKNOWN.
