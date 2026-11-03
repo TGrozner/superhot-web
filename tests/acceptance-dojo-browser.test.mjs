@@ -5,7 +5,8 @@ import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS } fro
 function mockBrowser() {
   const listeners = new Map();
   let seq=1, intervalCallback=null, cleared=false, screen='playing';
-  let controlsHidden=true, killed=0;
+  let controlsHidden=true, killed=0, pointerLocked=false;
+  const sceneCanvas = {id:'scene'};
   const documentListeners = new Map();
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
   const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
@@ -26,18 +27,23 @@ function mockBrowser() {
   globalThis.document={
     addEventListener(type,callback){documentListeners.set(type,callback);},
     removeEventListener(type){documentListeners.delete(type);},
-    getElementById(id){return id === 'scene-controls' ? {hidden:controlsHidden} : null;},
+    get pointerLockElement(){return pointerLocked ? sceneCanvas : null;},
+    getElementById(id){return id === 'scene-controls' ? {hidden:controlsHidden} :
+      id === 'scene' ? sceneCanvas : null;},
     createElement(){return {click(){}};},
   };
   return {
     setFrame(n){seq=n;}, setScreen(value){screen=value;},
     setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
+    setPointerLock(value){pointerLocked=value;},
+    mouse(button=0,trusted=true){documentListeners.get('mousedown')?.({button,isTrusted:trusted});},
     setSceneBuildIndex(index){source.sceneBuildIndex=index;},
     tick(){intervalCallback();},
     click(buttonId, trusted=true){documentListeners.get('click')?.({isTrusted:trusted,
       target:{closest(selector){assert.equal(selector,'button');return {id:buttonId};}}});},
     get documentListenerCount(){return documentListeners.size;},
-    key(code,down=true,extra={}){listeners.get(down?'keydown':'keyup')?.({code,...extra});},
+    key(code,down=true,extra={}){listeners.get(down?'keydown':'keyup')?.({
+      code,isTrusted:true,repeat:false,target:{tagName:'CANVAS'},...extra});},
     get listenerCount(){return listeners.size;}, get cleared(){return cleared;},
     teardown(){delete globalThis.window;delete globalThis.document;},
   };
@@ -229,6 +235,31 @@ test('SH10 does not accept an attempted Replay click outside win screen',()=>{
     mock.click('resume-button');
     mock.click('again-button',false);
     assert.deepEqual(recorder.stop().uiActions,[]);
+    assert.equal(mock.documentListenerCount,0);
+  } finally {mock.teardown();}
+});
+
+
+test('SH10 browser input receipts exclude first mouse-lock click and synthetic or nonplaying actions',()=>{
+  const mock=mockBrowser();
+  try {
+    const capture=startDojoCapture();
+    mock.mouse(0); // before pointer lock, src/main.js merely locks canvas
+    mock.setPointerLock(true);
+    mock.mouse(2); mock.mouse(0,false);
+    mock.mouse(0); // actual trusted primary fire attempt
+    mock.key('KeyE',true,{isTrusted:false});
+    mock.key('KeyE'); mock.key('KeyF');
+    mock.key('KeyF',true,{repeat:true});
+    mock.key('KeyE',true,{target:{tagName:'INPUT'}});
+    mock.setScreen('win');mock.key('KeyE');mock.mouse(0);
+    const result=capture.stop();
+    assert.deepEqual(result.inputActions,[
+      {kind:'fire',frameId:1,activeScreen:'playing'},
+      {kind:'pickup',frameId:1,activeScreen:'playing'},
+      {kind:'throw',frameId:1,activeScreen:'playing'},
+    ]);
+    assert.equal(result.inputActionsTruncated,false);
     assert.equal(mock.documentListenerCount,0);
   } finally {mock.teardown();}
 });
