@@ -33,7 +33,7 @@ const crosshair = $('crosshair');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
-const nativeHud = createNativeHud(hud, crosshair, $('health'));
+const nativeHud = createNativeHud(hud, crosshair, $('health'), id => assetUrl(id));
 let renderer;
 try { renderer = createRenderer(canvas); }
 catch (error) {
@@ -58,6 +58,23 @@ let nativeEnemyStats = null;
 let nativeScene = null;
 let nativeSkinInfo = null;
 let localAssetManifest = null;
+const assetRoot = new URL('../local-assets/', import.meta.url);
+function assetUrl(id) {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) throw new TypeError('Invalid asset ID');
+  const entry = localAssetManifest?.assets?.[id];
+  if (!entry) throw new Error('Asset not available: ' + id);
+  const filename = entry.path ?? id;
+  if (typeof filename !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(filename)) {
+    throw new TypeError('Unsafe asset filename: ' + id);
+  }
+  return new URL(filename, assetRoot).href;
+}
+function dojoUnavailable(message) {
+  const blocker = $('boot-blocker');
+  $('boot-message').textContent = message;
+  blocker.hidden = false;
+  if (state?.screen === 'playing') setScreen('menu');
+}
 let nativeHudReady = false;
 let nativeDoorWarningBridge = null;
 let nativeDoorWarningStatus = 'not-loaded';
@@ -127,7 +144,7 @@ if (containersPreviewEnabled) {
       const rigId = variant === 'headless' ? 'enemyHeadlessRig' : 'enemyRig';
       let rig = null;
       if (localAssetManifest?.assets?.[rigId]) {
-        const response = await fetch(`/local-assets/${rigId}`, { cache: 'no-store' });
+        const response = await fetch(assetUrl(rigId), { cache: 'no-store' });
         if (!response.ok) throw new Error('Animation originale locale indisponible.');
         rig = await response.json();
       }
@@ -241,7 +258,7 @@ if (containersPreviewEnabled) {
   async function localAssetFile(id) {
     const descriptor = localAssetManifest?.assets?.[id];
     if (!descriptor) throw new Error('Export local non configuré.');
-    const response = await fetch(`/local-assets/${id}`, { cache: 'no-store' });
+    const response = await fetch(assetUrl(id), { cache: 'no-store' });
     if (!response.ok) throw new Error('Export local indisponible.');
     return new File([await response.blob()], descriptor.name, { type: descriptor.type });
   }
@@ -343,18 +360,25 @@ if (containersPreviewEnabled) {
   async function loadLocalAssets() {
     const status = $('local-assets-status');
     try {
-      const response = await fetch('/local-assets/manifest', { cache: 'no-store' });
-      if (!response.ok) throw new Error('Serveur d’originaux locaux indisponible.');
+      const loopback = ['localhost', '127.0.0.1'].includes(location.hostname);
+      // Node serves /local-assets/manifest. GitHub Pages serves manifest.json
+      // under the repository base path; neither depends on the visitor's PC.
+      const candidates = loopback
+        ? [new URL('manifest', assetRoot), new URL('manifest.json', assetRoot)]
+        : [new URL('manifest.json', assetRoot)];
+      let response = null;
+      for (const url of candidates) {
+        const attempt = await fetch(url, { cache: 'no-store' });
+        if (attempt.ok) { response = attempt; break; }
+      }
+      if (!response) throw new Error('Le pack Dojo est absent de cet hébergement. Aucun décor de substitution ne sera affiché.');
       localAssetManifest = await response.json();
-      if (localAssetManifest.assets?.scenePackage) {
-        // A selected native packet must never silently fall back to another scene.
-        manifestStats = null;
-        loadLevel(0);
+      if (!localAssetManifest?.assets?.scenePackage ||
+          !localAssetManifest.assets.enemyMerged || !localAssetManifest.assets.enemyRig) {
+        throw new Error('Pack Dojo incomplet : scène, personnage et rig animé requis.');
       }
-      if (!Object.keys(localAssetManifest.assets ?? {}).length) {
-        status.textContent = 'Aucun original configuré sur ce serveur. Les sélecteurs manuels restent disponibles.';
-        return;
-      }
+      manifestStats = null;
+      loadLevel(0);
       const results = await Promise.all([
         ...(localAssetManifest.assets.scenePackage ? [] : localMeshPreviewSpec
           .filter(spec => localAssetManifest.assets[spec.slot]).map(async spec => {
@@ -366,11 +390,18 @@ if (containersPreviewEnabled) {
         localAssetFile('enemyMerged').then(file => nativeEnemyGeneration ? true : loadEnemyFile(file, 'merged')),
       ]);
       await loadScene();
-      status.textContent = results.every(Boolean)
-        ? 'Originaux locaux chargés automatiquement. Aucun envoi externe.'
-        : 'Chargement local incomplet : consulter les statuts ci-dessous.';
+      if (!results.every(Boolean) || !nativeScene || !nativeSkinInfo) {
+        throw new Error('Dojo incomplet : scène ou personnage animé impossible à charger.');
+      }
+      const source = nativeScene.source;
+      if (source.sceneBuildIndex !== 10 || !/dojo/i.test(source.scenePath)) {
+        throw new Error('Scène incorrecte : SHRL_Dojo2 / build 10 exigé.');
+      }
+      status.textContent = 'Dojo original chargé depuis cet hébergement.';
+      $('boot-blocker').hidden = true;
     } catch (error) {
-      status.textContent = `${error.message} Les sélecteurs manuels restent disponibles.`;
+      status.textContent = error.message;
+      dojoUnavailable(`Impossible d'ouvrir le vrai Dojo : ${error.message}`);
     }
   }
   void loadLocalAssets();
@@ -391,7 +422,7 @@ $('scene-mode').addEventListener('change', () => {
   delete window.__superhotSceneMetrics;
   document.exitPointerLock();
   loadLevel(0);
-  setScreen(containersPreviewEnabled ? 'playing' : 'menu');
+  setScreen(containersPreviewEnabled && nativeScene ? 'playing' : 'menu');
 });
 let renderedFrameId = 0;
 let renderedFrameSnapshot = null;
@@ -421,7 +452,7 @@ let nativeJumpAt = 0;
 
 function initializeAudio() {
   const assets = Object.fromEntries(Object.keys(localAssetManifest?.assets ?? {})
-    .map(id => [id, `/local-assets/${id}`]));
+    .map(id => [id, assetUrl(id)]));
   // Both verified event bindings point at sharedassets0.assets:604.
   if (assets.audioPistolFirePrimary) assets.audioEnemyFire = assets.audioPistolFirePrimary;
   void audio.init().then(() => audio.loadLocalAssets(assets)).then(() => {
@@ -520,9 +551,6 @@ function loadLevel(index) {
         nativeDoorWarningBridge = null;
         nativeDoorWarningStatus = 'source-warning-catalog-rejected';
       }
-    } else if (!nativeScene && !nativeInspection && !localAssetManifest?.assets?.scenePackage) {
-      state.solids = buildContainersCollisionSolids();
-      resetContainersTarget();
     }
   }
   nativeClock = createMcdGameplayClock(state.camera);
@@ -569,8 +597,8 @@ function requestMouse() {
     });
   }
 }
-function start() { initializeAudio(); resetGame(); requestMouse(); }
-function resume() { initializeAudio(); setScreen('playing'); requestMouse(); }
+function start() { if (!nativeGameplay()) { dojoUnavailable('Le Dojo original doit être entièrement chargé avant de jouer.'); return; } initializeAudio(); resetGame(); requestMouse(); }
+function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen('playing'); requestMouse(); }
 function pause() { if (state.screen === 'playing') setScreen('paused'); }
 function finish(win) {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -1551,62 +1579,8 @@ function render() {
     if (nativeInspection) {
       drawInspectedEnemy();
     }
-  } else if (containersPreviewEnabled && !localAssetManifest?.assets?.scenePackage) {
-    // SH-04/11: three independently joined Mesh6 submeshes share almost
-    // congruent, world-batched local geometry. This is a SOURCE-CONVERTED
-    // approximation, drawn only from an owner-selected local OBJ6 group47.
-    const mesh6Plan = planLocalMesh6Draws({
-      group47Loaded: localNativeMeshes.has('mesh6'),
-    });
-    const omitCargoIds = [];
-    let privateIndexedDraws = 0, convertedTrianglesDrawn = 0;
-    // Draw indexed originals first, then suppress ONLY the matching synthetic
-    // hull/ribs for successfully submitted ranges. Never copy native bytes to Git.
-    for (const packet of mesh6Plan.drawPackets) {
-      if (renderer.drawPrivateMesh(packet.gpuSlot, '#485761', packet.modelMatrix)) {
-        privateIndexedDraws++;
-        convertedTrianglesDrawn += 1546;
-        if (packet.id === 'cargo-22' || packet.id === 'cargo-7') omitCargoIds.push(packet.id);
-      }
-    }
-    for (const packet of localMesh7DrawPackets) {
-      if (renderer.drawPrivateMesh(packet.gpuSlot, '#f6f8f9', packet.modelMatrix, packet.drawRange)) {
-        privateIndexedDraws++;
-        convertedTrianglesDrawn += packet.drawRange.indexCount / 3;
-        omitCargoIds.push(packet.generatedProxyCandidate);
-      }
-    }
-    manifestStats = drawContainersBuild28Preview(renderer, cam, {
-      aspect: canvas.width / Math.max(1, canvas.height),
-      omitCargoIds,
-    });
-    const target = state.enemies.find(enemy => enemy.alive);
-    if (nativeInspection) {
-      drawInspectedEnemy();
-    } else if (target) drawEnemy(target);
-    else nativeEnemyStats = null;
-    // Prototype-only weapon, bullet and impact visuals; authentic MCD
-    // weapon rigs, enemy AI, combat damage and animation remain unverified.
-    for (const drop of state.drops) drawPickup(drop);
-    for (const bullet of state.bullets) drawBullet(bullet);
-    for (const p of state.fragments) renderer.shard(
-      p.x, p.y, p.z, p.sx, p.sy, p.sz, p.color, p.rx, p.ry, p.rz,
-      clamp(p.life / .6, 0, 1),
-    );
-    if (state.screen === 'playing') drawViewModel(cam);
-    manifestStats = {
-      ...manifestStats,
-      privateIndexedDraws, convertedTrianglesDrawn,
-      verifiedLocalMesh7RangeDraws: localMesh7DrawPackets.length,
-      localFilePreviewOnly: true, sourceConvertedApproximationOnly: true,
-      sourceQualifiedMesh6DrawPackets: mesh6Plan.drawPackets.length,
-      collisionConnected: state.solids.length === 5,
-      sourceDerivedColliderCount: state.solids.length,
-      shootableWebFallbackEnemy: Boolean(target && nativeEnemyStats),
-      nativeMeshMatch: false, nativeEnemySpawnVerified: false,
-      nativeCombatParityVerified: false,
-    };
   }
+
   if (syntheticManifest) {
     manifestStats = drawGeneratedManifest(renderer, syntheticManifest, cam, {
       aspect: canvas.width / Math.max(1, canvas.height),
