@@ -54,8 +54,6 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   const voices = new Set<Voice>();
   let drone: {osc: OscillatorNode; gain: GainNode} | null = null;
   let disposed = false;
-  let variationIndex = 0;
-  // Creative Web variation: repeat hits should not share the exact same waveform.
   const priorityByCue: Record<WebImpactCue, number> = {
     // Creative Web mix priorities: melee/player fire survive overlapping steps.
     'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
@@ -126,9 +124,6 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     }
     const voice: Voice = {sources: [], gain: out, panner, pending: 2, priority};
     voices.add(voice);
-    const variation = variationIndex++;
-    const noiseOffsetSeconds = (variation % 8) * 0.025;
-    const pitchScale = 0.97 + (variation % 7) * 0.01;
     const ended = () => {
       voice.pending--;
       if (voice.pending === 0) release(voice);
@@ -146,11 +141,11 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     burst.connect(out);
     noise.onended = ended;
     voice.sources.push(noise);
-    noise.start(at, noiseOffsetSeconds, duration);
+    noise.start(at, 0, duration);
     const osc = context.createOscillator();
     osc.type = cue === 'player-shot' || cue === 'enemy-shot' ? 'sawtooth' : 'triangle';
-    osc.frequency.setValueAtTime(startHz * pitchScale, at);
-    osc.frequency.exponentialRampToValueAtTime(endHz * pitchScale, at + duration);
+    osc.frequency.setValueAtTime(startHz, at);
+    osc.frequency.exponentialRampToValueAtTime(endHz, at + duration);
     const body = context.createGain();
     body.gain.setValueAtTime(volume * 0.48, at);
     body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
