@@ -250,11 +250,12 @@ export function assessDojoVertical(trace) {
     get(f).weapon === true && get(active[i - 1]).weapon === true &&
     get(active[i - 1]).ammo > 0 && get(f).ammo < get(active[i - 1]).ammo);
   if (!checks.pistolEquippedAndFired) errors.push('no consecutive playing frames with armed ammo decrease (gun discard is not a shot)');
-  checks.pistolFireInputObserved = active.some((f, i) => i > 0 &&
+  const witnessedPistolShotIndex = active.findIndex((f, i) => i > 0 &&
     f.activeScreen === 'playing' && active[i - 1].activeScreen === 'playing' &&
     get(f).weapon === true && get(active[i - 1]).weapon === true &&
     get(active[i - 1]).ammo > 0 && get(f).ammo < get(active[i - 1]).ammo &&
     witnessedInput('fire', active[i - 1].frameId, f.frameId));
+  checks.pistolFireInputObserved = witnessedPistolShotIndex >= 0;
   if (!checks.pistolFireInputObserved) errors.push('no trusted pointer-locked primary-fire input receipt aligned with armed ammo decrease');
 
   let picked = null;
@@ -275,6 +276,39 @@ export function assessDojoVertical(trace) {
   checks.throwInputObserved = released > 0 && witnessedInput('throw',
     frames[released - 1].frameId, frames[released].frameId);
   if (!checks.throwInputObserved) errors.push('no trusted F input receipt aligned with same-item release');
+  // Native Dojo pickup() rejects E while a gun is equipped. The requested
+  // shot -> F gun discard -> E source pickup -> F item throw route therefore
+  // needs a *separate* F attempt paired with an armed -> unarmed Web transition.
+  // F used later to release the held object cannot substitute for gun discard.
+  // Input receipts retain browser event order even when events share one
+  // rendered frame; never infer an F-before-E sequence from counters alone.
+  let pistolDiscardSampleIndex = -1;
+  let pistolDiscardReceiptIndex = -1;
+  if (picked && witnessedPistolShotIndex >= 0) {
+    for (let i = start + witnessedPistolShotIndex + 1; i <= picked.index; i++) {
+      const before = frames[i - 1], after = frames[i];
+      if (before.activeScreen !== 'playing' || after.activeScreen !== 'playing' ||
+          get(before).weapon !== true || get(after).weapon !== false ||
+          get(before).heldItem !== null) continue;
+      const receiptIndex = Array.isArray(inputs) ? inputs.findIndex(a =>
+        a.kind === 'throw' && a.frameId >= before.frameId &&
+        a.frameId < after.frameId) : -1;
+      if (receiptIndex < 0) continue;
+      pistolDiscardSampleIndex = i;
+      pistolDiscardReceiptIndex = receiptIndex;
+      break;
+    }
+  }
+  const pickupReceiptIndex = picked && picked.index > 0 && Array.isArray(inputs)
+    ? inputs.findIndex(a => a.kind === 'pickup' &&
+      a.frameId >= frames[picked.index - 1].frameId &&
+      a.frameId < frames[picked.index].frameId) : -1;
+  checks.pistolDiscardBeforePickupObserved = pistolDiscardSampleIndex >= 0 &&
+    pistolDiscardReceiptIndex >= 0 && pickupReceiptIndex > pistolDiscardReceiptIndex;
+  observed.pistolDiscardFrameId = pistolDiscardSampleIndex >= 0
+    ? frames[pistolDiscardSampleIndex].frameId : null;
+  if (!checks.pistolDiscardBeforePickupObserved) errors.push(
+    'no ordered F pistol-discard input with armed-to-unarmed Web transition after shot and before E item pickup');
 
   const initial = get(frames[start]), after = get(frames[restart]);
   const postRestart = frames.slice(restart);
