@@ -19,9 +19,9 @@ test('only confirmed enemy contacts flash the marker, wall impacts stay visual a
   for(let i=0;i<80;i++)recordWebImpact(feedback,{kind:'wall',...contact});
   assert.equal(feedback.particles.length,WEB_IMPACT_MAX_PARTICLES,'bursts have a strict draw budget');
   assert.ok(feedback.particles.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.vx)));
-  advanceWebImpactFeedback(feedback,.5);
-  assert.equal(feedback.hitSeconds,0,'realtime hit marker expires even during world slow-motion');
+  // The game budgets at most 50 ms of real time per rendered frame.
   for(let i=0;i<10;i++)advanceWebImpactFeedback(feedback,.05);
+  assert.equal(feedback.hitSeconds,0,'realtime hit marker expires even during world slow-motion');
   assert.equal(feedback.particles.length,0,'expired shards cost zero draw calls');
   resetWebImpactFeedback(feedback);
   assert.equal(feedback.impactCount,0);
