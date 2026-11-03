@@ -380,7 +380,9 @@ export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
   }));
   return {
     source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
-    lookBuffer: 0, lookMeasuredAt: 0, lookWarmup: 10, yaw, pitch,
+    // Web-only: start with the caller's actual view as the comparison anchor.
+    // Do not discard the first ten simulation frames after start/replay.
+    lookBuffer: 0, lookMeasuredAt: 0, yaw, pitch,
   };
 }
 
@@ -450,9 +452,6 @@ export function stepMcdGameplayClock(clock, {
     look.currentTimeModifier = lookSourceResult.state.currentTimeModifier;
     clock.yaw = yaw; clock.pitch = pitch; // keep the Web-only fallback anchored
   } else {
-    if (clock.lookWarmup > 0) {
-      clock.yaw = yaw; clock.pitch = pitch; clock.lookWarmup--;
-    }
     if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
       // PROVISIONAL Web look estimate, not the native CameraAngle transform.
       const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
@@ -464,7 +463,13 @@ export function stepMcdGameplayClock(clock, {
         Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03))),
       );
       look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
-      clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
+      // Web-only start/replay responsiveness: TimeControl's first two
+      // delayed writes cannot apply this look impulse. Keep it pending until
+      // the first writable tick instead of consuming a real camera turn
+      // invisibly during startup. Source-qualified models are unchanged.
+      if (clock.source.delayedUpdates === 0) {
+        clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
+      }
       clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
     }
   }
