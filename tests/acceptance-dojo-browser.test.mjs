@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS } from '../scripts/acceptance-dojo-browser.mjs';
+import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS, dojoMovementIntent } from '../scripts/acceptance-dojo-browser.mjs';
 
 function mockBrowser() {
   const listeners = new Map();
@@ -10,7 +10,14 @@ function mockBrowser() {
   const documentListeners = new Map();
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
   const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
-    nativeScene:{source},gameplay:{encounter:{killed,killTarget:6,enemies:[]},
+    nativeScene:{source},
+    generatedManifest:{drawCalls:360,privateSourceName:'DO_NOT_SERIALIZE'},
+    nativeHands:{handsDrawCalls:2,handsTriangles:140,sourcePoseSampled:true,
+      webKatanaSocketApplied:true,privateRig:'DO_NOT_SERIALIZE'},
+    gameplay:{doorWarning:{readiness:'source-catalog-present',
+      lastEventStatus:'triggered',activeEnvelopes:1,renderedSpotlights:0,
+      privateDoorKey:'DO_NOT_SERIALIZE'},
+      encounter:{killed,killTarget:6,enemies:[]},
       weapon:true,ammo:6,heldItem:null,items:[{id:'cup-1',name:'PRIVATE_NAME',state:'static'},
         {id:'cup-2',name:'PRIVATE_NAME',state:'held'}],originalFragmentCount:2,
       audio:{sceneAmbienceSources:3,assets:{PRIVATE:'not serialized'}},
@@ -63,9 +70,16 @@ test('SH10 browser recorder samples rendered frame telemetry without private ite
     assert.deepEqual(data.frames[1].gameplay.itemStates,[{id:'cup-2',state:'held'}]);
     assert.equal(data.frames[1].gameplay.itemsTotal,2);
     assert.equal(data.frames[1].gameplay.audioAmbienceSources,3);
+    assert.deepEqual(data.frames[1].gameplay.visual,{
+      worldDrawCalls:360,handsDrawCalls:2,handsTriangles:140,
+      handsSourcePoseSampled:true,katanaSocketApplied:true,
+      warningReadiness:'source-catalog-present',warningEventStatus:'triggered',
+      warningActiveEnvelopes:1,warningRenderedSpotlights:0,
+    });
     assert.equal(data.frames[1].nativeScene.source.serializedOwner,'level10');
     assert.equal(JSON.stringify(data).includes('PRIVATE_NAME'),false);
     assert.equal(JSON.stringify(data).includes('not serialized'),false);
+    assert.equal(JSON.stringify(data).includes('DO_NOT_SERIALIZE'),false);
     assert.equal(mock.listenerCount,0);assert.equal(mock.cleared,true);
   } finally {mock.teardown();}
 });
@@ -93,7 +107,7 @@ test('SH10 recorder ignores stale frames and makes no input-state mutation',()=>
     assert.equal(recorder.length,1);
     mock.setFrame(2);mock.tick();
     assert.equal(recorder.length,2);
-    assert.equal(recorder.stop().frames[1].gameplay.moving,true);
+    assert.equal(recorder.stop().frames[1].gameplay.moving,false); // KeyQ is not a movement code in main.js.
   } finally {mock.teardown();}
 });
 
@@ -261,5 +275,37 @@ test('SH10 browser input receipts exclude first mouse-lock click and synthetic o
     ]);
     assert.equal(result.inputActionsTruncated,false);
     assert.equal(mock.documentListenerCount,0);
+  } finally {mock.teardown();}
+});
+
+
+test('SH10 Web movement intent exactly cancels opposite active physical axes, not typed AZERTY labels',()=>{
+  const check=(codes,expected)=>assert.equal(dojoMovementIntent(new Set(codes)),expected,
+    'keys '+codes.join(','));
+  check([],false);
+  check(['KeyQ'],false); // Physical KeyQ; printed Q on AZERTY emits KeyA instead.
+  check(['KeyA'],true);
+  check(['KeyD'],true);
+  check(['KeyA','KeyD'],false);
+  check(['ArrowLeft','ArrowRight'],false);
+  check(['KeyW','KeyS'],false);
+  check(['KeyZ','ArrowDown'],false);
+  check(['KeyW','KeyZ'],true); // multiple same-direction keys count once
+  check(['KeyW','KeyS','KeyA'],true); // one axis cancels, other remains.
+});
+
+test('SH10 browser clock labels reflect real Web input-axis cancellation, not nonempty key set',()=>{
+  const mock=mockBrowser();
+  try {
+    const recorder=startDojoCapture();
+    mock.key('KeyW');mock.key('KeyS');
+    mock.setFrame(2);mock.tick();
+    mock.key('KeyW',false);mock.key('KeyS',false);
+    mock.key('KeyA');mock.key('KeyD');
+    mock.setFrame(3);mock.tick();
+    mock.key('KeyD',false);mock.setFrame(4);mock.tick();
+    mock.key('KeyA',false);mock.key('KeyQ');mock.setFrame(5);mock.tick();
+    const data=recorder.stop();
+    assert.deepEqual(data.frames.map(f=>f.gameplay.moving),[false,false,false,true,false]);
   } finally {mock.teardown();}
 });
