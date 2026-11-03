@@ -43,6 +43,24 @@ test('real hit impulse uses the source mass and fingers follow the moving rigid 
   near(distance(runtime.getBoneWorldMatrix(2),runtime.getBoneWorldMatrix(3)),0.2);
 });
 
+test('localized hit transfers conserved momentum into authored adjacent joints, not every bone',()=>{
+  const runtime=create();
+  applyNativeDeathForce(runtime,{
+    boneIndex:2,mode:'Impulse',vector:{x:8,y:0,z:0},point:{x:0,y:2,z:0},
+  });
+  const hips=runtime.byBone.get(1),torso=runtime.byBone.get(2);
+  near(torso.velocity.x,8*0.78/4);
+  near(hips.velocity.x,8*0.22/12);
+  near(torso.source.mass*torso.velocity.x+hips.source.mass*hips.velocity.x,8);
+  near(torso.angularVelocity.z,0,'a centred contact must not create extra spin');
+  const noPoint=create();
+  applyNativeDeathForce(noPoint,{boneIndex:2,mode:'Impulse',vector:{x:8,y:0,z:0}});
+  near(noPoint.byBone.get(2).velocity.x,2);
+  near(noPoint.byBone.get(1).velocity.x,0);
+  advanceNativeDeathRuntime(runtime,0.1);
+  assert.ok(Array.from(runtime.boneModelMatrices).every(Number.isFinite));
+});
+
 test('contacting the environment stops the corpse rather than falling through the floor',()=>{
   const runtime=create(floor());
   const result=advanceNativeDeathRuntime(runtime,1);

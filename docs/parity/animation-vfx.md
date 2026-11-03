@@ -396,3 +396,29 @@ remains separately subject to authorization.
 **Défaut Web corrigé, mesurable en charge :** `advanceNativeDeathRuntime` continuait à résoudre articulations et contacts de chaque corps après avoir émis une fois `cleanupRequested`, parce que l'hôte n'a pas encore consommé ce signal. Désormais, les sous-étapes PBD sont limitées à la première échéance de cleanup attestée ; ensuite, le dernier packet osseux est conservé sans nouveau solveur, sans nouveaux contacts, et l'horloge scaled continue. Le compteur de temps de simulation abandonné ne comptabilise que le vrai plafond de budget Web, pas le temps après disparition demandée. Test de régression ciblé dans `tests/animation-native-death-runtime.test.mjs` : dépassement de deadline, pose stable, signal unique, forces post-deadline inactives.
 
 **Limites, raccord SH-05 :** c'est un **fallback de performance Web**, pas une équivalence de Unity PhysX ni une disparition native déjà rendue. Pour masquer/pooler effectivement l'acteur, le propriétaire de `main.js` doit consommer `cleanupRequested` et connaître les flags HDR, l'identité rig/prefab et la branche d'effet source. En l'absence du packet physique/rig actif, la pose figée reste le fallback. Ne créer ni particules commerciales ni shader de disparition inventé. Aucun smoke navigateur n'est déduit du test Node.
+
+### SH-06 — couplage articulé des impacts de mort (Web J4, 2026-11-03)
+
+**Défaut visible ciblé :** une balle localisée faisait accélérer son unique os
+physique ; le reste du corps était ensuite déplacé seulement par projection des
+contraintes, avec des réactions de membre trop isolées. Le moteur conserve la
+localisation du contact et l'impulsion existante mais, lorsqu'un contact monde
+qualifié est fourni, redistribue **22 % de l'impulsion linéaire** aux voisins
+directs reliés par les CharacterJoint déjà présents dans la définition source.
+La masse de chaque voisin détermine sa part, sans ajouter d'impulsion totale ;
+les 78 % restants et leur couple restent sur l'os touché. Un Kill sans contact
+qualifié conserve strictement l'ancien comportement, sans kick inventé.
+
+**Niveau de preuve :** la topologie joints/corps et les masses proviennent du
+paquet Dojo source-lié déjà publié (22 Rigidbody / 21 articulations, identité
+rig vérifiée par la chaîne Pages). La répartition 78/22 est un **réglage
+créatif Web**, non un prédicat MCD/Unity/PhysX. Le solveur conserve son budget
+de quatre sous-étapes Web, la décision de cleanup et l'absence de fragments
+artificiels. Test ciblé : impulsion linéaire totale conservée et voisinage
+limité à un saut, absence d'effet pour un hit sans point, pose finie après PBD.
+
+**À observer sur Pages après merge SH-05 :** sur un tir latéral bras/torse,
+le tronc devrait accompagner davantage la réaction et éviter l'effet « bras
+seul ». Comparer kill avec et sans point d'impact, au moins six morts à FPS
+stable, puis victoire/rejouer. Aucun smoke navigateur ou gain FPS ne découle
+de la CI ; pas de revendication PhysX 1:1.

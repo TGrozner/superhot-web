@@ -165,12 +165,25 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   if(!body)throw new RangeError('Impact has no source Rigidbody');
   const value=vector(force);
   if(mode==='Impulse') {
-    for(const axis of axes)body.velocity[axis]+=value[axis]*body.inverseMass;
-    if(hitPoint!==null) {
-      // An actual world-space contact generates torque about the body origin.
-      // Capping the angular kick is a Web stability/feel choice, not PhysX.
-      const lever=sub(vector(hitPoint),body.position);
-      const angularKick=mul(cross(lever,value),body.inverseInertia);
+    const contactPoint=hitPoint===null?null:vector(hitPoint);
+    // Web-only game feel: a verified, localized hit should move the whole
+    // articulated corpse, not only fling one limb against static joints.
+    // Transfer 22% of linear impulse to DIRECT, authored joint neighbors.
+    // Distributing by their mass gives each neighbor the same delta-v;
+    // total impulse remains conserved. No contact point => original behavior.
+    const neighbors=contactPoint===null?[]:[...new Set(runtime.joints.flatMap(joint=>
+      joint.a===body?[joint.b]:joint.b===body?[joint.a]:[]))];
+    const neighborMass=neighbors.reduce((sum,neighbor)=>sum+neighbor.source.mass,0);
+    const share=neighborMass>0?0.22:0; // creative Web tuning, NOT source PhysX.
+    const localImpulse=mul(value,1-share);
+    for(const axis of axes)body.velocity[axis]+=localImpulse[axis]*body.inverseMass;
+    if(share>0)for(const neighbor of neighbors)for(const axis of axes)
+      neighbor.velocity[axis]+=value[axis]*share/neighborMass;
+    if(contactPoint!==null) {
+      // Only the impulse retained by the struck bone contributes local torque.
+      // The transferred linear impulse acts at connected body centres.
+      const lever=sub(contactPoint,body.position);
+      const angularKick=mul(cross(lever,localImpulse),body.inverseInertia);
       const speed=length(angularKick);
       const bounded=speed>12?mul(angularKick,12/speed):angularKick;
       for(const axis of axes)body.angularVelocity[axis]+=bounded[axis];
