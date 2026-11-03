@@ -441,3 +441,26 @@ local offset is known and suppress its previous static held draw to avoid
 duplicates. Otherwise preserve the stable source-held placement. The original
 pistol must remain hands-free. SH-03 owns hits and SH-06 owns effects.
 A native Dojo/Web camera- and phase-matched comparison is still outstanding.
+
+
+### SH-14 — Dojo playerAnimation wrapper compatibility (03 Nov 2026)
+
+The archived Dojo extractor's **scene-level wrapper** is unversioned:
+`playerAnimation: { skin, states, parameters, profiles, weaponBone, material }`.
+This is distinct from its **versioned inner** `skin.schemaVersion === 1`,
+which the existing GPU loader must still validate. The first recovery adapter
+(#188) accidentally also required `playerAnimation.schemaVersion === 1`, so
+an archive-shaped packet would be rejected before any indexed hands draw even
+when it later supplied qualified clip bindings and a camera-local matrix.
+The SH-14 adapter now accepts a missing wrapper version, rejects an explicitly
+incompatible wrapper version, and still validates the skin's own version,
+source clip identities, rig and bone. A synthetic non-cuboid WebGL2 mock test
+checks that an unversioned wrapper can draw hands and return a posed socket;
+this is **not** an original asset, a measured visual frame or a native pose.
+
+**SH-05 integration gate is unchanged:** render only with a verified scene
+`SHRL_Dojo2 / level10`, source `held/swing` clip identifiers and the real
+camera-to-hands local matrix. The private data fields and native player
+Animator clock remain to be qualified; use the stable static blade fallback
+otherwise. The separate source katana mesh/socket offset and native swing event
+are not inferred by accepting the wrapper.

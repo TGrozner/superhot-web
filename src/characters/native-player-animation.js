@@ -78,7 +78,11 @@ export function createDojoPlayerAnimationPass(gl, {
   // packet.weaponBone, NOT skin.weaponAttachment (the EnemyMerged format).
   // Keep the older direct attachment path for existing source packages.
   if (playerPacket !== null && (
-      playerPacket?.schemaVersion !== 1 || !playerPacket.skin ||
+      // The archived scene packet wrapper is unversioned; its `skin` carries
+      // the independently validated versioned GPU package. Reject any
+      // explicitly incompatible wrapper version rather than guessing.
+      (playerPacket?.schemaVersion !== undefined && playerPacket.schemaVersion !== 1) ||
+      !playerPacket.skin ||
       !Array.isArray(playerPacket.states) || !playerPacket.profiles ||
       !Number.isInteger(playerPacket.weaponBone))) {
     throw new TypeError('Original Dojo scene playerAnimation packet required');
