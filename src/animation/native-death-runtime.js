@@ -273,12 +273,18 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       contactsFor(runtime,body,mul(body.velocity,dt),contacts);
       body.forces=body.forces.filter(f=>f.until>runtime.elapsed+dt);
     }
-    for(let iteration=0;iteration<runtime.definition.solverIterations;iteration++) {
+    // Alternate a small number of contact passes with the source number of
+    // joint iterations. A single final collision pass can separate linked
+    // bones after the joints were satisfied; querying every iteration caused
+    // the catastrophic full-scene collision workload.
+    const jointIterations=runtime.definition.solverIterations;
+    const collisionInterval=Math.max(1,Math.ceil(jointIterations/3));
+    for(let iteration=0;iteration<jointIterations;iteration++) {
       for(const joint of runtime.joints)if(joint.enabled){solveLimits(joint);solveAnchor(joint);}
+      if((iteration+1)%collisionInterval===0 || iteration===jointIterations-1) {
+        for(const body of runtime.bodies)contactsFor(runtime,body,zero(),contacts);
+      }
     }
-    // Collision solves once on the final projected pose, not once *per joint
-    // iteration* (22 bodies × joints × scene boxes was the Dojo FPS collapse).
-    for(const body of runtime.bodies)contactsFor(runtime,body,zero(),contacts);
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
       // The angular/linear joint correction is a POSITION projection. The
