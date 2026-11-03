@@ -303,6 +303,40 @@ test('SH10 Dojo input attempts must align with observed Web shot, E pickup and F
   failure(earlyFire,/primary-fire input receipt/);
 });
 
+test('SH10 item F is not evidence that the pistol was discarded with F before pickup',()=>{
+  const data=complete();
+  // Existing source-item throw at frame 12 still occurs. Earlier F for the
+  // weapon is absent: E cannot legitimately pick up a source item while armed.
+  data.inputActions=data.inputActions.filter(a=>!(a.kind==='throw' && a.frameId===11));
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.throwInputObserved,true);
+  assert.equal(result.checks.pistolDiscardBeforePickupObserved,false);
+  assert.match(result.errors.join(' '),/ordered F pistol-discard input/);
+});
+
+test('SH10 F must precede E when pistol discard and source pickup share a sampled frame',()=>{
+  const data=complete();
+  const gunThrow=data.inputActions.findIndex(a=>a.kind==='throw' && a.frameId===11);
+  const pickup=data.inputActions.findIndex(a=>a.kind==='pickup');
+  [data.inputActions[gunThrow],data.inputActions[pickup]]=
+    [data.inputActions[pickup],data.inputActions[gunThrow]];
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.checks.pistolDiscardBeforePickupObserved,false);
+  assert.equal(result.checks.pickupInputObserved,true);
+  assert.match(result.errors.join(' '),/ordered F pistol-discard input/);
+});
+
+test('SH10 both six and seven kills retain an ordered F pistol-discard receipt',()=>{
+  for(const target of [6,7]){
+    const result=report(complete(target));
+    assert.equal(result.status,DOJO_VERTICAL_STATUS.COMPLETE,JSON.stringify(result.errors));
+    assert.equal(result.checks.pistolDiscardBeforePickupObserved,true);
+    assert.equal(result.observed.pistolDiscardFrameId,12);
+  }
+});
+
 test('SH10 legacy or truncated owner input traces cannot pass by counters alone',()=>{
   const legacy=complete();delete legacy.inputActions;delete legacy.inputActionsTruncated;
   failure(legacy,/input receipts absent or truncated/);
