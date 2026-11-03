@@ -93,3 +93,40 @@ test('100ms real DOM sampling preserves a short clash missed by 1s panel refresh
   assert.equal(removed,true);
   assert.equal(timers.size,0);
 });
+
+
+test('Web QA reads real text ink bounds: nowrap banner may overflow its CSS box',()=>{
+  let textInk={left:-18,top:90,width:350,height:25};
+  const timers=new Map();
+  const banner={
+    hidden:false,textContent:'×4 ENCHAÎNEMENT · +150',
+    getBoundingClientRect:()=>({left:44,top:84,width:232,height:36}),
+  };
+  const documentRef={
+    body:{append(){}},
+    createElement:()=>({style:{},setAttribute(){},remove(){}}),
+    getElementById:id=>id==='chain-banner'?banner:null,
+    createRange:()=>({
+      selectNodeContents(element){assert.equal(element,banner);},
+      getBoundingClientRect:()=>textInk,
+    }),
+  };
+  const windowRef={
+    innerWidth:320,innerHeight:240,
+    __superhotGetRenderedFrameSnapshot:()=>playing,
+    __superhotSceneMetrics:{p95FrameMs:16.4},
+    getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
+    setInterval:(fn,ms)=>{timers.set(ms,fn);return ms;},
+    clearInterval:ms=>{timers.delete(ms);},
+  };
+  const qa=installWebVisualQa({windowRef,documentRef});
+  assert.deepEqual(qa.getReport().warnings.map(w=>w.kind),['clipped-banner']);
+  textInk={left:26,top:90,width:268,height:25}; // inside viewport, beyond panel backdrop
+  timers.get(100)();
+  const report=qa.getReport();
+  assert.deepEqual(report.warnings.map(w=>w.kind),['text-outside-banner']);
+  assert.deepEqual(report.transientWarnings.map(w=>w.kind).sort(),
+    ['clipped-banner','text-outside-banner']);
+  qa.stop();
+  assert.equal(timers.size,0);
+});
