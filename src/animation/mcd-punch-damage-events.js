@@ -5,7 +5,8 @@
  * Receiver method contract: #152, artifact 13178856534,
  * PejAiAnimator.cs:1501-1509; native event interval: #29.
  *
- * It supports only the eight explicitly measured source fist clips, not aliases.\n * This adapter deliberately requires positive evidence for the actor, clip,
+ * It supports only the eight explicitly measured source fist clips, not aliases.
+ * This adapter deliberately requires positive evidence for the actor, clip,
  * prepared event interval, active GameObject and receiver. It DOES NOT resolve
  * Unity's clip time, crossfade, weight, culling, binding, or hitbox itself.
  */
@@ -13,7 +14,7 @@ import { scanNativeEventInterval } from './native-event-interval.js';
 
 // Source serialized MeleeDamageStart/End writes for eight source fist variants.
 // These are clip seconds, NEVER wall-clock estimates or proof that the Dojo
- // actor selected a particular clip. Private research #46 / artifact 13135780460.
+// actor selected a particular clip. Private research #46 / artifact 13135780460.
 const CLIP_OWNER = 'sharedassets0.assets';
 const WINDOWS = Object.freeze({
   429: Object.freeze([0.4686083197593689, 0.7319236993789673]), // Fist 01
