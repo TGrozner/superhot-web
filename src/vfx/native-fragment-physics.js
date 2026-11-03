@@ -1,6 +1,9 @@
 import { nativeSphereHit } from '../scenes/native-collision.js';
 
 const axes = ['x', 'y', 'z'];
+// Original Web frame budget: source fixed steps on normal frames, at most four
+// swept steps after a hitch. This is NOT an extracted Unity/PhysX policy.
+export const WEB_FRAGMENT_MAX_SUBSTEPS = 4;
 const dot = (a, b) => a.x*b.x + a.y*b.y + a.z*b.z;
 const sub = (a,b) => ({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
 const along = (a,b,t) => ({x:a.x+b.x*t,y:a.y+b.y*t,z:a.z+b.z*t});
@@ -107,14 +110,26 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
 /** Advance an authored shard using a source fixed step and source gravity.
  * The caller still owns HDR destruction; this function never invents lifetimes.
  */
-export function advanceNativeFragmentBody(body, scaledDelta, { collisionScene, gravity, fixedDelta, material }) {
+export function advanceNativeFragmentBody(body, scaledDelta, {
+  collisionScene, gravity, fixedDelta, material, limitWebFrameWork = false,
+}) {
   if (!Number.isFinite(scaledDelta) || scaledDelta < 0 || !Number.isFinite(fixedDelta) || fixedDelta <= 0 ||
-      !gravity || !axes.every(a => Number.isFinite(gravity[a])) || !Number.isFinite(body.drag) || body.drag < 0)
+      !gravity || !axes.every(a => Number.isFinite(gravity[a])) || !Number.isFinite(body.drag) || body.drag < 0 ||
+      typeof limitWebFrameWork !== 'boolean')
     throw new TypeError('Nonnegative delta, source gravity, drag and positive fixedDelta required');
   const contacts = [];
   let remaining = scaledDelta;
+  // At 60fps, keep source-sized substeps. A slow Web frame would otherwise
+  // multiply 150Hz fragment sweeps across every active shattered object.
+  // Use at most four larger *swept* steps, preserving elapsed motion and the
+  // independent HDR lifetime instead of accumulating a physics catch-up debt.
+  const stepLimit = limitWebFrameWork
+    ? Math.max(fixedDelta, scaledDelta / WEB_FRAGMENT_MAX_SUBSTEPS)
+    : fixedDelta;
+  let steps = 0;
   while (remaining > 1e-12) {
-    const dt = Math.min(fixedDelta, remaining);
+    const dt = limitWebFrameWork && steps === WEB_FRAGMENT_MAX_SUBSTEPS - 1
+      ? remaining : Math.min(stepLimit, remaining);
     const displacement = {};
     for (const axis of axes) {
       const next = (body.velocity[axis] + gravity[axis]*dt) / (1+body.drag*dt);
@@ -124,6 +139,7 @@ export function advanceNativeFragmentBody(body, scaledDelta, { collisionScene, g
     contacts.push(...moveNativeFragmentSphere(collisionScene, body.position, body.velocity,
       displacement, body.collisionRadius, material));
     remaining -= dt;
+    steps++;
   }
   return contacts;
 }
