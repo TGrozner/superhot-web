@@ -190,25 +190,36 @@ test('J4 Web beacons sweep real Dojo door cones smoothly without new packets or 
   const packets = bridge.packets();
   const first = packets[0];
   const sourceIntensity = first.spotlight.intensity;
+  const sourceAngle = first.spotlight.spotAngle;
   const firstDirection = first.spotlight.direction;
   const firstRight = first.spotlight.right;
+  const firstUp = first.spotlight.up;
   const baseForward = [...firstDirection];
   const baseRight = [...firstRight];
+  const baseUp = [...firstUp];
 
   assert.equal(bridge.accept(warning(103)).status, 'triggered');
   bridge.advance(0.5); // Source curve = 50% range; Web sweep at a quarter cycle.
   assert.equal(bridge.packets(), packets, 'no warning packet allocations per frame');
   assert.equal(first.spotlight.direction, firstDirection, 'direction buffer reused');
   assert.equal(first.spotlight.right, firstRight, 'right buffer reused');
+  assert.equal(first.spotlight.up, firstUp, 'up buffer reused');
+  assert.ok(Math.abs(first.spotlight.spotAngle - sourceAngle * 0.62) < 1e-10,
+    '3D warning lighthouse narrows its visible cone at full sideways sweep');
+  assert.ok(first.spotlight.direction[1] > 0.07,
+    'lighthouse also climbs the doorway; it does not merely rotate horizontally');
   assert.ok(Math.abs(first.spotlight.range - 6.3) < 1e-10);
   assert.ok(Math.abs(first.spotlight.intensity - sourceIntensity * 1.2) < 1e-10);
   assert.ok(first.spotlight.direction[2] < baseForward[2] - 0.25,
     'beacon sweeps over the real source doorway, instead of staying fixed');
   assert.ok(Math.abs(Math.hypot(...first.spotlight.direction) - 1) < 1e-9);
   assert.ok(Math.abs(Math.hypot(...first.spotlight.right) - 1) < 1e-9);
-  const orthogonal = first.spotlight.direction.reduce((sum, value, i) =>
-    sum + value * first.spotlight.right[i], 0);
-  assert.ok(Math.abs(orthogonal) < 1e-9, 'cone basis remains orthogonal');
+  assert.ok(Math.abs(Math.hypot(...first.spotlight.up) - 1) < 1e-9);
+  const dot = (a, b) => a.reduce((sum, value, i) => sum + value * b[i], 0);
+  assert.ok(Math.abs(dot(first.spotlight.direction, first.spotlight.right)) < 1e-9);
+  assert.ok(Math.abs(dot(first.spotlight.direction, first.spotlight.up)) < 1e-9);
+  assert.ok(Math.abs(dot(first.spotlight.right, first.spotlight.up)) < 1e-9,
+    'animated 3D cookie basis remains orthonormal');
   assert.equal(packets[1].active, false, 'other door warnings stay off');
   assert.equal(packets[2].active, false);
 
@@ -216,6 +227,8 @@ test('J4 Web beacons sweep real Dojo door cones smoothly without new packets or 
   assert.equal(bridge.accept(warning(103)).status, 'triggered');
   assert.deepEqual(first.spotlight.direction, baseForward);
   assert.deepEqual(first.spotlight.right, baseRight);
+  assert.deepEqual(first.spotlight.up, baseUp);
+  assert.equal(first.spotlight.spotAngle, sourceAngle);
   bridge.advance(1);
   assert.equal(first.spotlight.range, 10, 'source midpoint is never altered');
   assert.equal(first.spotlight.intensity, sourceIntensity);
@@ -225,6 +238,8 @@ test('J4 Web beacons sweep real Dojo door cones smoothly without new packets or 
   assert.equal(first.spotlight.range, 0);
   assert.deepEqual(first.spotlight.direction, baseForward);
   assert.deepEqual(first.spotlight.right, baseRight);
+  assert.deepEqual(first.spotlight.up, baseUp);
+  assert.equal(first.spotlight.spotAngle, sourceAngle);
   assert.equal(first.spotlight.intensity, sourceIntensity);
   bridge.reset();
   assert.equal(packets.filter(packet => packet.active).length, 0);
