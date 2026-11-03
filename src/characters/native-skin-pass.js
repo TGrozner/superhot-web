@@ -67,7 +67,7 @@ in vec3 vCameraForward;
 in vec3 vObjectCameraForward;
 uniform vec4 uColor;
 uniform vec4 uRedCrystalControl;
-uniform float uWebHitFlash;
+uniform vec4 uWebHitFlash;
 uniform vec3 uCameraPosition;
 uniform vec3 uSourceLightDirection;
 out vec4 fragColor;
@@ -88,7 +88,7 @@ void main() {
   // Creative Web impact feedback after both source and diagnostic shading.
   // Single white-hot pulse: no extra geometry or draw call.
   fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.96, 0.83),
-    clamp(uWebHitFlash, 0.0, 1.0));
+    clamp(uWebHitFlash.x, 0.0, 1.0));
 }`;
 
 function numericArray(value, length, label) {
@@ -1439,7 +1439,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
         ? width / height : 1;
       gl.uniform4f(uniforms.uRedCrystalControl,
         loaded.mesh.hasSourceUV0 ? 1 : 0, shaderTime, viewportAspect, 0);
-      gl.uniform1f(uniforms.uWebHitFlash, webHitFlash);
+      gl.uniform4f(uniforms.uWebHitFlash, webHitFlash, 0, 0, 0);
       gl.uniform3f(uniforms.uCameraPosition, camera[0], camera[1], camera[2]);
       gl.uniform3f(uniforms.uSourceLightDirection, ...sourceLighting.directionToLight);
       if (culling) gl.frontFace(mirrored ? gl.CW : gl.CCW);
