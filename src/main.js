@@ -475,6 +475,7 @@ const state = {
   score: 0, shots: 0, hits: 0, ammo: 6, weapon: true, reload: 0, fireDelay: 0,
   recoil: 0, muzzle: 0, hop: 0, verticalSpeed: 0, walkCycle: 0,
   kills: 0, damage: 0, instructions: false,
+  chain: 0, lastChainKillAt: -Infinity, chainBonus: 0,
 };
 const webImpactFeedback = createWebImpactFeedback();
 let nativeClock = createMcdGameplayClock();
@@ -602,6 +603,7 @@ function loadLevel(index) {
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   resetWebImpactFeedback(webImpactFeedback);
+  state.chain=0;state.lastChainKillAt=-Infinity;state.chainBonus=0;
   $('ammo-hint').textContent = nativeGameplay() ? '/ CHANGER D’ARME UNE FOIS VIDE' : '/ R POUR RECHARGER';
   audio.setOriginalMode(Boolean(containersPreviewEnabled && nativeScene));
   $('room-name').textContent = containersPreviewEnabled
@@ -986,7 +988,13 @@ function killEnemy(enemy,hitReceipt=null) {
   enemy.deathFireAction=enemy.fireAction??null;
   enemy.alive = false;
   enemy.deathAt = state.worldClock;
-  state.kills++; state.score += 100;
+  // Web-only momentum scoring: reward aggressive streaks using REAL played
+  // time, not the slowed physics clock. Never modify the kill quota.
+  const chained=state.runClock-state.lastChainKillAt<=3.25;
+  state.chain=chained?Math.min(9,state.chain+1):1;
+  state.lastChainKillAt=state.runClock;
+  state.chainBonus=100*state.chain;
+  state.kills++;state.score+=state.chainBonus;
   state.hits++;
   const floorY = floorAt(enemy.x, enemy.z, enemy.y);
   if(nativeGameplay()) {
@@ -1413,6 +1421,14 @@ function updateHud(dt = 0) {
   shootFlash.style.opacity = state.muzzle > 0 ? '.42' : '0';
   const target = rayTarget();
   crosshair.classList.toggle('target',!!target);
+  const chainTime=3.25-(state.runClock-state.lastChainKillAt);
+  const chainVisible=state.chain>1 && chainTime>0;
+  const chainLabel=$('chain-banner');
+  chainLabel.hidden=!chainVisible;
+  if(chainVisible) {
+    chainLabel.textContent=`×${state.chain} ENCHAÎNEMENT  ·  +${state.chainBonus}`;
+    chainLabel.style.opacity=String(Math.min(1,chainTime*2));
+  }
   hitConfirm.style.opacity=String(clamp(webImpactFeedback.hitSeconds/.12,0,1));
   hitConfirm.classList.toggle('kill',webImpactFeedback.hitKind==='kill');
   if (nativeGameplay() && nativeHudReady) {
@@ -1811,6 +1827,7 @@ function render() {
       instances: nativeScene.instances.length, textures: nativeScene.textures.size } : null,
     gameplay: { timeScale: state.speed, nativeClock: nativeGameplay(),
       webImpactFx: {active:webImpactFeedback.particles.length,contacts:webImpactFeedback.impactCount},
+      chain:state.chain,chainBonus:state.chainBonus,
       ammo: state.ammo, fireDelay: state.fireDelay, weapon: state.weapon,
       initialEquipment: nativeGameplay() ? nativeScene.initialEquipment : null,
       feet:nativeGameplay()?{...nativeFeet}:null,grounded:nativeGameplay()?nativeGrounded:null,
