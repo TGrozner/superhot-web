@@ -171,3 +171,15 @@ test('invalid state/clip/contact timestamps fail rather than guess', () => {
   assert.throws(() => step(begin(), 0.6, null,
     { preparedIntervalConfirmed: undefined }), /boolean/);
 });
+
+test('Dojo fist-02 gate uses its own shorter serialized window, not fist-01 timing', () => {
+  const variant = { ...proof, clipPathId: 448 };
+  const first = step(begin(), 0.35, hit(0.31), variant);
+  assert.equal(first.requests.length, 1);
+  assert.equal(first.requests[0].clipTime, 0.31);
+  const after = step(begin(), 0.6, hit(0.50), variant);
+  assert.equal(after.contactStatus, 'damage-window-closed');
+  assert.deepEqual(after.requests, []);
+  const laterFist01 = step(begin(), 0.35, hit(0.31), proof);
+  assert.equal(laterFist01.contactStatus, 'damage-window-closed');
+});
