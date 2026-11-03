@@ -14,6 +14,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyDojoRagdollPack } from './verify-dojo-ragdoll.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pack = resolve(root, 'local-assets');
@@ -46,6 +47,12 @@ async function sha256(path) {
   for await (const chunk of createReadStream(path)) h.update(chunk);
   return h.digest('hex');
 }
+
+// Publication must consume the exact same canonical pack as npm start.
+// This source/rig preflight is independent of the generic size/hash gate.
+const ragdoll = await verifyDojoRagdollPack(pack);
+console.log('Ragdoll release gate:', ragdoll.bodies, 'bodies,',
+  ragdoll.joints, 'joints, exact rig checksum.');
 
 const manifestPath = join(pack, 'manifest.json');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
