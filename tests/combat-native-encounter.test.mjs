@@ -291,3 +291,39 @@ test('Dojo door matures a source factory order before choosing its active weapon
   assert.equal(missing.sourceFactoryPlan.status,'blocked');
   assert.equal(missing.sourceFactoryPlan.reason,'active-factory-evidence-incomplete');
 });
+
+
+test('J3 Web strafes: armed enemies alternate safe lateral lanes instead of camping the firing line',()=>{
+  // Synthetic Web-only tuning, never source MCD speed/timing data. The
+  // existing real encounter loop consumes this without an extra main hook.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const clear=setup(data), enemy=firstSpawn(clear,near);
+  enemy.clock=1.6;
+  enemy.muzzlePosition=p(2,1.4,2);
+  enemy.muzzleForward=p(1,0,0);
+  const before=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(clear,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.ok(Math.abs(enemy.z-before.z)>.05,'qualified armed actor strafes near the visible player');
+  assert.ok(Math.abs(enemy.x-before.x)<.001,'movement is tangential to the player');
+  assert.equal(enemy.walking,true,'existing skin animation gets the movement flag');
+  assert.equal(enemy.encounter.route,null,'strafe invalidates any stale chase corridor');
+  const moved=p(enemy.x,enemy.y,enemy.z);
+  enemy.clock=3.5; // outside the 1.35 s Web movement window
+  advanceNativeEncounter(clear,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),moved,'brief pause restores readable shot windows');
+  enemy.clock=1.6;
+  enemy.reaction.stunRemaining=.7;
+  advanceNativeEncounter(clear,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),moved,'stun still prevents movement');
+
+  const crowded=setup(data), sideEnemy=firstSpawn(crowded,near);
+  sideEnemy.clock=1.6;
+  sideEnemy.muzzlePosition=p(2,1.4,2);
+  sideEnemy.muzzleForward=p(1,0,0);
+  const blocker={id:'web-lane-blocker',x:2,y:0,z:1.05,alive:true,active:true};
+  advanceNativeEncounter(crowded,input([sideEnemy,blocker],{...near,scaledDeltaTime:.2}));
+  assert.ok(sideEnemy.z>2,'occupied first lane causes a real reverse sidestep');
+  assert.ok(Math.hypot(sideEnemy.x-blocker.x,sideEnemy.z-blocker.z)>=.8,
+    'no crowd clipping or actor teleport');
+});

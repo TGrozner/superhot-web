@@ -11,6 +11,47 @@ const living = enemy => enemy.alive && !enemy.reaction?.dead;
 const participating = enemy => living(enemy) && enemy.active !== false;
 const fromMatrix = matrix => ({ x:matrix[12], y:matrix[13], z:matrix[14] });
 const EPSILON = 1e-6;
+
+// J3 Web gameplay tuning, NOT MCD timing: staggered short lateral moves make
+// armed enemies less static without changing the source navmesh or gun gates.
+const WEB_STRAFE = Object.freeze({
+  warmupSeconds: 1.2,
+  cycleSeconds: 3.4,
+  activeSeconds: 1.35,
+  speedFraction: 0.8,
+});
+
+/** Keep the native collision/navmesh as the authority even for Web-only
+ * tactics. Never teleport an actor or cross a blocking actor/player.
+ * Blocked lanes reverse once, then the enemy simply holds its position.
+ */
+function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
+  const start=position(enemy), state=enemy.encounter;
+  const dx=playerFeet.x-start.x, dz=playerFeet.z-start.z, d=Math.hypot(dx,dz);
+  if (d<=EPSILON || !Number.isFinite(d)) return false;
+  const cycle=Math.floor((enemy.clock-WEB_STRAFE.warmupSeconds)/WEB_STRAFE.cycleSeconds);
+  const direction=state.webTacticalSide*(cycle%2===0 ? 1 : -1);
+  const travel=enemy.runtime.speed*scaledDeltaTime*WEB_STRAFE.speedFraction;
+  if (travel<=EPSILON) return false;
+  // Face stays toward the player while the feet move sideways. All movement
+  // is done by the existing capsule mover and checked against baked nav data.
+  for (const side of [direction,-direction]) {
+    const moved=moveNativeCharacter(runtime.collision,start,{
+      x:-dz/d*travel*side,y:0,z:dx/d*travel*side,
+    },runtime.body).position;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null; // A later chase must route from the actual new feet.
+    if(side!==direction)state.webTacticalSide=-state.webTacticalSide;
+    return true;
+  }
+  return false;
+}
 function scalar(value, name) {
   if (!Number.isFinite(value) || value < 0) throw new TypeError(name+' must be finite and nonnegative');
   return value;
@@ -209,7 +250,8 @@ function spawnEnemy(runtime, point, order, population) {
       ? Object.freeze({status:'qualified',factoryId:activation.factoryId,
         family:activation.family,archetype:activation.archetype,prefabId:activation.prefabId})
       : Object.freeze({status:'web-pistol-fallback',reason:activation.reason}),
-    encounter:{route:null, target:null, visible:false, canAttack:false, spawnPointId:point.id},
+    encounter:{route:null, target:null, visible:false, canAttack:false, spawnPointId:point.id,
+      webTacticalSide:runtime.nextId%2===0 ? 1 : -1},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
@@ -238,11 +280,25 @@ function moveEnemy(runtime, enemy, input) {
     nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
   const stopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stop=state.visible && distance(start,playerFeet) <= stopDistance;
+  // Deliberately Web-only J3 behavior: a visible, muzzle-qualified armed actor
+  // briefly circles the player instead of remaining a stationary firing target.
+  // Per-actor side staggering and periodic reversal are deterministic; no new
+  // attack, projectile or damage is introduced. No movement without nav/capsule
+  // acceptance, and missing muzzle evidence preserves existing behavior.
+  const tacticalTime=enemy.clock-WEB_STRAFE.warmupSeconds;
+  const tactical=stop && armed && state.canAttack && !enemy.runtime.pendingShot &&
+    Number.isFinite(tacticalTime) && tacticalTime>=0 &&
+    tacticalTime%WEB_STRAFE.cycleSeconds<WEB_STRAFE.activeSeconds;
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
-    stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
+    tactical ? 'walking' : stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
   const dx=playerPosition.x-start.x, dz=playerPosition.z-start.z;
   if (dx || dz) enemy.face=Math.atan2(dx,-dz);
-  if (stop || scaledDeltaTime === 0) return;
+  if (stop) {
+    if(tactical && scaledDeltaTime>0 &&
+        !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
+    return;
+  }
+  if (scaledDeltaTime === 0) return;
   if (!state.route || !state.target || distance(state.target,playerFeet) > runtime.body.radius ||
       state.route.cursor >= state.route.points.length) {
     state.route=findNativeRoute(runtime.nav,start,playerFeet,{maxSnapDistance:runtime.maxSnapDistance});
