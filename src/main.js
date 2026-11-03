@@ -14,6 +14,8 @@ import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativ
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
+import { createNativeDeathRuntime } from './animation/native-death-runtime.js';
+import { advanceDojoDeathSkinFrame } from './animation/native-gameplay-pose-bridge.js';
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests } from './combat/native-enemy-fire-phase.js';
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
@@ -57,6 +59,7 @@ let nativeEnemyGeneration = 0;
 let nativeEnemyStats = null;
 let nativeScene = null;
 let nativeSkinInfo = null;
+let nativeRigSha256 = null;
 let localAssetManifest = null;
 let nativeHudReady = false;
 let nativeDoorWarningBridge = null;
@@ -125,14 +128,20 @@ if (containersPreviewEnabled) {
     try {
       const receipt = await loadNativeEnemyObj(file, { variant });
       const rigId = variant === 'headless' ? 'enemyHeadlessRig' : 'enemyRig';
-      let rig = null;
+      let rig = null, rigSha256 = null;
       if (localAssetManifest?.assets?.[rigId]) {
         const response = await fetch(`/local-assets/${rigId}`, { cache: 'no-store' });
         if (!response.ok) throw new Error('Animation originale locale indisponible.');
-        rig = await response.json();
+        const bytes = await response.arrayBuffer();
+        rig = JSON.parse(new TextDecoder().decode(bytes));
+        if (globalThis.crypto?.subtle?.digest) {
+          const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+          rigSha256 = [...hash].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        }
       }
       if (generation !== nativeEnemyGeneration) return false;
       nativeSkinInfo = renderer.replaceNativeCharacter(receipt, rig);
+      nativeRigSha256 = rigSha256;
       localNativeEnemy = Object.freeze({
         owner: receipt.owner, meshPathId: receipt.meshPathId,
         variant: receipt.variant, triangles: receipt.mesh.triangleCount,
@@ -828,6 +837,47 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
   }
   return result;
 }
+// Normal source Kill toggles the authored rigidbodies; directional/head forces
+// are separate native routes. We only start an explicitly source-bound Web PBD
+// preview from an actual sampled actor pose and measured Web motion.
+function prepareDojoDeathPhysics(enemy) {
+  const definition=nativeScene?.gameplay?.deathPhysics;
+  const rig=nativeSkinInfo?.skinRig;
+  if(!definition || !rig || !isDojoBuild10Source(nativeScene.source)) return;
+  if(definition.source?.identity!=='sharedassets0.assets::5163 / EnemyMergedForPooler' ||
+      !nativeRigSha256 || nativeRigSha256!==nativeScene.gameplay.deathPhysicsRigSha256 ||
+      definition.bodies?.length!==22 || definition.joints?.length!==21 ||
+      definition.boneParents?.length!==rig.boneOrder.length) {
+    enemy.deathPhysicsStatus='unqualified-source-rig-or-definition';
+    return;
+  }
+  const elapsed=state.worldClock-(enemy.lastPoseWorldClock??Infinity);
+  if(!(elapsed>0) || !enemy.lastActorModel || !enemy.lastBoneModelMatrices) {
+    enemy.deathPhysicsStatus='no-timestamped-skinned-pose';
+    return;
+  }
+  const initialVelocity=vec(
+    (enemy.x-enemy.lastActorModel[12])/elapsed,
+    (enemy.y-enemy.lastActorModel[13])/elapsed,
+    (enemy.z-enemy.lastActorModel[14])/elapsed);
+  if(![initialVelocity.x,initialVelocity.y,initialVelocity.z].every(Number.isFinite)) {
+    enemy.deathPhysicsStatus='invalid-observed-web-velocity';
+    return;
+  }
+  try {
+    enemy.deathRuntime=createNativeDeathRuntime({
+      definition, boneModelMatrices:enemy.lastBoneModelMatrices,
+      modelMatrix:enemy.lastActorModel, collisionScene:nativeEnemyCollision,
+      initialVelocity,
+    });
+    enemy.deathRig=rig;
+    enemy.deathBoneOrder=rig.boneOrder;
+    enemy.deathPhysicsProvenance='source-prefab-plus-observed-web-velocity-not-physx';
+    enemy.deathPhysicsStatus='source-parameters-web-pbd-active';
+  } catch {
+    enemy.deathPhysicsStatus='source-physics-construction-rejected';
+  }
+}
 function killEnemy(enemy) {
   if (!enemy.alive) return;
   enemy.deathFireAction=enemy.fireAction??null;
@@ -839,6 +889,7 @@ function killEnemy(enemy) {
   if(nativeGameplay()) {
     if(enemy.reaction.hasWeapon) {dropNativeEnemyWeapon(enemy);enemy.reaction.hasWeapon=false;}
     enemy.reaction.dead=true;enemy.runtime.pendingShot=null;
+    prepareDojoDeathPhysics(enemy);
   } else {
     shatterAt(vec(enemy.x, enemy.y + 1.12, enemy.z), 23, RED, floorY);
     state.drops.push({x:enemy.x,y:floorY+.38,z:enemy.z,bob:rand(0,7),ammo:6});
@@ -1199,6 +1250,27 @@ function update(dt) {
     f.life-=worldDt;
     if (f.life<=0) state.fragments.splice(i,1);
   }
+  if(native && nativeSkinInfo) for(const enemy of state.enemies) {
+    if(enemy.alive || !enemy.deathRuntime) continue;
+    if(enemy.deathRig!==nativeSkinInfo.skinRig) {
+      enemy.deathRuntime=null;
+      enemy.deathSolvedPose=null;
+      enemy.deathPhysicsStatus='skin-rig-replaced';
+      continue;
+    }
+    try {
+      const frame=advanceDojoDeathSkinFrame({
+        runtime:enemy.deathRuntime, rig:enemy.deathRig,
+        sourceBoneOrder:enemy.deathBoneOrder, scaledDelta:worldDt,
+        provenance:enemy.deathPhysicsProvenance,
+      });
+      enemy.deathSolvedPose=frame.solvedPose;
+    } catch {
+      enemy.deathRuntime=null;
+      enemy.deathSolvedPose=null;
+      enemy.deathPhysicsStatus='web-pbd-step-rejected';
+    }
+  }
   if (state.transition>0) {
     state.transition-=dt;
     if (state.transition<=0) {
@@ -1318,12 +1390,23 @@ function drawEnemy(enemy) {
     } : null;
     const time = animationClock - animation.startedAt;
     enemy.fireAction=enemyFireAction(enemy,animationClock);
+    const solvedPose=dying ? enemy.deathSolvedPose??null : null;
     nativeEnemyStats = renderer.drawNativeSkin(actorMatrix, animation.state, time, {
-      statePlayback, transition, action: enemy.fireAction,
+      statePlayback, transition:solvedPose?null:transition,
+      action:solvedPose?null:enemy.fireAction, solvedPose,
       shaderTime: state.runClock, cameraPosition: state.camera,
     })
       ?? renderer.drawLocalEnemyDiagnostic(actorMatrix);
     if(nativeGameplay() && nativeEnemyStats?.boneModelMatrices) {
+      if(enemy.alive && nativeEnemyStats.skinned) {
+        const bones=nativeEnemyStats.boneModelMatrices;
+        if(!enemy.lastBoneModelMatrices || enemy.lastBoneModelMatrices.length!==bones.length)
+          enemy.lastBoneModelMatrices=new Float32Array(bones.length);
+        enemy.lastBoneModelMatrices.set(bones);
+        if(!enemy.lastActorModel)enemy.lastActorModel=new Float32Array(16);
+        enemy.lastActorModel.set(actorMatrix);
+        enemy.lastPoseWorldClock=state.worldClock;
+      }
       enemy.hitShapes=sampleNativeBodyShapes(nativeScene.gameplay.hitShapes,actorMatrix,nativeEnemyStats.boneModelMatrices,enemy.hitShapes);
       const bones=nativeEnemyStats.boneModelMatrices,offset=nativeScene.gameplay.aim.spineBoneIndex*16;
       enemy.spineUp=normalize3(vec(actorMatrix[0]*bones[offset+4]+actorMatrix[4]*bones[offset+5]+actorMatrix[8]*bones[offset+6],
@@ -1615,7 +1698,7 @@ function render() {
   if (!containersPreviewEnabled || nativeGameplay()) {
     for(const drop of state.drops) drawPickup(drop);
     for(const enemy of state.enemies) {
-      if(enemy.alive || (containersPreviewEnabled && nativeSkinInfo && enemy.deathAt !== null && state.worldClock - enemy.deathAt < .8)) drawEnemy(enemy);
+      if(enemy.alive || (containersPreviewEnabled && nativeSkinInfo && enemy.deathAt !== null && (enemy.deathRuntime ? !enemy.deathRuntime.cleanupRequested : state.worldClock - enemy.deathAt < .8))) drawEnemy(enemy);
     }
     if(nativeGameplay()) {
       const draws=nativeItemDraws(nativeItems,cam);
@@ -1647,7 +1730,7 @@ function render() {
       }:null,
       encounter:nativeEncounter?{killTarget:nativeEncounter.killTarget,killed:nativeEncounter.killed,pending:nativeEncounter.spawner.pending.length,
         enemies:state.enemies.map(e=>({id:e.id,x:e.x,y:e.y,z:e.z,alive:e.alive,walking:e.walking,stun:e.reaction.stunRemaining,
-          armed:e.reaction.hasWeapon,canAttack:e.encounter.canAttack,spawnPoint:e.encounter.spawnPointId,muzzle:e.muzzlePosition,forward:e.muzzleForward}))}:null,
+          armed:e.reaction.hasWeapon,canAttack:e.encounter.canAttack,spawnPoint:e.encounter.spawnPointId,muzzle:e.muzzlePosition,forward:e.muzzleForward,deathPhysics:e.deathPhysicsStatus??null}))}:null,
       items:nativeItems?nativeItems.items.map(item=>({id:item.id,name:item.name,state:item.state,position:getNativeItemPosition(item)})):[],
       heldItem:nativeItems?.held?.id??null,originalFragmentCount:nativeItems?.fragments.reduce((n,g)=>n+g.shards.filter(s=>!s.destroyed).length,0)??0,
       hop: state.hop, velocity: { ...nativeVelocity }, audio: audio.getMetrics() },
