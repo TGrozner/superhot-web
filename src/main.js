@@ -1029,7 +1029,16 @@ function update(dt) {
       scaledDeltaTime:worldDt,unscaledDeltaTime:dt,playerPosition:state.camera,
       playerForward:cameraAxes(state.camera.yaw,state.camera.pitch).forward,playerFeet:nativeFeet,enemies:state.enemies,
     });
-    for(const event of events)if(event.type==='spawn')state.enemies.push(event.enemy);
+    for(const event of events)if(event.type==='spawn') {
+      // The existing encounter's only selected template is 'web-pistol'.
+      // Bind an explicit per-actor Web fallback family for both Attack and
+      // late weapon-pose emission. Native Dojo factory selection is UNKNOWN.
+      event.enemy.activeWeaponSettings=Object.freeze({
+        ...nativeEncounter.enemySettings,
+        family:nativeEncounter.enemySettings.family ?? 'Pistol',
+      });
+      state.enemies.push(event.enemy);
+    }
   }
 
   for (const enemy of state.enemies) {
@@ -1037,7 +1046,8 @@ function update(dt) {
     if (containersPreviewEnabled && (nativeInspection || !nativeScene || !nativeCombatStarted)) continue;
     if(native) {
       enemy.clock+=worldDt;
-      advanceNativeEnemyWeapon(enemy.runtime,nativeEncounter.enemySettings,worldDt);
+      const activeWeaponSettings=enemy.activeWeaponSettings ?? nativeEncounter.enemySettings;
+      advanceNativeEnemyWeapon(enemy.runtime,activeWeaponSettings,worldDt);
       const aim=vec(state.camera.x,state.camera.y-.25,state.camera.z);
       const toUnity=p=>vec(-p.x,p.y,p.z);
       enemy.aimState??={};
@@ -1047,7 +1057,7 @@ function update(dt) {
         spineUp:toUnity(enemy.spineUp),
       },worldDt):{ready:false,targetInSight:false,position:toUnity(aim)};
       enemy.aimReady=aimed.ready;
-      const attack=runNativeEnemyGunAttack(enemy.runtime,nativeEncounter.enemySettings,{
+      const attack=runNativeEnemyGunAttack(enemy.runtime,activeWeaponSettings,{
         scaledDeltaTime:worldDt,unscaledDeltaTime:dt,targetSight:enemy.encounter.visible,
         sightMode:'all-directions',aimTargetInSight:enemy.encounter.canAttack&&aimed.targetInSight,aimReady:aimed.ready,
         weaponInRightPosition:enemy.encounter.canAttack,allowAttacking:true,canShot:true,
@@ -1055,7 +1065,7 @@ function update(dt) {
       });
       if(attack.shot) {
         enemy.attackIntentAt=state.worldClock;
-        const family=nativeEncounter.enemySettings.family;
+        const family=activeWeaponSettings.family;
         // Attack's sound request precedes animation/IK and cannot be vetoed
         // by the later bullet collision. Other weapon families remain silent
         // until their original cue/alert contracts are verified.
@@ -1621,11 +1631,13 @@ function render() {
 // not an executed Unity FixedUpdate/PhysX parity proof.
 function flushDojoEnemyLateShots() {
   if(!nativeGameplay() || !nativeCombatStarted || state.screen!=='playing')return;
-  const settings=nativeEncounter?.enemySettings;
-  if(!settings)return;
+  if(!nativeEncounter)return;
   for(const enemy of state.enemies) {
     if(!enemy.alive || !enemy.reaction?.hasWeapon || !enemy.runtime?.pendingShot)continue;
     if(enemy.muzzlePoseFrame!==renderedFrameId)continue;
+    const settings=enemy.activeWeaponSettings ?? nativeEncounter.enemySettings;
+    // Never invent a native family for a non-Web-fallback actor.
+    if(typeof settings?.family!=='string')continue;
     const emission=nativeEnemyFireLateRequests(enemy.runtime,settings,{
       muzzlePosition:enemy.muzzlePosition,weaponForward:enemy.muzzleForward,
     });
