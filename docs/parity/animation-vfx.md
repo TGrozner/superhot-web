@@ -388,3 +388,11 @@ new assets or PhysX behavior are manufactured. The source death exporter is
 now connected locally by #250 to a qualified private package; the browser
 must still guard actual package/rig identity, while public asset distribution
 remains separately subject to authorization.
+
+### SH-06 — quiescence du PBD après l'échéance Kill (2026-11-03)
+
+**Preuve native bornée :** `PejAiAnimator.Kill(killTime)` désactive l'Animator et les IK, rend non-kinématiques les Rigidbody des membres, puis programme une décision de disparition/pooling à `killTime` en **temps non réel**. Le défaut source est 3,5 s. Lorsque la branche HDR demande une disparition différée, le pooling peut être repoussé d'une seconde supplémentaire ; ses paramètres visuels et ses conditions effectives doivent encore être fournis au Web. Provenance privée : research #86 (artifact 13140401513, Kill lignes 1008–1111) et #217 (artifact 13236749185). Aucun extrait propriétaire n'est reproduit.
+
+**Défaut Web corrigé, mesurable en charge :** `advanceNativeDeathRuntime` continuait à résoudre articulations et contacts de chaque corps après avoir émis une fois `cleanupRequested`, parce que l'hôte n'a pas encore consommé ce signal. Désormais, les sous-étapes PBD sont limitées à la première échéance de cleanup attestée ; ensuite, le dernier packet osseux est conservé sans nouveau solveur, sans nouveaux contacts, et l'horloge scaled continue. Le compteur de temps de simulation abandonné ne comptabilise que le vrai plafond de budget Web, pas le temps après disparition demandée. Test de régression ciblé dans `tests/animation-native-death-runtime.test.mjs` : dépassement de deadline, pose stable, signal unique, forces post-deadline inactives.
+
+**Limites, raccord SH-05 :** c'est un **fallback de performance Web**, pas une équivalence de Unity PhysX ni une disparition native déjà rendue. Pour masquer/pooler effectivement l'acteur, le propriétaire de `main.js` doit consommer `cleanupRequested` et connaître les flags HDR, l'identité rig/prefab et la branche d'effet source. En l'absence du packet physique/rig actif, la pose figée reste le fallback. Ne créer ni particules commerciales ni shader de disparition inventé. Aucun smoke navigateur n'est déduit du test Node.

@@ -249,14 +249,28 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
   if(typeof limitWebFrameWork!=='boolean')throw new TypeError('limitWebFrameWork must be boolean');
   const target=runtime.elapsed+scaledDelta;
   if(!Number.isFinite(target))throw new RangeError('Death clock overflow');
+  // The native Kill path schedules pool/disappear at killTime (or starts an
+  // additional HDR cleanup branch). The host has not consumed that request
+  // yet. Do not keep spending CPU on an already-expired Web PBD actor while
+  // the last rendered pose is held as an explicit, non-native fallback.
+  if(runtime.cleanupRequested) {
+    runtime.elapsed=target;
+    return {boneModelMatrices:runtime.boneModelMatrices,contacts:[],
+      cleanupRequested:false,droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
+  }
   const contacts=[];
   // Source dt retained for every executed substep. On a slow Web frame,
   // dropping excess simulation time is preferable to a feedback loop of
   // more work, lower FPS and ever larger deltas. Cleanup still uses world time.
-  const acceptedDelta=limitWebFrameWork
+  const budgetedDelta=limitWebFrameWork
     ? Math.min(scaledDelta,WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta)
     : scaledDelta;
-  runtime.droppedWebSimulationTime=(runtime.droppedWebSimulationTime??0)+scaledDelta-acceptedDelta;
+  // No further Web PBD work after the source's first cleanup trigger. The
+  // HDR branch can extend *visibility* by one scaled second: only the host,
+  // with the actual HDR flags, may choose when to hide/pool the mesh.
+  const acceptedDelta=Math.min(budgetedDelta,
+    Math.max(0,runtime.definition.cleanupAfterSeconds-runtime.elapsed));
+  runtime.droppedWebSimulationTime=(runtime.droppedWebSimulationTime??0)+scaledDelta-budgetedDelta;
   let remaining=acceptedDelta;
   while(remaining>1e-12) {
     const dt=Math.min(runtime.definition.fixedDelta,remaining);
