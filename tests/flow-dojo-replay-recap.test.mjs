@@ -41,3 +41,29 @@ test('death, corrupted storage and invalid scoreboard preserve playable restart'
   assert.throws(() => result(7, {kills:5}), /contradicts/);
   assert.throws(() => result(7, {elapsedSeconds:Infinity}), /finite/);
 });
+
+test('existing Dojo finish screens expose Web style grades and actionable retry targets', () => {
+  const c = result(6, {score:600, dodges:0});
+  assert.equal(c.styleGrade, 'C');
+  assert.equal(c.nextStyleTarget, 1050);
+  assert.match(c.text, /STYLE C.*1050 PTS/);
+  const b = result(6, {score:1100});
+  assert.equal(b.styleGrade, 'B');
+  assert.equal(b.nextStyleTarget, 1500);
+  const a = result(7, {score:2000});
+  assert.equal(a.styleGrade, 'A');
+  assert.equal(a.nextStyleTarget, 2800);
+  const s = result(7, {score:2800});
+  assert.equal(s.styleGrade, 'S');
+  assert.equal(s.nextStyleTarget, null);
+  assert.match(s.text, /STYLE S/);
+  assert.equal(s.best.bestScore, 2800);
+  const loss = createDojoReplayRecap({
+    quota:7, victory:false, kills:4, shots:10, dodges:0,
+    score:400, elapsedSeconds:17.5,
+  });
+  assert.equal(loss.styleGrade, null);
+  assert.equal(loss.nextStyleTarget, null);
+  assert.match(loss.text, /3 ENNEMIS RESTANTS/);
+  assert.equal(loss.shouldPersist, false);
+});
