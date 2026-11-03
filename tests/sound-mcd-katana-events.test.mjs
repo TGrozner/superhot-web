@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MCD_KATANA_AUDIO,planMcdKatanaSliceSound} from '../src/sound/mcd-katana-event-intent.js';
+import {MCD_KATANA_AUDIO,planMcdKatanaSliceSound,planMcdKatanaHitSceneBinding} from '../src/sound/mcd-katana-event-intent.js';
 const state = (patch={}) => ({producer:'living-body-part',realtimeSeconds:0.5,
   previousSliceRealtimeSeconds:0,localClipDecoded:true,...patch});
 
@@ -47,4 +47,22 @@ test('source rejects unknown flags and nonfinite/negative clock input',()=>{
   assert.throws(()=>planMcdKatanaSliceSound(state({realtimeSeconds:NaN})),TypeError);
   assert.throws(()=>planMcdKatanaSliceSound(state({previousSliceRealtimeSeconds:-1})),TypeError);
   assert.throws(()=>planMcdKatanaSliceSound(state({localClipDecoded:'unknown'})),TypeError);
+});
+
+test('Katana private WAV can be registered for verified scene item, not generic hits',()=>{
+  const base={ambience:[{id:'existing-door'}],items:{'source-katana-1':{pickup:{prefab:'previous'}}}};
+  const call=(patch={})=>planMcdKatanaHitSceneBinding({sceneAudio:base,
+    itemId:'source-katana-1',sourceItemVerified:true,privateWavPresent:true,...patch});
+  assert.equal(call({sourceItemVerified:false}),null);
+  assert.equal(call({privateWavPresent:false}),null);
+  const result=call();
+  assert.equal(result.ambience,base.ambience);
+  assert.equal(result.items['source-katana-1'].pickup,base.items['source-katana-1'].pickup);
+  assert.deepEqual(result.clips.audioNative_resources_assets_1443,
+    {manifestKey:'audioNative_resources_assets_1443',owner:'resources.assets',pathId:1443,name:'AC_Katana_Hit'});
+  assert.equal(result.items['source-katana-1'].slice.clipId,'audioNative_resources_assets_1443');
+  assert.equal(result.items['source-katana-1'].slice.realtimeCooldown,0.1);
+  assert.equal(result.items['source-katana-1'].slice.gain,0.5);
+  assert.throws(()=>planMcdKatanaHitSceneBinding({sceneAudio:result,
+    itemId:'source-katana-1',sourceItemVerified:true,privateWavPresent:true}),/overwritten/);
 });

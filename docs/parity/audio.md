@@ -1009,3 +1009,27 @@ Instrumenter `AudioContext.running`, ID/durée du buffer, démarrage
 `AudioBufferSourceNode` et pic d'analyseur non nul dans le Dojo.
 Ces mesures démontreraient le graphe navigateur, **pas** l'audition
 physique ni la parité temporelle Unity ; elles ne sont pas encore réalisées.
+
+
+**Extension SH-07 — liaison vers le son local exploitable (3 novembre 2026).**
+`planMcdKatanaHitSceneBinding` construit, pour un *item Katana qualifié*
+par son identifiant exact de scène et seulement si l'original local est présent,
+la clé `audioNative_resources_assets_1443` et la commande `items[itemId].slice`
+compatibles avec `createAudio().configureSceneAudio`. La sortie conserve les
+autres ambiances/cues, refuse tout écrasement d'identité et ne publie aucun WAV.
+La présence du fichier privé doit être confirmée depuis le manifeste
+`/local-assets/manifest` ; cette présence ne démontre ni décodage ni audition.
+Les champs gain .5, pitch 1, randomisation relative .1 et cooldown réel .1
+viennent des preuves #185/#188/#193 ci-dessus : le gain de sortie final,
+le routage DSP et la lecture native restent inconnus. Aucun spatializer n'est
+ajouté au cue 2D `AudioManager.PlayClip` source.
+
+**Raccord impératif SH-05 :** avant `audio.loadLocalAssets()`, intégrer le
+résultat non-nul au descripteur `prepared.gameplay.audio`, sans le remplacer
+si l'état source est inconnu. Lors de la lecture, appeler `audio.itemCue('slice')`
+**uniquement** après la garde `planMcdKatanaSliceSound` et une branche
+`Katana.AttackTarget` réellement qualifiée. Le `findMeleeTarget/killEnemy`
+actuel n'établit pas ce contrat, donc brancher naïvement ce descripteur sur
+l'ancien clic produirait un faux positif. Mesurer `AudioBufferSourceNode.start`
+et le signal Chromium séparément : ni cette liaison ni un test Node n'attestent
+un son perçu ou une parité 1:1.

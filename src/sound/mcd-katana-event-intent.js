@@ -49,3 +49,49 @@ export function planMcdKatanaSliceSound(input) {
     }
     return result('local-clip-request', input.realtimeSeconds, MCD_KATANA_AUDIO.hit.clip);
 }
+/** A fail-closed local WAV registration for an *already source-confirmed* Katana.
+ * Creates only a descriptor for the existing browser audio graph; it NEVER
+ * performs playback or certifies that a sound has been heard. See private
+ * research #185/#188/#193, Assembly-CSharp SHA ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257.
+ */
+export function planMcdKatanaHitSceneBinding({ sceneAudio, itemId, sourceItemVerified, privateWavPresent, }) {
+    if (typeof itemId !== 'string' || !itemId ||
+        typeof sourceItemVerified !== 'boolean' ||
+        typeof privateWavPresent !== 'boolean' ||
+        (sceneAudio !== null && (typeof sceneAudio !== 'object' || Array.isArray(sceneAudio)))) {
+        throw new TypeError('exact source item and private original WAV presence required');
+    }
+    if (!sourceItemVerified || !privateWavPresent)
+        return null;
+    const base = sceneAudio ?? {};
+    const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+    const clips = base['clips'] ?? {};
+    const items = base['items'] ?? {};
+    if (!isRecord(clips) || !isRecord(items)) {
+        throw new TypeError('source audio clips/items must be records');
+    }
+    const priorItem = Object.hasOwn(items, itemId) ? items[itemId] : {};
+    if (!isRecord(priorItem))
+        throw new TypeError('source item cues must be a record');
+    const key = 'audioNative_resources_assets_1443';
+    if (Object.hasOwn(clips, key) || Object.hasOwn(priorItem, 'slice')) {
+        throw new Error('pre-existing Katana clip or slice cue must not be overwritten');
+    }
+    const hit = MCD_KATANA_AUDIO.hit;
+    return Object.freeze({
+        ...base,
+        clips: Object.freeze({ ...clips, [key]: Object.freeze({
+                manifestKey: key, ...hit.clip,
+            }) }),
+        items: Object.freeze({ ...items, [itemId]: Object.freeze({
+                ...priorItem, slice: Object.freeze({
+                    clipId: key, gain: hit.serializedVolume, pitch: hit.serializedPitch,
+                    gainRandomization: hit.volumeRandomization,
+                    pitchRandomization: hit.pitchRandomization,
+                    relativePitch: hit.relativePitch,
+                    realtimeCooldown: hit.realtimeRestSeconds,
+                    priority: hit.priority,
+                }),
+            }) }),
+    });
+}
