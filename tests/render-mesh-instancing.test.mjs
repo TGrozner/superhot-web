@@ -51,8 +51,24 @@ test('SH-12/J4: 48 transformed non-cubic cylinders share geometry, submit 1 inst
   assert.deepEqual(calls.filter(c=>c[0]==='drawElementsInstanced'),[
     ['drawElementsInstanced',gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0,48],
   ]);
-  batch.draw(); // Static matrices are not uploaded on every frame.
+  batch.draw(); // Drawing the same GPU buffer never re-uploads matrices.
+  const same = Array.from({length:48},(_,i)=>model(i));
+  batch.setMatrices(same); // Rebuilding an identical world list also skips GPU upload.
   assert.equal(calls.filter(c=>c[0]==='bufferSubData').length,1);
+  same[20] = model(420); // One moving body: transfer only its 100-byte record.
+  batch.setMatrices(same);
+  const movedUploads = calls.filter(c=>c[0]==='bufferSubData');
+  assert.equal(movedUploads.length,2);
+  assert.equal(movedUploads[1][2],20*100);
+  assert.equal(movedUploads[1][3].length,25);
+  assert.equal(movedUploads[1][3][12],420);
+  batch.setMatrices(same.slice(0,18)); // Shrinking needs no transfer.
+  assert.equal(calls.filter(c=>c[0]==='bufferSubData').length,2);
+  batch.setMatrices(same); // Regrowing uploads records no longer in active range.
+  const grownUploads = calls.filter(c=>c[0]==='bufferSubData');
+  assert.equal(grownUploads.length,3);
+  assert.equal(grownUploads[2][2],18*100);
+  assert.equal(grownUploads[2][3].length,30*25);
   batch.setMatrices([]);
   assert.deepEqual(batch.draw(),{drawCalls:0,instances:0,triangles:0});
   gpu.dispose();
