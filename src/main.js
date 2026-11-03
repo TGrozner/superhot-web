@@ -43,6 +43,8 @@ const dodgeBanner = $('dodge-banner');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
+// WEB game feel: unarmed punches recharge on real time, unlike source gun clocks.
+let unarmedFireDelayRealtime = false;
 const nativeHud = createNativeHud(hud, crosshair, $('health'), id => assetUrl(id));
 let renderer;
 try { renderer = createRenderer(canvas); }
@@ -610,6 +612,7 @@ function loadLevel(index) {
   nativeHud.setActive(Boolean(nativeGameplay() && nativeHudReady));
   nativeHud.reset();
   state.reload = 0; state.fireDelay = 0;
+  unarmedFireDelayRealtime = false;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   resetWebImpactFeedback(webImpactFeedback);
@@ -769,10 +772,21 @@ function shoot() {
     return;
   }
   state.fireDelay = state.weapon ? (nativeGameplay() ? nativePistol.attackDelay : .19) : .36;
+  unarmedFireDelayRealtime = nativeGameplay() && !state.weapon;
   if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .2);
   state.shotPulse = 1;
   state.recoil = 1;
   if (!state.weapon) {
+    // The source Hands controller already supports Attack on its unarmed profile.
+    // Trigger on the accepted punch, not on every animation frame.
+    if (nativeGameplay() && nativeHandsController && nativeHandsEquippedId === 'unarmed') {
+      try { nativeHandsController.action('attack'); }
+      catch {
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsController = null;
+        nativeHandsStatus = 'DOJO_UNARMED_ATTACK_DESCRIPTOR_REJECTED_FALLBACK';
+      }
+    }
     // Unarmed close-range attack; useful after throwing the gun.
     const hit = findMeleeTarget();
     if (hit) {
@@ -832,6 +846,7 @@ function throwWeapon(attack = false) {
       }
     }
     state.shotPulse=1;state.recoil=1;state.fireDelay=.38;
+    unarmedFireDelayRealtime = false;
     addMcdGameplayPulse(nativeClock,.05,.5);
     audio.itemCue(attack?'attackThrow':'throw',{itemId,position:state.camera,realtimeSeconds:state.runClock});
     return;
@@ -851,6 +866,7 @@ function throwWeapon(attack = false) {
   weaponGeneration++;
   if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .5);
   state.recoil = 1; state.fireDelay = .38;
+  unarmedFireDelayRealtime = false;
   audio.throwWeapon();
 }
 function nearbyPickup() {
@@ -1144,7 +1160,10 @@ function update(dt) {
     });
     state.speed = tick.timeScale;
     worldDt = tick.worldDelta;
-    state.fireDelay = Math.max(0, state.fireDelay - worldDt);
+    // Slow-motion must not stretch the 360 ms unarmed punch recovery to 60s.
+    state.fireDelay = Math.max(0, state.fireDelay -
+      (unarmedFireDelayRealtime ? dt : worldDt));
+    if (state.fireDelay === 0) unarmedFireDelayRealtime = false;
     audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
     audio.advanceWorldTime(worldDt);
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
@@ -1999,8 +2018,16 @@ function frame(now) {
         ragdollStatus: e.deathPhysicsStatus ?? (!e.alive ? 'no-verified-runtime' : 'alive'),
         ragdollPoseAvailable: Boolean(e.deathSolvedPose),
       })),
-      ragdollPackVerified: Boolean(localAssetManifest?.features?.ragdoll &&
-        nativeRigSha256 === nativeScene?.gameplay?.deathPhysicsRigSha256),
+      // The canonical pack may omit optional manifest.features.ragdoll. Boot
+      // checks the actual 22 bodies, 21 joints, source identity and rig hash.
+      ragdollPackVerified: Boolean(nativeRigSha256 &&
+        nativeRigSha256 === nativeScene?.gameplay?.deathPhysicsRigSha256 &&
+        nativeScene?.gameplay?.deathPhysics?.source?.identity ===
+          'sharedassets0.assets::5163 / EnemyMergedForPooler' &&
+        nativeScene?.gameplay?.deathPhysics?.bodies?.length === 22 &&
+        nativeScene?.gameplay?.deathPhysics?.joints?.length === 21 &&
+        nativeScene?.gameplay?.deathPhysics?.boneParents?.length ===
+          nativeSkinInfo?.skinRig?.boneOrder?.length),
       activeRagdolls: state.enemies.filter(e => !e.alive && e.deathRuntime).length,
       nativeActionActivationVerified: false,
       worldClock: state.worldClock,
