@@ -87,7 +87,7 @@ test('provisional cookie projector produces a visibly nonzero Web preview only i
   assert.ok(crystal.rgb[2] > center.rgb[2] + .20);
   assert.equal(crystal.rgb[0] > center.rgb[0], true);
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [1, 2, 8], 0, 3).rgb, [0, 0, 0]);
-  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /uMode == 3 && dangerRed > 0\\.0/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /uMode == 3 && dangerRed > 0\.0/);
   const near = sampleDojoDoorWarningWebPreview(spot, [1, 2, 4], .4);
   const far = sampleDojoDoorWarningWebPreview(spot, [1, 2, 12], .4);
   assert.ok(near.rgb[0] > center.rgb[0] && center.rgb[0] > far.rgb[0]);
