@@ -69,6 +69,20 @@ test('SH-12/J4: 48 transformed non-cubic cylinders share geometry, submit 1 inst
   assert.equal(grownUploads.length,3);
   assert.equal(grownUploads[2][2],18*100);
   assert.equal(grownUploads[2][3].length,30*25);
+  const sparse = same.slice();
+  sparse[0] = model(700);
+  sparse[47] = model(900);
+  batch.setMatrices(sparse); // Two distant corpses: 200 bytes, not 4,800.
+  const sparseUploads = calls.filter(c=>c[0]==='bufferSubData').slice(3);
+  assert.deepEqual(sparseUploads.map(c=>[c[2],c[3].length]),[[0,25],[4700,25]]);
+  assert.equal(sparseUploads[0][3][12],700);
+  assert.equal(sparseUploads[1][3][12],900);
+  const dense = sparse.map((_,i)=>model(1000+i));
+  batch.setMatrices(dense); // Every instance moves: still one GL transfer.
+  const allUploads = calls.filter(c=>c[0]==='bufferSubData');
+  assert.equal(allUploads.length,6);
+  assert.equal(allUploads[5][2],0);
+  assert.equal(allUploads[5][3].length,48*25);
   batch.setMatrices([]);
   assert.deepEqual(batch.draw(),{drawCalls:0,instances:0,triangles:0});
   gpu.dispose();

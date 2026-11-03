@@ -155,7 +155,7 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
             throw new RangeError('Instance matrices exceed capacity');
           }
           let nextMirror = false;
-          let firstDirty = matrices.length, lastDirty = -1;
+          const dirtyIndices = [];
           for (let i = 0; i < matrices.length; i++) {
             const item = meshModelMatrices(matrices[i]);
             if (i && nextMirror !== item.mirrored) {
@@ -175,19 +175,36 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
               }
             }
             if (changed) {
-              firstDirty = Math.min(firstDirty, i);
-              lastDirty = i;
+              dirtyIndices.push(i);
             }
           }
-          // One contiguous upload per changed run avoids per-instance GL call
-          // overhead. Shrinking a batch or replaying identical transforms
-          // requires no transfer. Growing it always uploads the new records.
-          if (lastDirty >= firstDirty) {
+          // Avoid uploading unchanged instances between two distant moving
+          // rigid objects. Coalesce nearby dirty records (<=2 clean records
+          // between them) to limit WebGL calls; cap at 8 uploads per update,
+          // falling back to one span when highly fragmented. Shrink/unchanged
+          // sets still submit zero bytes.
+          if (dirtyIndices.length) {
+            const runs = [];
+            let start = dirtyIndices[0], end = start;
+            for (let j = 1; j < dirtyIndices.length; j++) {
+              const index = dirtyIndices[j];
+              if (index - end <= 3) {
+                end = index;
+              } else {
+                runs.push([start, end]);
+                start = end = index;
+              }
+            }
+            runs.push([start, end]);
+            const ranges = runs.length <= 8 ? runs :
+              [[dirtyIndices[0], dirtyIndices[dirtyIndices.length - 1]]];
             const previous = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
             try {
               gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
-              gl.bufferSubData(gl.ARRAY_BUFFER, firstDirty * 100,
-                pending.subarray(firstDirty * 25, (lastDirty + 1) * 25));
+              for (const [first, last] of ranges) {
+                gl.bufferSubData(gl.ARRAY_BUFFER, first * 100,
+                  pending.subarray(first * 25, (last + 1) * 25));
+              }
             } finally {
               gl.bindBuffer(gl.ARRAY_BUFFER, previous);
             }
