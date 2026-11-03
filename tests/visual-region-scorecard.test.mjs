@@ -156,9 +156,9 @@ test('missing owner-qualified paired object ID and reused native/Web masks fail 
   }finally{f.remove();}
 });
 
-test('empty, colored or wrong-sized masks cannot produce an IoU',()=>{
+test('both empty, colored or wrong-sized masks cannot produce a qualified IoU',()=>{
   const n=image(),w=image(),a=mask(actorN),b=mask(actorW);
-  assert.throws(()=>measureRegisteredRegion(n,w,mask(()=>false),b),/positive visible area/);
+  assert.throws(()=>measureRegisteredRegion(n,w,mask(()=>false),mask(()=>false)),/Both masks have no visible pixels/);
   const colored=mask(actorN);colored.rgb[3*26+1]=0;
   assert.throws(()=>measureRegisteredRegion(n,w,colored,b),/grayscale/);
   assert.throws(()=>measureRegisteredRegion(n,w,{...a,width:9},b),/viewport/);
