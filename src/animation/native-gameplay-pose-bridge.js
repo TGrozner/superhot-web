@@ -117,8 +117,9 @@ export function advanceDojoDeathSkinFrame({
   }
   // This is intentionally NOT PhysX: the source-parameterized PBD solver
   // cannot establish Unity angular/CCD equivalence or native cleanup by itself.
-  // Browser-render budget: preserve exact authored substep size when run,
-  // but refuse the slow-frame catch-up spiral on multiple dead actors.
+  // Web budget: preserve authored substeps on normal frames, allow four
+  // slightly larger swept steps at 30 Hz, and discard long-stall catch-up.
+  // This is responsive Web physics, not the original PhysX scheduler.
   const step = advanceNativeDeathRuntime(runtime, scaledDelta, {limitWebFrameWork:true});
   return {
     status: 'source-parameterized-web-solver-not-physx',
