@@ -511,3 +511,46 @@ runtime. Counter alignment does **not** establish weapon causality, hitbox
 parity, MCD physics or an executable-native observation. The accompanying
 Node fixtures deliberately include counter-before-death and
 counter-after-death traces; they are authored fixtures, **not Chromium games**.
+
+
+### SH-10 P0: a settled Web reset, not a 0→0 ambience false positive (3 November 2026)
+
+The first rendered frame after win-screen `REJOUER` can arrive before the
+asynchronous `initializeAudio() → startSceneAmbience()` promise finishes.
+The previous gate compared **one initial and one post-restart**
+`sceneAmbienceSources` count; **0 === 0 could pass despite zero scene
+ambiences**, and a later second set of WebAudio sources could be missed.
+This is a real gap in what the browser acceptance protocol *measures*, not
+an observed leak in an executed Dojo session.
+
+The source-qualified owner-local Dojo run described in
+`docs/dojo-reprise.md` observed **three persistent Web ambience sources**
+in the selected Dojo package. The strict Web-only gate now requires two
+consecutive pre-victory samples with count **3**, and two consecutive
+post-restart samples with count **3**, including the final recorded sample.
+A count **greater than 3 at any observed pre-victory or post-restart sample**
+is a potential Web duplicate/leak; an initial post-restart 0 is allowed
+while audio initializes **only if** two subsequent renders settle to 3.
+This count is a source/owner **Web baseline, NOT a native MCD sound proof**,
+nor an acoustic listening test.
+
+At least **two post-restart rendered samples** are mandatory. All of the
+post-restart samples must still show original item pool size, no held/broken
+item state or fragments, and restored starting weapon/ammo. A leak or stale
+item appearing *after* an immediately clean reset can therefore fail the
+gate. The opt-in recorder already collects these frames: after clicking
+`REJOUER`, **allow at least a few 100 ms samples for WebAudio to settle**
+while staying in the new playing run, without touching weapons/items;
+only then call `dojoRun.save('dojo-full-run.json')`. Do **not** make
+a test pass by fabricating audio counts or snapshots. If local assets are
+absent or the browser blocks audio, the result is **INCOMPLETE** with
+diagnostic `postRestartAudioSourceCounts` and bounded
+`overBudgetAudioFrameIds`, *not* REFUTED native parity.
+
+Five new authored Node regressions cover no settled reset, 0→0 missing
+ambience, late duplicate nodes, asynchronous 0→3→3 recovery and
+late changed-item residue. They test the **validator** alone, not a real
+Chromium victory/restart, physical speaker output or matched MCD frame.
+Owners: SH-10 acceptance protocol; SH-05 owns any runtime fix after an
+actual failed private owner-local trace, and SH-07 owns native/Web audio
+source-provenance questions.
