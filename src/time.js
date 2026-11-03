@@ -599,18 +599,22 @@ export function advanceMcdSourceLookTimeshift(state, {
 }
 
 /**
- * Scene-identity gate for the Containers-only reconstructed gameplay clock.
+ * Scene-identity gate for the source-serialized TimeControl timestep.
  *
- * OBSERVED WEB: src/main.js currently constructs createMcdGameplayClock for
- * every loaded native scene, including SHRL_Dojo2 (build10).
- * PROVED SERIALIZED, NOT EXECUTED: private research #38, artifact 13134630168,
- * identifies level28:TimeControl18679 with denominator 120 in Containers.
- * Its TimeControl method contract is research #13, artifact 13134370412,
- * MCD build 20299547. The Dojo/level10 instance and denominator are UNKNOWN.
+ * PROVED SERIALIZED, NOT EXECUTED (Steam MCD build 20299547):
+ * - Containers/level28: research #38, artifact 13134630168,
+ *   level28:TimeControl18679 fixedTimestepDenominator=120.
+ * - Dojo/level10: research #162, artifact 13187615600,
+ *   level10:TimeControl6430 (GO83 _Omni, enabled) denominator=120;
+ *   GO83's serialized active flag was checked separately in research #163.
+ * - TimeControl.Awake's conditional fixed-step assignment is research #13,
+ *   artifact 13134370412, decompiled/TimeControl.decompiled.cs:30-46.
  *
- * This is opt-in: SH-05 owns selection/fallback in src/main.js. Returning null
- * for an unqualified scene preserves that distinction rather than guessing a
- * Dojo denominator or silently applying the Containers profile.
+ * Both scene tuples qualify the SERIALIZED denominator only. An Awake
+ * execution, later runtime writes, Unity fixed-tick schedule and effective
+ * shifter/Animator time domains remain UNKNOWN. In particular, creating the
+ * EXISTING Web clock below does NOT certify native gameplay time parity.
+ * SH-05 exclusively owns runtime selection and fallback in src/main.js.
  */
 export const MCD_CONTAINERS_SERIALIZED_TIME_SCENE = Object.freeze({
   sceneBuildIndex: 28,
@@ -618,16 +622,28 @@ export const MCD_CONTAINERS_SERIALIZED_TIME_SCENE = Object.freeze({
   serializedOwner: 'level28',
 });
 
+export const MCD_DOJO_SERIALIZED_TIME_SCENE = Object.freeze({
+  sceneBuildIndex: 10,
+  scenePath: 'Assets/Scenes/SHRL/SHRL_Dojo2/SHRL_Dojo2.unity',
+  serializedOwner: 'level10',
+});
+
+const matchesSerializedTimeScene = (candidate, known) => candidate != null
+  && typeof candidate === 'object'
+  && candidate.sceneBuildIndex === known.sceneBuildIndex
+  && candidate.scenePath === known.scenePath
+  && candidate.serializedOwner === known.serializedOwner;
+
 export function qualifyMcdGameplayClockScene(sceneSource) {
-  const known = MCD_CONTAINERS_SERIALIZED_TIME_SCENE;
-  const sourceQualified = sceneSource != null
-    && sceneSource.sceneBuildIndex === known.sceneBuildIndex
-    && sceneSource.scenePath === known.scenePath
-    && sceneSource.serializedOwner === known.serializedOwner;
+  const containers = matchesSerializedTimeScene(sceneSource, MCD_CONTAINERS_SERIALIZED_TIME_SCENE);
+  const dojo = matchesSerializedTimeScene(sceneSource, MCD_DOJO_SERIALIZED_TIME_SCENE);
+  const sourceQualified = containers || dojo;
   return Object.freeze({
-    status: sourceQualified
+    status: containers
       ? 'CONTAINERS_SERIALIZED_TIME_PROFILE_ONLY'
-      : 'NATIVE_SCENE_TIME_UNKNOWN',
+      : dojo
+        ? 'DOJO_SERIALIZED_TIME_PROFILE_ONLY'
+        : 'NATIVE_SCENE_TIME_UNKNOWN',
     sourceQualified,
     fixedTimestepDenominator: sourceQualified ? 120 : null,
     nativeRuntimeObserved: false,
@@ -635,10 +651,14 @@ export function qualifyMcdGameplayClockScene(sceneSource) {
 }
 
 /**
- * Only yield the historical Containers Web clock after exact source identity.
- * No clock is created for Dojo/level10, unknown scenes or incomplete metadata;
- * the caller must explicitly choose a WEB-PROVISIONAL fallback for those.
- * This does not alter existing callers of createMcdGameplayClock.
+ * Reuse the existing WEB gameplay clock only when the source scene tuple has
+ * a primary serialized 120 denominator. This is an opt-in WEB model, not a
+ * reconstruction of Unity's executed fixed-step or animation scheduler.
+ * Dojo remains playable if SH-05 keeps the existing runtime connection;
+ * no scene is automatically switched by this pure factory.
+ *
+ * Unknown, missing or cross-scene metadata returns null, never a silently
+ * borrowed Containers denominator.
  */
 export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pitch = 0 } = {}) {
   const qualification = qualifyMcdGameplayClockScene(sceneSource);
