@@ -249,15 +249,18 @@ test('Dojo door matures a source factory order before choosing its active weapon
       afterglowDuration:.5,stopAimingTime:.05,alwaysAlert:false},
     campingPointsAvailable:false,
   };
-  const active=createNativeEncounter(data,collision,()=>0,{sourceEnemyActivation:context});
+  let nativeDraws=0;
+  const active=createNativeEncounter(data,collision,()=>{nativeDraws++;return 0;},{sourceEnemyActivation:context});
   assert.equal(active.sourceFactoryPlan.status,'qualified');
   assert.deepEqual(active.sourceFactoryPlan.templates.map(x=>x.factoryId),[child.factoryId]);
   const before=advanceNativeEncounter(active,input());
   assert.equal(before[0].type,'door-warning');
   assert.equal(active.actors.size,0,'weapon draw and actor creation wait for actual door order');
+  const drawsAtWarning=nativeDraws;
   const issued=advanceNativeEncounter(active,input([],{unscaledDeltaTime:2}));
   const spawn=issued.find(event=>event.type==='spawn');
   assert.ok(spawn);
+  assert.ok(nativeDraws>drawsAtWarning,'weapon family is sampled at actual factory activation');
   assert.equal(spawn.activation.status,'qualified');
   assert.equal(spawn.activation.factoryId,child.factoryId);
   assert.equal(spawn.activation.prefabId,'synthetic-pistol-prefab');
