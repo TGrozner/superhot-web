@@ -356,6 +356,19 @@ export function mcdSourcePlayerTimeTargets({
 }
 
 /**
+ * WEB-ONLY camera recovery tuning, not a delivered MCD constant.
+ * The fallback look-time estimator is used by the playable Dojo until the
+ * real CameraAngle/world-rotation source can be bound.  A quick turn used to
+ * queue many .3-scale measurements and kept time fast long after aiming
+ * stopped. Retain at most TWO pending look measurements to keep the initial
+ * turn responsive but return to slow motion promptly when the mouse stops.
+ *
+ * Do not apply this limit to advanceMcdSourceLookTimeshift: that separate
+ * source-qualified model intentionally preserves the native buffer semantics.
+ */
+const WEB_LOOK_BUFFER_CAP = Math.fround(0.6);
+
+/**
  * Default Containers runtime composition, without POWER/SlomoJump modifiers.
  * PlayerController, CameraLookTimeControl and SimplifiedTimeShifter supply the
  * three source time domains here; collision/Unity callback ordering remain Web.
@@ -444,7 +457,12 @@ export function stepMcdGameplayClock(clock, {
       // PROVISIONAL Web look estimate, not the native CameraAngle transform.
       const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
       const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
-      clock.lookBuffer = Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03)));
+      // Web-authored anti-linger: large flicks must not keep the world
+      // accelerated for many frames after the player stops turning.
+      clock.lookBuffer = Math.min(
+        WEB_LOOK_BUFFER_CAP,
+        Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03))),
+      );
       look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
       clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
       clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
