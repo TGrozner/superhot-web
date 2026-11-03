@@ -114,3 +114,79 @@ test('SH-12/J4: winding and singular matrix validation is atomic',()=>{
   batch.dispose();batch.dispose();gpu.dispose();
   assert.equal(calls.filter(c=>c[0]==='deleteVAO').length,2);
 });
+
+
+test('SH-12/J4: supplemental Dojo channels survive the instanced VAO without a second mesh upload', () => {
+  const { gl, calls } = mockWebGL2();
+  const lookup = gl.getAttribLocation.bind(gl);
+  const named = new Map([['aColor', 10], ['aLightmapUV', 11], ['aTangent', 12]]);
+  gl.getAttribLocation = (program, name) => named.get(name) ?? lookup(program, name);
+  Object.assign(gl, {
+    VERTEX_ATTRIB_ARRAY_ENABLED: 1, VERTEX_ATTRIB_ARRAY_BUFFER_BINDING: 2,
+    VERTEX_ATTRIB_ARRAY_TYPE: 3, VERTEX_ATTRIB_ARRAY_DIVISOR: 4,
+    VERTEX_ATTRIB_ARRAY_INTEGER: 5, VERTEX_ATTRIB_ARRAY_SIZE: 6,
+    VERTEX_ATTRIB_ARRAY_NORMALIZED: 7, VERTEX_ATTRIB_ARRAY_STRIDE: 8,
+    VERTEX_ATTRIB_ARRAY_POINTER: 9,
+  });
+  const gpu = uploadIndexedMesh(gl, 'base', makeCylinderMesh());
+  // Source world pass appends these real supplemental streams to mesh.vao.
+  // Bindings are mocked; no native MCD buffers enter this fixture.
+  const channels = new Map([
+    [10, { buffer: 'source-color-vbo', size: 4, stride: 16, offset: 0 }],
+    [11, { buffer: 'source-uv2-vbo', size: 2, stride: 8, offset: 0 }],
+    [12, { buffer: 'source-tangent-vbo', size: 4, stride: 16, offset: 0 }],
+  ]);
+  gl.getVertexAttrib = (location, query) => {
+    assert.equal(gl.getParameter(gl.VERTEX_ARRAY_BINDING), gpu.vao,
+      'read enabled source bindings from original VAO only');
+    const item = channels.get(location);
+    if (!item) throw new Error('unexpected source location');
+    switch (query) {
+      case gl.VERTEX_ATTRIB_ARRAY_ENABLED: return true;
+      case gl.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING: return item.buffer;
+      case gl.VERTEX_ATTRIB_ARRAY_TYPE: return gl.FLOAT;
+      case gl.VERTEX_ATTRIB_ARRAY_DIVISOR: return 0;
+      case gl.VERTEX_ATTRIB_ARRAY_INTEGER: return false;
+      case gl.VERTEX_ATTRIB_ARRAY_SIZE: return item.size;
+      case gl.VERTEX_ATTRIB_ARRAY_NORMALIZED: return false;
+      case gl.VERTEX_ATTRIB_ARRAY_STRIDE: return item.stride;
+      default: throw new Error('unexpected attribute query');
+    }
+  };
+  gl.getVertexAttribOffset = (location, query) => {
+    assert.equal(query, gl.VERTEX_ATTRIB_ARRAY_POINTER);
+    return channels.get(location).offset;
+  };
+  const pointerBuffers = new Map();
+  const pointer = gl.vertexAttribPointer.bind(gl);
+  gl.vertexAttribPointer = (location, ...args) => {
+    if (channels.has(location)) pointerBuffers.set(location, gl.getParameter(gl.ARRAY_BUFFER_BINDING));
+    pointer(location, ...args);
+  };
+  const batch = gpu.createInstancedBatch('instanced', {
+    capacity: 2, requireUV: true,
+    inheritAttributes: ['aColor', 'aLightmapUV', 'aTangent'],
+  });
+  assert.deepEqual([...pointerBuffers], [
+    [10, 'source-color-vbo'], [11, 'source-uv2-vbo'], [12, 'source-tangent-vbo'],
+  ]);
+  assert.deepEqual(calls.filter(c => c[0] === 'divisor' && c[1] >= 10), [
+    ['divisor', 10, 0], ['divisor', 11, 0], ['divisor', 12, 0],
+  ]);
+  assert.equal(gl.getParameter(gl.VERTEX_ARRAY_BINDING), 'beforeVAO');
+  assert.equal(gl.getParameter(gl.ARRAY_BUFFER_BINDING), 'beforeArray');
+  assert.equal(calls.filter(c => c[0] === 'bufferData').length, 3,
+    'original mesh VBO/EBO plus instance buffer, no duplicate source streams');
+  batch.setMatrices([model(0), model(2)]);
+  assert.equal(batch.draw().drawCalls, 1);
+
+  // Missing source tangents cannot silently become constant zero normals:
+  // non-qualified meshes must stay on the existing per-instance draw path.
+  const oldGet = gl.getVertexAttrib;
+  gl.getVertexAttrib = (location, query) =>
+    query === gl.VERTEX_ATTRIB_ARRAY_ENABLED ? false : oldGet(location, query);
+  assert.throws(() => gpu.createInstancedBatch('instanced', {
+    inheritAttributes: ['aTangent'],
+  }), /missing source mesh channel aTangent/);
+  gpu.dispose();
+});
