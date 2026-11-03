@@ -31,9 +31,19 @@ const update = (actorId, state, additions = {}) =>
     scaledDeltaTime: 0, unscaledDeltaTime: 0,
     random: () => .5, ...additions,
   });
-const late = (actorId, state, pose) =>
+const ownedFrame = actorId => {
+  // SH-14 #253 Web actor report shape, synthetic matrix (NOT MCD geometry).
+  const weaponAttachmentMatrix = new Float32Array(16);
+  for (let i = 0; i < 4; i++) weaponAttachmentMatrix[i * 5] = 1;
+  return { actorId, actorPoseOwnedSnapshot: true, weaponAttachmentMatrix };
+};
+const late = (actorId, state, pose, actorFrame = ownedFrame(actorId)) =>
   stepNativeDojoActorCombat({
-    actorId, phase: 'late', ...state, pose, random: () => .5,
+    actorId, phase: 'late', ...state, actorFrame,
+    pose: pose === null ? null : {
+      ...pose, sourceSocketMatrix: actorFrame.weaponAttachmentMatrix,
+    },
+    random: () => .5,
   });
 
 test('one actor fires in Update, retains pending shot without animation pose, emits after pose, then routes separate fixed collision', () => {
@@ -49,6 +59,18 @@ test('one actor fires in Update, retains pending shot without animation pose, em
   assert.equal(missingPose.status, 'awaiting-late-pose');
   assert.equal(missingPose.pendingShot, true);
   assert.deepEqual(missingPose.projectileRequests, []);
+  const foreignFrame = ownedFrame('enemy-2');
+  const foreign = late('enemy-1', state,
+    { muzzlePosition: p(1), weaponForward: p(1) }, foreignFrame);
+  assert.equal(foreign.status, 'awaiting-owned-actor-frame');
+  assert.equal(foreign.pendingShot, true);
+  assert.deepEqual(foreign.projectileRequests, []);
+  const noFrame = stepNativeDojoActorCombat({
+    actorId: 'enemy-1', phase: 'late', ...state,
+    pose: { muzzlePosition: p(1), weaponForward: p(1) },
+  });
+  assert.equal(noFrame.status, 'awaiting-owned-actor-frame');
+  assert.equal(state.runtime.pendingShot !== null, true);
   const shot = late('enemy-1', state, { muzzlePosition: p(1), weaponForward: p(1) });
   assert.equal(shot.status, 'spawn-requests');
   assert.equal(shot.projectileRequests.length, 1);
