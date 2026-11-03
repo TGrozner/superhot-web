@@ -404,3 +404,39 @@ test('J3 Web crossfire: living allies block muzzle shots and trigger safe flanki
   advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
   assert.equal(shooter.encounter.canAttack,true,'ally outside the capsule radius does not occlude');
 });
+
+test('J3 Web close-range pressure: armed enemies backpedal safely when rushed, never while shot-locked or stunned',()=>{
+  // Synthetic geometry, Web-authored spacing; consumed by the live encounter.
+  const near={playerFeet:p(3.3,0,2),playerPosition:p(3.3,1.6,2)};
+  const runtime=setup(), enemy=firstSpawn(runtime,near);
+  enemy.clock=1.6;
+  enemy.muzzlePosition=p(2,1.4,2);
+  enemy.muzzleForward=p(1,0,0);
+  const start=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.ok(enemy.x<start.x-.05,'rushed gunner gives ground rather than freezing in melee range');
+  assert.equal(enemy.walking,true,'walk animation remains wired to real feet movement');
+  assert.equal(enemy.encounter.route,null,'retreat invalidates previous chase');
+  assert.ok(Math.hypot(enemy.x-near.playerFeet.x,enemy.z-near.playerFeet.z)>
+    Math.hypot(start.x-near.playerFeet.x,start.z-near.playerFeet.z),
+  'actor must increase spacing rather than slide toward the player');
+  const retired=p(enemy.x,enemy.y,enemy.z);
+  enemy.runtime.pendingShot={target:near.playerPosition};
+  advanceNativeEncounter(runtime,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),retired,'an accepted deferred shot holds the pose');
+  enemy.runtime.pendingShot=null;
+  enemy.reaction.stunRemaining=.5;
+  advanceNativeEncounter(runtime,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),retired,'stunned enemy cannot disengage');
+
+  const wall=setup(scene(),[box(1.5,1,2,.2,2,10)]);
+  const trapped=firstSpawn(wall,near);
+  trapped.clock=1.6;
+  trapped.muzzlePosition=p(2,1.4,2);
+  trapped.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(wall,input([trapped],{...near,scaledDeltaTime:.2}));
+  assert.ok(trapped.x>=1.99,'retreat cannot tunnel through a world wall');
+  assert.ok(Number.isFinite(trapped.z),'blocked retreat cannot teleport');
+  assert.equal(trapped.encounter.canAttack,true,
+    'retreat never changes the established clear-muzzle firing gate');
+});
