@@ -77,14 +77,31 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
   // Arming before Start avoids reopening DevTools after pointer lock.
   // Preview frames are not captured, even if they say activeScreen=playing.
   let ready = readiness.ready;
-  const frames = [], marks = [], uiActions = [], pressed = new Set(), markerWarnings = [];
-  let lastFrameId = -1, timer = null, stopped = false;
+  const frames = [], marks = [], uiActions = [], inputActions = [],
+    pressed = new Set(), markerWarnings = [];
+  let lastFrameId = -1, timer = null, stopped = false, inputActionsTruncated = false;
+  const recordInput = kind => {
+    if (!ready || stopped) return;
+    let snapshot;
+    try { snapshot = window.__superhotGetRenderedFrameSnapshot?.(); }
+    catch { return; }
+    if (snapshot?.activeScreen !== 'playing' ||
+        !Number.isSafeInteger(snapshot.frameId) || snapshot.frameId < 0) return;
+    if (inputActions.length >= 256) { inputActionsTruncated = true; return; }
+    inputActions.push({kind,frameId:snapshot.frameId,activeScreen:'playing'});
+  };
   const onDown = event => {
     if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
-    const type = DOJO_ROUTE_HOTKEYS[event.code];
-    if (!type || !ready || event.repeat || event.isComposing) return;
     const target = event.target;
-    if (target?.isContentEditable || ['INPUT','SELECT','TEXTAREA'].includes(target?.tagName)) return;
+    const editable = target?.isContentEditable ||
+      ['INPUT','SELECT','TEXTAREA'].includes(target?.tagName);
+    // E/F receipts are browser-originating *attempts*, not proof an action succeeded.
+    if (!editable && event.isTrusted === true && !event.repeat && !event.isComposing) {
+      if (event.code === 'KeyE') recordInput('pickup');
+      if (event.code === 'KeyF') recordInput('throw');
+    }
+    const type = DOJO_ROUTE_HOTKEYS[event.code];
+    if (!type || !ready || event.repeat || event.isComposing || editable) return;
     // Hotkeys are meaningful only while the *actual* browser game is playing.
     if (window.__superhotGetRenderedFrameSnapshot()?.activeScreen !== 'playing') return;
     try { mark(type); }
@@ -107,9 +124,16 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     uiActions.push({type, buttonId:id, frameId:current.frameId,
       activeScreen:current.activeScreen});
   };
+  const onMouseDown = event => {
+    // The first click merely requests pointer lock in src/main.js; not a shot.
+    if (event.isTrusted !== true || event.button !== 0 ||
+        document.pointerLockElement !== document.getElementById?.('scene')) return;
+    recordInput('fire');
+  };
   const onUp = event => pressed.delete(event.code);
   const onBlur = () => pressed.clear();
   document.addEventListener('click', onUiClick, true);
+  document.addEventListener('mousedown', onMouseDown, true);
   window.addEventListener('keydown', onDown, { passive: true });
   window.addEventListener('keyup', onUp, { passive: true });
   window.addEventListener('blur', onBlur);
@@ -161,6 +185,7 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
       stopped = true;
       if (timer !== null) window.clearInterval(timer);
       document.removeEventListener('click', onUiClick, true);
+      document.removeEventListener('mousedown', onMouseDown, true);
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('blur', onBlur);
@@ -168,6 +193,7 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     }
     return { schemaVersion: 2, captureKind: 'SH10_DOJO_OWNER_BROWSER_V2',
       frames: frames.slice(), marks: marks.slice(), uiActions: uiActions.slice(),
+      inputActions: inputActions.slice(), inputActionsTruncated,
       markerWarnings: markerWarnings.slice() };
   };
   function mark(type) {
