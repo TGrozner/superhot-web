@@ -274,3 +274,37 @@ test('archived packet identity is explicit and cannot silently mix two skins', (
     rig: rig(), clips: clipBindings,
   }), /packet required/);
 });
+
+
+test('Dojo source packet without wrapper schemaVersion renders source skin and weapon socket', () => {
+  // Mirrors the recovered extractor's field-level wrapper shape:
+  // {skin, states, parameters, profiles, weaponBone, material}.
+  // The authored mesh/poses and IDs in this fixture are NOT commercial data.
+  const skin = { ...pkg(), weaponAttachment: undefined };
+  const packet = {
+    skin, states: [], parameters: {}, profiles: { katana: {} },
+    weaponBone: 1, material: {},
+  };
+  const { gl, calls } = mockGl();
+  const pass = createDojoPlayerAnimationPass(gl, {
+    playerPacket: packet, rig: rig(), clips: clipBindings,
+  });
+  const result = pass.draw(frame('swing', .5));
+  assert.equal(result.handsDrawCalls, 1);
+  assert.equal(result.sampledClip, 'swingSource');
+  assert.equal(result.weaponBoneWorldMatrix[12], 1.5);
+  assert.equal(result.katanaModelMatrix[12], 1.75);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 1);
+  pass.dispose();
+
+  // An explicit wrong wrapper version cannot silently downgrade.
+  assert.throws(() => createDojoPlayerAnimationPass(gl, {
+    playerPacket: { ...packet, schemaVersion: 2 },
+    rig: rig(), clips: clipBindings,
+  }), /packet required/);
+  // The inner skin's version is mandatory independently of wrapper metadata.
+  assert.throws(() => createDojoPlayerAnimationPass(gl, {
+    playerPacket: { ...packet, skin: { ...skin, schemaVersion: 2 } },
+    rig: rig(), clips: clipBindings,
+  }), /schemaVersion|version|schema/i);
+});
