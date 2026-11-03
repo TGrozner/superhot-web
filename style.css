@@ -15,6 +15,8 @@
 #hit-confirm i:nth-child(3){left:5px;bottom:10px;transform:rotate(-45deg)}
 #hit-confirm i:nth-child(4){right:5px;bottom:10px;transform:rotate(45deg)}
 #hit-confirm.kill i{background:#e20b31;width:16px;height:4px;box-shadow:0 0 7px rgba(216,19,57,.52)}
+#chain-banner{position:absolute;top:23%;left:50%;transform:translateX(-50%);max-width:calc(100% - 48px);white-space:nowrap;padding:9px 16px;border-left:3px solid #df1c3d;background:rgba(241,245,248,.88);box-shadow:0 6px 22px rgba(32,44,54,.1);color:#b31334;font:900 clamp(12px,1.6vw,18px)/1.15 ui-monospace,Consolas,monospace;letter-spacing:.06em;text-align:center;pointer-events:none}
+#chain-banner[hidden]{display:none}
 #hud{position:absolute;inset:0;pointer-events:none;user-select:none}#hud[hidden],.overlay[hidden],[hidden]{display:none!important}
 .top-bar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:start;padding:35px 45px;background:linear-gradient(rgba(241,246,248,.76),transparent)}.brand b{display:block;font-size:23px;line-height:1;letter-spacing:-.07em;font-weight:950}.brand b span{color:#db233d}.brand small{display:block;font:700 9px ui-monospace,monospace;letter-spacing:.19em;padding-top:8px;color:#8b9aa5}.level-indicator{text-align:right}.eyebrow{font:700 10px ui-monospace,Consolas,monospace;letter-spacing:.16em;color:#697d8b}.level-indicator strong{display:block;font-size:15px;letter-spacing:.1em;margin-top:5px}
 .side-caption{position:absolute;left:30px;top:50%;writing-mode:vertical-rl;transform:rotate(180deg) translateY(50%);font:700 9px ui-monospace,monospace;letter-spacing:.25em;color:#98a8b0}
