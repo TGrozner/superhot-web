@@ -193,6 +193,8 @@ export function installDojoFullTabCaptureButton({
   const button=documentRef.createElement('button');
   button.textContent='SH-15 — capture privée de cet onglet';
   button.type='button';
+  // Remain clickable above the fullscreen scene; hidden before any video frame.
+  button.style.cssText='position:fixed;top:16px;right:16px;z-index:2147483647;padding:12px;background:#fff;color:#111;border:2px solid #111;cursor:pointer;font:14px sans-serif';
   button.setAttribute('aria-label','Capture privée Dojo, choisir cet onglet');
   documentRef.body.append(button);
   button.addEventListener('click',() => {
