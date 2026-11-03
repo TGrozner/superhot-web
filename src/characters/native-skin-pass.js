@@ -67,6 +67,7 @@ in vec3 vCameraForward;
 in vec3 vObjectCameraForward;
 uniform vec4 uColor;
 uniform vec4 uRedCrystalControl;
+uniform float uWebHitFlash;
 uniform vec3 uCameraPosition;
 uniform vec3 uSourceLightDirection;
 out vec4 fragColor;
@@ -80,10 +81,14 @@ void main() {
       vObjectCameraForward, screenUv, uRedCrystalControl.z,
       uRedCrystalControl.y, uCameraPosition, uSourceLightDirection
     );
-    return;
+  } else {
+    vec3 webProceduralRgb = uColor.rgb * vLight;
+    fragColor = nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0));
   }
-  vec3 webProceduralRgb = uColor.rgb * vLight;
-  fragColor = nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0));
+  // Creative Web impact feedback after both source and diagnostic shading.
+  // Single white-hot pulse: no extra geometry or draw call.
+  fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.96, 0.83),
+    clamp(uWebHitFlash, 0.0, 1.0));
 }`;
 
 function numericArray(value, length, label) {
@@ -1194,7 +1199,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
   }
   attributes.aUV0 = 4;
   for (const name of ['uModel', 'uViewProjection', 'uJoints[0]', 'uLightDirection',
-    'uLightCoefficients', 'uColor', 'uRedCrystalControl', 'uCameraPosition',
+    'uLightCoefficients', 'uColor', 'uRedCrystalControl', 'uWebHitFlash', 'uCameraPosition',
     'uSourceLightDirection']) {
     uniforms[name] = gl.getUniformLocation(program, name);
     if (uniforms[name] == null) {
@@ -1285,7 +1290,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
                   cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
                   color, transition = null, action = null, solvedPose = null,
-                  webPoseLean = null } = {}) {
+                  webPoseLean = null, webHitFlash = 0 } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1338,6 +1343,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
       if (solvedPose !== null) {
         throw new TypeError('A solved death pose cannot also receive a Web-only animation lean');
       }
+    }
+    if (!Number.isFinite(webHitFlash) || webHitFlash < 0 || webHitFlash > 1) {
+      throw new RangeError('Web-only hit flash must be a finite intensity in [0,1]');
     }
     let palette;
     let actionLayer = null;
@@ -1431,6 +1439,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
         ? width / height : 1;
       gl.uniform4f(uniforms.uRedCrystalControl,
         loaded.mesh.hasSourceUV0 ? 1 : 0, shaderTime, viewportAspect, 0);
+      gl.uniform1f(uniforms.uWebHitFlash, webHitFlash);
       gl.uniform3f(uniforms.uCameraPosition, camera[0], camera[1], camera[2]);
       gl.uniform3f(uniforms.uSourceLightDirection, ...sourceLighting.directionToLight);
       if (culling) gl.frontFace(mirrored ? gl.CW : gl.CCW);
@@ -1449,6 +1458,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       solvedPoseProvenance: solvedPose?.provenance ?? null,
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
+      webHitFlashIntensity: webHitFlash,
+      webHitFlashDesign: webHitFlash > 0 ? 'Web-only white-hot damage pulse' : null,
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
       weaponAttachmentMatrix,
