@@ -17,7 +17,9 @@ function f(frameId, feet=p(0), {screen='playing', kills=0, enemies=[], heldItem=
   };
 }
 function complete(target=6) {
-  const alive = [{id:1,alive:true}], dead = [{id:1,alive:false}];
+  const alive = [{id:'native-encounter-0',alive:true}];
+  const deadThrough = count => Array.from({length:count}, (_,id) =>
+    ({id:'native-encounter-'+id,alive:false}));
   const frames = [
     f(1,p(0),{target,moving:false}),
     f(2,p(.1),{target}),
@@ -33,10 +35,10 @@ function complete(target=6) {
     f(12,p(1.51,.35),{target,enemies:alive,weapon:false,ammo:0,heldItem:'cup-1',itemStates:[{id:'cup-1',state:'held'}]}),
     f(13,p(1.51,.35),{target,enemies:alive,weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:25}),
     ...Array.from({length:target}, (_, n) => f(14+n,p(1.51,.35),{
-      target,kills:n+1,enemies:dead,weapon:false,ammo:0,
+      target,kills:n+1,enemies:deadThrough(n+1),weapon:false,ammo:0,
       itemStates:[{id:'cup-1',state:'broken'}],fragments: n < 2 ? 25 : 10,
     })),
-    f(14+target,p(1.51,.35),{target,screen:'win',kills:target,enemies:dead,weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
+    f(14+target,p(1.51,.35),{target,screen:'win',kills:target,enemies:deadThrough(target),weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
     f(15+target,p(0),{target,moving:false}),
   ];
   frames.at(-1).worldClock=.1;
@@ -172,4 +174,24 @@ test('SH10 rejects simultaneous gun-equipped and source-item-held telemetry',()=
   const result=report(data);
   assert.equal(result.status,DOJO_VERTICAL_STATUS.INVALID);
   assert.match(result.errors.join('\n'),/invalid Dojo v2 runtime telemetry/);
+});
+
+test('SH10 rejects six counter increments represented by a single repeatedly dead actor',()=>{
+  const data=complete();
+  for(const frame of data.frames) {
+    if(frame.gameplay.encounter.enemies.some(actor=>!actor.alive))
+      frame.gameplay.encounter.enemies=[{id:'native-encounter-0',alive:false}];
+  }
+  failure(data,/distinct dead actor IDs/);
+});
+
+test('SH10 does not accept a resurrected enemy or duplicate actor ID before reset',()=>{
+  const resurrected=complete();
+  resurrected.frames[14].gameplay.encounter.enemies[0].alive=true;
+  assert.equal(report(resurrected).status,DOJO_VERTICAL_STATUS.INVALID);
+  assert.match(report(resurrected).errors.join('\\n'),/resurrected/);
+  const duplicate=complete();
+  duplicate.frames[14].gameplay.encounter.enemies.push({...duplicate.frames[14].gameplay.encounter.enemies[0]});
+  assert.equal(report(duplicate).status,DOJO_VERTICAL_STATUS.INVALID);
+  assert.match(report(duplicate).errors.join('\\n'),/duplicate Web encounter actor/);
 });
