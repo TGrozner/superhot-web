@@ -17,7 +17,7 @@ import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
 import { createNativeHud } from './render/native-hud.js';
-import { createNativePlayerAnimation } from './characters/native-player-controller.js';
+import { createNativePlayerAnimation, projectDojoPlayerFrame } from './characters/native-player-controller.js';
 import { multiplyMatrices } from './scenes/graph.js';
 import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
 import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
@@ -1338,45 +1338,61 @@ function drawViewModel(camera) {
   const sway=Math.sin(state.walkCycle)*.013;
   const bob=Math.cos(state.walkCycle*.5)*.012;
   const shot=state.recoil*.13;
+  // This exact basis is also used by nativeItemDraws(camera) to position
+  // the source-held item. Project once, without fabricating a native camera.
+  const cameraWorldMatrix=[
+    -axes.right.x,-axes.right.y,-axes.right.z,0,
+    axes.up.x,axes.up.y,axes.up.z,0,
+    axes.forward.x,axes.forward.y,axes.forward.z,0,
+    camera.x,camera.y,camera.z,1,
+  ];
   if(nativeGameplay() && nativeItems?.held) {
-    if (nativeItems.held.isKatana && nativeHandsController
-      && nativeHandsEquippedId === nativeItems.held.id) {
+    const heldItem=nativeItems.held;
+    let sampledKatanaLocalMatrix=null;
+    if (heldItem.isKatana && nativeHandsController &&
+        nativeHandsEquippedId === heldItem.id) {
       try {
-        const sample = nativeHandsController.sample();
-        if (sample.handsVisible && sample.profileId === nativeItems.held.id
-          && sample.handsMatrix?.length === 16
-          && Array.from(sample.handsMatrix).every(Number.isFinite)) {
-          const basis = [
-            -axes.right.x,-axes.right.y,-axes.right.z,0,
-            axes.up.x,axes.up.y,axes.up.z,0,
-            axes.forward.x,axes.forward.y,axes.forward.z,0,
-            camera.x,camera.y,camera.z,1,
-          ];
-          // sample.handsMatrix ALREADY includes the author's item-specific
-          // handPosition/drawRoot/container. Multiply exactly once by the
-          // current Web camera basis; this is not certified native camera TRS.
-          const modelMatrix = multiplyMatrices(basis, sample.handsMatrix);
-          const receipt = renderer.drawDojoPlayerHands({
-            heldItem:nativeItems.held, modelMatrix, descriptor:sample.descriptor,
+        const sample=nativeHandsController.sample();
+        const frame=projectDojoPlayerFrame({
+          pose:sample,heldItem,cameraWorldMatrix,
+        });
+        if(frame) {
+          const receipt=renderer.drawDojoPlayerHands({
+            heldItem,profileId:frame.profileId,
+            modelMatrix:frame.modelMatrix,descriptor:frame.descriptor,
           });
-          if (receipt?.handsDrawCalls > 0) {
-            nativeHandsStats = {
+          if(receipt?.handsDrawCalls>0) {
+            // This camera-local attachment is already mirrored by the
+            // source controller; nativeItemDraws applies the Web camera once.
+            // Keep static source held pose if either GPU or socket is missing.
+            if(frame.bladeSocketAvailable) sampledKatanaLocalMatrix=frame.itemCameraLocalMatrix;
+            nativeHandsStats={
               handsDrawCalls:receipt.handsDrawCalls,
               handsTriangles:receipt.handsTriangles,
               sourcePoseSampled:receipt.sourcePoseSampled,
+              webKatanaSocketApplied:Boolean(sampledKatanaLocalMatrix),
             };
-            nativeHandsStatus = 'DOJO_HANDS_DRAWN_WEB_CAMERA_DIAGNOSTIC_NOT_1_TO_1';
+            nativeHandsStatus=sampledKatanaLocalMatrix
+              ? 'DOJO_HANDS_AND_KATANA_SOCKET_WEB_CAMERA_DIAGNOSTIC_NOT_1_TO_1'
+              : 'DOJO_HANDS_DRAWN_WEB_CAMERA_DIAGNOSTIC_NOT_1_TO_1';
           }
         }
       } catch {
         renderer.replaceDojoPlayerHands(null);
-        nativeHandsController = null;
-        nativeHandsStatus = 'DOJO_HANDS_WEB_DRAW_REJECTED_FALLBACK';
+        nativeHandsController=null;
+        nativeHandsStatus='DOJO_HANDS_WEB_DRAW_REJECTED_FALLBACK';
       }
     }
-    // Source blade geometry keeps its already-proven held transform; the
-    // camera-child katana socket offset is not yet proven.
-    for(const draw of nativeItemDraws(nativeItems,camera).held)renderer.drawNativeInstance(draw.instanceId,draw.modelMatrix,true);
+    // Temporary override only for this draw. Do not retain a stale socket
+    // on a later missing sample, pickup, throw, scene reset or frame failure.
+    const staticHeldMatrix=heldItem.heldMatrix;
+    if(sampledKatanaLocalMatrix)heldItem.heldMatrix=sampledKatanaLocalMatrix;
+    try {
+      for(const draw of nativeItemDraws(nativeItems,camera).held)
+        renderer.drawNativeInstance(draw.instanceId,draw.modelMatrix,true);
+    } finally {
+      heldItem.heldMatrix=staticHeldMatrix;
+    }
     return;
   }
   if (nativeGameplay() && state.weapon) {
@@ -1393,7 +1409,38 @@ function drawViewModel(camera) {
     }
     return;
   }
-  if (nativeGameplay()) return; // No source unarmed hand model is supplied.
+  if(nativeGameplay()) {
+    // After an accepted throw the original unarmed Hands.Throw can remain
+    // visible without any held katana. A pistol never enters this path.
+    if(!state.weapon && nativeHandsController && nativeHandsEquippedId==='unarmed') {
+      try {
+        const sample=nativeHandsController.sample();
+        const frame=projectDojoPlayerFrame({
+          pose:sample,heldItem:null,cameraWorldMatrix,
+        });
+        if(frame) {
+          const receipt=renderer.drawDojoPlayerHands({
+            heldItem:null,profileId:frame.profileId,
+            modelMatrix:frame.modelMatrix,descriptor:frame.descriptor,
+          });
+          if(receipt?.handsDrawCalls>0) {
+            nativeHandsStats={
+              handsDrawCalls:receipt.handsDrawCalls,
+              handsTriangles:receipt.handsTriangles,
+              sourcePoseSampled:receipt.sourcePoseSampled,
+              webKatanaSocketApplied:false,
+            };
+            nativeHandsStatus='DOJO_UNARMED_HANDS_DRAWN_WEB_CAMERA_DIAGNOSTIC_NOT_1_TO_1';
+          }
+        }
+      } catch {
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsController=null;
+        nativeHandsStatus='DOJO_UNARMED_HANDS_WEB_DRAW_REJECTED_FALLBACK';
+      }
+    }
+    return; // No generated first-person proxy in original-source mode.
+  }
   const origin=add3(add3(add3(camera,multiply3(axes.forward,.87-shot)),multiply3(axes.right,.37+sway)),multiply3(axes.up,-.31+bob-shot*.4));
   const offset=(r,u,f)=>add3(add3(add3(origin,multiply3(axes.right,r)),multiply3(axes.up,u)),multiply3(axes.forward,f));
   const draw=(r,u,f,sx,sy,sz,color)=>{
