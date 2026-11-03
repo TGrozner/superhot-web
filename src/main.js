@@ -14,7 +14,7 @@ import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativ
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
-import { createNativeDeathRuntime } from './animation/native-death-runtime.js';
+import { createNativeDeathRuntime, applyNativeDeathForce } from './animation/native-death-runtime.js';
 import { advanceDojoDeathSkinFrame } from './animation/native-gameplay-pose-bridge.js';
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests } from './combat/native-enemy-fire-phase.js';
@@ -880,14 +880,16 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
       enemy.stunnedAt=state.worldClock;enemy.runtime.pendingShot=null;enemy.attackIntentAt=null;
       audio.stun({bodyId:enemy.id,position:enemy,realtimeSeconds:state.runClock});
     }
-    if(action.type==='kill')killEnemy(enemy);
+    if(action.type==='kill')killEnemy(enemy,{
+      boneIndex:hit.boneIndex,point:hit.point,direction:normalize3(velocity),kind:'throw',
+    });
   }
   return result;
 }
 // Normal source Kill toggles the authored rigidbodies; directional/head forces
 // are separate native routes. We only start an explicitly source-bound Web PBD
 // preview from an actual sampled actor pose and measured Web motion.
-function prepareDojoDeathPhysics(enemy) {
+function prepareDojoDeathPhysics(enemy,hitReceipt=null) {
   const definition=nativeScene?.gameplay?.deathPhysics;
   const rig=nativeSkinInfo?.skinRig;
   if(!definition || !rig || !isDojoBuild10Source(nativeScene.source)) return;
@@ -925,6 +927,28 @@ function prepareDojoDeathPhysics(enemy) {
       previousModelMatrix:sampledMotionReady?enemy.previousActorModel:null,
       poseDeltaSeconds:sampledMotionReady?poseDeltaSeconds:null,
     });
+    // Deliberately tuned Web-only impact response. A sampled limb collider
+    // names the hit bone; walk its authored parents to the nearest Rigidbody
+    // for fingers, hands or other bones without their own rigidbody.
+    if(hitReceipt && Number.isInteger(hitReceipt.boneIndex) &&
+        hitReceipt.boneIndex>=0 && hitReceipt.boneIndex<definition.boneParents.length &&
+        hitReceipt.point && hitReceipt.direction &&
+        ['x','y','z'].every(axis=>Number.isFinite(hitReceipt.point[axis]) &&
+          Number.isFinite(hitReceipt.direction[axis]))) {
+      let bone=hitReceipt.boneIndex;
+      while(bone>=0 && !enemy.deathRuntime.byBone.has(bone))
+        bone=definition.boneParents[bone];
+      const body=enemy.deathRuntime.byBone.get(bone);
+      if(body) {
+        const direction=normalize3(hitReceipt.direction);
+        const strength=hitReceipt.kind==='throw'?1.5:1.1; // m/s; authored Web tuning
+        applyNativeDeathForce(enemy.deathRuntime,{
+          boneIndex:bone,mode:'Impulse',
+          vector:multiply3(direction,body.source.mass*strength),
+          point:hitReceipt.point,
+        });
+      }
+    }
     enemy.deathRig=rig;
     enemy.deathBoneOrder=rig.boneOrder;
     enemy.deathPhysicsProvenance='source-prefab-plus-observed-web-velocity-not-physx';
@@ -933,7 +957,7 @@ function prepareDojoDeathPhysics(enemy) {
     enemy.deathPhysicsStatus='source-physics-construction-rejected';
   }
 }
-function killEnemy(enemy) {
+function killEnemy(enemy,hitReceipt=null) {
   if (!enemy.alive) return;
   enemy.deathFireAction=enemy.fireAction??null;
   enemy.alive = false;
@@ -944,7 +968,7 @@ function killEnemy(enemy) {
   if(nativeGameplay()) {
     if(enemy.reaction.hasWeapon) {dropNativeEnemyWeapon(enemy);enemy.reaction.hasWeapon=false;}
     enemy.reaction.dead=true;enemy.runtime.pendingShot=null;
-    prepareDojoDeathPhysics(enemy);
+    prepareDojoDeathPhysics(enemy,hitReceipt);
   } else {
     shatterAt(vec(enemy.x, enemy.y + 1.12, enemy.z), 23, RED, floorY);
     state.drops.push({x:enemy.x,y:floorY+.38,z:enemy.z,bob:rand(0,7),ammo:6});
@@ -1285,7 +1309,10 @@ function update(dt) {
         if(native&&bullet.type==='throw')applyNativeEnemyContact(impact.enemy,{
           stickable:false,isKiller:false,headshotKiller:false,cutLimbs:false,
         },impact,bullet.velocity);
-        else killEnemy(impact.enemy);
+        else killEnemy(impact.enemy,native?{
+          boneIndex:impact.boneIndex,point:impact.point,
+          direction:bullet.direction,kind:'shot',
+        }:null);
       }
       else if (impact.type==='player') damagePlayer();
       if (bullet.type==='throw' && impact.type==='wall' && !native) {
