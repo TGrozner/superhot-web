@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {MCD_KATANA_AUDIO,planMcdKatanaSliceSound,planMcdKatanaHitSceneBinding} from '../src/sound/mcd-katana-event-intent.js';
+import {planMcdPlayClip, MCD_PLAYCLIP_RESULT} from '../src/sound/mcd-playclip-intent.js';
 const state = (patch={}) => ({producer:'living-body-part',realtimeSeconds:0.5,
   previousSliceRealtimeSeconds:0,localClipDecoded:true,...patch});
 
@@ -65,4 +66,22 @@ test('Katana private WAV can be registered for verified scene item, not generic 
   assert.equal(result.items['source-katana-1'].slice.gain,0.5);
   assert.throws(()=>planMcdKatanaHitSceneBinding({sceneAudio:result,
     itemId:'source-katana-1',sourceItemVerified:true,privateWavPresent:true}),/overwritten/);
+});
+
+test('source Katana mixer Channel reference unblocks the Web PlayClip channel guard', () => {
+  const planned=planMcdKatanaHitSceneBinding({
+    sceneAudio:null,itemId:'verified-katana-1',
+    sourceItemVerified:true,privateWavPresent:true,
+  });
+  const cue=planned.items['verified-katana-1'].slice;
+  // A Web routing label for the proven serialized reference, NOT a
+  // Unity mixer name or evidence that the clip has been decoded/heard.
+  assert.equal(cue.mixerGroup,'source-mixer-ref:file3:path659');
+  const playbackIntent=planMcdPlayClip({
+    clipPresent:true,channelPresent:typeof cue.mixerGroup==='string' && cue.mixerGroup.length>0,
+    cooldownActive:false,channelIsInterfaceSfx:false,bypassEffects:false,
+    positionProvided:false,isLooped:false,playDelaySeconds:0,
+    volume:cue.gain,pitch:cue.pitch,priority:cue.priority,
+  });
+  assert.equal(playbackIntent.status,MCD_PLAYCLIP_RESULT.REQUEST);
 });
