@@ -14,6 +14,7 @@ const validPoint = value => value !== null && typeof value === 'object' &&
   ['x', 'y', 'z'].every(axis => Number.isFinite(value[axis]));
 const soundQualifiedFamilies = new Set(['Pistol', 'Shotgun']);
 const meleeFamilies = new Set(['Melee', 'Katana']);
+const gunFamilies = new Set(['Pistol', 'Shotgun', 'MachineGun', 'SniperRifle']);
 
 /**
  * @typedef {{type:string, [key:string]:unknown}} CombatReactionAction
@@ -79,6 +80,12 @@ export function stepNativeDojoActorCombat(input) {
       typeof random !== 'function') {
     throw new TypeError('explicit actor, phase, gun state, family and random required');
   }
+  // The selector can enumerate more families than the current native behavior
+  // implementation has reconstructed. Fail closed rather than routing a
+  // MeleeWeapon/unknown prefab through GunAttack and spawning fake bullets.
+  if (!gunFamilies.has(weaponSettings.family) && !meleeFamilies.has(weaponSettings.family)) {
+    throw new TypeError('selected weapon family has no qualified attack phase');
+  }
   if (phase === 'late') {
     if (gunInput !== null || meleeInput !== null || reactionActions.length !== 0) {
       throw new TypeError('Late may only consume the pending shot and current pose');
@@ -113,6 +120,14 @@ export function stepNativeDojoActorCombat(input) {
     if (!action || typeof action.type !== 'string') {
       throw new TypeError('reaction actions must be explicit source action receipts');
     }
+  }
+
+  // A received Kill is an external native reaction receipt. Applying another
+  // Attack in the same unspecified frame would invent ordering after the
+  // source Animator.Kill has disabled the actor's animator.
+  if (reactionActions.some(action => action.type === 'kill') &&
+      (gunInput !== null || meleeInput !== null)) {
+    throw new TypeError('cannot accept new attack with a kill reaction receipt');
   }
 
   const animationIntents = [];
