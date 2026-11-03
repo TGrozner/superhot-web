@@ -132,6 +132,45 @@ test('false-light three-slot ceiling does not leak a spotlight cookie or invente
   assert.ok(packets.falseLights.every(light => !Object.hasOwn(light, 'color')));
 });
 
+test('missing owner-local Dojo door world TRS fails closed without breaking gameplay', () => {
+  const incomplete = {
+    ...sourceDoor,
+    spotlight: { ...sourceDoor.spotlight },
+    falseLight: { ...sourceDoor.falseLight },
+  };
+  for (const key of ['position', 'direction', 'right', 'up']) delete incomplete.spotlight[key];
+  delete incomplete.falseLight.position;
+  const warnings = createMcdDoorWarnings({ 'level10::7': incomplete });
+  warnings.trigger('level10::7');
+  // The warning controller starts at range=0; source TRS must not be required yet.
+  const before = prepareDojoDoorWarningLighting(scene, warnings.packets(), options);
+  assert.deepEqual(before.spotlights, []);
+  assert.deepEqual(before.falseLights, []);
+
+  warnings.advance(1);
+  const unresolved = prepareDojoDoorWarningLighting(scene, warnings.packets(), options);
+  assert.equal(unresolved.spotlights.length, 0);
+  assert.equal(unresolved.falseLights.length, 0);
+  assert.deepEqual(unresolved.omissions.map(o => o.reason).sort(), [
+    'source-false-light-world-position-not-resolved',
+    'source-spotlight-world-basis-not-resolved',
+  ]);
+  assert.equal(warnings.packets()[0].elapsed, 1);
+
+  // The two light types have independent source-space positions: a missing
+  // false-light transform cannot suppress a separately qualified spotlight.
+  incomplete.spotlight = { ...sourceDoor.spotlight };
+  const onlyFalsePositionMissing = createMcdDoorWarnings({
+    'level10::7': incomplete,
+  });
+  onlyFalsePositionMissing.trigger('level10::7');
+  onlyFalsePositionMissing.advance(1);
+  const partial = prepareDojoDoorWarningLighting(scene, onlyFalsePositionMissing.packets(), options);
+  assert.equal(partial.spotlights.length, 1);
+  assert.equal(partial.falseLights.length, 0);
+  assert.equal(partial.omissions[0].reason, 'source-false-light-world-position-not-resolved');
+});
+
 test('rejects malformed inputs rather than publishing phantom light uniforms', () => {
   const active = activeWarning().packets();
   assert.throws(() => prepareDojoDoorWarningLighting(scene, active,
