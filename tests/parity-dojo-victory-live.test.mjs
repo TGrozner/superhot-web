@@ -7,7 +7,8 @@ import { resolveDojoKillCompletion } from '../src/flow/dojo-combat-completion.js
 // Check live call-site, while flow-dojo-combat-completion.test.mjs exercises
 // the true combat-owner mutable runtime with 6/7 deaths and replay.
 const main=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
-const kill=main.slice(main.indexOf('function killEnemy(enemy) {'),main.indexOf('function damagePlayer()'));
+const kill=main.slice(main.indexOf('function killEnemy(enemy,'),main.indexOf('function damagePlayer()'));
+assert.ok(kill.startsWith('function killEnemy(enemy,'),'death dispatch must remain reachable');
 
 test('SH-05 main dispatches Dojo kill receipts only once and preserves other scenes',()=>{
   assert.match(kill,/if \(isDojoBuild10Source\(nativeScene\.source\)\)/);
