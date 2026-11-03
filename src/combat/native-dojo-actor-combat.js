@@ -53,7 +53,10 @@ const gunFamilies = new Set(['Pistol', 'Shotgun', 'MachineGun', 'SniperRifle']);
  *   meleeInput?:object|null,
  *   shooterPosition?:{x:number,y:number,z:number}|null,
  *   pose?:{muzzlePosition:{x:number,y:number,z:number},
- *          weaponForward?:{x:number,y:number,z:number}}|null,
+ *          weaponForward?:{x:number,y:number,z:number},
+ *          sourceSocketMatrix?:Float32Array}|null,
+ *   actorFrame?:{actorId:string|number,actorPoseOwnedSnapshot:boolean,
+ *     weaponAttachmentMatrix:Float32Array|null}|null,
  *   reactionActions?:CombatReactionAction[],
  *   random?:()=>number
  * }} input
@@ -70,7 +73,7 @@ export function stepNativeDojoActorCombat(input) {
     actorId, phase, runtime, weaponSettings,
     scaledDeltaTime, unscaledDeltaTime,
     gunInput = null, meleeInput = null, shooterPosition = null, pose = null,
-    reactionActions = [], random = Math.random,
+    actorFrame = null, reactionActions = [], random = Math.random,
   } = input ?? {};
   if (!validId(actorId) || !['update', 'late'].includes(phase) ||
       !runtime || typeof runtime !== 'object' ||
@@ -94,6 +97,22 @@ export function stepNativeDojoActorCombat(input) {
       if (runtime.pendingShot) throw new TypeError('melee actor has an unqualified pending gun shot');
       return { actorId, phase, status: 'empty', animationIntents: [],
         projectileRequests: [], pendingShot: false };
+    }
+    // SH-14 #253 returns independently owned socket snapshots per actor.
+    // A previously drawn enemy's scratch socket must never release this actor's
+    // pending shot. Bind the derived muzzle to that SAME snapshot by identity;
+    // lack of source pose keeps the shot pending. The actual muzzle-local
+    // transform and Web collider sweep remain SH-05's separate responsibilities.
+    if (runtime.pendingShot && (
+      actorFrame?.actorId !== actorId ||
+      actorFrame.actorPoseOwnedSnapshot !== true ||
+      !(actorFrame.weaponAttachmentMatrix instanceof Float32Array) ||
+      actorFrame.weaponAttachmentMatrix.length !== 16 ||
+      !actorFrame.weaponAttachmentMatrix.every(Number.isFinite) ||
+      pose?.sourceSocketMatrix !== actorFrame.weaponAttachmentMatrix
+    )) {
+      return { actorId, phase, status: 'awaiting-owned-actor-frame',
+        animationIntents: [], projectileRequests: [], pendingShot: true };
     }
     const result = nativeEnemyFireLateRequests(runtime, weaponSettings, pose, random);
     return {
