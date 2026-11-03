@@ -131,7 +131,6 @@ test('per-actor source punch action uses its own clip clock, never idle sample o
     { actorPoseOwnedSnapshot: false },
     { actionEffectiveWeight: 0.7 },
     { actionApproximation: true },
-    { actionTime: 0.15 },
     { transition: 'idle->punch', transitionWeight: 0.5 },
   ]) {
     const rejected = advanceRenderedDojoPunchGate(state(), {
@@ -141,6 +140,12 @@ test('per-actor source punch action uses its own clip clock, never idle sample o
     assert.equal(rejected.poseQualified, false);
     assert.deepEqual(rejected.requests, []);
   }
+  const early = advanceRenderedDojoPunchGate(state(), {
+    drawReport: { ...report, actionTime: 0.15 },
+    clipBinding: actionBinding, ...flags, contact: sweep,
+  });
+  assert.equal(early.poseQualified, true, 'valid action sample before hit window');
+  assert.deepEqual(early.requests, [], 'no damage before serialized Start event');
   const baseClock = advanceRenderedDojoPunchGate(state(), {
     drawReport: report, clipBinding: binding, ...flags, contact: sweep,
   });
