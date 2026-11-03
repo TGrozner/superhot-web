@@ -3,11 +3,30 @@ import { meshModelMatrices } from './mesh-format.js';
 import { multiplyMatrices } from '../scenes/graph.js';
 import { createNativeSceneMaterialPacket, NATIVE_MATERIAL_GLSL } from './native-material.js';
 import { RED_CRYSTAL_GLSL } from './red-crystal-pass.js';
+import { createDojoDoorWarningSceneAdapter, DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL } from './lighting-model.js';
 import {
   sliceNativeLightmapBc3Mips,
   nativeLightmapBc3GpuPacket,
 } from './material-model.js';
 
+// Source-gated Web cookie preview; not the original Unity projector/shadow pipeline.
+// Three authored warning components can have separate decoded cookies.
+const warningSlots = 3;
+const warningPreviewGlsl = [
+  'uniform int uDoorWarningCount;',
+  ...Array.from({length: warningSlots}, (_, i) =>
+    'uniform sampler2D uDoorCookie' + i + ';\n' +
+    'uniform vec3 uDoorPosition' + i + ', uDoorDirection' + i + ', uDoorRight' + i + ', uDoorUp' + i + ', uDoorColor' + i + ';\n' +
+    'uniform float uDoorRange' + i + ', uDoorCos' + i + ', uDoorTan' + i + ', uDoorIntensity' + i + ';'),
+  DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+  'vec3 dojoWarningPreview(vec3 worldPosition) { vec3 rgb = vec3(0.0);',
+  ...Array.from({length: warningSlots}, (_, i) =>
+    'if (uDoorWarningCount > ' + i + ') rgb += dojoDoorWarningSpotWebPreview(' +
+    'uDoorCookie' + i + ', worldPosition, uDoorPosition' + i + ', uDoorDirection' + i + ',' +
+    ' uDoorRight' + i + ', uDoorUp' + i + ', uDoorRange' + i + ', uDoorCos' + i + ',' +
+    ' uDoorTan' + i + ', uDoorColor' + i + ', uDoorIntensity' + i + ');'),
+  'return rgb; }',
+].join('\n');
 const vertex = `#version 300 es
 precision highp float;
 precision highp int;
@@ -138,6 +157,7 @@ uniform vec3 uClock;
 uniform vec4 uMonitor, uBlackState;
 uniform float uCutoff, uObjectPhase;
 uniform int uMode, uTextured, uHasNormals, uHasTangents, uLightmapped;
+${warningPreviewGlsl}
 out vec4 outColor;
 ${NATIVE_MATERIAL_GLSL.blackCrystalReflection}
 ${NATIVE_MATERIAL_GLSL.firstPersonBlackCrystal}
@@ -179,13 +199,14 @@ void main() {
     rgb += (vBlackLighting.z * vec3(0.0, 1.4, 1.8) + vBlackLighting.w * 10.0) * nearAmount;
     rgb *= nearAmount;
     rgb = mix(rgb, vSeam.rgb, vSeam.a);
-    outColor = vec4(max(rgb - 0.1, 0.0), 1.0);
+    outColor = vec4(max(rgb - 0.1, 0.0) + dojoWarningPreview(vWorld), 1.0);
     return;
   }
   if (uMode == 3) {
     outColor = nativeRedCrystalDefaultForward(vUV, vNormal, vWorld, vViewNormal,
       vCameraForward, vObjectCameraForward, gl_FragCoord.xy / uScreen,
       uScreen.x / uScreen.y, uClock.y, uCamera, uWorldSpaceLightDirection);
+    outColor.rgb += dojoWarningPreview(vWorld);
     return;
   }
   if (uMode == 5 && uTextured == 1) {
@@ -202,7 +223,7 @@ void main() {
       uFogColor.rgb, uFogScale, uFogPower, uSecondaryFogDistance,
       uGroundFogColor.rgb, uGroundFog);
     if (abs(transition) < uClock.z + 0.01) rgb += 0.6 * (1.0 - uClock.z);
-    outColor = vec4(rgb, 1.0);
+    outColor = vec4(rgb + dojoWarningPreview(vWorld), 1.0);
     return;
   }
   vec4 albedo = vec4(1.0);
@@ -286,12 +307,12 @@ void main() {
     rgb = nativeConcreteLocalFog(rgb, uFogGradient, vWorld, uCamera,
       uFogColor.rgb, uFogScale, uFogPower, uSecondaryFogDistance,
       uGroundFogColor.rgb, uGroundFog);
-    outColor = vec4(rgb, 1.0);
+    outColor = vec4(rgb + dojoWarningPreview(vWorld), 1.0);
     return;
   }
   float generic = 0.64 + 0.36 * max(dot(n, normalize(vec3(-0.55, 0.9, 0.42))), 0.0);
   vec3 rgb = albedo.rgb * uColor.rgb * generic;
-  outColor = vec4(rgb, uMode == 2 || uMode == 4 ? 1.0 : uColor.a * albedo.a);
+  outColor = vec4(rgb + dojoWarningPreview(vWorld), uMode == 2 || uMode == 4 ? 1.0 : uColor.a * albedo.a);
 }`;
 
 // PR150's source-qualified opaque state, extended to the compiled alpha-test
@@ -325,6 +346,11 @@ function shader(gl, type, source) {
 
 /** Caller supplies private decoded assets. No asset URLs or original data are embedded. */
 export function createNativeWorldPass(gl, scene, images) {
+  const warningAdapter = scene.source?.sceneBuildIndex === 10 &&
+    scene.source.serializedOwner === 'level10' &&
+    scene.gameplay?.audio?.doors && scene.instanceMap instanceof Map &&
+    scene.textures instanceof Map
+    ? createDojoDoorWarningSceneAdapter(scene, images) : null;
   const auxiliaryInstances = scene.auxiliaryInstances ?? [];
   const worldInstances = [...scene.instances, ...auxiliaryInstances];
   const program = gl.createProgram(), meshes = new Map(), textures = new Map();
@@ -333,7 +359,7 @@ export function createNativeWorldPass(gl, scene, images) {
   const lightmapUploads = new Map();
   const oldActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
   const oldTextureBindings = [];
-  for (let unit = 0; unit < 5; unit++) {
+  for (let unit = 0; unit < 8; unit++) {
     gl.activeTexture(gl.TEXTURE0 + unit);
     oldTextureBindings.push(gl.getParameter(gl.TEXTURE_BINDING_2D));
   }
@@ -458,6 +484,9 @@ export function createNativeWorldPass(gl, scene, images) {
     uploadTexture(concreteTextures.microseamTextureId);
     uploadTexture(concreteTextures.poreTextureId);
     uploadTexture(concreteTextures.fogGradientTextureId, { clamp: true });
+    for (const cookie of warningAdapter?.cookieStatus ?? []) {
+      if (cookie.decoded) uploadTexture(cookie.textureId, { clamp: true });
+    }
     packets = new Map();
     const materialInstances = [...worldInstances];
     if (scene.worldPistol) {
@@ -535,7 +564,7 @@ export function createNativeWorldPass(gl, scene, images) {
   finally {
     for (const s of shaders) gl.deleteShader(s);
     gl.useProgram(oldProgram);
-    for (let unit = 4; unit >= 0; unit--) {
+    for (let unit = 7; unit >= 0; unit--) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, oldTextureBindings[unit]);
     }
@@ -555,7 +584,11 @@ export function createNativeWorldPass(gl, scene, images) {
     'uGroundFog', 'uGroundFogColor',
     'uWorldSpaceLightDirection',
     'uClock', 'uMonitor', 'uBlackState', 'uCutoff', 'uObjectPhase',
-    'uFirstPersonProjectionScale', 'uFirstPersonDepth',
+    'uFirstPersonProjectionScale', 'uFirstPersonDepth', 'uDoorWarningCount',
+    ...Array.from({length: warningSlots}, (_, slot) => [
+      'uDoorCookie', 'uDoorPosition', 'uDoorDirection', 'uDoorRight', 'uDoorUp',
+      'uDoorColor', 'uDoorRange', 'uDoorCos', 'uDoorTan', 'uDoorIntensity',
+    ].map(prefix => prefix + slot)).flat(),
   ]) uniforms[name] = gl.getUniformLocation(program, name);
   const colorLocation = gl.getAttribLocation(program, 'aColor');
   const lightmapUvLocation = gl.getAttribLocation(program, 'aLightmapUV');
@@ -597,7 +630,8 @@ export function createNativeWorldPass(gl, scene, images) {
     }
   }
   function render(viewProjection, camera, weaponMatrix = null, clock = {}, firstPerson = false,
-    weaponLocalMatrix = weaponLocal, selectedInstance = null, instanceTransform = null) {
+    weaponLocalMatrix = weaponLocal, selectedInstance = null, instanceTransform = null,
+    warningPackets = null) {
     const previousProgram = gl.getParameter(gl.CURRENT_PROGRAM);
     const previousVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
     const previousActive = gl.getParameter(gl.ACTIVE_TEXTURE);
@@ -608,11 +642,13 @@ export function createNativeWorldPass(gl, scene, images) {
       depthMask: gl.getParameter(gl.DEPTH_WRITEMASK),
     };
     const previousTextureBindings = [];
-    for (let unit = 0; unit < 5; unit++) {
+    for (let unit = 0; unit < 8; unit++) {
       gl.activeTexture(gl.TEXTURE0 + unit);
       previousTextureBindings.push(gl.getParameter(gl.TEXTURE_BINDING_2D));
     }
     let drawCalls = 0, triangles = 0;
+    let warningPreviewDrawCalls = 0;
+    const warningDoorIdsDrawn = new Set();
     let sourceConcreteDrawCalls = 0, concreteDrawCalls = 0;
     let blackCrystalDrawCalls = 0, redCrystalDrawCalls = 0, cutoutDrawCalls = 0, monitorDrawCalls = 0;
     let firstPersonDrawCalls = 0;
@@ -678,6 +714,32 @@ export function createNativeWorldPass(gl, scene, images) {
         gl.uniform1f(uniforms.uModelSign, transform.mirrored ? -1 : 1);
         const objectPhase = (transform.model[13] - transform.model[12]) * 1000;
         gl.uniform1f(uniforms.uObjectPhase, objectPhase - Math.floor(objectPhase));
+        // Only authored, source-layer meshes receive source-door projection.
+        // Missing ImageBitmap => adapter supplies no spotlight, never a fake cookie.
+        const worldSource = scene.instanceMap?.get(instance.id);
+        const qualified = warningAdapter && Array.isArray(warningPackets) &&
+          worldSource && Number.isInteger(worldSource.layer) &&
+          !firstPerson && !weaponMatrix && !selectedInstance
+          ? warningAdapter.prepareForInstance(instance.id, warningPackets).spotlights : [];
+        const activeWarnings = qualified.slice(0, warningSlots);
+        gl.uniform1i(uniforms.uDoorWarningCount, activeWarnings.length);
+        for (let slot = 0; slot < warningSlots; slot++) {
+          const spot = activeWarnings[slot];
+          gl.activeTexture(gl.TEXTURE0 + 5 + slot);
+          gl.bindTexture(gl.TEXTURE_2D, spot ? textures.get(spot.cookieTextureId) : null);
+          if (!spot) continue;
+          gl.uniform1i(uniforms['uDoorCookie' + slot], 5 + slot);
+          for (const [key, value] of [
+            ['Position', spot.position], ['Direction', spot.direction],
+            ['Right', spot.right], ['Up', spot.up], ['Color', spot.color],
+          ]) gl.uniform3fv(uniforms['uDoor' + key + slot], value);
+          for (const [key, value] of [
+            ['Range', spot.range], ['Cos', spot.cosHalfAngle],
+            ['Tan', spot.tanHalfAngle], ['Intensity', spot.intensity],
+          ]) gl.uniform1f(uniforms['uDoor' + key + slot], value);
+          warningDoorIdsDrawn.add(spot.doorId);
+        }
+        gl.activeTexture(gl.TEXTURE0);
         const preparedMesh = scene.meshes.get(instance.meshId);
         gl.uniform1i(uniforms.uHasNormals, preparedMesh.hasNormals ? 1 : 0);
         gl.uniform1i(uniforms.uHasTangents, preparedMesh.hasTangents ? 1 : 0);
@@ -705,6 +767,7 @@ export function createNativeWorldPass(gl, scene, images) {
             material.lightmap ? textures.get(material.lightmap.textureId) : null);
           meshes.get(draw.meshId).draw(draw.range);
           drawCalls++;
+          if (activeWarnings.length) warningPreviewDrawCalls++;
           if (material.sourceConcrete) sourceConcreteDrawCalls++;
           if (material.concrete) concreteDrawCalls++;
           if (material.mode === 1) blackCrystalDrawCalls++;
@@ -719,7 +782,7 @@ export function createNativeWorldPass(gl, scene, images) {
         }
       }
     } finally {
-      for (let unit = 4; unit >= 0; unit--) {
+      for (let unit = 7; unit >= 0; unit--) {
         gl.activeTexture(gl.TEXTURE0 + unit);
         gl.bindTexture(gl.TEXTURE_2D, previousTextureBindings[unit]);
       }
@@ -737,6 +800,9 @@ export function createNativeWorldPass(gl, scene, images) {
       nativeGeometry: true,
       nativeMaterialParity: false,
       nativeLightingParity: false,
+      warningPreviewSpotlights: warningDoorIdsDrawn.size,
+      warningPreviewDrawCalls,
+      warningCookieStatus: warningAdapter?.cookieStatus ?? [],
       sourceConcreteLightmappedDrawCalls: sourceConcreteDrawCalls,
       unsupportedConcreteCompositionDrawCalls: concreteDrawCalls - sourceConcreteDrawCalls,
       sourceBlackCrystalDrawCalls: blackCrystalDrawCalls,
@@ -766,7 +832,8 @@ export function createNativeWorldPass(gl, scene, images) {
       }
       return {center:[...bounds.center],radius:bounds.radius};
     },
-    draw: (vp, camera, clock) => render(vp, camera, null, clock),
+    draw: (vp, camera, clock, warningPackets = null) =>
+      render(vp, camera, null, clock, false, weaponLocal, null, null, warningPackets),
     // Visibility controls only the authored world placement, not explicit draws.
     setInstanceVisible(id, visible) {
       requireInstance(id);
