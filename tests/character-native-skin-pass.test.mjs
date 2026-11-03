@@ -676,3 +676,54 @@ test('Web-only hit/melee accents lean the real sampled GPU rig, socket and hit p
   assert.equal(calls.filter(call => call[0] === 'draw').length, before);
   pass.dispose();
 });
+
+test('source fire action produces a visible post-shot Web recoil without moving the firing-edge muzzle', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic recoil test', coordinates: 'synthetic local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const frameAt = (actorId, time, blend = 1) => actors.drawActor({
+    actorId,
+    pose: { state: 'idle', time: 0,
+      action: { state: 'fire', time, weight: 1, blend } },
+    modelMatrix: identity(), viewProjection: identity(),
+    color: [.8, .1, .2, 1],
+  });
+
+  const atShot = frameAt('enemy-A', 0);
+  assert.equal(atShot.actorWebPoseReaction, null,
+    'shot time zero must retain the original source muzzle aim');
+  assert.equal(atShot.webPoseLeanApplied, false);
+  const shotSocket = Array.from(atShot.weaponAttachmentMatrix);
+
+  const recoiling = frameAt('enemy-A', .15);
+  assert.equal(recoiling.actorWebPoseReaction.kind, 'fire');
+  assert.ok(recoiling.actorWebPoseReaction.pitch > .1);
+  assert.equal(recoiling.webPoseLeanApplied, true);
+  assert.ok(Math.abs(recoiling.weaponAttachmentMatrix[13] - shotSocket[13]) > .03,
+    'recoil must move the actual rendered weapon socket in world space');
+  assert.ok(Math.abs(recoiling.boneModelMatrices[16 + 13]) > .03,
+    'live model-space bones for hitboxes follow the GPU recoil');
+  const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
+  assert.ok(Math.abs(palette[16 + 1]) > .03,
+    'the weighted GPU palette rotates with the same receipt');
+
+  const opposite = frameAt('enemy-B', .15);
+  assert.ok(recoiling.actorWebPoseReaction.roll * opposite.actorWebPoseReaction.roll < 0,
+    'opposite stable actor IDs produce distinct recoil silhouettes');
+  near(Array.from(atShot.weaponAttachmentMatrix), shotSocket);
+  assert.notEqual(opposite.weaponAttachmentMatrix, recoiling.weaponAttachmentMatrix);
+
+  const suppressed = frameAt('enemy-A', .15, 0);
+  assert.equal(suppressed.actorWebPoseReaction, null,
+    'source action blend zero must not introduce procedural recoil');
+  const settled = frameAt('enemy-A', .9);
+  assert.equal(settled.actorWebPoseReaction, null);
+  assert.equal(settled.webPoseLeanApplied, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 5);
+  pass.dispose();
+});
