@@ -28,6 +28,7 @@ import { multiplyMatrices } from './scenes/graph.js';
 import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
 import { createDojoDoorWarningBridge } from './scenes/dojo-door-warning-bridge.js';
 import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
+import { createDojoReplayRecap, readDojoReplayBest } from './flow/dojo-replay-recap.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -647,7 +648,28 @@ function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen(
 function pause() { if (state.screen === 'playing') setScreen('paused'); }
 function finish(win) {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
-  const stats = `${state.kills} ennemis éliminés · ${state.shots} tirs · ${state.runClock.toFixed(1)} secondes`;
+  let stats = `${state.kills} ennemis éliminés · ${state.shots} tirs · ${state.runClock.toFixed(1)} secondes`;
+  // Original Web replay goals on the *actual* Dojo scoreboard. Storage failure
+  // must never block victory, death or REJOUER; 6/7-kill records are separate.
+  const quota = nativeEncounter?.killTarget;
+  if (nativeGameplay() && isDojoBuild10Source(nativeScene?.source) &&
+      (quota === 6 || quota === 7)) {
+    try {
+      const key = 'framebreak-dojo-record-v1-' + quota;
+      let previous = null;
+      try { previous = readDojoReplayBest(window.localStorage.getItem(key), quota); }
+      catch { /* Private mode or disabled storage: still display this run. */ }
+      const recap = createDojoReplayRecap({
+        quota, victory: win, kills: state.kills, shots: state.shots,
+        dodges: state.dodges, score: state.score, elapsedSeconds: state.runClock,
+      }, previous);
+      stats = recap.text;
+      if (recap.shouldPersist) {
+        try { window.localStorage.setItem(key, JSON.stringify(recap.best)); }
+        catch { /* A blocked write must never interrupt REJOUER. */ }
+      }
+    } catch { /* Preserve the previously validated win/death screen. */ }
+  }
   $(win ? 'win-stats' : 'death-stats').textContent = stats;
   setScreen(win ? 'win' : 'dead');
   if (win) audio.win();
@@ -776,7 +798,15 @@ function shoot() {
   const origin = add3(add3(state.camera, multiply3(forward, .68)), multiply3(right, .12));
   // The visible first-person muzzle may extend past a wall; do not start a
   // projectile on its far side.
-  if(!nativeGameplay() || !nativeSegmentHit(nativeShotCollision,state.camera,origin))addBullet(origin, forward, true);
+  const muzzleBlock = nativeGameplay() ? nativeSegmentHit(nativeShotCollision,state.camera,origin) : null;
+  if (!muzzleBlock) addBullet(origin, forward, true);
+  else if (muzzleBlock.t > 0.01) {
+    // The shot was genuinely blocked *before* its muzzle: show that exact
+    // wall contact, without spawning a bullet through cover or a false hitmarker.
+    recordWebImpact(webImpactFeedback, {
+      kind: 'wall', point: muzzleBlock.point, direction: forward,
+    });
+  }
   state.muzzle = .09;
   shootFlash.style.opacity = '.5';
   audio.shoot();
