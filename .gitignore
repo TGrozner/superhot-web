@@ -5,6 +5,7 @@ coverage/
 
 # Local reverse-engineering evidence and original game material.
 /private/
+/local-assets/
 
 # TypeScript temporary compilation output (JS runtime files stay in src/).
 .generated/
