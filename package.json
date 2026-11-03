@@ -11,7 +11,9 @@
     "check": "node --check src/main.js && node --check src/renderer.js && node --check src/levels.js && node --check src/math.js && node --check src/audio.js && npm test && npm run typecheck && npm run check:typed-output",
     "typecheck": "tsc --noEmit --project tsconfig.json && node scripts/enforce-types.mjs",
     "check:typed-output": "tsc --project tsconfig.json && node scripts/sync-types.mjs --check",
-    "build:typed": "npm run typecheck && tsc --project tsconfig.json && node scripts/sync-types.mjs"
+    "build:typed": "npm run typecheck && tsc --project tsconfig.json && node scripts/sync-types.mjs",
+    "sync:dojo": "node scripts/sync-dojo-assets.mjs",
+    "publish:dojo": "node scripts/sync-dojo-assets.mjs --publish"
   },
   "engines": {
     "node": ">=20"
