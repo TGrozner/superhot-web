@@ -86,6 +86,21 @@ const WEB_WARNING_IRIS_FOCUS = 0.38;
 const WEB_WARNING_RANGE_GAIN = 0.26;
 const WEB_WARNING_INTENSITY_GAIN = 0.20;
 const WEB_WARNING_MIN_CYCLE_SECONDS = 1.2;
+// Web-only reactive telegraph: a nearby player in front of the original
+// doorway subtly attracts the existing beam. The source warning clock and
+// light/cookie identities are unchanged. No proxy, texture or GPU pass.
+const WEB_WARNING_TRACK_INNER_METERS = 4;
+const WEB_WARNING_TRACK_OUTER_METERS = 12;
+const WEB_WARNING_TRACK_FACING_START = 0.60;
+const WEB_WARNING_TRACK_FACING_FULL = 0.85;
+const WEB_WARNING_TRACK_STRENGTH = 0.75;
+const WEB_WARNING_TRACK_MAX_YAW = 0.43;
+const WEB_WARNING_TRACK_MAX_PITCH = 0.22;
+
+function smooth01(value) {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * (3 - 2 * t);
+}
 
 function finiteBasisVector(value) {
   return (Array.isArray(value) || (ArrayBuffer.isView(value) && !(value instanceof DataView))) &&
@@ -157,7 +172,11 @@ function createWebWarningSweep(catalog, controller) {
     for (const base of bases.values()) restoreOne(base);
   }
 
-  function advance() {
+  function advance(playerWorldPosition) {
+    const playerKnown = playerWorldPosition != null &&
+      Number.isFinite(playerWorldPosition.x) &&
+      Number.isFinite(playerWorldPosition.y) &&
+      Number.isFinite(playerWorldPosition.z);
     for (const base of bases.values()) {
       const { packet } = base;
       if (!packet.active) {
@@ -180,9 +199,45 @@ function createWebWarningSweep(catalog, controller) {
       // J4 Web-authored lighthouse: as the red beam sweeps sideways its
       // aperture tightens; halfway through it glides up the doorway.
       // Keep a smooth, single-cycle warning, never a high-frequency strobe.
-      const yaw = WEB_WARNING_SWEEP_RADIANS * sweep;
-      const pitch = WEB_WARNING_PITCH_RADIANS *
+      let yaw = WEB_WARNING_SWEEP_RADIANS * sweep;
+      let pitch = WEB_WARNING_PITCH_RADIANS *
         Math.sin(Math.PI * phase) ** 2;
+
+      // Interactive Web lighting: if a player is close enough to the beam
+      // and actually in FRONT of its source, ease its sweep toward that
+      // player during the warning's middle. Far/behind players preserve
+      // the normal lighthouse motion. This is a local light-direction cue,
+      // NOT a line-of-sight test or permission to draw through walls.
+      const origin = packet.spotlight.position;
+      if (playerKnown && finiteBasisVector(origin)) {
+        const dx = playerWorldPosition.x - origin[0];
+        const dy = playerWorldPosition.y - origin[1];
+        const dz = playerWorldPosition.z - origin[2];
+        const distance = Math.hypot(dx, dy, dz);
+        if (distance > 1e-6 && distance < WEB_WARNING_TRACK_OUTER_METERS) {
+          const forward = (dx * base.direction[0] + dy * base.direction[1] +
+            dz * base.direction[2]) / distance;
+          const across = (dx * base.right[0] + dy * base.right[1] +
+            dz * base.right[2]) / distance;
+          const vertical = (dx * base.up[0] + dy * base.up[1] +
+            dz * base.up[2]) / distance;
+          const near = 1 - smooth01((distance - WEB_WARNING_TRACK_INNER_METERS) /
+            (WEB_WARNING_TRACK_OUTER_METERS - WEB_WARNING_TRACK_INNER_METERS));
+          const facing = smooth01((forward - WEB_WARNING_TRACK_FACING_START) /
+            (WEB_WARNING_TRACK_FACING_FULL - WEB_WARNING_TRACK_FACING_START));
+          const weight = WEB_WARNING_TRACK_STRENGTH * near * facing *
+            Math.sin(Math.PI * phase) ** 2;
+          if (weight > 0) {
+            const aimYaw = Math.max(-WEB_WARNING_TRACK_MAX_YAW,
+              Math.min(WEB_WARNING_TRACK_MAX_YAW, Math.atan2(across, forward)));
+            const aimPitch = Math.max(-WEB_WARNING_TRACK_MAX_PITCH,
+              Math.min(WEB_WARNING_TRACK_MAX_PITCH,
+                Math.atan2(vertical, Math.hypot(across, forward))));
+            yaw += (aimYaw - yaw) * weight;
+            pitch += (aimPitch - pitch) * weight;
+          }
+        }
+      }
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
       const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
       packet.spotlight.spotAngle = base.spotAngle *
@@ -264,7 +319,14 @@ export function createDojoDoorWarningBridge(scene) {
     return outcome('triggered', { spawnPathId, doorKey });
   }
 
-  function advance(worldDeltaSeconds) {
+  /**
+   * @param {number} worldDeltaSeconds
+   * @param {{x: number, y: number, z: number} | null} [playerWorldPosition]
+   *   Optional live camera/eye position in browser world coordinates. SH-05
+   *   owns passing it from main; omission preserves the current visual.
+   * @returns {ReturnType<ReturnType<typeof createMcdDoorWarnings>['packets']>}
+   */
+  function advance(worldDeltaSeconds, playerWorldPosition = null) {
     // Preserve SH-07 world-clock semantics: DO NOT use the spawner's
     // unscaledDeltaTime for the light's animation curve.
     if (!Number.isFinite(worldDeltaSeconds) || worldDeltaSeconds < 0) {
@@ -272,7 +334,7 @@ export function createDojoDoorWarningBridge(scene) {
     }
     if (!controller) return [];
     const packets = controller.advance(worldDeltaSeconds);
-    webSweep.advance();
+    webSweep.advance(playerWorldPosition);
     return packets;
   }
 
