@@ -18,6 +18,7 @@ const WEB_STRAFE = Object.freeze({
   warmupSeconds: 1.2,
   cycleSeconds: 3.4,
   activeSeconds: 1.35,
+  peekSeconds: 2.4, // Web-only: allow longer side search when muzzle is occluded.
   speedFraction: 0.8,
 });
 
@@ -280,15 +281,20 @@ function moveEnemy(runtime, enemy, input) {
     nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
   const stopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stop=state.visible && distance(start,playerFeet) <= stopDistance;
-  // Deliberately Web-only J3 behavior: a visible, muzzle-qualified armed actor
-  // briefly circles the player instead of remaining a stationary firing target.
-  // Per-actor side staggering and periodic reversal are deterministic; no new
-  // attack, projectile or damage is introduced. No movement without nav/capsule
-  // acceptance, and missing muzzle evidence preserves existing behavior.
+  // J3 Web-only tactics: a body-visible enemy whose *known* muzzle is
+  // obstructed must not freeze at its stop radius. Seek a lateral firing lane
+  // with the same nav/capsule/occupancy gates as ordinary strafing. A missing
+  // muzzle is not evidence of an obstructed shot and must not trigger peeking.
+  // Longer peek bursts make it possible to move past low cover; short shooting
+  // pauses remain once the muzzle line opens. No shot/damage gate is bypassed.
+  const needsFiringLane=stop && armed && state.visible &&
+    Boolean(enemy.muzzlePosition && enemy.muzzleForward) &&
+    !state.canAttack && !enemy.runtime.pendingShot;
   const tacticalTime=enemy.clock-WEB_STRAFE.warmupSeconds;
-  const tactical=stop && armed && state.canAttack && !enemy.runtime.pendingShot &&
-    Number.isFinite(tacticalTime) && tacticalTime>=0 &&
-    tacticalTime%WEB_STRAFE.cycleSeconds<WEB_STRAFE.activeSeconds;
+  const tactical=stop && armed && (state.canAttack || needsFiringLane) &&
+    !enemy.runtime.pendingShot && Number.isFinite(tacticalTime) && tacticalTime>=0 &&
+    tacticalTime%WEB_STRAFE.cycleSeconds<
+      (needsFiringLane ? WEB_STRAFE.peekSeconds : WEB_STRAFE.activeSeconds);
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
     tactical ? 'walking' : stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
   const dx=playerPosition.x-start.x, dz=playerPosition.z-start.z;
