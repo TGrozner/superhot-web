@@ -17,4 +17,10 @@ Avant cette amélioration, les 22 Rigidbody reprenaient tous la vitesse racine d
 
 Les limites de swing, auparavant bornées indépendamment sur deux axes de rotation, utilisent maintenant une enveloppe elliptique couplée et pondèrent la correction angulaire par l'inertie approximative des corps. Cela reste une approximation rotation-vector, **pas une implémentation native PhysX CharacterJoint**, et ni les tensions, contacts dynamiques, couples d'impact, ni les propriétés manquantes du matériau ne sont ici certifiés identiques à MCD.
 
-**À vérifier sur le navigateur et contre une capture native :** mort au repos, en marche, en rotation et lors d'un mouvement de bras, sans envol ni chute de FPS. Le résultat de la CI seul ne prouve pas la ressemblance visuelle. Les coups Web ordinaires appellent encore `killEnemy` sans transmettre une commande d'impulsion native qualifiée au solveur; ce chantier est distinct.
+**À vérifier au navigateur :** mort au repos, en marche, en rotation et lors d'un mouvement de bras, sans envol ni chute de FPS. La CI ne suffit pas à démontrer le rendu ou le ressenti ; la parité native 1:1 n'est plus un critère de livraison.
+
+## Impacts localisés (qualité de jeu Web)
+
+Sur mort causée par un contact d'arme effectivement identifié, `src/main.js` transmet désormais l'os touché, le point de contact et la direction de l'impact. Si cet os n'a pas de Rigidbody propre, la hiérarchie source sert à choisir son ancêtre physique. Une impulsion **créative Web** est appliquée au corps touché, proportionnellement à sa masse : vitesse cible de 1,1 m/s au tir et 1,5 m/s pour les objets projetés. `applyNativeDeathForce` déduit un couple de rotation du bras de levier `contact - body.position` et borne l'impulsion angulaire individuelle à 12 rad/s. Ces valeurs privilégient le ressenti et la stabilité, **elles ne proviennent pas de MCD**. Une mort sans contact connu reste sans coup inventé.
+
+Acceptation : comparer au sein du Web un tir centré et décentré (direction de chute perceptiblement différente), coups sur mains/bras mappés à un Rigidbody parent, stabilité/FPS sur plusieurs éliminations, victoire et REJOUER, localhost **et** Pages. Les tests Node et la CI n'établissent pas le résultat visuel.
