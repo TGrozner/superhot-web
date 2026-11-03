@@ -55,7 +55,8 @@ test('the warning signal advances in world seconds, independently from unscaled 
   assert.equal(bridge.advance(0)[0].spotlight.range, 0);
   // An unscaled source spawn order has no effect on the source visual envelope.
   assert.equal(bridge.advance(0)[0].elapsed, 0);
-  assert.equal(bridge.advance(0.5)[0].spotlight.range, 5);
+  assert.equal(bridge.advance(0.5)[0].spotlight.range, 6.3,
+    'Web-authored beacon breathing adds 26% during a live source envelope');
   assert.equal(bridge.advance(1.5)[0].active, false);
   bridge.reset();
   assert.equal(bridge.packets()[0].falseLight.slot, -1);
@@ -182,4 +183,51 @@ test('world-basis enrichment fails closed on unverified coordinates, and never o
   assert.deepEqual(bridge.packets()[0].falseLight.position, [6, 5, 4]);
   assert.equal(catalogWithPartialRuntime['level10::7090'].spotlight.position, undefined,
     'source catalog is not mutated');
+});
+
+test('J4 Web beacons sweep real Dojo door cones smoothly without new packets or source mutation', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const packets = bridge.packets();
+  const first = packets[0];
+  const sourceIntensity = first.spotlight.intensity;
+  const firstDirection = first.spotlight.direction;
+  const firstRight = first.spotlight.right;
+  const baseForward = [...firstDirection];
+  const baseRight = [...firstRight];
+
+  assert.equal(bridge.accept(warning(103)).status, 'triggered');
+  bridge.advance(0.5); // Source curve = 50% range; Web sweep at a quarter cycle.
+  assert.equal(bridge.packets(), packets, 'no warning packet allocations per frame');
+  assert.equal(first.spotlight.direction, firstDirection, 'direction buffer reused');
+  assert.equal(first.spotlight.right, firstRight, 'right buffer reused');
+  assert.ok(Math.abs(first.spotlight.range - 6.3) < 1e-10);
+  assert.ok(Math.abs(first.spotlight.intensity - sourceIntensity * 1.2) < 1e-10);
+  assert.ok(first.spotlight.direction[2] < baseForward[2] - 0.25,
+    'beacon sweeps over the real source doorway, instead of staying fixed');
+  assert.ok(Math.abs(Math.hypot(...first.spotlight.direction) - 1) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(...first.spotlight.right) - 1) < 1e-9);
+  const orthogonal = first.spotlight.direction.reduce((sum, value, i) =>
+    sum + value * first.spotlight.right[i], 0);
+  assert.ok(Math.abs(orthogonal) < 1e-9, 'cone basis remains orthogonal');
+  assert.equal(packets[1].active, false, 'other door warnings stay off');
+  assert.equal(packets[2].active, false);
+
+  // Repeated events must restart the same emitter from its own initial basis.
+  assert.equal(bridge.accept(warning(103)).status, 'triggered');
+  assert.deepEqual(first.spotlight.direction, baseForward);
+  assert.deepEqual(first.spotlight.right, baseRight);
+  bridge.advance(1);
+  assert.equal(first.spotlight.range, 10, 'source midpoint is never altered');
+  assert.equal(first.spotlight.intensity, sourceIntensity);
+
+  bridge.advance(1); // The original 2s warning has ended; no ghost beacon.
+  assert.equal(first.active, false);
+  assert.equal(first.spotlight.range, 0);
+  assert.deepEqual(first.spotlight.direction, baseForward);
+  assert.deepEqual(first.spotlight.right, baseRight);
+  assert.equal(first.spotlight.intensity, sourceIntensity);
+  bridge.reset();
+  assert.equal(packets.filter(packet => packet.active).length, 0);
+  assert.equal(noPrecomputedWorldCatalog['level10::7089'].spotlight.position, undefined,
+    'the original source catalog remains untouched');
 });
