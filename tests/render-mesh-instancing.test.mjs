@@ -73,7 +73,7 @@ test('SH-12/J4: winding and singular matrix validation is atomic',()=>{
   assert.equal(calls.filter(c=>c[0]==='bufferSubData').length,uploads);
   batch.setMatrices([model(0,-2)]);
   assert.equal(batch.mirrored,true);
-  assert.throws(()=>batch.draw({firstIndex:1,indexCount:3}),/Invalid/);
+  assert.throws(()=>batch.draw({firstIndex:1,indexCount:4}),/Invalid/);
   batch.dispose();batch.dispose();gpu.dispose();
   assert.equal(calls.filter(c=>c[0]==='deleteVAO').length,2);
 });
