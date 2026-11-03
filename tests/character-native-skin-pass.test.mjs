@@ -558,7 +558,7 @@ test('per-actor real GPU draws use source states, action, transition and solved 
     state: 'run', time: .2,
     transition: { from: { state: 'idle', time: 0 }, elapsed: .05 },
   });
-  assert.equal(second.sampledTime, Math.fround(.2 * 2.25));
+  assert.equal(second.sampledTime, .2 * 2.25);
   assert.equal(second.transition, 'idle->run');
   assert.equal(second.transitionWeight, .5);
   assert.equal(second.actorId, 'enemy-B');
