@@ -180,3 +180,38 @@ test('Dojo first-person projection keeps static blade fallback when source attac
     pose,heldItem,cameraWorldMatrix:[...identity().slice(0,12),NaN,0,0,1],
   }),/finite column-major affine/);
 });
+
+
+test('throwing a katana projects the authored unarmed Hands.Throw pose without a ghost blade',()=>{
+  const driver=createNativePlayerAnimation(fixture(),{random:()=>0.5});
+  driver.equip('pickup_4201',{animate:false});
+  driver.action('throw'); // source controller immediately equips unarmed
+  const pose=driver.sample();
+  assert.equal(pose.profileId,'unarmed');
+  assert.equal(pose.handsVisible,true);
+  assert.equal(pose.state,'Hands.Throw');
+  assert.equal(pose.descriptor.clip,'throw');
+  const cameraWorldMatrix=[-1,0,0,0,0,1,0,0,0,0,1,0,5,2,9,1];
+  const frame=projectDojoPlayerFrame({pose,heldItem:null,cameraWorldMatrix});
+  assert.equal(frame.profileId,'unarmed');
+  assert.equal(frame.descriptor.clip,'throw');
+  near(frame.modelMatrix[12],5);
+  assert.equal(frame.itemCameraLocalMatrix,null);
+  assert.equal(frame.itemWorldMatrix,null);
+  assert.equal(frame.bladeSocketAvailable,false);
+  // Even a stale socket may not resurrect a sword after the accepted throw.
+  const stale=projectDojoPlayerFrame({
+    pose:{...pose,itemMatrix:identity()},heldItem:null,cameraWorldMatrix,
+  });
+  assert.equal(stale.itemCameraLocalMatrix,null);
+  driver.update(0.2,1);
+  const next=projectDojoPlayerFrame({pose:driver.sample(),heldItem:null,cameraWorldMatrix});
+  assert.equal(next.descriptor.clip,'throw');
+  assert.ok(next.descriptor.time>frame.descriptor.time);
+  assert.equal(projectDojoPlayerFrame({
+    pose:{...pose,handsVisible:false},heldItem:null,cameraWorldMatrix,
+  }),null);
+  assert.equal(projectDojoPlayerFrame({
+    pose:{...pose,profileId:'pistol'},heldItem:null,cameraWorldMatrix,
+  }),null);
+});

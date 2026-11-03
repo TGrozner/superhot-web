@@ -77,8 +77,13 @@ export function selectNativePlayerClip(state, parameters) {
  * container offset twice. No original katana mesh or pose is included here.
  */
 export function projectDojoPlayerFrame({ pose, heldItem, cameraWorldMatrix } = {}) {
-  if (heldItem?.isKatana !== true || !pose?.handsVisible ||
-      pose.profileId !== heldItem.id) return null;
+  // A source throw immediately switches the recovered controller to
+  // unarmed, while its authored Hands.Throw clip can still animate visible
+  // hands. No held item or fabricated blade should be required for that pose.
+  const unarmedHands = heldItem == null && pose?.profileId === 'unarmed';
+  if (!pose?.handsVisible ||
+      (!unarmedHands && (heldItem?.isKatana !== true ||
+        pose.profileId !== heldItem.id))) return null;
   if (!pose.descriptor || typeof pose.descriptor.clip !== 'string') {
     throw new TypeError('Dojo held player frame requires a source clip descriptor');
   }
@@ -103,12 +108,12 @@ export function projectDojoPlayerFrame({ pose, heldItem, cameraWorldMatrix } = {
   const modelMatrix = new Float32Array(multiplyMatrices(cameraWorldMatrix, pose.handsMatrix));
   // nativeItemDraws() already multiplies cameraWorldMatrix by heldMatrix;
   // returning a camera-LOCAL matrix prevents an accidental double camera.
-  const itemCameraLocalMatrix = pose.itemMatrix == null ? null
+  const itemCameraLocalMatrix = unarmedHands || pose.itemMatrix == null ? null
     : new Float32Array(pose.itemMatrix);
   const itemWorldMatrix = itemCameraLocalMatrix == null ? null
     : new Float32Array(multiplyMatrices(cameraWorldMatrix, itemCameraLocalMatrix));
   return Object.freeze({
-    heldItem, modelMatrix, descriptor: pose.descriptor,
+    heldItem, profileId: pose.profileId, modelMatrix, descriptor: pose.descriptor,
     itemCameraLocalMatrix, itemWorldMatrix,
     bladeSocketAvailable: itemCameraLocalMatrix !== null,
     nativeCameraActiveVerified: false,

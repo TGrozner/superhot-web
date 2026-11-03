@@ -135,13 +135,22 @@ export function createDojoPlayerAnimationPass(gl, {
 
   let disposed = false;
   function draw({
-    heldItem, phase, sourceClipTime, modelMatrix, viewProjection,
+    heldItem, profileId = null, phase, sourceClipTime, modelMatrix, viewProjection,
     cameraPosition, shaderTime, color, katanaMeshLocalMatrix = null,
     descriptor = null,
   } = {}) {
     if (disposed) throw new Error('Disposed Dojo player animation pass');
+    // Throwing the katana switches immediately to the source unarmed
+    // profile, yet its actual Hands.Throw clip can keep drawing the hands.
+    // Require an explicit source descriptor and authored visibility; no
+    // inferred animation or synthetic blade is allowed in this state.
+    const unarmedHands = heldItem == null && profileId === 'unarmed' &&
+      playerPacket?.profiles?.unarmed?.handsVisible === true && descriptor != null;
     // Dojo's source pistol has no held hands. Do not add fabricated hands.
-    if (heldItem?.isKatana !== true) return null;
+    if (!unarmedHands && heldItem?.isKatana !== true) return null;
+    if (unarmedHands && katanaMeshLocalMatrix != null) {
+      throw new TypeError('Unarmed Dojo hands cannot request a katana mesh');
+    }
     let instance;
     let sampleTime;
     let transition = null;
@@ -200,7 +209,7 @@ export function createDojoPlayerAnimationPass(gl, {
     if (!socket) throw new Error('Dojo sampled weapon-bone socket is unavailable');
     // The skin pass reuses its scratch arrays on the next draw. Copy now.
     const weaponBoneWorldMatrix = new Float32Array(socket);
-    const katanaModelMatrix = katanaMeshLocalMatrix == null ? null
+    const katanaModelMatrix = unarmedHands || katanaMeshLocalMatrix == null ? null
       : new Float32Array(multiplyMatrices(weaponBoneWorldMatrix, katanaMeshLocalMatrix));
 
     return Object.freeze({
