@@ -22,6 +22,16 @@ const WEB_STRAFE = Object.freeze({
   speedFraction: 0.8,
 });
 
+// J3 Web behavior, not MCD: armed enemies give ground when the player rushes
+// into their personal space. Prefer actual retreat; use diagonals only when
+// the navmesh/capsule or another actor blocks the direct escape.
+const WEB_DISENGAGE = Object.freeze({
+  stopRadiusFraction: 0.8,
+  maximumBodyRadii: 5,
+  speedFraction: 0.85,
+  diagonalBias: 0.6,
+});
+
 /** Keep the native collision/navmesh as the authority even for Web-only
  * tactics. Never teleport an actor or cross a blocking actor/player.
  * Blocked lanes reverse once, then the enemy simply holds its position.
@@ -53,6 +63,41 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
   }
   return false;
 }
+/** Retreat using the existing world capsule, navmesh and body-occupancy
+ * constraints. Fail closed near a wall or teammate; never teleport, bypass a
+ * collision or create permission to shoot. Returns true only when feet moved.
+ */
+function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
+  const start=position(enemy), state=enemy.encounter;
+  const awayX=start.x-playerFeet.x, awayZ=start.z-playerFeet.z;
+  const length=Math.hypot(awayX,awayZ);
+  const travel=enemy.runtime.speed*scaledDeltaTime*WEB_DISENGAGE.speedFraction;
+  if(!Number.isFinite(length) || length<=EPSILON || travel<=EPSILON)return false;
+  const x=awayX/length, z=awayZ/length, side=state.webTacticalSide;
+  const candidates=[
+    {x,z},
+    {x:x-side*z*WEB_DISENGAGE.diagonalBias,z:z+side*x*WEB_DISENGAGE.diagonalBias},
+    {x:x+side*z*WEB_DISENGAGE.diagonalBias,z:z-side*x*WEB_DISENGAGE.diagonalBias},
+  ];
+  for(const candidate of candidates) {
+    const magnitude=Math.hypot(candidate.x,candidate.z);
+    const moved=moveNativeCharacter(runtime.collision,start,{
+      x:candidate.x/magnitude*travel,y:0,z:candidate.z/magnitude*travel,
+    },runtime.body).position;
+    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON)continue;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null;
+    return true;
+  }
+  return false;
+}
+
 function scalar(value, name) {
   if (!Number.isFinite(value) || value < 0) throw new TypeError(name+' must be finite and nonnegative');
   return value;
@@ -306,7 +351,15 @@ function moveEnemy(runtime, enemy, input) {
     webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,playerPosition,enemies);
   state.canAttack=worldMuzzleClear && !state.webAllyBlockingShot;
   const stopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
-  const stop=state.visible && distance(start,playerFeet) <= stopDistance;
+  const playerDistance=distance(start,playerFeet);
+  const stop=state.visible && playerDistance <= stopDistance;
+  // Web-only close-quarters pressure: give ground before resuming strafing.
+  // Using the source stop radius as a ceiling avoids inventing a larger chase
+  // distance; the five-body-radius cap keeps this a near-contact reaction.
+  const disengageDistance=Math.min(stopDistance*WEB_DISENGAGE.stopRadiusFraction,
+    runtime.body.radius*WEB_DISENGAGE.maximumBodyRadii);
+  const disengaging=stop && armed && !enemy.runtime.pendingShot &&
+    playerDistance<disengageDistance;
   // J3 Web-only tactics: a body-visible enemy whose *known* muzzle is
   // obstructed must not freeze at its stop radius. Seek a lateral firing lane
   // with the same nav/capsule/occupancy gates as ordinary strafing. A missing
@@ -322,11 +375,13 @@ function moveEnemy(runtime, enemy, input) {
     tacticalTime%WEB_STRAFE.cycleSeconds<
       (needsFiringLane ? WEB_STRAFE.peekSeconds : WEB_STRAFE.activeSeconds);
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
-    tactical ? 'walking' : stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
+    (disengaging || tactical) ? 'walking' : stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
   const dx=playerPosition.x-start.x, dz=playerPosition.z-start.z;
   if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   if (stop) {
-    if(tactical && scaledDeltaTime>0 &&
+    if(disengaging && scaledDeltaTime>0) {
+      if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
+    } else if(tactical && scaledDeltaTime>0 &&
         !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
     return;
   }
