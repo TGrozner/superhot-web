@@ -13,10 +13,18 @@
 - **Coordination :** SH-05 est responsable de `src/main.js`, `src/renderer.js`, fichiers d'intégration partagés et merge-train. Chaque agent reste dans son périmètre réservé, ouvre une branche/PR, et conserve le fonctionnement standalone. Pas de remplacement de la démo publique par une scène inventée. Privilégier les fonctionnalités visibles avec données source prouvées ; TypeScript strict sans `any` pour les modules migrés et JS généré conforme.
 - Les outils locaux / runner de recherche ne servent **pas** les visiteurs. Les recherches restent privées ; réutiliser les preuves existantes, ne pas lancer un autre runner, ne jamais repackager automatiquement tout `private/`.
 
+## Single source of truth — Dojo et ragdoll (migration 2026-11-03)
+
+- **Une seule source à l'exécution :** `local-assets/manifest.json` + `local-assets/scenePackage.json.gz` + `local-assets/enemyRig.json`, identiques en local (`npm start`) et sur Pages. `private/` n'est qu'un **input de build**, jamais une source de gameplay de secours. Le navigateur refuse un manifeste non standalone ou une empreinte rig/physique non concordante.
+- **Publication atomique et complète :** depuis le PC autorisé, `npm run sync:dojo` extrait les paramètres physiques source depuis le corpus privé et **reconstruit** `local-assets/`. `npm run publish:dojo` suit exactement le même chemin, vérifie la scène et la définition 22 Rigidbody / 21 joints + empreinte SHA-256 du rig, puis publie les assets statiques vers `main`. Aucun push de `private/`.
+- **Bloquer le retour arrière :** `scripts/vendor-dojo-assets.mjs` refuse d'écraser `local-assets/` si la source physique est absente ; `scripts/publish-dojo-pages.mjs` refuse un ancien pack ; le workflow Pages exécute `verify-pages-pack.mjs --require-ragdoll`. La vérification de code PR reste indépendante tant que le pack canonique actuel n'a pas été migré. **Une CI code verte ne certifie pas la physique.**
+- **Ordre de migration :** publier d'abord le pack enrichi à partir de la machine propriétaire, puis fusionner la PR de garde-fous runtime. Tant que le pack 52-assets historique n'est pas remplacé, tout nouveau déploiement Pages doit échouer sans remplacer la version servie. Ne pas contourner ce verrou.
+- **Respect de la propriété :** un `--publish` rend tout le contenu du pack accessible publiquement. Exiger une autorisation de redistribution pour chaque asset ; aucun export automatique de toute la recherche.
+
 ## Liens et commandes
 
 - Site : https://tgrozner.github.io/superhot-web/
 - Déploiements : https://github.com/TGrozner/superhot-web/actions
 - Documentation détaillée : [docs/standalone-dojo-pages.md](docs/standalone-dojo-pages.md)
 - Vérification locale : `npm start` puis `http://localhost:4173/`
-- Si un asset autorisé change, depuis le poste propriétaire : `node scripts/vendor-dojo-assets.mjs` puis `node scripts/publish-dojo-pages.mjs`. Ce sont des **opérations explicites de publication publique**, pas une étape normale du merge-train.
+- Si un asset autorisé change, depuis le poste propriétaire : `npm run publish:dojo` après préparation et autorisation des assets. Ce sont des **opérations explicites de publication publique**, pas une étape normale du merge-train.
