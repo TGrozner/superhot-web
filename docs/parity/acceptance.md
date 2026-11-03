@@ -46,10 +46,10 @@ REPORTED_AGREEMENT_UNVERIFIED, not certified parity.
 
 | ID | What the Web source/module demonstrably does | Native HANDOFF claim (not runtime-certified) | Current evaluation | Responsible |
 | --- | --- | --- | --- | --- |
-| MCD-ACCEPT-01-KEY-R | KeyR yields reload in src/input.js; the actual src/main.js handler calls reload, whose timer fills the 6-round magazine. | Recovered keyboard profile maps R to Replay; KillReloadMod adjusts delays/animations, not ammo. | REPORTED_CONFLICT if both source anchors still match; source unresolved otherwise. | SH-02 input contract; SH-05 browser wiring; SH-03 ammo behavior |
+| MCD-ACCEPT-01-KEY-R | The unconnected prototype input helper yields reload; current Dojo src/main.js processes KeyR **only when !nativeGameplay()**, so active Dojo has no Replay handler. Non-native reload refills the six-round magazine. | Recovered keyboard profile maps R to Replay; KillReloadMod adjusts delays/animations, not ammo. | REPORTED_CONFLICT for active Dojo Web source, **not** an original gameplay trace. | SH-02 active input profile; SH-05 browser dispatch |
 | MCD-ACCEPT-02-CONTAINERS-FIXED-STEP | A variable requestAnimationFrame delta drives the Web update; a 100ms stall is clipped to 50ms by the pure frame helper. | Containers RUN_LEVEL_6C / SHRL_ContainerPort / build28 binds denominator 120 (8.333…ms), unlike class initializer 60 (16.666…ms). | SCENE_UNMATCHED, not a direct numeric disagreement between two versions of Containers. | SH-01 native binding; SH-05 integration |
 | MCD-ACCEPT-03-TIME-MAX-CAP-OVERRIDE | Web uses a max contribution plus smoothing. The Web target helper ignores injected cap/forced fields; pure pause freezes clocks but leaves current scale unchanged. | Maximum of shifter contributions, clamp, then forced override; zero pause is not raised to a positive minimum. | REPORTED_CAPABILITY_GAP; exact native values/branches remain unknown. | SH-01 native method; SH-02 time mechanics |
-| MCD-ACCEPT-04-PLAYER-SCALED-DELTA | src/main.js moves the player with real dt, while world simulation advances with worldDt=dt*timeScale. A matched one-frame Web probe records both possible displacements in **Web units**, not native meters. | Active movement reportedly uses Unity Time.deltaTime and an AsymmetricSmoothLinearInstantTimeShifter binding. | REPORTED_CONFLICT for time domain only; native movement speed, collisions and scene not matched. | SH-02 movement; SH-05 browser |
+| MCD-ACCEPT-04-PLAYER-SCALED-DELTA | Active Dojo Web passes **worldDt=tick.worldDelta** to mcdSourcePlayerPreConstraintMove; only non-native fallback uses real dt. Pure movementStep probes are **unconnected demo helpers**, not actual Dojo motion. | Active native movement is reported to use Unity Time.deltaTime and an AsymmetricSmoothLinearInstantTimeShifter. | REPORTED_AGREEMENT_UNVERIFIED for Web scaled-delta wiring only; no native/Dojo movement pair or collision proof. | SH-02 clocks/movement; SH-05 browser |
 | MCD-ACCEPT-05-PROJECTILE-PHASES | src/main.js updates enemy AI and projectile movement/collision in a single RAF update; src/combat/projectiles.js is an independent one-step helper and **not connected** to main. | Movement in Update, some sweeps in FixedUpdate, delayed AI firing after LateUpdate pose adjustment. | REPORTED_PHASE_GAP, not verified event-by-event ordering. | SH-03 combat/IA; SH-05 scheduler |
 
 The report checks whether its specific src/main.js source anchors are still
@@ -84,14 +84,15 @@ points. A native method that overrides *before* clamping or clamps pause zero
 would refute the reported order. An arbitrary Web rules injection is **only a
 capability probe**, not an original MCD numerical target.
 
-**ACCEPT-04 (P0, movement):** Record identical directional input across two
-known native time scales, with scene collision and camera pose controlled.
-Capture actual Time.deltaTime and player displacement on each update; compare
-against the independently measured Web game delta and movement trace. The
-script's counterfactual movementStep(..., worldDelta) is purely illustrative:
-it cannot establish native walking speed or displacement. A native active
-movement body using unscaledDeltaTime would refute the report; simply changing
-the Web helper call without changing src/main.js would not converge.
+**ACCEPT-04 (P0, movement):** Active Dojo Web already sends tick.worldDelta
+to pre-constraint motion; the old real-dt claim applies only to the demo
+fallback. Compare identical directional input across two known native time
+scales with scene collision/camera controlled. Measure actual native
+Time.deltaTime and player displacement against independently observed Web
+worldDelta, positions and phase. The pure movementStep probes are illustrative,
+not Dojo samples. A native movement body using unscaledDeltaTime would refute
+the reported source time-domain claim; source-aligned Web wiring alone cannot
+establish runtime or collision parity.
 
 **ACCEPT-05 (P0, phases):** Produce a controlled projectile crossing a wall
 between render and fixed ticks, plus an AI shot requiring a LateUpdate pose
@@ -427,3 +428,19 @@ spawn/death pairs, not dead-on-arrival enemies. These are sampled Web telemetry
 receipts, not actual Chromium execution, projectile causality or a matched
 MCD native observation. A completed owner-local Dojo playthrough and the
 same-scene/angle original visual reference remain **UNKNOWN**.
+
+
+## SH-10 active Dojo source-path requalification (3 November 2026)
+
+Source-only audit of current Web entry point (not a Chromium Dojo run):
+`KeyR` is conditional on `!nativeGameplay()`, so the legacy prototype
+reload helper cannot be used as a Dojo keyboard receipt. In contrast, actual
+Dojo movement sends `scaledDeltaTime: worldDt` from `tick.worldDelta` to
+the source-qualified pre-constraint movement; a prior acceptance matrix
+incorrectly described this active path as using real dt. These are **Web source
+classification corrections**, not an original-MCD comparison.
+
+SH-05 owns active Replay wiring and gameplay/browser execution. SH-02 owns
+native movement/time qualification; SH-03 projectile phases. The remaining
+full Dojo Start→6/7 living-to-dead actors→win→Replay→restart test must still
+be played in Chromium and validated from private browser telemetry.

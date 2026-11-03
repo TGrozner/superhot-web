@@ -48,16 +48,20 @@ test('SH10 provenance cannot silently promote handoff to original runtime measur
   }
 });
 
-test('SH10 input scenario detects Web reload without claiming MCD Replay was executed', () => {
+test('SH10 Dojo KeyR unhandled despite unconnected prototype reload helper', () => {
   const result = scenarios.get('MCD-ACCEPT-01-KEY-R');
   assert.ok(result);
   assert.equal(result.web.moduleActionOnKeyR, keydownAction({ screen: 'playing', code: 'KeyR' }));
   assert.equal(result.web.moduleActionOnKeyR, 'reload');
+  assert.equal(result.web.moduleActionBoundToDojo, false);
+  assert.equal(result.web.browserDojoKeyRDispatch, 'UNHANDLED_IN_DOJO_WEB');
+  assert.equal(result.web.browserNonNativeKeyRCallsReload, true);
+  assert.equal(result.web.browserNonNativeReloadRefillsMagazine, true);
   assert.equal(result.web.browserMeasurement, false);
   assert.equal(result.verdict, qualifyReportedGap({
     sourceVerified: result.web.sourceAnchorsPresent,
     comparison: 'action',
-    differs: result.web.moduleActionOnKeyR !== 'replay',
+    differs: result.web.browserDojoKeyRDispatch === 'UNHANDLED_IN_DOJO_WEB',
   }));
   assert.ok([VERDICT.CONFLICT, VERDICT.WEB_UNRESOLVED].includes(result.verdict));
 });
@@ -99,7 +103,7 @@ test('SH10 max/cap/override remains an unverified native feature question', () =
   }));
 });
 
-test('SH10 player displacement records real-vs-world time, without fictitious native speed', () => {
+test('SH10 Dojo time domain uses scaled worldDelta while old movement helper stays illustrative', () => {
   const result = scenarios.get('MCD-ACCEPT-04-PLAYER-SCALED-DELTA');
   assert.ok(result);
   const tick = stepTime(createTimeState(), { dt: 1 / 60, moving: true });
@@ -108,17 +112,21 @@ test('SH10 player displacement records real-vs-world time, without fictitious na
   almost(result.web.tickInputRealSeconds, 1 / 60);
   almost(result.web.webWorldScaleAfterTick, tick.timeScale);
   almost(result.web.webWorldDeltaSeconds, tick.worldDelta);
-  almost(result.web.webPlayerDistanceWorldUnits, Math.hypot(webReal.dx, webReal.dz));
-  almost(result.web.scaledDtCounterfactualWorldUnits,
+  assert.equal(result.web.webDojoDeltaDomain, 'tick.worldDelta (scaled frame delta)');
+  assert.equal(result.web.webDojoUsesScaledWorldDelta, true);
+  assert.equal(result.web.webDojoMeasuredDisplacementMeters, null);
+  almost(result.web.prototypeOnlyRealSeconds, tick.realDelta);
+  almost(result.web.prototypeOnlyHelperDistanceWorldUnits, Math.hypot(webReal.dx, webReal.dz));
+  almost(result.web.prototypeOnlyScaledCounterfactualWorldUnits,
     Math.hypot(counterfactual.dx, counterfactual.dz));
   assert.equal(result.web.counterfactualIsNativeMeasurement, false);
   assert.equal(result.web.browserMeasurement, false);
   assert.equal(result.verdict, qualifyReportedGap({
     sourceVerified: result.web.sourceAnchorsPresent,
     comparison: 'movement',
-    differs: Math.abs(result.web.webPlayerDistanceWorldUnits -
-      result.web.scaledDtCounterfactualWorldUnits) > 1e-12,
+    differs: false,
   }));
+  assert.equal(result.verdict, VERDICT.AGREEMENT_UNVERIFIED);
 });
 
 test('SH10 projectile helper is not mislabeled as native FixedUpdate/LateUpdate timing', () => {
