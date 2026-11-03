@@ -266,8 +266,8 @@
       "name": "native-scene.json.gz",
       "type": "application/gzip",
       "path": "scenePackage.json.gz",
-      "size": 3504085,
-      "sha256": "1acfb33298ce76345365888ca0d0dee8e6f2fb800f738d490d2ac8d592718622"
+      "size": 3432841,
+      "sha256": "3e1d056d549f619df9c2de6e44b508900bffcaa8e174efaaabd5b8c8799943ba"
     },
     "sceneTexture_000": {
       "name": "sceneTexture_000.png",
