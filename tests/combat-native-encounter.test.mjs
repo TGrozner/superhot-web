@@ -214,3 +214,77 @@ test('an existing actor never chases straight across disconnected source polygon
   assert.equal(enemy.encounter.route,null);
   assert.equal(enemy.runtime.speed,0);
 });
+
+
+test('Dojo door matures a source factory order before choosing its active weapon, otherwise reports an explicit Web fallback', () => {
+  // Synthetic fixtures only: IDs, weights, delays and prefabs here are NOT
+  // original MCD assets or evidence of the deployed Dojo difficulty.
+  const data=scene(), collision=prepareNativeCollision([]);
+  const child={factoryId:'test-factory-in-spawner',gameObjectId:'test-inactive-child',
+    activeInHierarchy:false,enabled:true,weaponSelector:'BasedOnDifficulty',
+    aiArchetypeSelector:'BasedOnDifficulty'};
+  const outside={factoryId:'test-unrelated-factory',gameObjectId:'test-unrelated-child',
+    activeInHierarchy:true,enabled:true,weaponSelector:'Shotgun',
+    aiArchetypeSelector:'Offensive'};
+  const context={
+    sceneName:'SHRL_Dojo2',buildIndex:10,
+    catalog:{spawnerGameObjectId:'test-spawner',
+      nodes:[
+        {gameObjectId:'root',parentGameObjectId:null},
+        {gameObjectId:'test-spawner',parentGameObjectId:'root'},
+        {gameObjectId:'test-inactive-child',parentGameObjectId:'test-spawner'},
+        {gameObjectId:'test-unrelated-child',parentGameObjectId:'root'},
+      ],factories:[outside,child]},
+    difficulty:{PistolEnemies:10,MeleeEnemies:0,
+      MaxActivePistolEnemies:4,MaxActiveMeleeEnemies:4,
+      KamperEnemies:0,MeleeBrawlerEnemies:0},
+    availableWeapons:{
+      Pistol:{prefabId:'synthetic-pistol-prefab',verifiedActiveInDojo:true},
+      Melee:{prefabId:'synthetic-melee-prefab',verifiedActiveInDojo:true},
+    },
+    familySettings:{Pistol:{attackDelay:.25,projectileSpeed:13},Melee:{}},
+    baseSettings:{attackDelay:.5,alertDelay:.5,projectileSpeed:28,
+      weaponSpeedMultiplier:1,difficultyWeaponSpeedMultiplier:1,
+      walkingSpeed:2,runningSpeed:5,acceleration:10,
+      afterglowDuration:.5,stopAimingTime:.05,alwaysAlert:false},
+    campingPointsAvailable:false,
+  };
+  const active=createNativeEncounter(data,collision,()=>0,{sourceEnemyActivation:context});
+  assert.equal(active.sourceFactoryPlan.status,'qualified');
+  assert.deepEqual(active.sourceFactoryPlan.templates.map(x=>x.factoryId),[child.factoryId]);
+  const before=advanceNativeEncounter(active,input());
+  assert.equal(before[0].type,'door-warning');
+  assert.equal(active.actors.size,0,'weapon draw and actor creation wait for actual door order');
+  const issued=advanceNativeEncounter(active,input([],{unscaledDeltaTime:2}));
+  const spawn=issued.find(event=>event.type==='spawn');
+  assert.ok(spawn);
+  assert.equal(spawn.activation.status,'qualified');
+  assert.equal(spawn.activation.factoryId,child.factoryId);
+  assert.equal(spawn.activation.prefabId,'synthetic-pistol-prefab');
+  assert.equal(spawn.enemy.weaponFamily,'Pistol');
+  assert.equal(spawn.enemy.activeWeaponSettings.attackDelay,.25);
+  assert.equal(spawn.enemy.runtime.attackDelayRemaining,.25);
+  assert.equal(spawn.enemy.activeWeaponSettings.projectileSpeed,13);
+
+  const unverified=createNativeEncounter(data,collision,()=>0,{
+    sourceEnemyActivation:{...context,
+      availableWeapons:{...context.availableWeapons,
+        Pistol:{prefabId:'synthetic-pistol-prefab',verifiedActiveInDojo:false}}},
+  });
+  advanceNativeEncounter(unverified,input());
+  const denied=advanceNativeEncounter(unverified,input([],{unscaledDeltaTime:2}))
+    .find(event=>event.type==='spawn');
+  assert.ok(denied);
+  assert.equal(denied.activation.status,'web-pistol-fallback');
+  assert.equal(denied.activation.reason,'selected-family-active-prefab-unverified');
+  assert.equal(denied.enemy.weaponFamily,'Pistol');
+  assert.equal(denied.enemy.runtime.attackDelayRemaining,data.gameplay.weapon.attackDelay);
+  assert.equal(denied.enemy.activeWeaponSettings,undefined,
+    'SH-05 keeps the existing Web settings when provenance is incomplete');
+
+  const missing=createNativeEncounter(data,collision,()=>0,{
+    sourceEnemyActivation:{...context,difficulty:null},
+  });
+  assert.equal(missing.sourceFactoryPlan.status,'blocked');
+  assert.equal(missing.sourceFactoryPlan.reason,'active-factory-evidence-incomplete');
+});
