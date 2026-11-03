@@ -17,6 +17,7 @@ import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { sampleNativeBodyShapes, hitNativeBody } from './combat/native-body-hit.js';
 import { createNativeHud } from './render/native-hud.js';
+import { createNativePlayerAnimation } from './characters/native-player-controller.js';
 import { multiplyMatrices } from './scenes/graph.js';
 import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
 import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
@@ -56,7 +57,8 @@ let nativeScene = null;
 let nativeSkinInfo = null;
 let localAssetManifest = null;
 let nativeHudReady = false;
-let nativeHandsCameraLocal = null;
+let nativeHandsController = null;
+let nativeHandsEquippedId = 'unarmed';
 let nativeHandsStatus = 'PLAYER_HANDS_SOURCE_UNAVAILABLE';
 let nativeHandsStats = null;
 // Common sharedassets0.assets:711 -> PistolGun:4849 settings, not a scene pickup.
@@ -285,53 +287,31 @@ if (containersPreviewEnabled) {
           nativeHud.setActive(false);
         }
       }
-      // Source-only Dojo hands: no generic/guessed clips, no made-up camera
-      // offsets and no fabricated katana swing. The recovered adapter draws
-      // only when the local scene provides explicit clip and local-matrix data.
+      // The owner's original local packet exposes item-id profiles and source clips,
+      // not global 'katana' or held/swing aliases. The Web controller supplies
+      // exact source descriptors; camera projection/basis are still diagnostic.
       renderer.replaceDojoPlayerHands(null);
-      nativeHandsCameraLocal = null;
+      nativeHandsController = null;
+      nativeHandsEquippedId = 'unarmed';
       nativeHandsStatus = 'PLAYER_HANDS_SOURCE_UNAVAILABLE';
       const packet = prepared.playerAnimation;
-      const dojoSource = prepared.source.sceneBuildIndex === 10
-        && prepared.source.serializedOwner === 'level10'
-        && prepared.source.scenePath.replaceAll('\\', '/').endsWith('/SHRL_Dojo2.unity');
-      if (dojoSource && packet) {
-        const profile = packet.profiles?.katana;
-        const clips = packet.sourceClips ?? profile?.sourceClips ?? profile?.clips;
-        const localMatrix = packet.handsCameraLocalMatrix ?? profile?.handsCameraLocalMatrix;
+      if (isDojoBuild10Source(prepared.source) && packet) {
         const boneName = packet.skin?.bones?.[packet.weaponBone]?.name;
-        if (localMatrix?.length === 16
-          && Array.from(localMatrix).every(x => Number.isFinite(x) && Number.isFinite(Math.fround(x)))
-          && Number.isFinite(
-            localMatrix[0]*(localMatrix[5]*localMatrix[10]-localMatrix[6]*localMatrix[9])
-            -localMatrix[4]*(localMatrix[1]*localMatrix[10]-localMatrix[2]*localMatrix[9])
-            +localMatrix[8]*(localMatrix[1]*localMatrix[6]-localMatrix[2]*localMatrix[5]))
-          && Math.abs(
-            localMatrix[0]*(localMatrix[5]*localMatrix[10]-localMatrix[6]*localMatrix[9])
-            -localMatrix[4]*(localMatrix[1]*localMatrix[10]-localMatrix[2]*localMatrix[9])
-            +localMatrix[8]*(localMatrix[1]*localMatrix[6]-localMatrix[2]*localMatrix[5])) > 1e-12
-          && localMatrix[3] === 0 && localMatrix[7] === 0
-          && localMatrix[11] === 0 && localMatrix[15] === 1
-          && typeof boneName === 'string' && boneName.length
-          && typeof clips?.held === 'string' && typeof clips?.swing === 'string') {
-          try {
-            // IDs are the documented Dojo scene rig references, while
-            // 'provenance' identifies this private owner-supplied packet.
-            const rig = {
-              scene:'SHRL_Dojo2', sceneBuildIndex:10,
-              animatorPathId:6333, handManagerPathId:6545,
-              rendererPathId:6378, weaponBoneTransformPathId:2896,
-              weaponBoneName:boneName,
-              provenance:'owner-local-scene-package-SHRL_Dojo2-level10',
-            };
-            renderer.replaceDojoPlayerHands(packet, rig, clips);
-            nativeHandsCameraLocal = Array.from(localMatrix);
-            nativeHandsStatus = 'DOJO_HANDS_SOURCE_READY_WEB_HELD_CLOCK';
-          } catch {
-            nativeHandsStatus = 'DOJO_HANDS_SOURCE_PACKET_REJECTED';
-          }
-        } else {
-          nativeHandsStatus = 'DOJO_HANDS_SOURCE_CLIPS_OR_MATRIX_MISSING';
+        try {
+          const rig = {
+            scene:'SHRL_Dojo2', sceneBuildIndex:10,
+            animatorPathId:6333, handManagerPathId:6545,
+            rendererPathId:6378, weaponBoneTransformPathId:2896,
+            weaponBoneName:boneName,
+            provenance:'owner-local-scene-package-SHRL_Dojo2-level10',
+          };
+          const controller = createNativePlayerAnimation(packet);
+          renderer.replaceDojoPlayerHands(packet, rig);
+          nativeHandsController = controller;
+          nativeHandsStatus = 'DOJO_HANDS_SOURCE_CONTROLLER_READY_WEB_CAMERA_UNVERIFIED';
+        } catch {
+          renderer.replaceDojoPlayerHands(null);
+          nativeHandsStatus = 'DOJO_HANDS_SOURCE_PACKET_REJECTED_FALLBACK';
         }
       }
       nativeInspection = false;
@@ -531,6 +511,8 @@ function loadLevel(index) {
     }
   }
   nativeClock = createMcdGameplayClock(state.camera);
+  nativeHandsController?.reset();
+  nativeHandsEquippedId = 'unarmed';
   nativeVelocity.x = 0; nativeVelocity.z = 0; jumpRequested = false;
   nativeJumpAt=-Infinity;
   weaponGeneration++;
@@ -651,6 +633,14 @@ function shoot() {
   if (state.fireDelay > 0 || state.reload > 0) return;
   if (nativeGameplay() && nativeItems?.held) {
     if (nativeItems.held.isKatana) {
+      if (nativeHandsController && nativeHandsEquippedId === nativeItems.held.id) {
+        try { nativeHandsController.action('attack'); }
+        catch {
+          renderer.replaceDojoPlayerHands(null);
+          nativeHandsController = null;
+          nativeHandsStatus = 'DOJO_HANDS_ATTACK_DESCRIPTOR_REJECTED_FALLBACK';
+        }
+      }
       audio.itemCue('swing',{itemId:nativeItems.held.id,position:state.camera,realtimeSeconds:state.runClock});
       const hit=findMeleeTarget();
       if(hit) {
@@ -704,6 +694,16 @@ function throwWeapon(attack = false) {
   if (nativeGameplay() && nativeItems?.held) {
     const itemId=nativeItems.held.id;
     throwNativeItem(nativeItems,state.camera,cameraAxes(state.camera.yaw,state.camera.pitch).forward);
+    if (nativeHandsController && nativeHandsEquippedId === itemId) {
+      try {
+        nativeHandsController.action('throw');
+        nativeHandsEquippedId = 'unarmed';
+      } catch {
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsController = null;
+        nativeHandsStatus = 'DOJO_HANDS_THROW_DESCRIPTOR_REJECTED_FALLBACK';
+      }
+    }
     state.shotPulse=1;state.recoil=1;state.fireDelay=.38;
     addMcdGameplayPulse(nativeClock,.05,.5);
     audio.itemCue(attack?'attackThrow':'throw',{itemId,position:state.camera,realtimeSeconds:state.runClock});
@@ -928,6 +928,23 @@ function update(dt) {
     audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
     audio.advanceWorldTime(worldDt);
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
+    if (nativeHandsController) {
+      try {
+        const heldId = nativeItems?.held?.id ?? 'unarmed';
+        if (nativeHandsEquippedId !== heldId) {
+          // An actual accepted item state, not an inferred animation alias.
+          nativeHandsController.equip(heldId, { animate:heldId !== 'unarmed' });
+          nativeHandsEquippedId = heldId;
+        }
+        // worldDelta uses the applied scale, not tick.timeScale for the next tick.
+        // The source controller itself selects which Animator states use TimeScale.
+        nativeHandsController.update(dt, tick.appliedTimeScale);
+      } catch {
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsController = null;
+        nativeHandsStatus = 'DOJO_HANDS_SOURCE_CLOCK_OR_PROFILE_REJECTED_FALLBACK';
+      }
+    }
   } else {
     const wanted = Math.max(.035, moving ? .98 : 0, state.lookActivity * .77, state.shotPulse * .85, state.reload > 0 ? .60 : 0);
     state.speed = lerp(state.speed, wanted, 1 - Math.exp(-8 * dt));
@@ -1322,33 +1339,38 @@ function drawViewModel(camera) {
   const bob=Math.cos(state.walkCycle*.5)*.012;
   const shot=state.recoil*.13;
   if(nativeGameplay() && nativeItems?.held) {
-    if (nativeItems.held.isKatana && nativeHandsCameraLocal) {
-      // The camera basis matches the existing owner-local first-person item
-      // transform. Only the camera-child offset comes from the source packet.
-      const basis = [
-        -axes.right.x,-axes.right.y,-axes.right.z,0,
-        axes.up.x,axes.up.y,axes.up.z,0,
-        axes.forward.x,axes.forward.y,axes.forward.z,0,
-        camera.x,camera.y,camera.z,1,
-      ];
-      const modelMatrix = multiplyMatrices(basis, nativeHandsCameraLocal);
-      // The held loop is a Web-preview sample, NOT a reconstructed player
-      // Animator clock or a verified native swing event.
+    if (nativeItems.held.isKatana && nativeHandsController
+      && nativeHandsEquippedId === nativeItems.held.id) {
       try {
-        const receipt = renderer.drawDojoPlayerHands({
-          heldItem:nativeItems.held, phase:'held',
-          sourceClipTime:state.worldClock, modelMatrix,
-        });
-        if (receipt) nativeHandsStats = {
-          handsDrawCalls:receipt.handsDrawCalls,
-          handsTriangles:receipt.handsTriangles,
-          sourcePoseSampled:receipt.sourcePoseSampled,
-        };
+        const sample = nativeHandsController.sample();
+        if (sample.handsVisible && sample.profileId === nativeItems.held.id
+          && sample.handsMatrix?.length === 16
+          && Array.from(sample.handsMatrix).every(Number.isFinite)) {
+          const basis = [
+            -axes.right.x,-axes.right.y,-axes.right.z,0,
+            axes.up.x,axes.up.y,axes.up.z,0,
+            axes.forward.x,axes.forward.y,axes.forward.z,0,
+            camera.x,camera.y,camera.z,1,
+          ];
+          // sample.handsMatrix ALREADY includes the author's item-specific
+          // handPosition/drawRoot/container. Multiply exactly once by the
+          // current Web camera basis; this is not certified native camera TRS.
+          const modelMatrix = multiplyMatrices(basis, sample.handsMatrix);
+          const receipt = renderer.drawDojoPlayerHands({
+            heldItem:nativeItems.held, modelMatrix, descriptor:sample.descriptor,
+          });
+          if (receipt?.handsDrawCalls > 0) {
+            nativeHandsStats = {
+              handsDrawCalls:receipt.handsDrawCalls,
+              handsTriangles:receipt.handsTriangles,
+              sourcePoseSampled:receipt.sourcePoseSampled,
+            };
+            nativeHandsStatus = 'DOJO_HANDS_DRAWN_WEB_CAMERA_DIAGNOSTIC_NOT_1_TO_1';
+          }
+        }
       } catch {
-        // Reject malformed local clip/transform without breaking the existing
-        // playable Dojo or removing the owner's static held-katana model.
         renderer.replaceDojoPlayerHands(null);
-        nativeHandsCameraLocal = null;
+        nativeHandsController = null;
         nativeHandsStatus = 'DOJO_HANDS_WEB_DRAW_REJECTED_FALLBACK';
       }
     }

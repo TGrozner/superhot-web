@@ -108,6 +108,13 @@ test('source-masked intersection isolates color error from silhouette displaceme
   assert.equal(actual.unionPixels,24);
   assert.ok(Math.abs(actual.silhouetteIou-2/3)<1e-12);
   assert.equal(actual.centroidDistancePx,1);
+  assert.deepEqual(actual.nativeBoundingBox,
+    {left:1,top:2,right:5,bottom:5,width:5,height:4});
+  assert.deepEqual(actual.webBoundingBox,
+    {left:2,top:2,right:6,bottom:5,width:5,height:4});
+  assert.equal(actual.maxBoundingEdgeDeltaPx,1);
+  assert.equal(actual.boundingBoxCenterDistancePx,1);
+  assert.ok(Math.abs(actual.boundingBoxIou-2/3)<1e-12);
   assert.ok(Math.abs(actual.materialIntersection.rgbMae01-50/(3*255))<1e-12);
   assert.ok(actual.silhouetteUnion.rgbMae01>actual.materialIntersection.rgbMae01);
 });
@@ -122,6 +129,8 @@ test('region scorecard ranks source-paired material vs silhouette separately',()
     assert.equal(output.regions.length,3);
     assert.equal(output.topMaterialColorDifferences[0].kind,'cargo');
     assert.equal(output.topSilhouetteDifferences[0].kind,'actor');
+    assert.equal(output.topBoundingEdgeDifferences[0].kind,'actor');
+    assert.equal(output.topBoundingEdgeDifferences[0].value,1);
     assert.equal(output.regions[0].sourceObjectPaired,true);
     assert.equal(output.regions[0].sourceTranslationDeltaWorldUnits,0);
     assert.equal(output.global.matchedObjects,3);
@@ -159,6 +168,12 @@ test('missing owner-qualified paired object ID and reused native/Web masks fail 
 test('both empty, colored or wrong-sized masks cannot produce a qualified IoU',()=>{
   const n=image(),w=image(),a=mask(actorN),b=mask(actorW);
   assert.throws(()=>measureRegisteredRegion(n,w,mask(()=>false),mask(()=>false)),/Both masks have no visible pixels/);
+  const missing=measureRegisteredRegion(n,w,a,mask(()=>false));
+  assert.deepEqual(missing.nativeBoundingBox,{left:1,top:2,right:5,bottom:5,width:5,height:4});
+  assert.equal(missing.webBoundingBox,null);
+  assert.equal(missing.boundingBoxIou,null);
+  assert.equal(missing.maxBoundingEdgeDeltaPx,null);
+  assert.equal(missing.boundingBoxCenterDistancePx,null);
   const colored=mask(actorN);colored.rgb[3*26+1]=0;
   assert.throws(()=>measureRegisteredRegion(n,w,colored,b),/grayscale/);
   assert.throws(()=>measureRegisteredRegion(n,w,{...a,width:9},b),/viewport/);

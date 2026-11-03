@@ -429,3 +429,26 @@ receipts, not actual Chromium execution, projectile causality or a matched
 MCD native observation. A completed owner-local Dojo playthrough and the
 same-scene/angle original visual reference remain **UNKNOWN**.
 
+
+### SH-10: trusted in-browser Start and victory Replay receipts (3 November 2026)
+
+The public runtime has concrete buttons: `start-button` / `play-original`
+call `start()`, and `again-button` calls `start()` on the win overlay.
+Counter/scene snapshots alone cannot distinguish a genuine replay click from
+some other reset or a synthetic sequence. The owner-local read-only browser
+recorder now attaches a **capture-phase click listener** when armed before Start.
+It serializes only bounded button IDs, rendered frame IDs, and screen names,
+**only for events with `isTrusted === true`**; JS-dispatched `.click()`
+events are not accepted. It does not intercept or alter the game event and
+removes its listener at stop. The full-run gate requires a Start click before
+the first sampled combat frame and an `again-button` click on the win overlay
+between sampled win and restart frames. Missing receipts yield **INCOMPLETE**,
+not a native failure; invalid receipt schema yields INVALID.
+
+**Operator requirement:** arm `startDojoCapture({waitForStart:true})` *before*
+pressing Start, and after victory press the actual **REJOUER** button; do not
+reset through DevTools or a different control. Older browser JSON recordings
+without `uiActions` remain inspectable but cannot satisfy this stronger full
+run gate. Even a browser-trusted click is not a cryptographic signature, and
+authored Node tests still only test the validator; a genuine completed Dojo
+Chromium trace and an executed matched native MCD capture remain **UNKNOWN**.

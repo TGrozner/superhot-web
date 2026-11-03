@@ -443,24 +443,52 @@ pistol must remain hands-free. SH-03 owns hits and SH-06 owns effects.
 A native Dojo/Web camera- and phase-matched comparison is still outstanding.
 
 
-### SH-14 — Dojo playerAnimation wrapper compatibility (03 Nov 2026)
+### SH-14 — Dojo scene controller descriptor draw (03 Nov 2026)
 
-The archived Dojo extractor's **scene-level wrapper** is unversioned:
-`playerAnimation: { skin, states, parameters, profiles, weaponBone, material }`.
-This is distinct from its **versioned inner** `skin.schemaVersion === 1`,
-which the existing GPU loader must still validate. The first recovery adapter
-(#188) accidentally also required `playerAnimation.schemaVersion === 1`, so
-an archive-shaped packet would be rejected before any indexed hands draw even
-when it later supplied qualified clip bindings and a camera-local matrix.
-The SH-14 adapter now accepts a missing wrapper version, rejects an explicitly
-incompatible wrapper version, and still validates the skin's own version,
-source clip identities, rig and bone. A synthetic non-cuboid WebGL2 mock test
-checks that an unversioned wrapper can draw hands and return a posed socket;
-this is **not** an original asset, a measured visual frame or a native pose.
+The original archived private `player_animation.py` (source SHA-256
+`1d323949eed0d7a99b0005dde8003ac2f4aea2f3883953c8ad6873d4be1a4bbb`)
+actually **does emit** outer `playerAnimation.schemaVersion: 1`, along with a
+separately versioned `skin`. The earlier description of its wrapper as
+unversioned was incorrect. Merged #202 merely tolerates an optional wrapper
+version; it is **not an evidenced fix for this particular exporter**.
 
-**SH-05 integration gate is unchanged:** render only with a verified scene
-`SHRL_Dojo2 / level10`, source `held/swing` clip identifiers and the real
-camera-to-hands local matrix. The private data fields and native player
-Animator clock remain to be qualified; use the stable static blade fallback
-otherwise. The separate source katana mesh/socket offset and native swing event
-are not inferred by accepting the wrapper.
+The recovered exporter keys `profiles` by actual held item IDs such as
+`pickup_<pathId>` (and `unarmed` / `pistol`), *not* by a universal
+`profiles.katana`. It does **not** publish aliases named
+`sourceClips.held/swing` or `handsCameraLocalMatrix` in that format.
+The archived Web controller `createNativePlayerAnimation`, not the GPU
+pass, is responsible for selecting a state/profile and emitting the sampled
+clip descriptor and hands/weapon transforms. This controller has **not**
+been restored to public main; no fake action timing or clip is substituted.
+
+**New live GPU capability:** `createDojoPlayerAnimationPass(gl, {
+playerPacket, rig, clips: undefined })` now supports *descriptor-only mode*
+for the recovered scene packet. The existing
+`draw({heldItem,descriptor,modelMatrix,viewProjection,katanaMeshLocalMatrix,
+cameraPosition,shaderTime,color})` samples the exact named clip supplied by
+a source-controller descriptor:
+`{clip,playback:'loop'|'clamp',time,transition?}`, with optional
+`transition:{fromClip,fromPlayback,fromTime,elapsed}`. The GPU skin sampler
+rejects unknown clip names/unsupported transitions. Without a descriptor
+the pass **fails closed**; it does not select guessed held or swing aliases.
+The legacy standalone `sourcePackage` entry still requires explicit
+`clips:{held,swing}`. The weapon socket comes from the posed
+`playerPacket.weaponBone` and optional caller-proven `itemFromBone`
+katana offset. Synthetic indexed non-cuboid GPU tests exercise both the
+successful actual draw and the absent-descriptor/unknown-clip rejection.
+There is no source mesh, clip or original binary in the test or public repo.
+
+**Raccord exclusif SH-05 (Dojo/build10):** after obtaining the archived
+controller from the owner-approved recovery channel, match the *actual*
+held item `id` to `packet.profiles[id]`, compute its source descriptor,
+and pass that descriptor directly to the existing hands GPU pass. Supply
+`modelMatrix` using the independently verified active camera and
+camera-relative hands transform, not `firstPersonPistol` guesses.
+Only pass `katanaMeshLocalMatrix` when `profile.itemFromBone` is
+qualified; then draw the source katana at the returned
+`katanaModelMatrix` and suppress the duplicate static blade. Until that
+raccord and the queued private camera query #174 return, retain the current
+static held-katana fallback. Source pistol is hands-free. SH-05 owns
+`main.js`/`renderer.js`/`levels.js`, SH-03 owns hits and SH-06 owns
+effects. No native Animator gameplay transition or matched native/Web
+camera/pose frame has been proven by this code change.
