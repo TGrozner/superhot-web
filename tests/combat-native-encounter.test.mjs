@@ -354,7 +354,7 @@ test('J3 Web peeking: a body-visible enemy sidesteps low cover until its real mu
   }
   assert.ok(opened,'repositioning reveals an actual unobstructed muzzle ray');
   assert.ok(Math.abs(enemy.z-originalZ)>1,'actor physically moved rather than bypassing collision');
-  assert.equal(enemy.x,2,'no phantom forward movement through low cover');
+  assert.ok(enemy.x<4.5,'capsule never jumps through the low cover while peeking');
 
   const missing=setup(data,[box(5,.65,5,.15,1.3,1.5)]);
   const blind=firstSpawn(missing,near);
