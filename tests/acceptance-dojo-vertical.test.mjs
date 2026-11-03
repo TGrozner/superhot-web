@@ -124,7 +124,7 @@ test('SH10 rejects leftover fragment/shard pool and held item after restart',()=
 
 test('SH10 observes duplicate ambient sources on restart as a reset leak candidate',()=>{
   const data=complete();data.frames.at(-1).gameplay.audioAmbienceSources=6;
-  failure(data,/ambient native WebAudio source count changed/);
+  failure(data,/three stable Dojo WebAudio scene ambiences/);
 });
 
 test('SH10 requires starting weapon and ammo to be restored',()=>{
@@ -133,7 +133,7 @@ test('SH10 requires starting weapon and ammo to be restored',()=>{
 });
 
 test('SH10 requires an actual world-clock reset after victory, not just kill reset',()=>{
-  const data=complete();data.frames.at(-1).worldClock=99;
+  const data=complete();data.frames.at(-2).worldClock=99;
   failure(data,/worldClock did not reset/);
 });
 
