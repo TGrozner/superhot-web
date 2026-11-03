@@ -366,3 +366,25 @@ physics definition**. A full source-qualified Dojo physics packet is still
 missing. Separate owner receipt must verify bone names/parents and the actual
 active enemy prefab, not just the source-wide 22/21/18 counts. IK, native
 crossfade dispatch and PhysX/CCD remain UNKNOWN.
+
+### SH-06 follow-up — source action-layer contact clock and independent actors
+
+Source-composed actions are **not** the renderer's base clip. An enemy may draw
+`idle` or `walk` with an explicit `punch` action layer; the GPU pass reports
+`sampledTime` for the base and `actionTime` for the overlaid action. SH-06's
+gate now accepts an explicit, mutually exclusive `drawAction` binding (owner +
+path ID still mandatory) and samples `actionTime` only when the SH-14 actor
+receipt identifies the **same attacker** and an exact, non-approximate full
+action weight. Missing actor ownership, partial weights, unqualified transition
+or a solved death pose fail closed. This prevents the other enemy's animation
+clock or the idle clip time from producing a melee damage request. Source
+windows and callback provenance remain private research #46, #152 and #29.
+
+This is a **Web safety condition**, not a claim that the native Animator would
+dispatch callbacks only at weight 1. Native transition-event and partial-blend
+dispatch are still unverified. SH-05 must wire this request to a real same-frame
+hitbox sweep before any observable melee damage changes. No native fragments,
+new assets or PhysX behavior are manufactured. The source death exporter is
+now connected locally by #250 to a qualified private package; the browser
+must still guard actual package/rig identity, while public asset distribution
+remains separately subject to authorization.

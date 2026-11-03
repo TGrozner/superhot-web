@@ -109,3 +109,46 @@ test('source-verified death solver hands SH-14 a copied per-actor pose; absent p
     provenance: 'synthetic-test',
   }), /ordering/);
 });
+
+test('per-actor source punch action uses its own clip clock, never idle sample or another enemy', () => {
+  const actionBinding = {
+    drawAction: 'punch', clipOwner: 'sharedassets0.assets',
+    clipPathId: 468, provenance: 'research#46:sharedassets0.assets:468',
+  };
+  const report = {
+    clip: 'idle', sampledTime: 1.9, action: 'punch', actionTime: 0.6,
+    actionEffectiveWeight: 1, actorId: 'enemy-1', actorPoseOwnedSnapshot: true,
+    skinned: true, nativeClipSampled: true,
+  };
+  const result = advanceRenderedDojoPunchGate(state(), {
+    drawReport: report, clipBinding: actionBinding, ...flags, contact: sweep,
+  });
+  assert.equal(result.poseQualified, true);
+  assert.equal(result.sampledClipTime, 0.6, 'not the idle clip at 1.9s');
+  assert.equal(result.requests.length, 1);
+  for (const bad of [
+    { actorId: 'enemy-other' },
+    { actorPoseOwnedSnapshot: false },
+    { actionEffectiveWeight: 0.7 },
+    { actionApproximation: true },
+    { transition: 'idle->punch', transitionWeight: 0.5 },
+  ]) {
+    const rejected = advanceRenderedDojoPunchGate(state(), {
+      drawReport: { ...report, ...bad },
+      clipBinding: actionBinding, ...flags, contact: sweep,
+    });
+    assert.equal(rejected.poseQualified, false);
+    assert.deepEqual(rejected.requests, []);
+  }
+  const early = advanceRenderedDojoPunchGate(state(), {
+    drawReport: { ...report, actionTime: 0.15 },
+    clipBinding: actionBinding, ...flags, contact: sweep,
+  });
+  assert.equal(early.poseQualified, true, 'valid action sample before hit window');
+  assert.deepEqual(early.requests, [], 'no damage before serialized Start event');
+  const baseClock = advanceRenderedDojoPunchGate(state(), {
+    drawReport: report, clipBinding: binding, ...flags, contact: sweep,
+  });
+  assert.equal(baseClock.poseQualified, false,
+    'the base clip must not borrow a composed punch action timestamp');
+});
