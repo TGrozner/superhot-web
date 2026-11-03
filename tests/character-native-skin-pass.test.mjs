@@ -609,3 +609,70 @@ test('per-actor real GPU draws use source states, action, transition and solved 
   assert.equal(calls.filter(call => call[0] === 'draw').length, 4);
   pass.dispose();
 });
+
+test('Web-only hit/melee accents lean the real sampled GPU rig, socket and hit pose per actor', () => {
+  const pkg = transitionPackage();
+  // Authored source-neutral clips: nothing from the commercial game.
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic test socket', coordinates: 'synthetic local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, pose) => actors.drawActor({
+    actorId, pose, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8, .1, .2, 1],
+  });
+
+  const baseline = draw(1, { state: 'hit', time: 0 });
+  const originalSocket = Array.from(baseline.weaponAttachmentMatrix);
+  near(originalSocket.slice(12, 15), [1, 0, 0]);
+  assert.equal(baseline.actorWebPoseReaction, null);
+  assert.equal(baseline.webPoseLeanApplied, false);
+
+  const struck = draw(1, { state: 'hit', time: .16 });
+  assert.equal(struck.actorWebPoseReaction.kind, 'hit');
+  assert.equal(struck.webPoseLeanApplied, true);
+  assert.ok(struck.weaponAttachmentMatrix[13] > .1);
+  assert.ok(struck.boneModelMatrices[16 + 13] > .1);
+  const hitPalette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
+  assert.ok(hitPalette[16 + 13] > .1, 'GPU palette follows the same lean as collision/socket');
+
+  const opposite = draw(2, { state: 'hit', time: .16 });
+  assert.ok(opposite.weaponAttachmentMatrix[13] < -.1, 'distinct actors react in opposite directions');
+  near(Array.from(baseline.weaponAttachmentMatrix), originalSocket);
+  assert.ok(struck.weaponAttachmentMatrix[13] > .1, 'owned receipt survives the other actor draw');
+
+  const melee = draw(1, { state: 'punch', time: .18 });
+  assert.equal(melee.actorWebPoseReaction.kind, 'punch');
+  assert.equal(melee.webPoseLeanApplied, true);
+  assert.notDeepEqual(Array.from(melee.boneModelMatrices), Array.from(baseline.boneModelMatrices));
+
+  const recovered = draw(1, { state: 'hit', time: .36 });
+  assert.equal(recovered.actorWebPoseReaction, null);
+  near(Array.from(recovered.weaponAttachmentMatrix), originalSocket);
+
+  const finalChild = identity();
+  finalChild[12] = 1;
+  const solved = draw(1, {
+    state: 'hit', time: .16,
+    solvedPose: { rig: pass.rig, provenance: 'synthetic death pose',
+      boneModelMatrices: new Float32Array([...identity(), ...finalChild]) },
+  });
+  assert.equal(solved.solvedPoseApplied, true);
+  assert.equal(solved.webPoseLeanApplied, false, 'Web accent must never modify ragdoll/death pose');
+  near(Array.from(solved.weaponAttachmentMatrix), originalSocket);
+
+  const before = calls.filter(call => call[0] === 'draw').length;
+  assert.throws(() => pass.draw({
+    instance: pass.createInstance({ clip: 'hit', playback: 'clamp' }),
+    modelMatrix: identity(), viewProjection: identity(),
+    color: [.8, .1, .2, 1], time: .16,
+    webPoseLean: { pitch: 100, roll: 0 },
+  }), /bounded pitch\/roll/);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, before);
+  pass.dispose();
+});
