@@ -34,12 +34,17 @@ function complete(target=6) {
     f(11,p(1.51,.35),{target,enemies:alive,ammo:5}),
     f(12,p(1.51,.35),{target,enemies:alive,weapon:false,ammo:0,heldItem:'cup-1',itemStates:[{id:'cup-1',state:'held'}]}),
     f(13,p(1.51,.35),{target,enemies:alive,weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:25}),
-    ...Array.from({length:target}, (_, n) => f(14+n,p(1.51,.35),{
-      target,kills:n+1,enemies:deadThrough(n+1),weapon:false,ammo:0,
-      itemStates:[{id:'cup-1',state:'broken'}],fragments: n < 2 ? 25 : 10,
-    })),
-    f(14+target,p(1.51,.35),{target,screen:'win',kills:target,enemies:deadThrough(target),weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
-    f(15+target,p(0),{target,moving:false}),
+    ...Array.from({length:target}, (_, n) => [
+      // One observed living spawn then one distinct death per Web actor.
+      f(14+2*n,p(1.51,.35),{target,kills:n,
+        enemies:[...deadThrough(n),{id:'native-encounter-'+n,alive:true}],
+        weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
+      f(15+2*n,p(1.51,.35),{target,kills:n+1,enemies:deadThrough(n+1),
+        weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],
+        fragments:n < 2 ? 25 : 10}),
+    ]).flat(),
+    f(14+2*target,p(1.51,.35),{target,screen:'win',kills:target,enemies:deadThrough(target),weapon:false,ammo:0,itemStates:[{id:'cup-1',state:'broken'}],fragments:10}),
+    f(15+2*target,p(0),{target,moving:false}),
   ];
   frames.at(-1).worldClock=.1;
   return {schemaVersion:2,captureKind:'SH10_DOJO_OWNER_BROWSER_V2',frames,
@@ -158,7 +163,7 @@ test('SH10 rejects owner-label duplication and unobserved browser frame IDs',()=
 });
 
 test('SH10 reset before winning cannot be scored as one continuous win',()=>{
-  const data=complete();data.frames[14].gameplay.encounter.killed=0;
+  const data=complete();data.frames[16].gameplay.encounter.killed=0;
   failure(data,/kill counter reset|base Dojo start/);
 });
 
@@ -187,11 +192,23 @@ test('SH10 rejects six counter increments represented by a single repeatedly dea
 
 test('SH10 does not accept a resurrected enemy or duplicate actor ID before reset',()=>{
   const resurrected=complete();
-  resurrected.frames[14].gameplay.encounter.enemies[0].alive=true;
+  resurrected.frames[16].gameplay.encounter.enemies[0].alive=true;
   assert.equal(report(resurrected).status,DOJO_VERTICAL_STATUS.INVALID);
   assert.match(report(resurrected).errors.join('\\n'),/resurrected/);
   const duplicate=complete();
   duplicate.frames[14].gameplay.encounter.enemies.push({...duplicate.frames[14].gameplay.encounter.enemies[0]});
   assert.equal(report(duplicate).status,DOJO_VERTICAL_STATUS.INVALID);
   assert.match(report(duplicate).errors.join('\\n'),/duplicate Web encounter actor/);
+});
+
+test('SH10 a corpse without a prior living frame is not a witnessed elimination',()=>{
+  const data=complete();
+  // Enemy #1 has no sampled living state, though its body and kill counter
+  // are present. This is a sampling gap, not native evidence or a refutation.
+  data.frames=data.frames.filter(f=>f.frameId!==16);
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.INCOMPLETE);
+  assert.equal(result.observed.distinctDeadActorIdsBeforeWin,6);
+  assert.equal(result.observed.distinctAliveThenDeadActorIdsBeforeWin,5);
+  assert.match(result.errors.join('\\n'),/sampled alive-to-dead actor transitions/);
 });

@@ -410,3 +410,20 @@ cleanup policy that removes corpses may produce INCOMPLETE; do not fabricate
 missing actors or weaken the gate automatically. Authored Node tests validate
 the checker only; the owner-local Chromium 6–7 kill → win → restart and matched
 native/Web screenshots are still NOT OBSERVED by these tests.
+
+
+### SH-10: Dojo living-spawn → death receipts (3 November 2026)
+
+A distinct corpse ID alone did not prove its actor was seen alive during the
+captured encounter: the previous synthetic positive trace introduced five of
+six enemies **already dead**. The strict vertical gate now requires a sampled
+`alive:true` followed later by `alive:false` for **each of the 6 or 7 distinct
+Web actor IDs**, in addition to the existing per-kill counter, win, route and
+restart gates. It reports both `distinctDeadActorIdsBeforeWin` and
+`distinctAliveThenDeadActorIdsBeforeWin`. A death first seen without its
+living predecessor is **INCOMPLETE** (sampling may have missed the spawn), not
+`REFUTED` native behavior. The authored 6/7 fixtures now contain individual
+spawn/death pairs, not dead-on-arrival enemies. These are sampled Web telemetry
+receipts, not actual Chromium execution, projectile causality or a matched
+MCD native observation. A completed owner-local Dojo playthrough and the
+same-scene/angle original visual reference remain **UNKNOWN**.
