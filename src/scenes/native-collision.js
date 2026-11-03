@@ -48,13 +48,28 @@ export function prepareNativeCollision(colliders) {
       max[axis] = Math.max(...vertices.map(p => p[axis]));
     }
     const triangles = [];
+    // Web perf: a box's 12 triangles reference 36 directed edges, but only
+    // 18 distinct undirected segments (12 physical edges + 6 face diagonals).
+    // Keep the first encounter's direction/face normal, preserving solver order,
+    // and avoid redoing costly capsule-vs-edge closest-point calculations.
+    const visitedEdges = new Set();
+    const addTriangle = (a, b, c, normal) => {
+      const uniqueEdges = [];
+      for (const [from, to] of [[a, b], [b, c], [c, a]]) {
+        const key = from < to ? from * 8 + to : to * 8 + from;
+        if (visitedEdges.has(key)) continue;
+        visitedEdges.add(key);
+        uniqueEdges.push([vertices[from], vertices[to]]);
+      }
+      triangles.push({ a: vertices[a], b: vertices[b], c: vertices[c], normal, uniqueEdges });
+    };
     for (let axis = 0; axis < 3; axis++) {
       const u = (axis + 1) % 3, v = (axis + 2) % 3;
       for (let side = 0; side < 2; side++) {
         const a = side << axis, b = a | (1 << u), c = b | (1 << v), d = a | (1 << v);
         const normal = multiply3(normals[axis], side ? 1 : -1);
-        triangles.push({ a: vertices[a], b: vertices[b], c: vertices[c], normal },
-          { a: vertices[a], b: vertices[c], c: vertices[d], normal });
+        addTriangle(a, b, c, normal);
+        addTriangle(a, c, d, normal);
       }
     }
     boxes.push({ collider, center, planes, triangles, min, max, enabled: true });
@@ -167,7 +182,7 @@ function capsuleDistance(box, bottom, top) {
   for (const triangle of box.triangles) {
     consider(bottom, closestTriangle(bottom, triangle), triangle.normal);
     consider(top, closestTriangle(top, triangle), triangle.normal);
-    for (const [a, b] of [[triangle.a, triangle.b], [triangle.b, triangle.c], [triangle.c, triangle.a]]) {
+    for (const [a, b] of triangle.uniqueEdges) {
       const pair = closestSegments(bottom, top, a, b);
       consider(pair[0], pair[1], triangle.normal);
     }
