@@ -10,6 +10,7 @@ import { lstat, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { verifyDojoRagdollPack } from './verify-dojo-ragdoll.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const assetDir = join(root, 'local-assets');
@@ -115,5 +116,14 @@ for (const id of [
 for (const id of usedIds) {
   if (!Object.hasOwn(manifest.assets, id)) fail('scene-referenced asset absent: ' + id);
 }
+// A pending source-pack migration does not block code-only PRs. Every real
+// Pages release, however, MUST use --require-ragdoll and fail closed until
+// a verified enriched pack is committed.
+if (process.argv.includes('--require-ragdoll')) {
+  const ragdoll = await verifyDojoRagdollPack(assetDir);
+  console.log('PAGES RAGDOLL OK:', ragdoll.bodies, 'bodies,',
+    ragdoll.joints, 'joints, exact rig SHA-256.');
+}
+
 console.log('PAGES PACK OK:', entries.length, 'assets,', total,
   'bytes; Dojo/build10; every declared SHA-256 verified.');
