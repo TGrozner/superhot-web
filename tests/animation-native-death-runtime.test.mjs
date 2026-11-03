@@ -143,3 +143,17 @@ test('death inherits each sampled rigidbody linear and angular velocity, not a s
   near(runtime.bodies[0].angularVelocity.z,0);
   assert.ok(Array.from(runtime.boneModelMatrices).every(Number.isFinite));
 });
+
+test('a world-space off-centre impact rotates the struck bone but a centre hit does not',()=>{
+  const side=create(),centre=create();
+  const impulse={x:8,y:0,z:0};
+  applyNativeDeathForce(side,{boneIndex:2,mode:'Impulse',vector:impulse,point:{x:0,y:2.5,z:0}});
+  applyNativeDeathForce(centre,{boneIndex:2,mode:'Impulse',vector:impulse,point:{x:0,y:2,z:0}});
+  near(side.bodies[1].velocity.x,centre.bodies[1].velocity.x);
+  assert.ok(Math.abs(side.bodies[1].angularVelocity.z)>0);
+  near(centre.bodies[1].angularVelocity.z,0);
+  assert.ok(Math.hypot(...Object.values(side.bodies[1].angularVelocity))<=12+1e-8,
+    'angular kick stays in the browser safety envelope');
+  advanceNativeDeathRuntime(side,0.02);
+  assert.ok(Array.from(side.boneModelMatrices).every(Number.isFinite));
+});
