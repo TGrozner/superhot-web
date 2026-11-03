@@ -154,6 +154,8 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     const changed = items.filter(i => i?.state !== 'static');
     frames.push({
       frameId: snapshot.frameId,
+      // Sampler wall time, NOT the rAF timestamp or native Unity time.
+      sampledAtMs: Number.isFinite(window.performance?.now?.()) ? window.performance.now() : null,
       activeScreen: snapshot.activeScreen,
       worldClock: snapshot.worldClock,
       nativeScene: snapshot.nativeScene ? { source: {
@@ -167,6 +169,8 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
           enemies: encounter.enemies?.map(enemy => ({ id: enemy.id, alive: enemy.alive })) ?? [],
         } : null,
         weapon: g.weapon, ammo: g.ammo,
+        // App reports the NEXT scale; worldClock already used the prior one.
+        timeScale: Number.isFinite(g.timeScale) ? g.timeScale : null,
         heldItem: asItemKey(g.heldItem),
         itemsTotal: items.length,
         // Do not serialize static source names, meshes or original transforms.
