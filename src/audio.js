@@ -5,6 +5,7 @@ import {
 import {planMcdAudioPrefabPlay} from './sound/mcd-prefab-sound-intent.js';
 import {planMcdStunAudioFromCommands} from './sound/mcd-enemy-stun-prefab.js';
 import {sampleMcdCurve} from './sound/mcd-curve.js';
+import {createWebImpactMix} from './sound/web-impact-mix.js';
 
 /**
  * Browser playback for locally served, owner/path_id-verified MCD clips.
@@ -123,6 +124,10 @@ export function createAudio(options = {}) {
   const ambienceSources = new Set();
 
   let ctx = null;
+  let webMix = null;
+  let webMixError = null;
+  let lastWebAccent = null;
+  let webAccentCount = 0;
   let originalMode = false;
   let soundScale = 1;
   let worldPitch = 1;
@@ -170,6 +175,26 @@ export function createAudio(options = {}) {
     return lastPlayback;
   }
 
+  // Extra Web game-feel, not recovered MCD audio. Keep the native playback
+  // result intact: a synthetic cue must never masquerade as a source WAV.
+  function webCombatAccent(cue, nativePlayback, position = null) {
+    if (!originalMode || !webMix || nativePlayback?.status === 'suppressed') return nativePlayback;
+    try {
+      const nativePlaying = nativePlayback?.status === 'started' ||
+        nativePlayback?.status === 'scheduled';
+      const receipt = webMix.emit(cue, {
+        position: vector3(position, 'webAccentPosition') ?? undefined,
+        intensity: nativePlaying ? 0.2 : 1,
+      });
+      lastWebAccent = Object.freeze({cue, nativeStatus: nativePlayback?.status ?? null,
+        status: receipt.status, spatial: receipt.spatial});
+      if (receipt.status === 'started') webAccentCount++;
+    } catch (error) {
+      lastWebAccent = Object.freeze({cue, status: 'blocked', reason: errorMessage(error)});
+    }
+    return nativePlayback;
+  }
+
   async function init() {
     if (!ctx) {
       if (typeof AudioContextClass !== 'function') {
@@ -179,6 +204,19 @@ export function createAudio(options = {}) {
       ctx = new AudioContextClass();
     }
     if (ctx.state === 'suspended' && typeof ctx.resume === 'function') await ctx.resume();
+    // A single user-gesture AudioContext is shared by original WAVs and Web
+    // impact accents. No continuous drone: the Dojo has its own scene ambience.
+    if (ctx.state === 'running' && !webMix &&
+        typeof ctx.createDynamicsCompressor === 'function' &&
+        typeof ctx.createBuffer === 'function' &&
+        typeof ctx.createBiquadFilter === 'function' &&
+        typeof ctx.createOscillator === 'function') {
+      try {
+        webMix = createWebImpactMix(ctx);
+        webMix.setMixLevel(0.45);
+        webMixError = null;
+      } catch (error) { webMix = null; webMixError = errorMessage(error); }
+    }
     return report(ctx.state === 'running' ? 'ready' : 'blocked', 'init', {
       contextState: ctx.state,
       sampleRate: ctx.sampleRate,
@@ -490,13 +528,18 @@ export function createAudio(options = {}) {
 
   function itemCue(action, {itemId, position, realtimeSeconds} = {}) {
     if (!originalMode) return report('suppressed', action, {reason: 'original-mode-disabled'});
+    const withItemAccent = (result) => {
+      const webCue = action === 'slice' ? 'katana' :
+        action === 'throw' ? 'throw' : action === 'pickup' ? 'pickup' : null;
+      return webCue ? webCombatAccent(webCue, result, position) : result;
+    };
     let cue = sceneAudio?.items?.[itemId]?.[action];
-    if (!cue) return report('blocked', action, {reason: 'native-item-cue-not-configured', itemId});
+    if (!cue) return withItemAccent(report('blocked', action, {reason: 'native-item-cue-not-configured', itemId}));
     if (cue.alsoThrow) itemCue('throw', {itemId, position, realtimeSeconds});
     if (cue.prefab) {
       const origin = vector3(position, 'position');
       if (!origin) throw new TypeError('prefab position is required');
-      return playScenePrefab(cue.prefab, origin);
+      return withItemAccent(playScenePrefab(cue.prefab, origin));
     }
     if (cue.choices) {
       const selection = randomUnit();
@@ -517,7 +560,7 @@ export function createAudio(options = {}) {
       ? cue.pitch * randomizedMultiplier(cue.pitchRandomization)
       : cue.pitch + randomUnit() * cue.pitchRandomization * 2 - cue.pitchRandomization) : cue.pitch;
     const gain = cue.gainRandomization ? cue.gain * randomizedMultiplier(cue.gainRandomization) : cue.gain;
-    return playMcdClip(action, cue.clipId, {...cue, gain, pitch});
+    return withItemAccent(playMcdClip(action, cue.clipId, {...cue, gain, pitch}));
   }
 
   function playMcdClip(event, clipId, {
@@ -593,14 +636,14 @@ export function createAudio(options = {}) {
     const selected = variant ?? (randomUnit() > 0.6 ? 'alternate' : 'primary');
     const pitch = randomizedMultiplier(0.15);
     const gain = 0.6 * randomizedMultiplier(0.15);
-    return playMcdClip('shoot',
+    return webCombatAccent('player-shot', playMcdClip('shoot',
       selected === 'alternate' ? 'pistolFireAlternate' : 'pistolFirePrimary', {
         gain,
         pitch,
         mixerGroup: 'Gunshots',
         priority: 1,
         position: vector3(position, 'position'),
-      });
+      }), position);
   }
 
   function throwWeapon() {
@@ -609,32 +652,32 @@ export function createAudio(options = {}) {
     // pitch1.5, then adds (not multiplies) its absolute ±0.2 randomization.
     const pitch = 1.5 + randomUnit() * 0.4 - 0.2;
     const gain = 0.8 * randomizedMultiplier(0.2);
-    return playMcdClip('throwWeapon', 'pistolThrow', {
+    return webCombatAccent('throw', playMcdClip('throwWeapon', 'pistolThrow', {
       gain, pitch, mixerGroup: 'Env SFX',
-    });
+    }));
   }
 
   function enemyShoot({position} = {}) {
     if (!originalMode) return proceduralEnemyShoot();
-    return playNative('enemyShoot', 'enemyFire', {
+    return webCombatAccent('enemy-shot', playNative('enemyShoot', 'enemyFire', {
       gain: 0.800000011920929,
       mixerGroup: 'Gunshots',
       priority: 128,
       pitch: 1 + randomUnit() * 0.8 - 0.4,
       position: vector3(position, 'position'),
       maxDistance: 300,
-    });
+    }), position);
   }
 
   function shatter({position} = {}) {
     if (!originalMode) return proceduralShatter();
-    return playNative('shatter', 'enemyShatter', {
+    return webCombatAccent('shatter', playNative('shatter', 'enemyShatter', {
       gain: 1,
       mixerGroup: 'Env SFX',
       priority: 30,
       position: vector3(position, 'position'),
       maxDistance: 30,
-    });
+    }), position);
   }
 
   function pickup({reloaded = false} = {}) {
@@ -642,10 +685,10 @@ export function createAudio(options = {}) {
     boolean(reloaded, 'reloaded');
     const pitch = randomizedMultiplier(0.15);
     const gain = 0.9 * randomizedMultiplier(0.15);
-    return playMcdClip('pickup',
+    return webCombatAccent('pickup', playMcdClip('pickup',
       reloaded ? 'pistolPickupReloaded' : 'pistolPickup', {
         gain, pitch, mixerGroup: 'Env SFX',
-      });
+      }));
   }
 
   function hit() {
@@ -901,6 +944,10 @@ export function createAudio(options = {}) {
       contextState: ctx?.state ?? 'uninitialized',
       playbackCount,
       originalMode,
+      webAccentCount,
+      lastWebAccent,
+      webMixLevel: webMix?.getMixLevel() ?? null,
+      webMixError,
       activeNativeSources: activeSources.size,
       sceneAmbienceSources: ambienceSources.size,
       nativeSceneAudioLimitations: sceneAudio?.limitations ?? [],
