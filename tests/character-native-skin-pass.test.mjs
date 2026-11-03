@@ -320,6 +320,7 @@ function mockGl({ uniformLimit = 256 } = {}) {
     frontFace: value => { winding = value; calls.push(['winding', value]); },
     uniformMatrix4fv: (location, _transpose, value) => calls.push(['matrix', location.name, Array.from(value)]),
     uniform3f: () => {}, uniform2f: () => {}, uniform4f: () => {},
+    uniform1f: (location, value) => calls.push(['uniform1f', location.name, value]),
     drawElements: (mode, count, type, offset) => calls.push(['draw', mode, count, type, offset]),
     deleteBuffer: value => calls.push(['deleteBuffer', value]),
     deleteVertexArray: value => calls.push(['deleteVao', value]),
@@ -725,5 +726,41 @@ test('source fire action produces a visible post-shot Web recoil without moving 
   assert.equal(settled.actorWebPoseReaction, null);
   assert.equal(settled.webPoseLeanApplied, false);
   assert.equal(calls.filter(call => call[0] === 'draw').length, 5);
+  pass.dispose();
+});
+
+
+test('Web-only impact glow hits the actual GPU material once, fades, and spares ragdolls', () => {
+  const pkg = transitionPackage();
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (time, solvedPose = null) => actors.drawActor({
+    actorId: 'enemy-impact',
+    pose: { state: 'hit', time, ...(solvedPose ? { solvedPose } : {}) },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+  const impact = draw(0);
+  assert.equal(impact.actorWebHitFlash, 1, 'accepted hit begins white-hot');
+  assert.equal(impact.webHitFlashIntensity, 1);
+  assert.equal(impact.webHitFlashDesign, 'Web-only white-hot damage pulse');
+  const fading = draw(.11);
+  assert.ok(fading.actorWebHitFlash > .2 && fading.actorWebHitFlash < .3);
+  const settled = draw(.22);
+  assert.equal(settled.actorWebHitFlash, 0);
+  const solved = draw(.05, { rig: pass.rig, provenance: 'authored death fixture',
+    boneModelMatrices: new Float32Array([...identity(), ...identity()]) });
+  assert.equal(solved.actorWebHitFlash, 0, 'ragdoll never flashes from the hit pose');
+  assert.deepEqual(calls.filter(call => call[0] === 'uniform1f' && call[1] === 'uWebHitFlash')
+    .map(call => call[2]), [1, fading.actorWebHitFlash, 0, 0]);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 4,
+    'the full-body crystal hit pulse requires no second draw');
+  assert.throws(() => pass.draw({
+    instance: pass.createStateInstance('hit'), time: 0,
+    modelMatrix: identity(), viewProjection: identity(), color: [.8,.1,.2,1],
+    webHitFlash: 2,
+  }), /hit flash must be a finite intensity/);
   pass.dispose();
 });
