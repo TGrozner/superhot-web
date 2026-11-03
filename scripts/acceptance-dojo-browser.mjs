@@ -7,8 +7,34 @@ const DOJO_ROUTE_MARKERS = Object.freeze([
   'door-before', 'door-after', 'stairs-bottom', 'stairs-top',
   'wall-press-start', 'wall-press-end',
 ]);
-const MOVEMENT_KEYS = new Set(['KeyW', 'KeyZ', 'ArrowUp', 'KeyS', 'KeyA', 'KeyQ',
+// Match src/main.js update(): event.code physical keys, opposing axes cancel.
+const MOVEMENT_KEYS = new Set(['KeyW', 'KeyZ', 'ArrowUp', 'KeyS', 'KeyA',
   'ArrowDown', 'ArrowLeft', 'KeyD', 'ArrowRight']);
+const WARNING_READINESS = new Set([
+  'source-catalog-present', 'missing-private-door-catalog',
+  'not-dojo-build10-source', 'unavailable',
+]);
+const WARNING_EVENT_STATUS = new Set([
+  'not-loaded', 'source-warning-catalog-rejected', 'triggered',
+  'missing-verified-spawn-go', 'spawn-go-not-bound-in-source',
+  'source-door-not-in-private-catalog', 'source-controller-rejected',
+  'missing-private-door-catalog', 'not-dojo-build10-source',
+]);
+const nonnegativeInt = v => Number.isSafeInteger(v) && v >= 0 ? v : null;
+const enumerated = (v, choices) => choices.has(v) ? v : null;
+
+/**
+ * Web movement-INPUT intent, not observed translation. Wall collisions may
+ * prevent movement with an axis held. Identical to main.js's axis composition.
+ */
+export function dojoMovementIntent(pressed) {
+  const has = code => pressed.has(code);
+  const forward = Number(has('KeyW') || has('KeyZ') || has('ArrowUp')) -
+    Number(has('KeyS') || has('ArrowDown'));
+  const horizontal = Number(has('KeyD') || has('ArrowRight')) -
+    Number(has('KeyA') || has('ArrowLeft'));
+  return forward !== 0 || horizontal !== 0;
+}
 const asItemKey = id => id == null ? null : String(id);
 export const DOJO_ROUTE_HOTKEYS = Object.freeze({
   Digit1: 'door-before', Digit2: 'door-after',
@@ -180,7 +206,23 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
         originalFragmentCount: g.originalFragmentCount,
         audioAmbienceSources: g.audio?.sceneAmbienceSources,
         feet: g.feet ? {x:g.feet.x, y:g.feet.y, z:g.feet.z} : null,
-        grounded: g.grounded, moving: pressed.size > 0,
+        grounded: g.grounded, moving: dojoMovementIntent(pressed),
+        // Bounded read-only receipts from this actual WebGL frame, not pixels.
+        // Values absent from older runtimes stay null (never assumed zero).
+        visual: {
+          worldDrawCalls: nonnegativeInt(snapshot.generatedManifest?.drawCalls),
+          handsDrawCalls: nonnegativeInt(snapshot.nativeHands?.handsDrawCalls),
+          handsTriangles: nonnegativeInt(snapshot.nativeHands?.handsTriangles),
+          handsSourcePoseSampled: typeof snapshot.nativeHands?.sourcePoseSampled === 'boolean'
+            ? snapshot.nativeHands.sourcePoseSampled : null,
+          katanaSocketApplied: typeof snapshot.nativeHands?.webKatanaSocketApplied === 'boolean'
+            ? snapshot.nativeHands.webKatanaSocketApplied : null,
+          // Never serialize arbitrary source-prefab names or source objects.
+          warningReadiness: enumerated(g.doorWarning?.readiness, WARNING_READINESS),
+          warningEventStatus: enumerated(g.doorWarning?.lastEventStatus, WARNING_EVENT_STATUS),
+          warningActiveEnvelopes: nonnegativeInt(g.doorWarning?.activeEnvelopes),
+          warningRenderedSpotlights: nonnegativeInt(g.doorWarning?.renderedSpotlights),
+        },
       },
     });
     if (frames.length >= maxFrames) stop();
