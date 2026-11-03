@@ -8,7 +8,7 @@ import { advanceNativeDeathRuntime } from './native-death-runtime.js';
  * Caller must separately prove the owner-qualified clip mapping, prepared
  * Unity event interval, active GameObject and mapped receiver. A real contact
  * must be a SH-03 geometry sweep sampled in that same clip-time interval.
- * Outputs are requests, never direct damage. No Animator dispatch is inferred.
+ * A source action layer is sampled at actionTime, not the base clip time;\n * it must carry an owned actor receipt and exact action weight.\n * Outputs are requests, never direct damage. No Animator dispatch is inferred.
  *
  * @param {object} state - Per-strike state from createDojoPunchContactGate.
  * @param {object} packet - Current source-qualified renderer/contact receipt.
@@ -19,12 +19,16 @@ export function advanceRenderedDojoPunchGate(state, {
   preparedIntervalConfirmed, activeGameObjectConfirmed,
   methodReceiverConfirmed,
 } = {}) {
+  // A base clip and a source Animator action layer have distinct clocks.
+  // The latter is sampled at drawReport.actionTime, never sampledTime.
+  const useBaseClip = typeof clipBinding?.drawClip === 'string' && !!clipBinding.drawClip;
+  const useAction = typeof clipBinding?.drawAction === 'string' && !!clipBinding.drawAction;
   if (!clipBinding || typeof clipBinding !== 'object' ||
-      typeof clipBinding.drawClip !== 'string' || !clipBinding.drawClip ||
+      useBaseClip === useAction ||
       typeof clipBinding.clipOwner !== 'string' || !clipBinding.clipOwner ||
       !Number.isSafeInteger(clipBinding.clipPathId) || clipBinding.clipPathId <= 0 ||
       typeof clipBinding.provenance !== 'string' || !clipBinding.provenance.trim()) {
-    throw new TypeError('Explicit owner-qualified source clip-to-GPU binding required');
+    throw new TypeError('Exactly one owner-qualified source clip/action binding required');
   }
   for (const [name, value] of Object.entries({
     preparedIntervalConfirmed, activeGameObjectConfirmed,
@@ -35,14 +39,31 @@ export function advanceRenderedDojoPunchGate(state, {
 
   // transitionWeight < 1 is a blended pose, NOT proof that Unity would
   // dispatch this clip's callbacks. Solved pose has no active clip either.
+  // For source-composed punches the base 'idle/walk' clip is NOT the punch
+  // timeline. SH-14 reports the actual action-layer sample separately.
+  // Require the owned actor receipt so another enemy cannot lend its event
+  // clock to this strike. Incomplete/approximate blend => no inferred hit.
+  const actionQualified = useAction &&
+    drawReport?.actorPoseOwnedSnapshot === true &&
+    drawReport.actorId === state.attackerId &&
+    drawReport.action === clipBinding.drawAction &&
+    Number.isFinite(drawReport.actionTime) && drawReport.actionTime >= 0 &&
+    drawReport.actionEffectiveWeight === 1 &&
+    drawReport.actionApproximation !== true;
+  const baseQualified = useBaseClip &&
+    drawReport?.clip === clipBinding.drawClip &&
+    drawReport.action == null &&
+    Number.isFinite(drawReport.sampledTime) && drawReport.sampledTime >= 0 &&
+    // When SH-14 provides an actor ID, it must match this gate's attacker.
+    (drawReport.actorId === undefined || drawReport.actorId === state.attackerId);
   const matched = drawReport?.skinned === true &&
     drawReport.nativeClipSampled === true &&
     drawReport.solvedPoseApplied !== true &&
-    drawReport.clip === clipBinding.drawClip &&
-    typeof drawReport.sampledTime === 'number' &&
-    Number.isFinite(drawReport.sampledTime) && drawReport.sampledTime >= 0 &&
-    (!drawReport.transition || drawReport.transitionWeight === 1);
-  const currentClipTime = matched ? drawReport.sampledTime : state.lastClipTime;
+    (!drawReport.transition || drawReport.transitionWeight === 1) &&
+    (actionQualified || baseQualified);
+  const currentClipTime = matched
+    ? (useAction ? drawReport.actionTime : drawReport.sampledTime)
+    : state.lastClipTime;
   const result = advanceDojoPunchContactGate(state, {
     clipOwner: clipBinding.clipOwner,
     clipPathId: clipBinding.clipPathId,
