@@ -1209,6 +1209,14 @@ export function createNativeSkinPass(gl, sourcePackage, {
   // includes the weapon geometry's basis conversion, not its source mesh offset.
   const weaponModelMatrix = loaded.weaponAttachment ? new Float32Array(16) : null;
   const weaponAttachmentMatrix = loaded.weaponAttachment ? new Float32Array(16) : null;
+  // An opaque, pass-specific binding; callers cannot accidentally feed a
+  // different mesh/rig's solved matrices into this GPU palette.
+  // It is handed to SH-05 via the pass metadata, not exported as source assets.
+  const rig = Object.freeze({
+    source: loaded.source,
+    boneOrder: Object.freeze(loaded.bones.map(bone => bone.name)),
+    parents: Object.freeze(loaded.bones.map(bone => bone.parent)),
+  });
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1237,7 +1245,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const camera = new Float32Array(3);
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
                   cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
-                  color, transition = null, action = null } = {}) {
+                  color, transition = null, action = null, solvedPose = null } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1278,6 +1286,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
       if (!Number.isFinite(value)) throw new RangeError('cameraPosition requires finite float32 xyz');
       camera[component] = value;
     }
+    if (solvedPose !== null && (action !== null || transition !== null)) {
+      throw new TypeError('solvedPose already contains the final pose: no clip transition or action overlay');
+    }
     let palette;
     let actionLayer = null;
     let actionPrecomposition = null;
@@ -1303,7 +1314,31 @@ export function createNativeSkinPass(gl, sourcePackage, {
       transitionInput.fromPlayback = transition.from.playback;
       transitionInput.elapsed = transition.elapsed;
     }
-    if (actionPrecomposition) {
+    if (solvedPose !== null) {
+      if (!solvedPose || typeof solvedPose !== 'object' || Array.isArray(solvedPose) ||
+          solvedPose.rig !== rig || typeof solvedPose.provenance !== 'string' ||
+          !solvedPose.provenance.trim()) {
+        throw new TypeError('solvedPose requires this pass rig identity and explicit provenance');
+      }
+      // Final bone MODEL matrices, including unweighted attachment bones, must
+      // match the exact indexed order of this pass. Never upload them directly
+      // to uJoints: GPU LBS uses globalModelBone * inverseBind.
+      numericArray(solvedPose.boneModelMatrices, loaded.jointCount * 16,
+        'solvedPose.boneModelMatrices');
+      for (let bone = 0; bone < loaded.jointCount; bone++) {
+        const offset = bone * 16;
+        affineDeterminant(
+          Array.prototype.slice.call(solvedPose.boneModelMatrices, offset, offset + 16),
+          'solvedPose.boneModelMatrices[' + bone + ']');
+      }
+      scratch.globals.set(solvedPose.boneModelMatrices);
+      for (let index = 0; index < loaded.weightedBoneIndices.length; index++) {
+        const bone = loaded.weightedBoneIndices[index];
+        multiplyInto(scratch.globals, bone * 16, loaded.mesh.inverseBindMatrices, bone * 16,
+          scratch.palette, index * 16);
+      }
+      palette = scratch.palette;
+    } else if (actionPrecomposition) {
       palette = evaluatePrecomposedActionPalette(loaded, actionPrecomposition,
         instance.clip, loaded.clips[instance.clip], time, instance.playback,
         action.time, action.weight * (action.blend ?? 1),
@@ -1356,7 +1391,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
     const report = {
       drawCalls: 1, triangles: loaded.mesh.indexCount / 3,
       clip: instance.clip, sampledTime: time, skinned: true,
-      nativeClipSampled: true, runtimeEnemyInstanceVerified: false,
+      nativeClipSampled: solvedPose === null, runtimeEnemyInstanceVerified: false,
+      solvedPoseApplied: solvedPose !== null,
+      solvedPoseProvenance: solvedPose?.provenance ?? null,
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
       weaponAttachmentMatrix,
@@ -1420,6 +1457,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
     actionLayers: loaded.actionLayers, actionPrecompositions: loaded.actionPrecompositions,
     availableActions: loaded.availableActions,
     availableTransitions: loaded.availableTransitions,
+    rig,
     createInstance, createStateInstance, loadInstance, draw, dispose,
   });
 }

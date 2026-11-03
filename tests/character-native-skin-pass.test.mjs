@@ -456,3 +456,84 @@ test('socket sampling does not fabricate a detached position when source attachm
   assert.equal(sampleNativeWeaponAttachment(pkg, identity(), pose.boneModelMatrices), null);
   assert.throws(() => sampleNativeWeaponAttachment(pkg, identity(), []), /components/);
 });
+
+
+test('solved per-actor pose drives compact GPU palette, world weapon socket and bone hit pose together', () => {
+  // This is a wholly authored two-bone triangle, NOT a native rig or a
+  // claimed Dojo ragdoll. Bone child has inverse bind translation -1.
+  const pkg = sourcePackage({
+    weaponAttachment: {
+      bone: 'child', localMatrix: identity(),
+      source: { owner: 'synthetic-test', weapon: 'child' },
+      coordinates: { space: 'synthetic model-local' },
+    },
+  });
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const instance = pass.createInstance({ clip: 'walk', playback: 'clamp' });
+  const world = identity();
+  world[12] = 10;
+  const root = identity(), child = identity();
+  root[12] = 3;
+  child[12] = 5;
+  const solvedPose = {
+    rig: pass.rig, provenance: 'synthetic two-bone solved frame',
+    boneModelMatrices: new Float32Array([...root, ...child]),
+  };
+  const drawn = pass.draw({
+    instance, modelMatrix: world, viewProjection: identity(), time: .25,
+    color: [.8,.1,.2,1], solvedPose,
+  });
+  const palette = calls.filter(c => c[0] === 'matrix' && c[1] === 'uJoints[0]').at(-1)[2];
+  // Bone 1 must apply inverse bind (-1), NOT upload the global +5 directly.
+  near([palette[12], palette[28]], [3,4]);
+  near([drawn.boneModelMatrices[12], drawn.boneModelMatrices[28]], [3,5]);
+  near([drawn.weaponAttachmentMatrix[12]], [15]);
+  assert.equal(drawn.solvedPoseApplied, true);
+  assert.equal(drawn.nativeClipSampled, false);
+  assert.equal(drawn.solvedPoseProvenance, solvedPose.provenance);
+
+  // Missing solvedPose falls back to existing sampled native clip, not a
+  // previous actor's borrowed bone buffer (or a frozen death pose).
+  const fallback = pass.draw({
+    instance, modelMatrix: world, viewProjection: identity(), time: .5,
+    color: [.8,.1,.2,1],
+  });
+  const fallbackPalette = calls.filter(c => c[0] === 'matrix' && c[1] === 'uJoints[0]').at(-1)[2];
+  near([fallbackPalette[12], fallbackPalette[28]], [1,1]);
+  near([fallback.weaponAttachmentMatrix[12]], [12]);
+  assert.equal(fallback.nativeClipSampled, true);
+  assert.equal(fallback.solvedPoseApplied, false);
+  pass.dispose();
+});
+
+test('solved pose refuses wrong rig, invalid affine bones and double clip overlays before GPU draw', () => {
+  const pkg = sourcePackage();
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const instance = pass.createInstance({ clip: 'walk', playback: 'clamp' });
+  const input = {
+    instance, modelMatrix: identity(), viewProjection: identity(), time: .5,
+    color: [.8,.1,.2,1],
+  };
+  const matrices = new Float32Array([...identity(), ...identity()]);
+  const right = { rig: pass.rig, provenance: 'synthetic solved pose', boneModelMatrices: matrices };
+  const drawCount = () => calls.filter(c => c[0] === 'draw').length;
+  const initial = drawCount();
+  assert.throws(() => pass.draw({ ...input, solvedPose: { ...right, rig: { ...pass.rig } } }),
+    /rig identity/);
+  assert.throws(() => pass.draw({ ...input, solvedPose: { ...right, provenance: '' } }),
+    /provenance/);
+  assert.throws(() => pass.draw({ ...input, solvedPose: right,
+    transition: { from: instance, fromTime: 0, elapsed: .2 } }), /no clip transition/);
+  const invalid = new Float32Array(matrices);
+  invalid[16 + 5] = 0;
+  assert.throws(() => pass.draw({ ...input, solvedPose: { ...right, boneModelMatrices: invalid } }),
+    /singular|unstable/i);
+  const inf = new Float32Array(matrices);
+  inf[28] = Infinity;
+  assert.throws(() => pass.draw({ ...input, solvedPose: { ...right, boneModelMatrices: inf } }),
+    /finite/);
+  assert.equal(drawCount(), initial, 'all bad solved poses rejected without issuing a draw');
+  pass.dispose();
+});
