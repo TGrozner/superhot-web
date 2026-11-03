@@ -77,3 +77,37 @@ test('disabled source colliders remain disabled for fragment contacts',()=>{
   assert.equal(contacts.some(c=>c.collider.id==='floor'),false);
   assert.ok(shard.position.y<0);
 });
+
+test('Web hitch budget keeps moving authored shards while limiting scene sweeps and skipping invisible HDR debris',()=>{
+  // Count scene reads, not wall-clock microbenchmarks. The uncapped baseline
+  // does ~45 native-sized steps here; the live Dojo must remain <=4.
+  let scans=0;
+  const emptyScene={get boxes(){scans++;return [];}};
+  const physics={...context(),collisionScene:emptyScene,gravity:{x:0,y:0,z:0}};
+  const bounded=body(); bounded.velocity={x:10,y:0,z:0};
+  const contacts=advanceNativeFragmentBody(bounded,0.3,{...physics,limitWebFrameWork:true});
+  const boundedReads=scans;
+  assert.deepEqual(contacts,[]);
+  assert.ok(Math.abs(bounded.position.x-3)<1e-8,'no dropped displacement after a hitch');
+  scans=0;
+  const uncapped=body();uncapped.velocity={x:10,y:0,z:0};
+  advanceNativeFragmentBody(uncapped,0.3,physics);
+  assert.ok(scans>boundedReads*5,'a long frame must not perform all 150Hz collision queries');
+  assert.ok(Math.abs(uncapped.position.x-bounded.position.x)<1e-8);
+  assert.throws(()=>advanceNativeFragmentBody(body(),0.1,{...physics,limitWebFrameWork:'yes'}),/required/);
+
+  const group=createGunPickupShardRuntime({
+    shards:[{id:'measured-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,collisionRadius:0.1}],
+    parentVelocity:{x:10,y:0,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[1.5],gravity:physics.gravity,physics,
+  });
+  scans=0;
+  const [live]=advanceGunPickupShardRuntime(group,0.3);
+  assert.equal(live.visible,true);
+  assert.ok(scans<=boundedReads+2,'live shard draw must use the same per-frame physics budget');
+  scans=0;
+  advanceGunPickupShardRuntime(group,2);
+  assert.equal(live.visible,false);
+  assert.deepEqual(live.contacts,[]);
+  assert.equal(scans,0,'invisible fragments must never query scene collision');
+});
