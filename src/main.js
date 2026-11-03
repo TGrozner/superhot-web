@@ -15,6 +15,7 @@ import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from '
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
 import { createNativeDeathRuntime, applyNativeDeathForce } from './animation/native-death-runtime.js';
+import { createWebImpactFeedback, resetWebImpactFeedback, recordWebImpact, advanceWebImpactFeedback } from './vfx/web-combat-feedback.js';
 import { advanceDojoDeathSkinFrame } from './animation/native-gameplay-pose-bridge.js';
 import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack, advanceNativeAimTarget } from './combat/native-enemy-runtime.js';
 import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests } from './combat/native-enemy-fire-phase.js';
@@ -32,6 +33,7 @@ const screens = { menu: $('menu-screen'), paused: $('pause-screen'), dead: $('de
 const overlay = $('overlay');
 const hud = $('hud');
 const crosshair = $('crosshair');
+const hitConfirm = $('hit-confirm');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
@@ -473,7 +475,9 @@ const state = {
   score: 0, shots: 0, hits: 0, ammo: 6, weapon: true, reload: 0, fireDelay: 0,
   recoil: 0, muzzle: 0, hop: 0, verticalSpeed: 0, walkCycle: 0,
   kills: 0, damage: 0, instructions: false,
+  chain: 0, lastChainKillAt: -Infinity, chainBonus: 0,
 };
+const webImpactFeedback = createWebImpactFeedback();
 let nativeClock = createMcdGameplayClock();
 const nativeVelocity = { x: 0, z: 0 };
 let nativeJumpAt = 0;
@@ -497,6 +501,7 @@ function setScreen(name) {
   hud.hidden = !playing;
   overlay.hidden = playing;
   crosshair.style.opacity = playing ? '1' : '0';
+  hitConfirm.hidden = !playing;
   for (const [key, screen] of Object.entries(screens)) screen.hidden = key !== name;
   if (!playing) keys.clear();
 }
@@ -597,13 +602,15 @@ function loadLevel(index) {
   state.reload = 0; state.fireDelay = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
+  resetWebImpactFeedback(webImpactFeedback);
+  state.chain=0;state.lastChainKillAt=-Infinity;state.chainBonus=0;
   $('ammo-hint').textContent = nativeGameplay() ? '/ CHANGER D’ARME UNE FOIS VIDE' : '/ R POUR RECHARGER';
   audio.setOriginalMode(Boolean(containersPreviewEnabled && nativeScene));
   $('room-name').textContent = containersPreviewEnabled
     ? `${nativeSceneName()} · GÉOMÉTRIE ORIGINALE · COMBAT WEB`
     : `${String(index + 1).padStart(2, '0')} / ${state.level.name}`;
   $('stage-banner').textContent = containersPreviewEnabled
-    ? `${nativeSceneName()} · COLLISIONS ET COMBAT WEB · PAS DE PARITÉ NATIVE`
+    ? `${nativeSceneName()} · LE TEMPS EST TON ARME`
     : `${String(index + 1).padStart(2, '0')} — ${state.level.name}` +
       (syntheticManifestEnabled ? ' · SYNTHETIC GEOMETRY (NOT MCD)' : '');
 }
@@ -715,7 +722,12 @@ function shoot() {
       audio.itemCue('swing',{itemId:nativeItems.held.id,position:state.camera,realtimeSeconds:state.runClock});
       const hit=findMeleeTarget();
       if(hit) {
-        killEnemy(hit);
+        const aim=cameraAxes(state.camera.yaw,state.camera.pitch).forward;
+        killEnemy(hit,{
+          boneIndex:hit.lastMeleeContact?.boneIndex,
+          point:hit.lastMeleeContact?.point??vec(hit.x,hit.y+1.2,hit.z),
+          direction:aim,kind:'katana',
+        });
         audio.itemCue('slice',{itemId:nativeItems.held.id,position:hit,realtimeSeconds:state.runClock});
       }
       state.fireDelay=.5;state.recoil=1;
@@ -734,7 +746,10 @@ function shoot() {
       if(nativeGameplay()) applyNativeEnemyContact(hit,{
         stickable:false,isKiller:false,headshotKiller:false,cutLimbs:false,
       },{...hit.lastMeleeContact,point:vec(hit.x,hit.y+1.2,hit.z)},multiply3(cameraAxes(state.camera.yaw,state.camera.pitch).forward,3));
-      else killEnemy(hit);
+      else killEnemy(hit,{
+        point:vec(hit.x,hit.y+1.2,hit.z),
+        direction:cameraAxes(state.camera.yaw,state.camera.pitch).forward,kind:'melee',
+      });
     }
     else audio.empty();
     return;
@@ -874,6 +889,13 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
     bossMind:false,velocitySquared:velocity.x**2+velocity.y**2+velocity.z**2,
     thrownByPlayer:true,shouldKill:false,direction:normalize3(velocity),relativeVelocity:velocity,position:hit.point,
   },{damage:1,stunTimeMultiplier:1,superThrows:false});
+  // A non-lethal confirmed contact still deserves an actual hit response.
+  // Lethal paths report once through killEnemy instead.
+  if(!result.actions.some(action=>action.type==='kill') &&
+      result.actions.some(action=>action.type==='stun'))
+    recordWebImpact(webImpactFeedback,{
+      kind:'hit',point:hit.point,direction:normalize3(velocity),
+    });
   for(const action of result.actions) {
     if(action.type==='drop-weapon')dropNativeEnemyWeapon(enemy);
     if(action.type==='stun') {
@@ -959,10 +981,20 @@ function prepareDojoDeathPhysics(enemy,hitReceipt=null) {
 }
 function killEnemy(enemy,hitReceipt=null) {
   if (!enemy.alive) return;
+  if(hitReceipt?.point && hitReceipt?.direction)
+    recordWebImpact(webImpactFeedback,{
+      kind:'kill',point:hitReceipt.point,direction:hitReceipt.direction,
+    });
   enemy.deathFireAction=enemy.fireAction??null;
   enemy.alive = false;
   enemy.deathAt = state.worldClock;
-  state.kills++; state.score += 100;
+  // Web-only momentum scoring: reward aggressive streaks using REAL played
+  // time, not the slowed physics clock. Never modify the kill quota.
+  const chained=state.runClock-state.lastChainKillAt<=3.25;
+  state.chain=chained?Math.min(9,state.chain+1):1;
+  state.lastChainKillAt=state.runClock;
+  state.chainBonus=100*state.chain;
+  state.kills++;state.score+=state.chainBonus;
   state.hits++;
   const floorY = floorAt(enemy.x, enemy.z, enemy.y);
   if(nativeGameplay()) {
@@ -1051,6 +1083,7 @@ function update(dt) {
   state.damage = Math.max(0, state.damage - dt);
   state.muzzle = Math.max(0, state.muzzle - dt);
   state.recoil = Math.max(0, state.recoil - dt * 4.8);
+  advanceWebImpactFeedback(webImpactFeedback,dt);
   if (!nativeGameplay()) state.fireDelay = Math.max(0, state.fireDelay - dt);
   if (state.reload > 0) {
     state.reload -= dt;
@@ -1305,16 +1338,22 @@ function update(dt) {
     const impact=closestImpact(bullet,start,end);
     bullet.age+=worldDt;bullet.ttl-=worldDt;
     if (impact) {
+      const contactPoint=impact.point??add3(start,multiply3(
+        vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
       if (impact.type==='enemy') {
         if(native&&bullet.type==='throw')applyNativeEnemyContact(impact.enemy,{
           stickable:false,isKiller:false,headshotKiller:false,cutLimbs:false,
-        },impact,bullet.velocity);
-        else killEnemy(impact.enemy,native?{
-          boneIndex:impact.boneIndex,point:impact.point,
+        },{...impact,point:contactPoint},bullet.velocity);
+        else killEnemy(impact.enemy,{
+          boneIndex:impact.boneIndex,point:contactPoint,
           direction:bullet.direction,kind:'shot',
-        }:null);
+        });
       }
       else if (impact.type==='player') damagePlayer();
+      else if (impact.type==='wall' && bullet.friendly)
+        recordWebImpact(webImpactFeedback,{
+          kind:'wall',point:contactPoint,direction:bullet.direction,
+        });
       if (bullet.type==='throw' && impact.type==='wall' && !native) {
         const p=add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
         state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0,ammo:bullet.ammo,
@@ -1382,6 +1421,16 @@ function updateHud(dt = 0) {
   shootFlash.style.opacity = state.muzzle > 0 ? '.42' : '0';
   const target = rayTarget();
   crosshair.classList.toggle('target',!!target);
+  const chainTime=3.25-(state.runClock-state.lastChainKillAt);
+  const chainVisible=state.chain>1 && chainTime>0;
+  const chainLabel=$('chain-banner');
+  chainLabel.hidden=!chainVisible;
+  if(chainVisible) {
+    chainLabel.textContent=`×${state.chain} ENCHAÎNEMENT  ·  +${state.chainBonus}`;
+    chainLabel.style.opacity=String(Math.min(1,chainTime*2));
+  }
+  hitConfirm.style.opacity=String(clamp(webImpactFeedback.hitSeconds/.12,0,1));
+  hitConfirm.classList.toggle('kill',webImpactFeedback.hitKind==='kill');
   if (nativeGameplay() && nativeHudReady) {
     const meleeTarget=state.fireDelay<=0?findMeleeTarget():null;
     // Source HUD class names from the recovered packet, not inferred texture IDs.
@@ -1760,6 +1809,10 @@ function render() {
     }
     for(const bullet of state.bullets) drawBullet(bullet);
     for(const p of state.fragments) renderer.shard(p.x,p.y,p.z,p.sx,p.sy,p.sz,p.color,p.rx,p.ry,p.rz,clamp(p.life/.6,0,1));
+    // Separate short-lived WEB contact glints: hard-capped, no asset or extra solver.
+    for(const p of webImpactFeedback.particles)
+      renderer.shard(p.x,p.y,p.z,p.size,p.size*.7,p.size*1.8,
+        p.color,p.rx,p.ry,p.rz,clamp(p.life/p.maxLife,0,1));
     if(state.screen==='playing') drawViewModel(cam);
   }
   renderedFrameSnapshot = {
@@ -1773,6 +1826,8 @@ function render() {
     nativeScene: nativeScene ? { source: nativeScene.source, meshes: nativeScene.meshes.size,
       instances: nativeScene.instances.length, textures: nativeScene.textures.size } : null,
     gameplay: { timeScale: state.speed, nativeClock: nativeGameplay(),
+      webImpactFx: {active:webImpactFeedback.particles.length,contacts:webImpactFeedback.impactCount},
+      chain:state.chain,chainBonus:state.chainBonus,
       ammo: state.ammo, fireDelay: state.fireDelay, weapon: state.weapon,
       initialEquipment: nativeGameplay() ? nativeScene.initialEquipment : null,
       feet:nativeGameplay()?{...nativeFeet}:null,grounded:nativeGameplay()?nativeGrounded:null,
