@@ -941,7 +941,7 @@ Lectures bornées privées (aucune sortie brute ou WAV publiée) :
   `d1d654bfadd0e0206d4d26b60bb5a6d2aba4b2627aa11d7183ebb180e9f3d30b`.
 - [research #188](https://github.com/TGrozner/superhot-research/issues/188),
   `Katana.cs:221–end`, artifact `13232868832`, SHA-256 de l'extrait
-  `f4b3abce0d4e4cf2d67e88234b79212884611e761396bc7931620a2b6`.
+  `f4b3abce0d4e4cf2d67e88234b79212884611e761f25a861396bc7931620a2b6`.
 - [research #186](https://github.com/TGrozner/superhot-research/issues/186),
   `KatanaAudioResources.cs`, artifact `13232832862`, extrait SHA-256
   `cfb361bcc747a3a61ba688b6dfb09627c5d35113e2b3be5489edfac2e39a534f`.
