@@ -17,7 +17,7 @@ const bodyPartComplete = target => target !== null && typeof target === 'object'
 
 const blocked = (reason, impactType = null) => ({
   status: 'blocked', reason, impactType, nativeEvents: [],
-  consumesWebBullet: false,
+  stopsContactTraversal: false, bulletDestroyRequested: false,
 });
 
 /**
@@ -58,12 +58,12 @@ const blocked = (reason, impactType = null) => ({
  *   velocity:{x:number,y:number,z:number}
  * }} input
  * @returns {{status:string,reason?:string,impactType:string|null,
- *   nativeEvents:object[],consumesWebBullet:boolean,nativeLoopStatus?:string}}
+ *   nativeEvents:object[],stopsContactTraversal:boolean,bulletDestroyRequested:boolean,nativeLoopStatus?:string}}
  */
 export function planDojoWebBulletImpact(input) {
   const { impact, contact, bullet, projectilePosition, velocity } = input ?? {};
   if (impact === null) return {
-    status: 'no-hit', impactType: null, nativeEvents: [], consumesWebBullet: false,
+    status: 'no-hit', impactType: null, nativeEvents: [], stopsContactTraversal: false, bulletDestroyRequested: false,
   };
   if (!impact || !['wall', 'enemy', 'player'].includes(impact.type) ||
       !Number.isFinite(impact.t) || impact.t < 0 || impact.t > 1 ||
@@ -120,7 +120,10 @@ export function planDojoWebBulletImpact(input) {
     impactType: impact.type,
     nativeEvents: result.events,
     nativeLoopStatus: result.status,
-    consumesWebBullet: !contact.ignored &&
+    // FixedUpdate stopping at a contact does NOT prove the projectile object
+    // was destroyed. Applying a destroy request is a later host-side effect.
+    stopsContactTraversal: !contact.ignored &&
       result.status === 'native-loop-stop-requested',
+    bulletDestroyRequested: result.events.some(event => event.type === 'bullet-destroy-request'),
   };
 }
