@@ -19,6 +19,33 @@
  */
 
 /**
+ * Reactive Web animation accents; these are a deliberate game-feel choice,
+ * NOT source Animator clips or native timing. They only accompany an actual
+ * available hit/punch clip, never substitute for missing source animation.
+ * Clock and actor identity come from the live Dojo gameplay caller.
+ */
+function webPoseReaction(actorId, pose, identity, solvedPose) {
+  if (solvedPose !== null || (identity.name !== 'hit' && identity.name !== 'punch')) {
+    return null;
+  }
+  const hit = identity.name === 'hit';
+  const duration = hit ? .32 : .36;
+  if (pose.time <= 0 || pose.time >= duration) return null;
+  const envelope = Math.sin(Math.PI * pose.time / duration);
+  let parity = typeof actorId === 'number' ? actorId % 2 : 0;
+  if (typeof actorId === 'string') {
+    for (let i = 0; i < actorId.length; i++) parity = (parity + actorId.charCodeAt(i)) % 2;
+  }
+  const side = parity ? 1 : -1;
+  return Object.freeze({
+    kind: identity.name,
+    pitch: (hit ? .08 : -.14) * envelope,
+    roll: side * (hit ? .22 : .035) * envelope,
+    design: 'Web-only reactive animation accent',
+  });
+}
+
+/**
  * @param {ReturnType<import('./native-skin-pass.js').createNativeSkinPass>} skinPass
  */
 export function createNativeActorSkinRuntime(skinPass) {
@@ -133,10 +160,12 @@ export function createNativeActorSkinRuntime(skinPass) {
         !actions.has(action.state))) {
       throw new RangeError('Source-composable actor action unavailable: ' + String(action?.state));
     }
+    const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose);
     const draw = {
       instance: selected.instance, time: selected.time,
       modelMatrix, viewProjection, color, cameraPosition,
       transition, action, solvedPose,
+      webPoseLean: reaction,
     };
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
@@ -148,6 +177,7 @@ export function createNativeActorSkinRuntime(skinPass) {
     return Object.freeze({
       ...report, actorId, actorSourceSelection: selected.identity,
       boneModelMatrices: matrices, weaponAttachmentMatrix: socket,
+      actorWebPoseReaction: reaction,
       // A serialized controller/state name is NOT proof of active native
       // Mecanim runtime branch or of 1:1 gameplay animation behavior.
       nativeActorControllerExecutionVerified: false,
