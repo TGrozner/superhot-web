@@ -4,6 +4,7 @@ import { collectNativeDojoSpawnerFactories, planNativeDojoEnemyActivation } from
 import { createNativeSpawnerState, advanceNativeSpawner } from '../src/combat/native-spawner.js';
 import { createNativeEnemyState, runNativeEnemyGunAttack } from '../src/combat/native-enemy-runtime.js';
 import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests } from '../src/combat/native-enemy-fire-phase.js';
+import { planIncomingBulletFixedContacts } from '../src/combat/incoming-bullet-contacts.js';
 
 const point = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const factoryInside = { factoryId: 'source-factory-in-spawner', gameObjectId: 'inactive-child',
@@ -99,6 +100,17 @@ test('one Dojo spawner order chooses an actual child factory, resolves family at
   assert.equal(late.status, 'spawn-requests');
   assert.equal(late.requests.length, 1);
   assert.equal(late.requests[0].type, 'projectile-spawn-request');
+  // A later, separately qualified projectile contact can request player
+  // death. This is a synthetic pre-sorted CustomCollider fixture, NOT PhysX.
+  const collision = planIncomingBulletFixedContacts({
+    orderedHits: [{ layer: 'CustomCollider', ignored: false, hasPlayerController: true }],
+    firedByPlayer: false, sniperBullet: false,
+    projectilePosition: point(6), velocity: point(10),
+  });
+  assert.equal(collision.status, 'native-loop-stop-requested');
+  assert.equal(collision.events.at(-1).type, 'player-kill-request');
+  assert.deepEqual(collision.events.at(-1).flags,
+    { switchToBlack: false, hardKill: false, forceKill: false });
 });
 
 test('live weapon cap switches the same source factory to shotgun with late pellet volley', () => {
@@ -121,8 +133,10 @@ test('live weapon cap switches the same source factory to shotgun with late pell
 test('incomplete runtime/enum data and unrelated templates cannot be treated as native selections', () => {
   const resolved = collectNativeDojoSpawnerFactories(hierarchy);
   assert.equal(activated(factoryOutside, resolved.templates).reason, 'spawn-template-not-qualified');
-  const unknown = activated({ ...factoryInside, weaponSelector: 11 }, resolved.templates);
+  const unmapped = { ...factoryInside, weaponSelector: 11 };
+  const unknown = activated(unmapped, [unmapped]);
   assert.equal(unknown.reason, 'source-weapon-or-archetype-enum-unmapped');
+  assert.equal(activated(unmapped, resolved.templates).reason, 'spawn-template-not-qualified');
   const missing = planNativeDojoEnemyActivation({
     template: resolved.templates[0], qualifiedTemplates: resolved.templates,
     difficulty: {}, availableWeapons: { Pistol: {}, Melee: {} },
