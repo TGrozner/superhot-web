@@ -104,3 +104,24 @@ test('Dojo win streak survives reload, upgrades legacy personal bests and resets
     ...defeat.best, currentStreak:4, bestStreak:2,
   }), 6), null, 'corrupt streak must not advance a record');
 });
+
+test('replay target uses the previous same-quota PB and offers a shot-free challenge', () => {
+  const previous = result(6, {score:900, elapsedSeconds:22}).best;
+  const chaseScore = result(6, {best:previous, score:850, elapsedSeconds:30});
+  assert.equal(chaseScore.replayTarget, '+51 PTS POUR UN NOUVEAU RECORD');
+  assert.match(chaseScore.text, /DÉFI : \+51 PTS/);
+  const chaseTime = result(6, {best:previous, score:1000, elapsedSeconds:30});
+  assert.equal(chaseTime.replayTarget, 'SOUS 22.0 S POUR UN NOUVEAU RECORD');
+  const challenge = result(6, {best:previous, score:1000, elapsedSeconds:18});
+  assert.equal(challenge.replayTarget, 'GAGNE SANS TIRER');
+  const shotFree = result(6, {best:previous, score:1000, elapsedSeconds:18, shots:0});
+  assert.equal(shotFree.replayTarget, null);
+  const first = result(6);
+  assert.equal(first.replayTarget, null, 'no invented personal record on first clear');
+  const failed = createDojoReplayRecap({
+    quota:6, victory:false, kills:4, shots:4, dodges:0,
+    score:300, elapsedSeconds:25,
+  }, previous);
+  assert.equal(failed.replayTarget, null, 'loss never receives a victory challenge');
+  assert.equal(readDojoReplayBest(JSON.stringify(chaseScore.best), 7), null);
+});

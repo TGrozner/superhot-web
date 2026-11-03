@@ -153,8 +153,24 @@ export function createDojoReplayRecap(snapshot, best = null) {
         ? ` · SÉRIE ${nextBest.currentStreak}${nextBest.currentStreak > (best?.bestStreak ?? 0)
             ? ' · RECORD SÉRIE' : ''}`
         : !run.victory && previousStreak > 0 ? ` · SÉRIE ${previousStreak} BRISÉE` : '';
+    // Personalized challenge uses the SAME quota's previous PBs, never a
+    // fabricated MCD checkpoint or kill-completion signal. New PBs are compared
+    // against the previous run, not the record updated above.
+    let replayTarget = null;
+    if (run.victory && best !== null) {
+        if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
+            replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;
+        }
+        else if (run.elapsedSeconds >= best.fastestSeconds && best.fastestSeconds > 0) {
+            replayTarget = `SOUS ${best.fastestSeconds.toFixed(1)} S POUR UN NOUVEAU RECORD`;
+        }
+        else if (run.shots > 0) {
+            replayTarget = 'GAGNE SANS TIRER';
+        }
+    }
+    const replayTargetText = replayTarget === null ? '' : ` · DÉFI : ${replayTarget}`;
     return Object.freeze({
-        text: `${metrics} · ${title[milestone]}${styleText}${streakText}${recordText}`,
+        text: `${metrics} · ${title[milestone]}${styleText}${streakText}${recordText}${replayTargetText}`,
         milestone, best: nextBest,
         shouldPersist: run.victory || previousStreak > 0,
         provenance: 'WEB_ONLY',
@@ -162,5 +178,6 @@ export function createDojoReplayRecap(snapshot, best = null) {
         nextStyleTarget: style?.nextTarget ?? null,
         currentStreak: nextBest?.currentStreak ?? 0,
         bestStreak: nextBest?.bestStreak ?? 0,
+        replayTarget,
     });
 }
