@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessWebVisualReadability } from '../scripts/visual-web-playability.mjs';
+import { assessWebVisualReadability, installWebVisualQa } from '../scripts/visual-web-playability.mjs';
 
 const playing = Object.freeze({
   activeScreen:'playing',frameId:12,totalWebGLDrawCalls:381,
@@ -51,4 +51,45 @@ test('No banner collision, 60 FPS budget and missing metrics make no fabricated 
   const missing=assessWebVisualReadability({frame:playing,width:1920,height:1080});
   assert.equal(missing.p95FrameMs,null);
   assert.equal(missing.warnings.length,0);
+});
+
+test('100ms real DOM sampling preserves a short clash missed by 1s panel refresh',()=>{
+  let active=false, removed=false;
+  const timers=new Map();
+  const elements={
+    'stage-banner':{hidden:false,getBoundingClientRect:()=>({left:100,top:90,width:160,height:70})},
+    'chain-banner':{hidden:false,getBoundingClientRect:()=>({left:110,top:110,width:150,height:35})},
+  };
+  const documentRef={
+    body:{append(){}},
+    createElement:()=>({style:{},setAttribute(){},remove(){removed=true;}}),
+    getElementById:id=>active?elements[id]??null:null,
+  };
+  const windowRef={
+    innerWidth:640,innerHeight:360,
+    __superhotGetRenderedFrameSnapshot:()=>playing,
+    __superhotSceneMetrics:{p95FrameMs:16.6},
+    getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
+    setInterval:(fn,ms)=>{timers.set(ms,fn);return ms;},
+    clearInterval:ms=>{timers.delete(ms);},
+  };
+  const qa=installWebVisualQa({windowRef,documentRef,sampleMs:100,refreshMs:1000});
+  assert.equal(qa.getReport().transientWarnings.length,0);
+  active=true;
+  timers.get(100)();
+  active=false;
+  timers.get(100)();
+  timers.get(1000)(); // a 1s-only sampler would have missed the overlap entirely
+  const r=qa.getReport();
+  assert.equal(r.warnings.length,0);
+  assert.equal(r.observedSamples,3);
+  assert.equal(r.transientWarnings.length,1);
+  assert.deepEqual(r.transientWarnings[0].ids,['stage-banner','chain-banner']);
+  assert.equal(r.transientWarnings[0].samplesWithWarning,1);
+  assert.ok(r.transientWarnings[0].peakOverlapFraction>=0.12);
+  assert.equal(r.transientWarnings[0].firstFrameId,12);
+  qa.stop();
+  qa.stop();
+  assert.equal(removed,true);
+  assert.equal(timers.size,0);
 });
