@@ -827,3 +827,29 @@ test('J3 Web near-miss suppression: actual passing player bullet interrupts gunf
   }));
   assert.equal(idle.encounter.webSuppressionRemaining,0,'enemy-fired bullets do not cause player-shot panic');
 });
+
+
+test('J3 Web rear near-miss: suppression breaks laterally instead of charging the shooter',()=>{
+  // Player is ahead to the east; a legitimate projectile passes the enemy
+  // from behind to its west. Retreating from that line would move TOWARD the
+  // player, so suppression should sidestep on the real swept nav/capsule.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),enemy=firstSpawn(runtime,player);
+  enemy.muzzlePosition=p(2,1.4,2);
+  enemy.muzzleForward=p(1,0,0);
+  const start=p(enemy.x,enemy.y,enemy.z);
+  const rearShot={friendly:true,pos:p(.6,1,-4),direction:p(0,0,1),speed:50};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[rearShot],
+  }));
+  assert.ok(Math.abs(enemy.z-start.z)>.01,
+    'rear-side near miss causes actual lateral feet movement');
+  assert.ok(Math.hypot(enemy.x-player.playerFeet.x,enemy.z-player.playerFeet.z)>=
+    Math.hypot(start.x-player.playerFeet.x,start.z-player.playerFeet.z)-1e-6,
+    'suppression must never charge into the player while seeking space');
+  assert.equal(enemy.encounter.canAttack,false,'real lateral suppression still delays fire');
+  assert.ok(enemy.encounter.webSuppressionRemaining>0,
+    'the same finite Web reaction remains active after a successful side-step');
+});
