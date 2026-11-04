@@ -396,7 +396,7 @@ export function createDojoReplayRecap(snapshot: unknown,
       : 'SURVIS JUSQU’À LA VICTOIRE';
     nextChallenge = Object.freeze(replayTarget === 'SURVIS JUSQU’À LA VICTOIRE'
       ? {kind:'survive',target:0} : {kind:'kills',target:goal});
-  } else if (best !== null && best.victories > 0) {
+  } else if (best !== null && best.victories > 0 && nextBest?.masteryMask !== 7) {
     // Compare only to the PREVIOUS same-quota PB, never a just-written PB.
     if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
       replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;

@@ -324,3 +324,11 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — validation technique requise.** Test ciblé d'une victoire sans tir encore manquée, score cible 901 approché à 850, score 930 sur mort **non** crédité, objectif 5 éliminations raté à 2 puis réussi à 5, deux esquives manquantes. Vérifier `npm run check` et CI sur SHA PR exact puis Pages + smoke des écrans de fin après fusion par SH-05 ; CI seule n'est pas une observation navigateur.
 
 **INCONNU — MCD natif.** Les gardes vivantes de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et les checkpoints restent non qualifiés. Cette explication de défi est une création `WEB_ONLY`, jamais un résultat d'analyse native.
+
+## SH-08 — priorité à la série après maîtrise 3/3 (04/11/2026)
+
+**PROUVÉ — Web-only.** Le défi de série introduit en #395 était écrasé, immédiatement après une série réussie, par un objectif de score/chrono dès que la nouvelle victoire ne battait pas les anciens records. Le branchement des records précédait le nouveau défi de série. Désormais, une maîtrise complète 3/3 donne priorité à une série croissante (2, 3, 4...), y compris avec des scores décroissants. Les défis déjà assignés restent conservés jusqu'à réussite. Le test ciblé `tests/flow-dojo-streak.test.mjs` vérifie trois victoires, conservation du PB et défaite brisant le compteur sans effacer le but. Aucun compteur combat, score, temps, arme, spawn, quota, entrée ou fichier SH-05 n'est modifié.
+
+**OBSERVÉ / non vérifié.** La vérification CI sur le SHA de PR et le rendu Pages doivent être contrôlés séparément ; aucun smoke navigateur ni mesure FPS n'est revendiqué par cette preuve statique.
+
+**INCONNU — MCD.** La requête privée `superhot-research#233` sur l'initialisation de `SHRLManager` ne présentait encore aucun résultat. Les signaux Dojo live de `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, activation `RunEnding`, checkpoints et menus ne sont pas établis. Les séries sont une mécanique Web, pas native. Aucun fichier original ni extraction privée publiée.
