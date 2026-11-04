@@ -7,6 +7,7 @@ import {
   createDojoDoorWarningSceneAdapter,
   sampleDojoDoorWarningWebPreview,
   sampleDojoDoorWarningWebGlow,
+  sampleDojoDoorFalseLightWebWash,
 } from '../src/render/lighting-model.js';
 
 // Synthetic geometry and curve: no private coordinates, cookie PNG or native shader.
@@ -285,6 +286,35 @@ test('opt-in Web-only glow retains real door joins, masks, envelopes and missing
 });
 
 
+
+test('J4 authored moving false-light becomes a bounded Web red floor wash, not a phantom source shader', () => {
+  const controller = activeWarning();
+  const fill = prepareDojoDoorWarningLighting(scene, controller.packets(), options).falseLights[0];
+  const atLamp = sampleDojoDoorFalseLightWebWash(fill, [2, 3, 4]);
+  assert.ok(Math.abs(atLamp.rgb[0] - 4 / 7) < 1e-12);
+  assert.ok(atLamp.rgb[1] < 0 && atLamp.rgb[2] < 0,
+    'red warning remains distinguishable from bright concrete');
+  const halfway = sampleDojoDoorFalseLightWebWash(fill, [4, 3, 4]);
+  assert.ok(Math.abs(halfway.rgb[0] - 0.25) < 1e-12,
+    'Web-only 4 m quadratic smooth falloff has a deterministic CPU/GPU contract');
+  assert.deepEqual(sampleDojoDoorFalseLightWebWash(fill, [6, 3, 4]).rgb, [0, 0, 0]);
+  assert.deepEqual(sampleDojoDoorFalseLightWebWash({ ...fill, intensity: 0 }, [2, 3, 4]).rgb,
+    [0, 0, 0]);
+  const moved = { ...fill, position: [3, 3, 4] };
+  assert.ok(sampleDojoDoorFalseLightWebWash(moved, [3, 3, 4]).rgb[0] > halfway.rgb[0],
+    'animated source false-light position moves the visible Web wash');
+  const crystal = sampleDojoDoorFalseLightWebWash(fill, [2, 3, 4], 3);
+  assert.ok(crystal.rgb[1] > atLamp.rgb[1] && crystal.rgb[2] > atLamp.rgb[2],
+    'Web-authored Red Crystal glint shares the existing material grade');
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /vec3 dojoDoorFalseLightWashWeb\(/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade/);
+  assert.throws(() => sampleDojoDoorFalseLightWebWash(
+    { ...fill, shaderParity: 'native-verified' }, [2, 3, 4]),
+  /Source-qualified/);
+  controller.reset();
+  assert.equal(prepareDojoDoorWarningLighting(scene, controller.packets(), options).falseLights.length, 0);
+});
+
 test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering vectors', () => {
   const key = 'level10::7089';
   const door = {
@@ -381,6 +411,7 @@ test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warning
     sourceScene, new Map([[textureId, { width: 2, height: 2 }]]));
   const near = adapter.prepareForInstance('near', packets);
   assert.equal(near.spotlights.length, 1);
+  assert.equal(near.webFalseLights.length, 1, 'nearby doorway wash remains on the authored mesh');
   for (const id of ['far', 'behind', 'outside-cone']) {
     const packet = adapter.prepareForInstance(id, packets);
     assert.equal(packet.spotlights.length, 0, id);
@@ -388,9 +419,17 @@ test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warning
     assert.strictEqual(adapter.prepareForInstance(id, packets), packet,
       'reusing the same source tick also reuses per-instance GPU packet');
     assert.equal(packet.falseLights.length, 1,
-      'bounding cull affects only spotlight projection, not false-light data');
+      'source false-light slot/data is preserved even when its Web wash is culled');
+    if (id === 'far' || id === 'outside-cone') {
+      assert.equal(packet.webFalseLights.length, 0,
+        'out-of-range 4 m Web floor wash does no fragment work on distant meshes');
+      assert.equal(packet.webBoundsCulledFalseLights, 1);
+    }
   }
   assert.equal(adapter.prepareForInstance('scaled-edge', packets).spotlights.length, 1);
+  assert.equal(adapter.prepareForInstance('scaled-edge', packets).webFalseLights.length, 0);
+  assert.equal(adapter.prepareForInstance('large-cone-edge', packets).webFalseLights.length, 1,
+    'large scale must not cull a red wash that may reach its mesh sphere');
   assert.equal(adapter.prepareForInstance('large-cone-edge', packets).spotlights.length, 1);
   assert.strictEqual(adapter.prepareForInstance('no-geometry', packets), near,
     'unknown mesh geometry fails open to avoid losing visible illumination');

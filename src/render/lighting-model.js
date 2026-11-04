@@ -226,7 +226,21 @@ vec3 dojoDoorWarningSpotWebGlow(
   float energy = sourceIntensity
     * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
   return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
-}`.trim();
+}
+// J4 creative Web fill: the SH-04 doorway false-light already has a live
+// world position/intensity, but no recovered native shader/falloff/colour.
+// One cheap world-space red wash per enabled false-light; no texture/pass.
+vec3 dojoDoorFalseLightWashWeb(
+  vec3 worldPosition, vec3 lightPosition, float sourceIntensity
+) {
+  float radius = length(worldPosition - lightPosition);
+  if (sourceIntensity <= 0.0 || radius >= 4.0) return vec3(0.0);
+  float fade = dojoWebWarningSmooth(1.0 - radius / 4.0);
+  float energy = sourceIntensity * fade * fade;
+  return dojoWebWarningContrast(
+    vec3(1.0, 0.06, 0.10), dojoWebWarningCompression(energy));
+}
+`.trim();
 
 const sourceDoorId = value =>
   typeof value === 'string' && /^[A-Za-z0-9_.-]+::[1-9][0-9]*$/.test(value);
@@ -377,6 +391,9 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
     nativeLightingParity: false,
     spotlights: Object.freeze(spotlights),
     falseLights: Object.freeze(falseLights),
+    // Web-only short-range illumination can be culled per mesh without
+    // rewriting the source false-light slots or their owner-qualified data.
+    webFalseLights: falseLights,
     omissions: Object.freeze(omissions),
     unresolved: Object.freeze([
       'native cookie projection and orientation',
@@ -470,6 +487,34 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
   const glow = energy / (3 + energy);
   return Object.freeze({
     rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
+    cookieUv: null,
+  });
+}
+
+
+/**
+ * J4 Web-only floor/doorway fill from an EXISTING SH-07/SH-04 false-light
+ * position and intensity. 4 m radius and warm red grade are Web art choices:
+ * the native XulmFalseLight composition/colour/falloff remain unresolved.
+ * SH-05 owns the GPU uniform wiring; no extra lamp or texture is generated.
+ * @param {{position: number[], intensity: number, shaderParity: string}} falseLight
+ * @param {number[]} worldPosition
+ * @param {number} [webMaterialMode]
+ * @returns {{rgb: readonly number[], cookieUv: null}}
+ */
+export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMaterialMode = 2) {
+  if (falseLight?.shaderParity !== 'unverified-no-false-light-composition') {
+    throw new TypeError('Source-qualified false-light packet required');
+  }
+  const position = sourceLightVec3(falseLight.position, 'false-light position');
+  const point = sourceLightVec3(worldPosition, 'false-light sample');
+  const intensity = sourceLightNonnegative(falseLight.intensity, 'false-light intensity');
+  const distance = Math.hypot(...point.map((value, index) => value - position[index]));
+  if (intensity === 0 || distance >= 4) return zeroWebWarning();
+  const fade = dojoWebWarningSmooth(1 - distance / 4);
+  const energy = intensity * fade * fade;
+  return Object.freeze({
+    rgb: webWarningContrast([1, .06, .10], energy / (3 + energy), webMaterialMode),
     cookieUv: null,
   });
 }
@@ -652,7 +697,8 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
   // Keep layer-wide validated uniforms, then cull only the spotlight entries
   // outside each *static* authored mesh. False-light data stays untouched.
   const forInstance = (instanceId, instance, layerResult) => {
-    if (layerResult.spotlights.length === 0) return layerResult;
+    if (layerResult.spotlights.length === 0 && layerResult.webFalseLights.length === 0)
+      return layerResult;
     const cached = instanceLightCache.get(instanceId);
     if (cached?.layerResult === layerResult) return cached.packet;
     if (!instanceBoundCache.has(instanceId))
@@ -660,11 +706,21 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
     const sphere = instanceBoundCache.get(instanceId);
     const lights = sphere ? layerResult.spotlights.filter(spot =>
       dojoSpotCouldReachSphere(spot, sphere)) : layerResult.spotlights;
+    // Unlike source spotlight layers, the false-light's native GPU mask is
+    // unknown. This cull applies ONLY to the explicitly Web-authored 4 m wash.
+    const fills = sphere ? layerResult.webFalseLights.filter(fill => {
+      const distance = Math.hypot(...fill.position.map((value, i) => value - sphere.center[i]));
+      const slack = 1e-4 * Math.max(1, distance, sphere.radius);
+      return distance <= 4 + sphere.radius + slack;
+    }) : layerResult.webFalseLights;
     const skipped = layerResult.spotlights.length - lights.length;
-    const packet = skipped === 0 ? layerResult : Object.freeze({
+    const skippedFills = layerResult.webFalseLights.length - fills.length;
+    const packet = skipped === 0 && skippedFills === 0 ? layerResult : Object.freeze({
       ...layerResult,
       spotlights: Object.freeze(lights),
+      webFalseLights: Object.freeze(fills),
       webBoundsCulledSpotlights: skipped,
+      webBoundsCulledFalseLights: skippedFills,
     });
     instanceLightCache.set(instanceId, { layerResult, packet });
     return packet;
