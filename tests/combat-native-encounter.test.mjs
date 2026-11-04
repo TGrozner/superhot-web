@@ -660,7 +660,7 @@ test('J3 Web dodge is cancelled by stun, pending fire or deactivation rather tha
   }
 });
 
-test('J3 Web fair hunt: enemies investigate last seen feet instead of tracking a hidden player through a wall',()=>{
+test('J3 Web fair hunt: enemies sweep near last seen feet without tracking hidden player',()=>{
   // All positions and the blocking wall are synthetic Web test fixtures.
   // This is NOT an assertion about MCD's native enemy perception.
   const data=scene();
@@ -673,21 +673,29 @@ test('J3 Web fair hunt: enemies investigate last seen feet instead of tracking a
   assert.deepEqual(enemy.encounter.webLastSeenFeet,seen.playerFeet);
 
   const hidden={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
-  for(let frame=0;frame<24;frame++){
+  const sweepPositions=[];
+  for(let frame=0;frame<30;frame++){
     advanceNativeEncounter(runtime,input([enemy],{...hidden,scaledDeltaTime:.2}));
     assert.equal(enemy.encounter.visible,false,'the wall keeps the player genuinely occluded');
     assert.deepEqual(enemy.encounter.webLastSeenFeet,seen.playerFeet,
-      'live hidden coordinates never overwrite the remembered position');
+      'hidden coordinates never overwrite the remembered location');
     assert.deepEqual(enemy.encounter.target,seen.playerFeet,
-      'the navigation goal is the previously seen position, not the hidden player');
+      'navigation and search use remembered feet, not the hidden player');
+    if(enemy.encounter.webSearchRemaining!==null && !enemy.encounter.webSearchComplete)
+      sweepPositions.push(p(enemy.x,enemy.y,enemy.z));
   }
-  assert.ok(enemy.x>5.5 && enemy.x<=6.001,'the hunter physically reaches the last seen location');
-  assert.ok(Math.abs(enemy.z-2)<.01,'hunter does not turn toward the unseen location');
+  assert.ok(sweepPositions.length>2,'hunter arrives and actually searches near last-seen feet');
+  assert.ok(sweepPositions.some(feet=>Math.abs(feet.z-2)>.08),
+    'hunter changes lane to investigate rather than standing still');
+  assert.ok(sweepPositions.every(feet=>Math.hypot(feet.x-6,feet.z-2)<=runtime.body.radius*3.5+1e-5),
+    'investigation stays close to last-known feet and uses bounded real movement');
+  assert.equal(enemy.encounter.webSearchComplete,true,'search ends in finite time');
+  assert.ok(enemy.x<8,'search never tracks the hidden player through cover');
   const holding=p(enemy.x,enemy.y,enemy.z);
   const relocated={playerFeet:p(13,0,7),playerPosition:p(13,1.6,7)};
   advanceNativeEncounter(runtime,input([enemy],{...relocated,scaledDeltaTime:.2}));
   assert.deepEqual(p(enemy.x,enemy.y,enemy.z),holding,
-    'the stationary search does not acquire clairvoyant chase through cover');
+    'completed search holds rather than magically following new hidden coordinates');
   assert.equal(enemy.encounter.canAttack,false,'no invisible target grants muzzle fire');
 
   const reappeared={playerFeet:p(4,0,2),playerPosition:p(4,1.6,2)};
