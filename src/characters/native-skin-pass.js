@@ -1545,7 +1545,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       webHeadLookApplied: webHeadLook !== null &&
         (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
          (webHeadLook.roll ?? 0) !== 0),
-      webHeadLookDesign: webHeadLook?.design ?? null,
+      webHeadLookDesign: webHeadLook === null ? null :
+        (webHeadLook.design ?? 'Web-only independent head gaze'),
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       webHitFlashIntensity: webHitFlash,
