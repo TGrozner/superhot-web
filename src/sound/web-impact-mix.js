@@ -80,6 +80,15 @@ export function createWebImpactMix(context, maxVoices = 24) {
         'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
         katana: 5, step: 1, pickup: 2, throw: 3,
     };
+    const attackByCue = {
+        // Layered Web attack: a short high-band crack rides the existing noise source.
+        // No additional voice, no original MCD clip or recovered Unity equalization.
+        'player-shot': [3700, 0.45, 0.022],
+        'enemy-shot': [3900, 0.32, 0.019],
+        impact: [2800, 0.48, 0.014],
+        shatter: [4800, 0.31, 0.043],
+        katana: [3200, 0.32, 0.065],
+    };
     function release(voice) {
         voices.delete(voice);
         retired.delete(voice);
@@ -209,6 +218,21 @@ export function createWebImpactMix(context, maxVoices = 24) {
         noise.connect(filter);
         filter.connect(burst);
         burst.connect(out);
+        // Web-authored transient: audible snap on hits, no extra BufferSourceNode.
+        // This layer shares the spatial path, gain trim and existing voice budget.
+        const snap = attackByCue[cue];
+        if (snap) {
+            const [hz, weight, tail] = snap;
+            const bright = context.createBiquadFilter();
+            bright.type = cue === 'katana' ? 'bandpass' : 'highpass';
+            bright.frequency.value = Math.min(hz, context.sampleRate * 0.43);
+            const accent = context.createGain();
+            accent.gain.setValueAtTime(volume * weight, at);
+            accent.gain.exponentialRampToValueAtTime(0.0001, at + tail);
+            noise.connect(bright);
+            bright.connect(accent);
+            accent.connect(out);
+        }
         noise.onended = ended;
         voice.sources.push(noise);
         noise.start(at, textureIndex * 0.025, duration);
