@@ -604,3 +604,24 @@ test('a confirmed Web landing has two weighted floor contacts without adding sou
   assert.equal(weightFilter.disconnected, true);
   assert.equal(heelToe.disconnected, true);
 });
+
+test('confirmed bullet wall contacts have a short spatial Web grit, not a shatter', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  const footstepBus = gains[3];
+  const duck = [];
+  footstepBus.gain.setTargetAtTime = (value, at) => duck.push({value, at});
+  const result = mix.emit('wall-impact', {position: {x: 1, y: 2, z: 3}});
+  assert.deepEqual(result, {status: 'started', source: 'web-original-synthesis',
+    at: ctx.currentTime, spatial: true});
+  assert.equal(nodes.length, 2); // One existing noise plus one pitched body.
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.ok(filters.some(f => f.type === 'bandpass' && f.frequency.value === 1050));
+  assert.ok(gains[7].connections[0].connections.includes(gains[2])); // HRTF to impacts.
+  assert.ok(duck.some(entry => entry.value === 0.10)); // Keep contact audible over steps.
+  assert.equal(mix.emit('step').status, 'blocked'); // Wall hit outranks a footstep.
+  for (const source of nodes) source.onended();
+  assert.equal(mix.getActiveVoices(), 0);
+  assert.ok(filters.every(f => f.disconnected || f.frequency.value === 2450));
+  mix.dispose();
+});
