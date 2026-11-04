@@ -216,7 +216,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     } else {
       out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' ? impacts : weapons);
     }
-    const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: 2, priority};
+    const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : 2, priority};
     voices.add(voice);
     const ended = () => {
       voice.pending--;
@@ -264,6 +264,30 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     voice.sources.push(osc);
     osc.start(at);
     osc.stop(at + duration);
+    // Creative Web crystal fracture: two short inharmonic glass rings.
+    // Reuses the existing spatial output and the same 24-voice budget.
+    if (cue === 'shatter') {
+        const glassTones = [
+            { hz: 1540, tail: 0.36, level: 0.26 },
+            { hz: 2690, tail: 0.23, level: 0.18 },
+        ];
+        for (const tone of glassTones) {
+            const ring = context.createOscillator();
+            ring.type = 'sine';
+            ring.frequency.setValueAtTime(tone.hz * texturePitch, at);
+            ring.frequency.exponentialRampToValueAtTime(tone.hz * texturePitch * 0.985, at + tone.tail);
+            const ringGain = context.createGain();
+            ringGain.gain.setValueAtTime(0.0001, at);
+            ringGain.gain.linearRampToValueAtTime(volume * tone.level, at + 0.008);
+            ringGain.gain.exponentialRampToValueAtTime(0.0001, at + tone.tail);
+            ring.connect(ringGain);
+            ringGain.connect(out);
+            ring.onended = ended;
+            voice.sources.push(ring);
+            ring.start(at);
+            ring.stop(at + tone.tail);
+        }
+    }
     if (cue !== 'step' && cue !== 'landing') {
       ambient.gain.cancelScheduledValues(at);
       ambient.gain.setTargetAtTime(0.03, at, 0.015);
