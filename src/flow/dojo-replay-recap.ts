@@ -220,7 +220,7 @@ export function createDojoReplayRecap(snapshot: unknown,
   }
   const title: Record<DojoReplayMilestone, string> = {
     'retry': 'REJOUE POUR PRENDRE TA REVANCHE',
-  'retry-progress': 'NOUVEAU PALIER AVANT LA VICTOIRE !',
+    'retry-progress': 'NOUVEAU PALIER AVANT LA VICTOIRE !',
     'first-clear': 'PREMIÈRE VICTOIRE !',
     'double-record': 'DOUBLE RECORD !',
     'score-record': 'NOUVEAU RECORD DE SCORE !',
