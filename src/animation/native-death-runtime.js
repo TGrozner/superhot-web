@@ -11,6 +11,10 @@ const WEB_GROUNDED_REST_SECONDS = 0.3;
 // Web-only angular surface friction: real static floor contacts dissipate
 // excess post-impact spin; free-flying limbs retain their sourced angular drag.
 const WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND = 7;
+// Web-only kinetic friction after an actual static floor contact: without
+// horizontal damping, fallen enemies keep skating between successive hits.
+// Never touch airborne velocity or the unbudgeted source-study path.
+const WEB_GROUNDED_LINEAR_FRICTION_PER_SECOND = 4;
 // Web-only game feel: cap extreme post-impact speeds, preventing tiny-mass
 // limbs from rocketing across a room in one four-substep browser frame.
 // This is not PhysX damping or a value recovered from MCD.
@@ -540,6 +544,10 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
   while(remaining>1e-12) {
     const dt=Math.min(webStep,remaining);
     const contactStart=contacts.length;
+    // One exponential per substep, reused by every contacted body. The
+    // continuous-time factor avoids a 30/60 FPS-dependent skid distance.
+    const groundSlideRetention=limitWebFrameWork
+      ? Math.exp(-WEB_GROUNDED_LINEAR_FRICTION_PER_SECOND*dt) : 1;
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
       for(const axis of axes) {
@@ -595,6 +603,13 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       // Exponential decay gives consistent results at 30/60 Hz; no floor
       // contact means all original airborne angular motion survives.
       if(groundedContact) {
+        // The source collision material still handles the immediate hit.
+        // This is additional, explicitly Web-authored post-impact settling,
+        // applied only on live floor contact in the real-time Dojo path.
+        if(limitWebFrameWork) {
+          body.velocity.x*=groundSlideRetention;
+          body.velocity.z*=groundSlideRetention;
+        }
         const angularRetention=Math.exp(-WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND*dt);
         for(const axis of axes)body.angularVelocity[axis]*=angularRetention;
       }
