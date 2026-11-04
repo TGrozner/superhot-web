@@ -698,9 +698,11 @@ export function createAudio(options = {}) {
 
   function hit() {
     if (!originalMode) return proceduralHit();
-    return playMcdClip('hit', 'playerHit', {
+    // Keep the source-qualified hit clip and its playback receipt authoritative.
+    // The Web-authored layer is a quiet accent, not a replacement MCD clip.
+    return webCombatAccent('player-hit', playMcdClip('hit', 'playerHit', {
       gain: 0.699999988079071, mixerGroup: 'Interface SFX', priority: 128,
-    });
+    }));
   }
 
   function empty() {
