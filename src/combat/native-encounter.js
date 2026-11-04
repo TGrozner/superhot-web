@@ -32,6 +32,15 @@ const WEB_DISENGAGE = Object.freeze({
   diagonalBias: 0.6,
 });
 
+// Web-authored finite cover search: after a genuine sighting, scan safe lanes
+// around the last-known feet, without using the player's occluded position.
+// This is Web AI design, NOT a recovered MCD timing or perception contract.
+const WEB_LAST_SEEN_SWEEP = Object.freeze({
+  seconds:1.8,
+  maxBodyRadii:3.5,
+  speedFraction:0.75,
+});
+
 // J3 Web-authored paired pressure: one armed squadmate closes the gap while
 // others hold their firing distance. Pick by stable actor identity, not array
 // iteration or frame timing; an ally's death ends the push immediately.
@@ -74,21 +83,27 @@ function webFinalSurvivorBreacher(runtime, enemy, enemies) {
  * tactics. Never teleport an actor or cross a blocking actor/player.
  * Blocked lanes reverse once, then the enemy simply holds its position.
  */
-function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
+function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
+  {sideOverride=null, maxDistance=Infinity}={}) {
   const start=position(enemy), state=enemy.encounter;
   const dx=playerFeet.x-start.x, dz=playerFeet.z-start.z, d=Math.hypot(dx,dz);
-  if (d<=EPSILON || !Number.isFinite(d)) return false;
+  if (!Number.isFinite(d) || (d<=EPSILON && sideOverride===null)) return false;
+  // If feet exactly match the last sighting, use actor facing for the search
+  // tangent. Never infer a direction from the currently hidden player.
+  const forwardX=d>EPSILON ? dx/d : Math.sin(enemy.face);
+  const forwardZ=d>EPSILON ? dz/d : -Math.cos(enemy.face);
   const cycle=Math.floor((enemy.clock-WEB_STRAFE.warmupSeconds)/WEB_STRAFE.cycleSeconds);
-  const direction=state.webTacticalSide*(cycle%2===0 ? 1 : -1);
+  const direction=sideOverride ?? state.webTacticalSide*(cycle%2===0 ? 1 : -1);
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_STRAFE.speedFraction;
   if (travel<=EPSILON) return false;
   // Face stays toward the player while the feet move sideways. All movement
   // is done by the existing capsule mover and checked against baked nav data.
   for (const side of [direction,-direction]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
-      x:-dz/d*travel*side,y:0,z:dx/d*travel*side,
+      x:-forwardZ*travel*side,y:0,z:forwardX*travel*side,
     },runtime.body).position;
-    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON ||
+        distance(moved,playerFeet)>maxDistance+EPSILON)continue;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
         occupied(runtime,start,moved,enemies,enemy) ||
@@ -96,7 +111,7 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
     enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
     enemy.walking=true;
     state.route=null; // A later chase must route from the actual new feet.
-    if(side!==direction)state.webTacticalSide=-state.webTacticalSide;
+    if(side!==direction && sideOverride===null)state.webTacticalSide=-state.webTacticalSide;
     return true;
   }
   return false;
@@ -485,6 +500,7 @@ function spawnEnemy(runtime, point, order, population) {
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
+      webSearchRemaining:null, webSearchComplete:false,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
@@ -517,7 +533,11 @@ function moveEnemy(runtime, enemy, input) {
   // losing body sight freezes its last known feet instead of letting it track
   // live coordinates through walls. Actors that have never seen the player
   // keep the established Dojo pursuit fallback; no new source AI claim.
-  if(state.visible)state.webLastSeenFeet={...playerFeet};
+  if(state.visible) {
+    state.webLastSeenFeet={...playerFeet};
+    state.webSearchRemaining=null;
+    state.webSearchComplete=false;
+  }
   const pursuitFeet=!state.visible && state.webLastSeenFeet
     ? state.webLastSeenFeet : playerFeet;
   const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
@@ -565,14 +585,33 @@ function moveEnemy(runtime, enemy, input) {
     : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
   const stop=state.visible && playerDistance <= stopDistance;
-  // On reaching genuinely last-seen feet behind cover, hold/search there
-  // instead of magically following the hidden player's new route. The same
-  // nav/capsule path remains authoritative on the approach.
+  // Search starts only after genuinely reaching previously seen feet. Once
+  // started it stays in search mode even when strafing away from that point.
+  // After a bounded sweep, hold there until REAL line of sight reacquires.
   if(!state.visible && state.webLastSeenFeet &&
-      distance(start,pursuitFeet)<=runtime.body.radius*0.8) {
-    enemy.runtime.speed=0;
+      (state.webSearchRemaining!==null || state.webSearchComplete ||
+        distance(start,pursuitFeet)<=runtime.body.radius*0.8)) {
+    if(state.webSearchRemaining===null && !state.webSearchComplete)
+      state.webSearchRemaining=WEB_LAST_SEEN_SWEEP.seconds;
     state.route=null;
     state.target={...pursuitFeet};
+    const sx=pursuitFeet.x-start.x, sz=pursuitFeet.z-start.z;
+    if(sx || sz)enemy.face=Math.atan2(sx,-sz);
+    enemy.runtime.speed=0;
+    if(state.webSearchRemaining>0 && scaledDeltaTime>0 && !enemy.runtime.pendingShot) {
+      advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+        'walking',scaledDeltaTime);
+      const elapsed=WEB_LAST_SEEN_SWEEP.seconds-state.webSearchRemaining;
+      const side=elapsed<WEB_LAST_SEEN_SWEEP.seconds/2
+        ? state.webTacticalSide : -state.webTacticalSide;
+      const moved=tryWebStrafe(runtime,enemy,pursuitFeet,enemies,
+        scaledDeltaTime*WEB_LAST_SEEN_SWEEP.speedFraction,{
+          sideOverride:side,maxDistance:runtime.body.radius*WEB_LAST_SEEN_SWEEP.maxBodyRadii,
+        });
+      if(!moved)enemy.runtime.speed=0;
+      state.webSearchRemaining=Math.max(0,state.webSearchRemaining-scaledDeltaTime);
+      if(state.webSearchRemaining<=EPSILON)state.webSearchComplete=true;
+    }
     return;
   }
   // The pushing actor's close-contact retreat must not cancel the shorter
