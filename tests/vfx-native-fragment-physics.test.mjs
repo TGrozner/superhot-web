@@ -284,6 +284,35 @@ test('grounded Dojo shards sleep without repeated sweeps, then wake on lost supp
   assert.ok(shard.position.x>0,'the shard resumes physical motion');
 });
 
+test('sleeping shards reuse warm authored support lookup instead of scanning distant Dojo boxes',()=>{
+  const floor={id:'floor',worldMatrix:matrix(0,-0.5,0),center:[0,0,0],size:[30,1,30]};
+  const distant=Array.from({length:96},(_,i)=>({
+    id:'distant-'+i,worldMatrix:matrix(100+i*3,-0.5,0),
+    center:[0,0,0],size:[1,1,1],
+  }));
+  const collisionScene=prepareNativeCollision([floor,...distant]);
+  let boxReads=0;
+  collisionScene.boxes=new Proxy(collisionScene.boxes,{
+    get(target,key,receiver){
+      if(typeof key==='string' && Number.isInteger(Number(key)))boxReads++;
+      return Reflect.get(target,key,receiver);
+    },
+  });
+  const shard=body();
+  shard.position={x:0,y:0.1,z:0};
+  shard.velocity={x:0,y:0,z:0};
+  const web={...context(),collisionScene,limitWebFrameWork:true};
+  web.material={...web.material,bounciness:0,staticFriction:2};
+  for(let i=0;i<24;i++)advanceNativeFragmentBody(shard,1/60,web);
+  assert.equal(shard.webShardResting,true,'only confirmed contact may sleep');
+  boxReads=0;
+  for(let i=0;i<36;i++)assert.deepEqual(advanceNativeFragmentBody(shard,1/60,web),[]);
+  assert.ok(boxReads<6,'the hot resting path must not inspect 97 distant boxes per frame');
+  collisionScene.setEnabled('floor',false);
+  advanceNativeFragmentBody(shard,1/60,web);
+  assert.equal(shard.webShardResting,false,'live collider disable must still wake the shard');
+});
+
 test('one long falling frame does not count airborne time toward grounded shard sleep',()=>{
   const physics=context();
   physics.material={...physics.material,bounciness:0};
