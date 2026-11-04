@@ -279,3 +279,34 @@ test('live shatter gains two glass rings without stealing more voices or leaving
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
 });
+
+test('Web player shot layers a delayed slide action without new sources or enemy-side changes', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const ramps = [];
+  const createGain = ctx.createGain;
+  ctx.createGain = () => {
+    const node = createGain();
+    const original = node.gain.linearRampToValueAtTime;
+    node.gain.linearRampToValueAtTime = function(value, at) {
+      ramps.push([node, value, at]);
+      return original.call(this, value, at);
+    };
+    return node;
+  };
+  const mix = createWebImpactMix(ctx);
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].connections.length, 3);
+  const tone = filters.find(f => f.type === 'bandpass' && f.frequency.value === 2600);
+  assert.ok(tone);
+  const action = gains.find(g => tone.connections.includes(g));
+  assert.ok(action);
+  assert.ok(ramps.some(([node, value, at]) =>
+    node === action && Math.abs(value - 0.62 * 0.32) < 1e-12 &&
+    Math.abs(at - (ctx.currentTime + 0.054)) < 1e-12));
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.equal(nodes.length, 4);
+  assert.equal(nodes[2].connections.length, 2);
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
+  mix.dispose();
+});
