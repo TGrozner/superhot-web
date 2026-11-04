@@ -171,6 +171,40 @@ export function sampleFrameDelta(previousTimestampMs, timestampMs) {
   };
 }
 
+
+/**
+ * Split elapsed PLAYING time from the capped physics-simulation step.
+ *
+ * WEB-ONLY fairness fix. The old main.js applied the 50ms RAF simulation
+ * cap to its score clock and to the explicitly real-time unarmed cooldown:
+ * at 10 FPS, a real second counted as only half a second in those systems.
+ *
+ * The caller supplies the timestamp of its most recent start/resume, not a
+ * guessed duration. Only the portion of this frame after that timestamp can
+ * be charged to active gameplay. On a long frame the simulation still uses
+ * the existing 50ms cap, but the score/cooldown can use activeRealDt.
+ *
+ * Browser ownership, including setting activeSinceTimestampMs on resume and
+ * ONLY calling update while playing, stays with SH-05 in src/main.js.
+ * Native MCD timing/cadence is not inferred by this Web helper.
+ *
+ * @param {number} previousTimestampMs Previous requestAnimationFrame timestamp.
+ * @param {number} timestampMs Current requestAnimationFrame timestamp.
+ * @param {number} activeSinceTimestampMs Last entered-playing timestamp.
+ * @returns {{simulationDt:number,activeRealDt:number,nextTimestampMs:number}}
+ */
+export function sampleActiveFrameDeltas(previousTimestampMs, timestampMs, activeSinceTimestampMs) {
+  const frame = sampleFrameDelta(previousTimestampMs, timestampMs);
+  requireFinite(activeSinceTimestampMs, 'activeSinceTimestampMs');
+  const elapsedMs = Math.max(0, timestampMs - Math.max(previousTimestampMs, activeSinceTimestampMs));
+  const activeRealDt = requireFinite(elapsedMs / 1000, 'activeRealDt');
+  return {
+    simulationDt: Math.min(PROTOTYPE_FRAME_RULES.maximumDeltaSeconds, activeRealDt),
+    activeRealDt,
+    nextTimestampMs: frame.nextTimestampMs,
+  };
+}
+
 /**
  * Source-qualified TimeControl model, isolated from the Web prototype rules.
  *
