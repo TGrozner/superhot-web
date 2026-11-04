@@ -111,3 +111,39 @@ test('Web hitch budget keeps moving authored shards while limiting scene sweeps 
   assert.deepEqual(live.contacts,[]);
   assert.equal(scans,0,'invisible fragments must never query scene collision');
 });
+
+test('authored torque visibly spins real shards about their swept collider center, independent of frame split',()=>{
+  const physics={
+    collisionScene:{boxes:[]},gravity:{x:0,y:0,z:0},fixedDelta:1/150,
+    material:{bounciness:0,dynamicFriction:0,bounceThreshold:2},
+  };
+  const create=(torque)=>createGunPickupShardRuntime({
+    shards:[{id:'offset-shard',modelMatrix:matrix(1,2,3),originalScale:1,
+      collisionRadius:0.1,collisionCenter:{x:1.25,y:2,z:3}}],
+    parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+    torqueSamples:[torque],fadeDelays:[1.5],gravity:physics.gravity,physics,
+  });
+  const full=create({x:0,y:0,z:1}),split=create({x:0,y:0,z:1});
+  const [shard]=advanceGunPickupShardRuntime(full,0.25);
+  advanceGunPickupShardRuntime(split,0.1);
+  const [splitShard]=advanceGunPickupShardRuntime(split,0.15);
+  // Unit sampled torque produces 90 degrees in 250ms by Web-only visual
+  // tuning. This is NOT an extracted inertia or PhysX angular velocity.
+  assert.ok(Math.abs(shard.modelMatrix[0])<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[1]-1)<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[4]+1)<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[5])<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[12]-1.25)<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[13]-1.75)<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[12]+shard.modelMatrix[0]*0.25-shard.position.x)<1e-10);
+  assert.ok(Math.abs(shard.modelMatrix[13]+shard.modelMatrix[1]*0.25-shard.position.y)<1e-10);
+  for(let i=0;i<16;i++)assert.ok(Math.abs(shard.modelMatrix[i]-splitShard.modelMatrix[i])<1e-10);
+  assert.equal(shard.sourceMatrix[12],1,'original source transform is never rotated or translated');
+
+  const noTorque=create({x:0,y:0,z:0});
+  const [still]=advanceGunPickupShardRuntime(noTorque,0.25);
+  assert.equal(still.modelMatrix[0],1);
+  assert.equal(still.modelMatrix[1],0);
+  assert.equal(still.modelMatrix[12],1);
+  assert.equal(still.modelMatrix[13],2);
+});
