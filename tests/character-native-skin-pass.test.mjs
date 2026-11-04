@@ -1225,8 +1225,8 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     Array.from(torsoOnly.weaponAttachmentMatrix));
   assert.ok(Math.abs(stagger.boneModelMatrices[2*16] - torsoOnly.boneModelMatrices[2*16]) > .02,
     'only the existing Head subtree receives the second deformation');
-  const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
-  assert.ok(palette.length > 0, 'head whiplash uses the existing GPU palette');
+  const hitPaletteCalls = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  assert.ok(hitPaletteCalls.length > 0, 'head whiplash uses the existing GPU palette');
   pass.dispose();
 });
 
