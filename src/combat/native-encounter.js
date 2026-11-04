@@ -543,9 +543,10 @@ function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
  * @param {Set<object>} observers Actors that see the player this frame.
  * @param {{x:number,y:number,z:number}} target Actual visible target point.
  * @param {number} scaledDeltaTime Current weapon Update tick, not wall time.
+ * @param {Map<object,object[]>} localSquads Full armed spatial groups, including temporarily busy links.
  * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>,eligible:Set<object>}}
  */
-function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime) {
+function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime, localSquads) {
   const clear=new Set(), allyBlocked=new Set(), ready=[];
   for(const enemy of enemies) {
     if(!participating(enemy) || !enemy.encounter || !enemy.reaction?.hasWeapon ||
@@ -565,21 +566,17 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime)
   // Overlapping neighbor lists can each elect a different shooter (A-B-C
   // chain). Partition the *eligible* gunners into disjoint connected squads;
   // all members then agree on one stable firing turn, regardless of input order.
-  const turn=new Set(), unassigned=new Set(ready);
-  const range=runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii;
-  for(const first of ready) {
-    if(!unassigned.has(first))continue;
-    const squad=[first];
-    unassigned.delete(first);
-    for(let i=0;i<squad.length;i++) {
-      const member=squad[i];
-      for(const ally of ready) {
-        if(!unassigned.has(ally) ||
-            Math.hypot(ally.x-member.x,ally.z-member.z)>range)continue;
-        unassigned.delete(ally);
-        squad.push(ally);
-      }
-    }
+  const turn=new Set(), eligibleSquads=new Map();
+  // Partition by the full armed fireteam, not only currently ready shooters.
+  // A suppressed, stunned or covered B still connects A-B-C spatially. If B
+  // temporarily disappears from eligibility, A and C must not each receive
+  // an independent firing turn in the same window.
+  for (const gunner of ready) {
+    const group=localSquads.get(gunner) ?? [gunner];
+    if(!eligibleSquads.has(group))eligibleSquads.set(group,[]);
+    eligibleSquads.get(group).push(gunner);
+  }
+  for(const squad of eligibleSquads.values()) {
     squad.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
     const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%squad.length;
     // A gunner that cannot finish its existing reload in this weapon Update
@@ -1044,8 +1041,8 @@ export function advanceNativeEncounter(runtime, input) {
   // RNG draw, native claim or shared-file wiring is required.
   runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
     (WEB_SQUAD_VOLLEY.beatSeconds*60);
-  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime);
   const localSquads=webLocalArmedSquads(runtime,enemies);
+  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime,localSquads);
   // Cover and crossfire may CHANGE as bodies move. Snapshot original feet so a
   // cached, previous-render muzzle can be translated to the new actor feet for
   // one conservative post-movement check. The true posed muzzle is still only
