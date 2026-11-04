@@ -254,3 +254,11 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — source Web, pas MCD :** les badges sont des objectifs créatifs de rejouabilité, pas des achievements natifs. Aucun asset, horaire, input, condition de victoire, compte d'ennemis, ragdoll, UI partagée ni service `private/` modifié. `finish(win)` est déjà raccordé ; SH-05 doit seulement fusionner après CI, puis observer victoire / redémarrage / défaite sur Pages.
 
 **INCONNU — progression native :** les conditions live `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et la destination de chargement après `RunEnding` restent non qualifiées ; ne jamais remplacer ces signaux par des badges ou le compteur Web.
+
+## SH-08 / J4 — coaching de reprise depuis les compteurs de manche (04/11/2026)
+
+**PROUVÉ — Web, pas MCD.** La boucle existante `src/main.js:finish(win)` appelle déjà `createDojoReplayRecap` après une vraie fin de manche Dojo. Les écrans de première victoire et de défaite disposaient de métriques, mais pas d'objectif explicite `DÉFI`. Le module SH-08 ajoute un objectif *sans modifier les mécaniques* : en défaite incomplète, viser une élimination supplémentaire au prochain essai ; si le quota est atteint mais le joueur meurt, survivre jusqu'à la victoire ; à la première victoire, proposer une médaille manquante. Les manches répétées conservent la priorité du record personnel précédent (score/temps) puis passent aux médailles non obtenues, y compris STYLE S. Les médailles déjà gagnées ne sont pas reproposées.
+
+**OBSERVÉ — validation attendue.** La validation se limite au test ciblé `flow-dojo-replay-recap.test.mjs`, à TypeScript strict avec JS généré et à la CI exacte de la PR. Le code de l'écran est consommé par `finish(win)` sans modification de `src/main.js`, CSS ou DOM. Aucune variation de spawn, score, timer, armes, F/E, comptage des morts ou succès. Les objectifs sont des conseils de rejouabilité **WEB_ONLY**, jamais des données natives MCD.
+
+**INCONNU.** Aucune observation navigateur faite pour cette livraison. Les gardes natifs actifs de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et les checkpoints restent non établis. SH-05 vérifie l'écran sur Pages après fusion (défaite 0/7, défaite 4/7, première victoire 6/6, maîtrise complète, REJOUER).
