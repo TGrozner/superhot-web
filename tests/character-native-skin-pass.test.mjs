@@ -1285,17 +1285,24 @@ test('Dojo source-named neck chain actually animates the GPU head with no Head b
   const initial = draw(0,{x:5,y:4,z:5});
   assert.equal(initial.actorWebHeadLook,null);
   const moving = draw(.12,{x:5,y:4,z:5});
+  // Equal source clip + equal Web idle weight shift, but NO camera gaze:
+  // weapon and other body branches must remain exactly synchronized.
+  const neutral = createNativeActorSkinRuntime(pass).drawActor({
+    actorId:'dojo-neck-test',pose:{state:'idle',time:.12},
+    modelMatrix:identity(),viewProjection:identity(),
+    cameraPosition:null,shaderTime:1.2,color:[.8,.1,.2,1],
+  });
   assert.equal(moving.webHeadLookApplied,true,
     'Dojo neck chain must no longer disable all Web head motion');
   assert.ok(moving.actorWebHeadLook.yaw>.1);
   assert.ok(moving.actorWebHeadLook.pitch>.05);
   assert.ok(Math.abs(moving.boneModelMatrices[2*16+8] -
-    initial.boneModelMatrices[2*16+8])>.05,
+    neutral.boneModelMatrices[2*16+8])>.05,
     'the source-neutral weighted terminal neck joint turns in GPU pose');
-  near(Array.from(moving.weaponAttachmentMatrix),Array.from(initial.weaponAttachmentMatrix));
+  near(Array.from(moving.weaponAttachmentMatrix),Array.from(neutral.weaponAttachmentMatrix));
   near(Array.from(moving.boneModelMatrices.slice(3*16,4*16)),
-    Array.from(initial.boneModelMatrices.slice(3*16,4*16)));
-  assert.equal(calls.filter(c=>c[0]==='draw').length,2,
+    Array.from(neutral.boneModelMatrices.slice(3*16,4*16)));
+  assert.equal(calls.filter(c=>c[0]==='draw').length,3,
     'do not add a second draw or material pass for Dojo head motion');
   pass.dispose();
 
