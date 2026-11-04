@@ -654,6 +654,53 @@ test('J3 Web squad baton: wingman takes breach when point man is stunned or supp
 });
 
 
+test('J3 Web leapfrog: squad lead relays on a shared beat and suppression expiry cannot cancel handoff',()=>{
+  // Pure synthetic Web tactical design, not a recovered MCD assault cadence.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const createPair=()=>{
+    const runtime=setup(data), lead=firstSpawn(runtime,target);
+    runtime.actors.delete(lead.id);
+    lead.id='a-relay-lead';
+    runtime.actors.set(lead.id,lead);
+    const wing={
+      ...lead,id:'z-relay-wing',x:2,z:4,clock:0,
+      reaction:{...lead.reaction},runtime:{...lead.runtime},
+      encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+    };
+    runtime.actors.set(wing.id,wing);
+    return {runtime,lead,wing};
+  };
+
+  const {runtime,lead,wing}=createPair();
+  advanceNativeEncounter(runtime,input([wing,lead],{...target,scaledDeltaTime:.2}));
+  assert.ok(lead.x>2.05,'first shared beat sends the lower-ID gunner forward');
+  assert.equal(wing.x,2,'first covering gunner holds his normal firing ring');
+  const previousLeadX=lead.x;
+  runtime.webVolleyClock=4.75;
+  advanceNativeEncounter(runtime,input([lead,wing],{...target,scaledDeltaTime:.2}));
+  assert.ok(wing.x>2.05,'next Web beat hands the actual push to the wingman');
+  assert.equal(lead.x,previousLeadX,'former point man covers rather than both charging');
+  assert.ok(Math.hypot(lead.x-wing.x,lead.z-wing.z)>=.8,
+    'relay movement cannot pass through an ally body');
+  assert.equal(wing.encounter.canAttack,false,
+    'tactical relay cannot invent a muzzle or authorize new shots');
+
+  const expiry=createPair();
+  expiry.lead.encounter.webSuppressionRemaining=.05;
+  expiry.lead.encounter.webSuppressionFrom=p(1,0,2);
+  advanceNativeEncounter(expiry.runtime,input([expiry.lead,expiry.wing],{
+    ...target,scaledDeltaTime:.2,
+  }));
+  assert.equal(expiry.lead.encounter.webSuppressionRemaining,0,
+    'the first actor exhausts suppression DURING its movement update');
+  assert.ok(expiry.wing.x>2.05,
+    'wingman retains the pre-movement breaching baton, even after that expiry');
+  assert.ok(Math.hypot(expiry.lead.x-expiry.wing.x,expiry.lead.z-expiry.wing.z)>=.8,
+    'suppression handoff also retains swept body occupancy');
+});
+
 test('J3 Web final-survivor pressure closes the finishing gap but yields to reinforcements',()=>{
   // Pure synthetic encounter: a real counted death, not a fake distance flag,
   // activates the finishing chase without authorizing a shot or bypassing nav.
