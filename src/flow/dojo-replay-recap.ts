@@ -21,9 +21,13 @@ export interface DojoReplayRun {
 }
 
 export interface DojoReplayBest {
-  readonly schemaVersion: 3;
+  readonly schemaVersion: 4;
   readonly quota: DojoWebQuota;
   readonly victories: number;
+  /** Only attempts tracked since this feature, plus known legacy victories. */
+  readonly trackedAttempts: number;
+  /** Maximum kills on an unfinished attempt, not a native checkpoint. */
+  readonly bestFailedKills: number;
   readonly bestScore: number;
   readonly fastestSeconds: number;
   /** Consecutive victories for this 6/7 quota only; losses reset it. */
@@ -82,13 +86,18 @@ export function readDojoReplayBest(json: string | null, quota: DojoWebQuota): Do
   let value: unknown;
   try { value = JSON.parse(json); } catch { return null; }
   if (!isRecord(value) ||
-      (value['schemaVersion'] !== 1 && value['schemaVersion'] !== 2 && value['schemaVersion'] !== 3) ||
-      value['quota'] !== quota || !isCount(value['victories']) || value['victories'] < 1 ||
+      (value['schemaVersion'] !== 1 && value['schemaVersion'] !== 2 &&
+       value['schemaVersion'] !== 3 && value['schemaVersion'] !== 4) ||
+      value['quota'] !== quota || !isCount(value['victories']) ||
+      (value['schemaVersion'] !== 4 && value['victories'] < 1) ||
       !isCount(value['bestScore']) || !isSeconds(value['fastestSeconds'])) return null;
+  const v4 = value['schemaVersion'] === 4;
+  if (value['victories'] === 0 &&
+      (!v4 || value['bestScore'] !== 0 || value['fastestSeconds'] !== 0)) return null;
   // Existing v1 personal records cannot establish any past streak. Upgrade
   // without fabricating wins or discarding a saved best score/time.
   let currentStreak = 0, bestStreak = 0;
-  if (value['schemaVersion'] === 2 || value['schemaVersion'] === 3) {
+  if (value['schemaVersion'] === 2 || value['schemaVersion'] === 3 || v4) {
     const current = value['currentStreak'];
     const record = value['bestStreak'];
     if (!isCount(current) || !isCount(record) ||
@@ -96,14 +105,19 @@ export function readDojoReplayBest(json: string | null, quota: DojoWebQuota): Do
     currentStreak = current;
     bestStreak = record;
   }
-  const masteryMask = value['schemaVersion'] === 3 ? value['masteryMask'] : 0;
+  const masteryMask = (value['schemaVersion'] === 3 || v4) ? value['masteryMask'] : 0;
   if (!isCount(masteryMask) || masteryMask > 7) return null;
+  const trackedAttempts = v4 ? value['trackedAttempts'] : value['victories'];
+  const bestFailedKills = v4 ? value['bestFailedKills'] : 0;
+  if (!isCount(trackedAttempts) || trackedAttempts < 1 ||
+      trackedAttempts < value['victories'] || !isCount(bestFailedKills) ||
+      bestFailedKills > quota) return null;
   return Object.freeze({
-    schemaVersion: 3, quota,
+    schemaVersion: 4, quota,
     victories: value['victories'],
     bestScore: value['bestScore'],
     fastestSeconds: value['fastestSeconds'],
-    currentStreak, bestStreak, masteryMask,
+    currentStreak, bestStreak, masteryMask, trackedAttempts, bestFailedKills,
   });
 }
 
@@ -143,15 +157,18 @@ function gradeDojoStyle(run: DojoReplayRun): {grade: DojoWebStyleGrade; nextTarg
  * `best` comes from `readDojoReplayBest` for the SAME quota. No side effects.
  * The SH-05 glue invokes this once on `finish(win)`, formats `text` into the
  * existing stats node and persists `JSON.stringify(result.best)` only when
- * `shouldPersist`, including losses that break an active streak. Never call from
+ * `shouldPersist`, including losses before any victory. Never call from
  * per-frame updates or from `killEnemy`.
  */
 export function createDojoReplayRecap(snapshot: unknown,
   best: Readonly<DojoReplayBest> | null = null): DojoReplayRecap {
   const run = validateRun(snapshot);
-  if (best !== null && (best.schemaVersion !== 3 || best.quota !== run.quota ||
-      !isCount(best.victories) || best.victories < 1 ||
+  if (best !== null && (best.schemaVersion !== 4 || best.quota !== run.quota ||
+      !isCount(best.victories) || !isCount(best.trackedAttempts) ||
+      best.trackedAttempts < 1 || best.trackedAttempts < best.victories ||
+      !isCount(best.bestFailedKills) || best.bestFailedKills > run.quota ||
       !isCount(best.bestScore) || !isSeconds(best.fastestSeconds) ||
+      (best.victories === 0 && (best.bestScore !== 0 || best.fastestSeconds !== 0)) ||
       !isCount(best.currentStreak) || !isCount(best.bestStreak) ||
       best.currentStreak > best.bestStreak || best.bestStreak > best.victories ||
       !isCount(best.masteryMask) || best.masteryMask > 7)) {
@@ -161,30 +178,39 @@ export function createDojoReplayRecap(snapshot: unknown,
   let nextBest = best;
   const previousStreak = best?.currentStreak ?? 0;
   if (run.victory) {
-    const first = best === null;
-    const scoreRecord = first || run.score > best.bestScore;
-    const speedRecord = first || run.elapsedSeconds < best.fastestSeconds;
+    const first = best === null || best.victories === 0;
+    const scoreRecord = first || run.score > (best?.bestScore ?? 0);
+    const speedRecord = first || run.elapsedSeconds < (best?.fastestSeconds ?? Infinity);
     milestone = first ? 'first-clear' : scoreRecord && speedRecord ? 'double-record'
       : scoreRecord ? 'score-record' : speedRecord ? 'speed-record' : 'clear';
     const currentStreak = Math.min(Number.MAX_SAFE_INTEGER, previousStreak + 1);
-    // Creative, opt-in mastery track. These are observed run counters, not
-    // original MCD achievements or a substitute for native progression.
+    // Web-only medals, preserved across tracked defeats.
     const style = gradeDojoStyle(run);
     const earnedMask = (style.grade === 'S' ? 1 : 0) |
       (run.shots === 0 ? 2 : 0) | (run.dodges >= 3 ? 4 : 0);
     nextBest = Object.freeze({
-      schemaVersion: 3, quota: run.quota,
-      victories: first ? 1 : Math.min(Number.MAX_SAFE_INTEGER, best.victories + 1),
-      bestScore: first ? run.score : Math.max(run.score, best.bestScore),
-      fastestSeconds: first ? run.elapsedSeconds : Math.min(run.elapsedSeconds, best.fastestSeconds),
-      currentStreak,
-      bestStreak: Math.max(currentStreak, best?.bestStreak ?? 0),
+      schemaVersion: 4, quota: run.quota,
+      trackedAttempts: Math.min(Number.MAX_SAFE_INTEGER, (best?.trackedAttempts ?? 0) + 1),
+      bestFailedKills: best?.bestFailedKills ?? 0,
+      victories: Math.min(Number.MAX_SAFE_INTEGER, (best?.victories ?? 0) + 1),
+      bestScore: first ? run.score : Math.max(run.score, best?.bestScore ?? 0),
+      fastestSeconds: first ? run.elapsedSeconds
+        : Math.min(run.elapsedSeconds, best?.fastestSeconds ?? run.elapsedSeconds),
+      currentStreak, bestStreak: Math.max(currentStreak, best?.bestStreak ?? 0),
       masteryMask: (best?.masteryMask ?? 0) | earnedMask,
     });
-  } else if (best !== null && previousStreak > 0) {
-    // finish(false) is already wired to write when shouldPersist is true.
-    // A defeat breaks the chain but never deletes PB score/time or wins.
-    nextBest = Object.freeze({...best, currentStreak: 0});
+  } else {
+    // A loss now contributes real, bounded progress even before FIRST clear.
+    // "trackedAttempts" never pretends to reconstruct unknown legacy defeats.
+    nextBest = Object.freeze({
+      schemaVersion: 4, quota: run.quota,
+      trackedAttempts: Math.min(Number.MAX_SAFE_INTEGER, (best?.trackedAttempts ?? 0) + 1),
+      bestFailedKills: Math.max(best?.bestFailedKills ?? 0, Math.min(run.quota, run.kills)),
+      victories: best?.victories ?? 0, bestScore: best?.bestScore ?? 0,
+      fastestSeconds: best?.fastestSeconds ?? 0,
+      currentStreak: 0, bestStreak: best?.bestStreak ?? 0,
+      masteryMask: best?.masteryMask ?? 0,
+    });
   }
   const title: Record<DojoReplayMilestone, string> = {
     'retry': 'REJOUE POUR PRENDRE TA REVANCHE',
@@ -196,9 +222,11 @@ export function createDojoReplayRecap(snapshot: unknown,
   };
   const metrics = `${run.kills}/${run.quota} ennemis · ${run.shots} tirs · ` +
     `${run.dodges} esquives · ${run.score} pts · ${run.elapsedSeconds.toFixed(1)} s`;
-  const recordText = !run.victory && nextBest !== null
+  const recordText = !run.victory && nextBest !== null && nextBest.victories > 0
     ? ` · record : ${nextBest.bestScore} pts / ${nextBest.fastestSeconds.toFixed(1)} s`
     : '';
+  const attemptText = !run.victory && nextBest !== null && nextBest.victories === 0
+    ? ` · MEILLEUR ESSAI ${nextBest.bestFailedKills}/${run.quota} · ${nextBest.trackedAttempts} ESSAI${nextBest.trackedAttempts > 1 ? 'S' : ''} SUIVI${nextBest.trackedAttempts > 1 ? 'S' : ''}` : '';
   const style = run.victory ? gradeDojoStyle(run) : null;
   const stillNeeded = Math.max(0, run.quota - run.kills);
   const styleText = style === null
@@ -226,11 +254,12 @@ export function createDojoReplayRecap(snapshot: unknown,
   // provenance separate from native MCD RunEnding and never mutate gameplay.
   let replayTarget: string | null = null;
   if (!run.victory) {
-    // The counter is for THIS attempt; no historic kill PB is inferred.
-    replayTarget = stillNeeded > 0
-      ? `VISE ${Math.min(run.quota, run.kills + 1)} ÉLIMINATION${run.kills === 0 ? '' : 'S'} AU PROCHAIN ESSAI`
+    // Before a first clear, beat the best unfinished round, not just this loss.
+    const goal = Math.max(run.kills, best?.victories === 0 ? best.bestFailedKills : 0) + 1;
+    replayTarget = stillNeeded > 0 && goal <= run.quota
+      ? `VISE ${goal} ÉLIMINATION${goal === 1 ? '' : 'S'} AU PROCHAIN ESSAI`
       : 'SURVIS JUSQU’À LA VICTOIRE';
-  } else if (best !== null) {
+  } else if (best !== null && best.victories > 0) {
     // Compare only to the PREVIOUS same-quota PB, never a just-written PB.
     if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
       replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;
@@ -248,9 +277,9 @@ export function createDojoReplayRecap(snapshot: unknown,
   }
   const replayTargetText = replayTarget === null ? '' : ` · DÉFI : ${replayTarget}`;
   return Object.freeze({
-    text: `${metrics} · ${title[milestone]}${styleText}${masteryText}${streakText}${recordText}${replayTargetText}`,
+    text: `${metrics} · ${title[milestone]}${styleText}${masteryText}${streakText}${recordText}${attemptText}${replayTargetText}`,
     milestone, best: nextBest,
-    shouldPersist: run.victory || previousStreak > 0,
+    shouldPersist: true,
     provenance: 'WEB_ONLY',
     styleGrade: style?.grade ?? null,
     nextStyleTarget: style?.nextTarget ?? null,

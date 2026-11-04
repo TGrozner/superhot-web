@@ -67,14 +67,16 @@ test('existing Dojo finish screens expose Web style grades and actionable retry 
   assert.equal(loss.styleGrade, null);
   assert.equal(loss.nextStyleTarget, null);
   assert.match(loss.text, /3 ENNEMIS RESTANTS/);
-  assert.equal(loss.shouldPersist, false);
+  assert.equal(loss.shouldPersist, true);
+  assert.equal(loss.best.victories, 0);
+  assert.equal(loss.best.bestFailedKills, 4);
 });
 
 test('Dojo win streak survives reload, upgrades legacy personal bests and resets on loss', () => {
   const legacy = readDojoReplayBest(JSON.stringify({
     schemaVersion:1, quota:6, victories:8, bestScore:1900, fastestSeconds:19.4,
   }), 6);
-  assert.equal(legacy.schemaVersion, 3);
+  assert.equal(legacy.schemaVersion, 4);
   assert.equal(legacy.currentStreak, 0, 'legacy history cannot prove a streak');
   assert.equal(legacy.bestStreak, 0);
   const one = result(6, {best:legacy, score:700, elapsedSeconds:25});
@@ -148,7 +150,7 @@ test('Dojo mastery medals unlock across actual victories and remain isolated per
     schemaVersion:2, quota:6, victories:5, bestScore:900, fastestSeconds:18,
     currentStreak:2, bestStreak:3,
   }), 6);
-  assert.equal(upgradedV2.schemaVersion, 3);
+  assert.equal(upgradedV2.schemaVersion, 4);
   assert.equal(upgradedV2.currentStreak, 2);
   assert.equal(upgradedV2.masteryMask, 0, 'historical medals cannot be inferred');
   assert.equal(readDojoReplayBest(JSON.stringify({...second.best, masteryMask:8}), 6), null);
@@ -175,5 +177,41 @@ test('Dojo retry coaching never invents a PB or re-awards completed medals', () 
     quota:7, victory:false, kills:7, shots:8, dodges:0, score:2000, elapsedSeconds:25,
   });
   assert.equal(lostAfterQuota.replayTarget, 'SURVIS JUSQU’À LA VICTOIRE');
-  assert.equal(lostAfterQuota.shouldPersist, false);
+  assert.equal(lostAfterQuota.shouldPersist, true);
+});
+
+test('failed Dojo rounds persist best partial clear and unlock a real first victory', () => {
+  const lose = (kills, best = null) => createDojoReplayRecap({
+    quota:7, victory:false, kills, shots:5, dodges:1, score:kills*100,
+    elapsedSeconds:20,
+  }, best);
+  const first = lose(4);
+  assert.equal(first.best.victories, 0);
+  assert.equal(first.best.bestFailedKills, 4);
+  assert.equal(first.best.trackedAttempts, 1);
+  assert.equal(first.shouldPersist, true);
+  const next = lose(2, readDojoReplayBest(JSON.stringify(first.best), 7));
+  assert.equal(next.best.bestFailedKills, 4);
+  assert.equal(next.best.trackedAttempts, 2);
+  assert.equal(next.replayTarget, 'VISE 5 ÉLIMINATIONS AU PROCHAIN ESSAI');
+  assert.match(next.text, /MEILLEUR ESSAI 4\/7/);
+  const better = lose(5, next.best);
+  assert.equal(better.best.bestFailedKills, 5);
+  assert.equal(better.replayTarget, 'VISE 6 ÉLIMINATIONS AU PROCHAIN ESSAI');
+  const cleared = result(7, {best:readDojoReplayBest(JSON.stringify(better.best), 7)});
+  assert.equal(cleared.milestone, 'first-clear');
+  assert.equal(cleared.best.trackedAttempts, 4);
+  assert.equal(cleared.best.victories, 1);
+  assert.equal(cleared.best.bestFailedKills, 5);
+  assert.equal(readDojoReplayBest(JSON.stringify(cleared.best), 6), null);
+  const legacy = readDojoReplayBest(JSON.stringify({
+    schemaVersion:3, quota:7, victories:5, bestScore:1700, fastestSeconds:25,
+    currentStreak:2, bestStreak:3, masteryMask:5,
+  }), 7);
+  assert.equal(legacy.schemaVersion, 4);
+  assert.equal(legacy.trackedAttempts, 5);
+  assert.equal(legacy.bestFailedKills, 0);
+  assert.equal(legacy.masteryMask, 5);
+  assert.equal(readDojoReplayBest(JSON.stringify({...better.best, trackedAttempts:0}), 7), null);
+  assert.equal(readDojoReplayBest(JSON.stringify({...better.best, fastestSeconds:2}), 7), null);
 });
