@@ -186,6 +186,8 @@ test('failed Dojo rounds persist best partial clear and unlock a real first vict
     elapsedSeconds:20,
   }, best);
   const first = lose(4);
+  assert.equal(first.milestone, 'retry-progress');
+  assert.match(first.text, /^NOUVEAU PALIER AVANT LA VICTOIRE/);
   assert.equal(first.best.victories, 0);
   assert.equal(first.best.bestFailedKills, 4);
   assert.equal(first.best.trackedAttempts, 1);
@@ -193,17 +195,23 @@ test('failed Dojo rounds persist best partial clear and unlock a real first vict
   const next = lose(2, readDojoReplayBest(JSON.stringify(first.best), 7));
   assert.equal(next.best.bestFailedKills, 4);
   assert.equal(next.best.trackedAttempts, 2);
+  assert.equal(next.milestone, 'retry', 'weaker loss must not re-award a progress milestone');
   assert.equal(next.replayTarget, 'VISE 5 ÉLIMINATIONS AU PROCHAIN ESSAI');
   assert.match(next.text, /MEILLEUR ESSAI 4\/7/);
   const better = lose(5, next.best);
+  assert.equal(better.milestone, 'retry-progress');
   assert.equal(better.best.bestFailedKills, 5);
   assert.equal(better.replayTarget, 'VISE 6 ÉLIMINATIONS AU PROCHAIN ESSAI');
   const cleared = result(7, {best:readDojoReplayBest(JSON.stringify(better.best), 7)});
   assert.equal(cleared.milestone, 'first-clear');
+  assert.match(cleared.text, /^PREMIÈRE VICTOIRE/);
+  assert.match(cleared.text, /4 ESSAIS POUR LA PREMIÈRE VICTOIRE/);
   assert.equal(cleared.best.trackedAttempts, 4);
   assert.equal(cleared.best.victories, 1);
   assert.equal(cleared.best.bestFailedKills, 5);
   assert.equal(readDojoReplayBest(JSON.stringify(cleared.best), 6), null);
+  assert.doesNotMatch(result(6).text, /ESSAIS POUR LA PREMIÈRE VICTOIRE/,
+    'a first-try win must not pretend there were previous defeats');
   const legacy = readDojoReplayBest(JSON.stringify({
     schemaVersion:3, quota:7, victories:5, bestScore:1700, fastestSeconds:25,
     currentStreak:2, bestStreak:3, masteryMask:5,
