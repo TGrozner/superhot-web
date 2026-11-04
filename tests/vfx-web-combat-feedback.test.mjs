@@ -79,3 +79,22 @@ test('confirmed hit and kill fragments eject toward the shooter, not into target
   assert.ok(feedback.particles.every(p=>p.vz>0),
     'existing wall ejection still faces back toward the incoming shot');
 });
+
+
+test('kill glints outrank later wall bursts without expanding the particle budget',()=>{
+  const feedback=createWebImpactFeedback();
+  recordWebImpact(feedback,{kind:'kill',...contact});
+  advanceWebImpactFeedback(feedback,.02);
+  const left=feedback.hitSeconds;
+  recordWebImpact(feedback,{kind:'hit',...contact});
+  assert.equal(feedback.hitKind,'kill');
+  assert.equal(feedback.hitSeconds,left);
+  for(let i=0;i<30;i++)recordWebImpact(feedback,{kind:'wall',...contact});
+  assert.equal(feedback.particles.length,WEB_IMPACT_MAX_PARTICLES);
+  assert.equal(feedback.particles.filter(p=>p.webPriority===2).length,11);
+  assert.equal(feedback.particles.filter(p=>p.webPriority===1).length,7);
+  advanceWebImpactFeedback(feedback,left);
+  assert.equal(feedback.hitKind,null);
+  recordWebImpact(feedback,{kind:'hit',...contact});
+  assert.equal(feedback.hitKind,'hit');
+});
