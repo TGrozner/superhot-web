@@ -229,15 +229,37 @@ test('Web ragdoll keeps natural 30 Hz fall without an unbounded hitch catch-up',
   }
   const hitched=create();
   const delayed=advanceNativeDeathRuntime(hitched,0.3,{limitWebFrameWork:true});
-  assert.ok(delayed.droppedWebSimulationTime>0.25 &&
-    delayed.droppedWebSimulationTime<0.3,
-    'large tab/GPU stalls still discard PBD work beyond the bounded four steps');
+  assert.ok(delayed.droppedWebSimulationTime>0.19 &&
+    delayed.droppedWebSimulationTime<0.21,
+    'a 300ms tab/GPU stall discards catch-up beyond four 25ms swept steps');
   near(hitched.elapsed,0.3);
-  assert.ok(hitched.bodies[0].velocity.y>-0.5,
-    'a single hitch must not integrate the full fall in one unstable catch-up');
+  assert.ok(hitched.bodies[0].velocity.y> -1.2 && hitched.bodies[0].velocity.y< -.8,
+    'a hitch integrates only bounded 100ms rather than the full stall');
   assert.ok(Array.from(hitched.boneModelMatrices).every(Number.isFinite));
 });
 
+
+test('sustained 10 FPS Dojo ragdoll advances full active time with only four swept steps',()=>{
+  const slow=create(),smooth=create();
+  const hundredMs=advanceNativeDeathRuntime(slow,0.1,{limitWebFrameWork:true});
+  for(let i=0;i<6;i++)advanceNativeDeathRuntime(smooth,1/60,{limitWebFrameWork:true});
+  near(hundredMs.droppedWebSimulationTime,0);
+  near(slow.elapsed,0.1);
+  const slowFall=1-slow.getBoneWorldMatrix(1)[13];
+  const smoothFall=1-smooth.getBoneWorldMatrix(1)[13];
+  assert.ok(slowFall>smoothFall*.75 && slowFall<smoothFall*1.55,
+    'a 100ms frame must fall about as far as six frames at 60 FPS');
+  assert.ok(Array.from(slow.boneModelMatrices).every(Number.isFinite));
+  const landed=create(floor());
+  let contacted=false;
+  for(let i=0;i<12;i++){
+    const frame=advanceNativeDeathRuntime(landed,0.1,{limitWebFrameWork:true});
+    if(frame.contacts.some(contact=>contact.collider?.id==='floor'))contacted=true;
+  }
+  assert.equal(contacted,true,'wide swept steps still detect the authored floor');
+  for(const body of landed.bodies)assert.ok(body.position.y>=0.1-1e-5);
+  assert.ok(Array.from(landed.boneModelMatrices).every(Number.isFinite));
+});
 
 test('Web corpses settle only on live grounded contact, sleep, then wake for real impacts or lost support',()=>{
   const grounded=(scene=floor())=>{
