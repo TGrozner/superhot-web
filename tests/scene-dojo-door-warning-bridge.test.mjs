@@ -432,3 +432,58 @@ test('J4 door red wash travels through the active doorway and returns without ne
   unverified.advance(1.5);
   assert.equal(unverified.packets()[0].falseLight.position, undefined);
 });
+
+test('J4 overlapping Dojo door arrivals focus the imminent entrance without a new render packet', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const packets = bridge.packets();
+  const [first, second, idle] = packets;
+  const originalPacketRefs = [...packets];
+  const originalBasisRefs = packets.map(packet => packet.spotlight.direction);
+
+  assert.equal(bridge.accept(warning(103)).status, 'triggered');
+  bridge.advance(0.9);
+  assert.equal(bridge.accept(warning(221)).status, 'triggered');
+  bridge.advance(0.25); // first at 1.15s, second at 0.25s
+  assert.equal(bridge.packets(), packets, 'the same three GPU-facing packets are reused');
+  assert.deepEqual(packets, originalPacketRefs, 'no new light records are created');
+  packets.forEach((packet, index) =>
+    assert.equal(packet.spotlight.direction, originalBasisRefs[index]));
+  assert.deepEqual(packets.map(packet => packet.active), [true, true, false]);
+  assert.deepEqual(packets.map(packet => packet.falseLight.slot), [0, 1, -1]);
+  assert.ok(first.spotlight.intensity > 34,
+    'the nearer arrival becomes the brighter directional cue');
+  assert.ok(second.spotlight.intensity < 30,
+    'the newly started second alarm remains visible without competing at full power');
+  assert.ok(first.falseLight.intensity > second.falseLight.intensity);
+  assert.equal(idle.spotlight.range, 0);
+  assert.equal(idle.falseLight.intensity, 0);
+
+  const before = second.spotlight.intensity;
+  bridge.advance(0.01);
+  assert.ok(Math.abs(second.spotlight.intensity - before) < 3,
+    'priority adapts smoothly instead of jumping a whole intensity band in one tick');
+
+  bridge.advance(1); // first expires, second continues alone
+  assert.equal(first.active, false);
+  assert.equal(second.active, true);
+  const solo = createDojoDoorWarningBridge(browserScene());
+  solo.accept(warning(221));
+  solo.advance(1.26);
+  assert.ok(Math.abs(second.spotlight.intensity - solo.packets()[1].spotlight.intensity) < 0.1,
+    'remaining active door smoothly regains its ordinary solo intensity');
+
+  bridge.reset();
+  assert.deepEqual(packets.map(packet => packet.active), [false, false, false]);
+  assert.deepEqual(packets.map(packet => packet.falseLight.slot), [-1, -1, -1]);
+  assert.equal(first.spotlight.intensity, 30);
+  assert.equal(second.spotlight.intensity, 30);
+  assert.equal(first.falseLight.intensity, 0);
+  assert.equal(second.falseLight.intensity, 0);
+
+  // Synchronized warnings are balanced; no arbitrary door ID wins.
+  bridge.accept(warning(103));
+  bridge.accept(warning(221));
+  bridge.advance(0.5);
+  assert.ok(Math.abs(first.spotlight.intensity - second.spotlight.intensity) < 1e-9);
+  assert.ok(Math.abs(first.falseLight.intensity - second.falseLight.intensity) < 1e-9);
+});
