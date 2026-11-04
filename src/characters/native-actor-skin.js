@@ -117,8 +117,9 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, camer
 
 /**
  * WEB game-feel: bank toward observed travel AND observed heading changes,
- * then ease into and out of that bank at the same rate on 30/60 FPS draws.
- * A stationary guard settles instead of snapping rigidly upright. Paused
+ * then ease into and out of that bank using elapsed GAME-WORLD animation
+ * seconds, even when slow motion advances the Red Crystal shader on a different
+ * clock. A stationary guard settles instead of snapping rigidly upright. Paused
  * world time preserves the last GPU posture; an actual action/transition,
  * teleport, clock rewind or death cancels the bank.
  *
@@ -126,18 +127,19 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, camer
  * invalid frame cannot alter the next frame's visual/weapon/hitbox pose.
  * This is an intentional Web animation layer, not a recovered MCD controller.
  *
- * @param {Map<string | number, {time: number, x: number, z: number, fx: number, fz: number, bankPitch: number, bankRoll: number}>} frames
+ * @param {Map<string | number, {time: number, poseTime: number, state: string, x: number, z: number, fx: number, fz: number, bankPitch: number, bankRoll: number}>} frames
  * @param {string | number} actorId
  * @param {{name: string}} identity
  * @param {number[] | Float32Array} modelMatrix
- * @param {number | undefined} shaderTime
+ * @param {number | undefined} shaderTime red-crystal/unscaled Web clock (not movement time)
+ * @param {number} poseTime elapsed gameplay-world seconds in this state
  * @param {object | null} solvedPose
  * @param {object | null} action
  * @param {object | null} transition
  * @returns {{kind: string, pitch: number, roll: number, design: string} | null}
  */
 function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTime,
-                            solvedPose, action, transition) {
+                            poseTime, solvedPose, action, transition) {
   const locomoting = identity.name === 'walk' || identity.name === 'run';
   if (solvedPose !== null || action !== null || transition !== null ||
       (!locomoting && identity.name !== 'idle') ||
@@ -148,9 +150,15 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
     kind: locomoting ? 'locomotion' : 'turn', pitch, roll,
     design: 'Web-only inertial travel and turn banking',
   });
-  const dt = shaderTime - previous.time;
-  // Freeze the exact bank while game time is paused. Re-evaluating a zero-dt
-  // velocity would drop the pose instantly, even though the source clip froze.
+  // Dojo samples source pose.time from worldClock, while shaderTime is runClock
+  // (real active seconds). Under SUPERHOT slow motion these are very different:
+  // dividing world displacement by real seconds makes an enemy lean as if
+  // barely moving, and a shader-only tick must not unfreeze a held pose.
+  const shaderDt = shaderTime - previous.time;
+  const sameState = identity.name === previous.state;
+  const dt = sameState ? poseTime - previous.poseTime : shaderDt;
+  if (shaderDt < 0 || dt < 0) return null; // REJOUER or state clock rewind
+  // Freeze the exact bank while the sampled GAME pose time is frozen.
   if (dt === 0) {
     return Math.abs(previous.bankPitch) + Math.abs(previous.bankRoll) >= .012
       ? describe(previous.bankPitch, previous.bankRoll) : null;
@@ -166,12 +174,14 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
       rightLength < 1e-6 || forwardLength < 1e-6) return null;
   const fx = modelMatrix[8] / forwardLength;
   const fz = modelMatrix[10] / forwardLength;
-  const headingChange = Math.atan2(previous.fx * fz - previous.fz * fx,
-    previous.fx * fx + previous.fz * fz);
+  // Crossing state identities resets pose.time. Only settle the previous
+  // lean in that case; a new state's first transform is not a velocity sample.
+  const headingChange = sameState ? Math.atan2(previous.fx * fz - previous.fz * fx,
+    previous.fx * fx + previous.fz * fz) : 0;
   if (!Number.isFinite(headingChange) || Math.abs(headingChange) > .7) return null;
-  const strafe = locomoting
+  const strafe = locomoting && sameState
     ? (dx * modelMatrix[0] + dz * modelMatrix[2]) / (dt * rightLength) : 0;
-  const advance = locomoting
+  const advance = locomoting && sameState
     ? (dx * modelMatrix[8] + dz * modelMatrix[10]) / (dt * forwardLength) : 0;
   const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
   // First-order damped response is independent of frame rate. Target angles
@@ -327,7 +337,7 @@ export function createNativeActorSkinRuntime(skinPass) {
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
       modelMatrix, cameraPosition)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
-        modelMatrix, shaderTime, solvedPose, action, transitionDescriptor)
+        modelMatrix, shaderTime, pose.time, solvedPose, action, transitionDescriptor)
       ?? webIdleReaction(actorId, pose, selected.identity,
         solvedPose, action, transitionDescriptor);
     // Web game-feel: a hard impact reads instantly against the red crystalline
@@ -366,7 +376,8 @@ export function createNativeActorSkinRuntime(skinPass) {
       const movementBank = reaction?.kind === 'locomotion' || reaction?.kind === 'turn'
         ? reaction : null;
       movementFrames.set(actorId, {
-        time: shaderTime, x: modelMatrix[12], z: modelMatrix[14],
+        time: shaderTime, poseTime: pose.time, state: selected.identity.name,
+        x: modelMatrix[12], z: modelMatrix[14],
         fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
         bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
       });
