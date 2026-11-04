@@ -307,3 +307,27 @@ test('Web corpses settle only on live grounded contact, sleep, then wake for rea
   assert.ok(walled.runtime.bodies[0].position.x<=0.45+1e-5,
     'secondary tangent sweep must respect the real wall face');
 });
+
+test('Web floor contact damps residual ragdoll spin without damping airborne rotation',()=>{
+  const def=definition();
+  def.bodies=[def.bodies[0]];def.joints=[];
+  const make=collisionScene=>createNativeDeathRuntime({
+    definition:def,collisionScene,
+    boneModelMatrices:new Float32Array([
+      ...matrix(0,0,0),...matrix(0,0.1,0),
+      ...matrix(0,1.1,0),...matrix(0.2,1.1,0),
+    ]),
+    modelMatrix:matrix(0,0,0),initialVelocity:{x:0,y:0,z:0},
+  });
+  const landed=make(floor()),airborne=make({boxes:[]});
+  landed.bodies[0].angularVelocity={x:0,y:0,z:6};
+  airborne.bodies[0].angularVelocity={x:0,y:0,z:6};
+  const contact=advanceNativeDeathRuntime(landed,1/30);
+  advanceNativeDeathRuntime(airborne,1/30);
+  assert.ok(contact.contacts.some(c=>c.collider?.id==='floor' && c.normal.y>0.55),
+    'angular settling must be backed by an actual static floor contact');
+  assert.ok(landed.bodies[0].angularVelocity.z<5.8,
+    'grounded post-impact limb spin should dissipate instead of spinning forever');
+  near(airborne.bodies[0].angularVelocity.z,6);
+  assert.ok(Array.from(landed.boneModelMatrices).every(Number.isFinite));
+});
