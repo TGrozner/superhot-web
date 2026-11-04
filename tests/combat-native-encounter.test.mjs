@@ -928,3 +928,31 @@ test('J3 Web rear near-miss: suppression breaks laterally instead of charging th
   assert.ok(enemy.encounter.webSuppressionRemaining>0,
     'the same finite Web reaction remains active after a successful side-step');
 });
+
+test('J3 Web blind suppression: a real nearby bullet prompts cover-safe evasion without hidden-player tracking',()=>{
+  // Synthetic geometry and projectiles: original Web tactical behavior, NOT MCD.
+  // Wall blocks the gunner's eyes; the separate bullet corridor stays clear.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const passing={friendly:true,pos:p(7,1,3.4),direction:p(-1,0,0),speed:22};
+  function simulate(hiddenZ) {
+    const player={playerFeet:p(9,0,hiddenZ),playerPosition:p(9,1.6,hiddenZ)};
+    const runtime=setup(data,[box(5,1,2,.2,2,1.4)]);
+    const enemy=firstSpawn(runtime,player);
+    enemy.muzzlePosition=p(2,1.4,2);enemy.muzzleForward=p(1,0,0);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+    }));
+    assert.equal(enemy.encounter.visible,false,'real wall occludes the player');
+    assert.equal(enemy.encounter.webLastSeenFeet,null,'bullet does not reveal hidden player feet');
+    assert.equal(enemy.encounter.canAttack,false,'physical warning cannot authorize blind shots');
+    assert.ok(enemy.z<start.z-.01,'clear passing bullet creates an actual swept evasive step');
+    assert.ok(enemy.encounter.webSuppressionRemaining>0,'suppression persists as a finite beat');
+    return p(enemy.x,enemy.y,enemy.z);
+  }
+  const centered=simulate(2);
+  const displaced=simulate(2.6);
+  assert.deepEqual(centered,displaced,
+    'changing the occluded player position cannot steer a bullet-triggered retreat');
+});

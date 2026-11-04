@@ -749,7 +749,10 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
   // Genuine near-misses create a brief opportunity to reposition, but direct
   // threats retain priority in the existing dodge. Preserve committed shots.
   // Shooting permission is withheld during movement, not permanently disabled.
-  if (armed && state.visible && scaledDeltaTime>0 && !enemy.runtime.pendingShot &&
+  // A near-miss is physical evidence of danger even when the shooter is
+  // hidden. It may move an enemy, but must not reveal the hidden player or
+  // authorize a shot; the world/bullet visibility casts remain mandatory.
+  if (armed && scaledDeltaTime>0 && !enemy.runtime.pendingShot &&
       state.webDodgeRemaining<=0 && state.webSuppressionRemaining<=0 &&
       state.webSuppressionCooldown<=EPSILON) {
     const passage=webNearMissProjectile(runtime,enemy,playerProjectiles);
@@ -764,9 +767,13 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
       'running',scaledDeltaTime);
     // A shot from behind must not make a suppressed gunner rush the player.
     // Side-step instead if every safe retreat vector shortens that gap.
+    // Never steer a blind response using the player's CURRENT hidden feet.
+    // The bullet passage is real evidence; last-known sightings do not grant
+    // any attack permission or fresh target location.
+    const safeReference=state.visible ? playerFeet : state.webSuppressionFrom;
     const moved=tryWebDisengage(runtime,enemy,state.webSuppressionFrom,enemies,scaledDeltaTime,
-      {avoidApproaching:playerFeet}) ||
-      tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+      {avoidApproaching:state.visible ? playerFeet : null}) ||
+      tryWebStrafe(runtime,enemy,safeReference,enemies,scaledDeltaTime,
         {sideOverride:state.webTacticalSide});
     state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
     state.canAttack=false;
