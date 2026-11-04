@@ -458,7 +458,7 @@ test('each Web combat cue releases all its transient processing nodes on source 
   // This verifies a WebAudio lifecycle invariant, not audible native behavior.
   for (const cue of ['player-shot', 'enemy-shot', 'impact', 'shatter', 'player-hit',
     'katana', 'katana-swing', 'punch-swing', 'punch-contact', 'step', 'landing',
-    'pickup', 'throw']) {
+    'pickup', 'throw', 'dodge']) {
     const beforeSources = nodes.length;
     const beforeGains = gains.length;
     const beforeFilters = filters.length;
@@ -508,6 +508,40 @@ test('Web gunfire and confirmed impacts temporarily duck footsteps, not native a
     ]);
   }
   assert.equal(mix.getActiveVoices(), 13);
+  mix.dispose();
+  assert.equal(mix.getActiveVoices(), 0);
+});
+
+test('clean dodge schedules a spatial Web-only descending zip and ducks footsteps', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const sweeps = [];
+  const createFilter = ctx.createBiquadFilter;
+  ctx.createBiquadFilter = () => {
+    const filter = createFilter();
+    const ramp = filter.frequency.exponentialRampToValueAtTime;
+    filter.frequency.exponentialRampToValueAtTime = function(value, time) {
+      sweeps.push({filter, value, time});
+      return ramp.call(this, value, time);
+    };
+    return filter;
+  };
+  const mix = createWebImpactMix(ctx, 1);
+  const footstepBus = gains[3];
+  const duckTargets = [];
+  footstepBus.gain.setTargetAtTime = (value, at, tau) => duckTargets.push({value, at, tau});
+  const receipt = mix.emit('dodge', {position: {x: 1.2, y: 1.5, z: -0.2}});
+  assert.deepEqual(receipt, {status: 'started', source: 'web-original-synthesis',
+    at: ctx.currentTime, spatial: true}); // Scheduling, never an audition proof.
+  assert.equal(nodes.length, 2); // One noise and one oscillator, one voice.
+  assert.equal(mix.getActiveVoices(), 1);
+  const zip = filters.find(filter => filter.type === 'bandpass' &&
+    sweeps.some(entry => entry.filter === filter && entry.value === 1050 &&
+      Math.abs(entry.time - (ctx.currentTime + 0.18)) < 1e-12));
+  assert.ok(zip, 'Web-authored 180ms descending air zip');
+  const output = gains[7];
+  assert.ok(output.connections[0].connections.includes(gains[1])); // HRTF -> weapons.
+  assert.ok(duckTargets.some(entry => entry.value === 0.10));
+  assert.equal(mix.emit('step').status, 'blocked'); // Dodge outranks a footfall.
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
 });
