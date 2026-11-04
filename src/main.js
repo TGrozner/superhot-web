@@ -1550,6 +1550,8 @@ function update(dt, activeRealDt) {
           })) {
             state.dodges++;
             state.score+=WEB_DODGE_SCORE;
+            // Play only after the projectile missed and scoring accepted the dodge.
+            audio.dodge({position:clean.point});
           }
         }
       }
