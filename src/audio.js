@@ -706,6 +706,17 @@ export function createAudio(options = {}) {
     }));
   }
 
+  // Web-only fist feedback, not a recovered MCD punch recording.
+  // A blocked native receipt still allows the existing authored Web mixer cue.
+  function punch({hit = false, position = null} = {}) {
+    boolean(hit, 'hit');
+    if (!originalMode) return report('suppressed', 'punch', {reason: 'original-mode-disabled'});
+    const receipt = report('blocked', 'punch', {reason: 'native-punch-clip-unverified'});
+    webCombatAccent('punch-swing', receipt, position);
+    if (hit) webCombatAccent('punch-contact', receipt, position);
+    return receipt;
+  }
+
   function empty() {
     if (!originalMode) return proceduralEmpty();
     return playMcdClip('empty', 'pistolEmpty', {
@@ -1007,6 +1018,7 @@ export function createAudio(options = {}) {
     shatter,
     pickup,
     hit,
+    punch,
     empty,
     ready,
     scheduleReady,
