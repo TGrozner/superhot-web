@@ -453,7 +453,7 @@ export function createDojoReplayRecap(snapshot: unknown,
   // Store exactly the next displayed goal, never a guess about a native run.
   if (nextBest !== null) nextBest = Object.freeze({...nextBest,pendingChallenge:nextChallenge});
   return Object.freeze({
-    text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${completedText}${replayTargetText}${retryDetailText}`,
+    text: `${title[milestone]}${completedText}${replayTargetText}${retryDetailText} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}`,
     milestone, best: nextBest,
     shouldPersist: true,
     provenance: 'WEB_ONLY',

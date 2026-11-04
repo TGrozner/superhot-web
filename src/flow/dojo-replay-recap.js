@@ -404,7 +404,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
     if (nextBest !== null)
         nextBest = Object.freeze({ ...nextBest, pendingChallenge: nextChallenge });
     return Object.freeze({
-        text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${completedText}${replayTargetText}${retryDetailText}`,
+        text: `${title[milestone]}${completedText}${replayTargetText}${retryDetailText} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}`,
         milestone, best: nextBest,
         shouldPersist: true,
         provenance: 'WEB_ONLY',
