@@ -72,6 +72,8 @@ test('accepted source pistol fire bends weighted right arm and world wrist only 
   const mock=glFixture(),pass=createNativeSkinPass(mock.gl,packageFixture());
   assert.equal(pass.webFireArmKickAvailable,true);
   assert.equal(pass.webFireArmPivotBone,1);
+  assert.equal(pass.webFireElbowCounterKickAvailable,true);
+  assert.equal(pass.webFireElbowPivotBone,2);
   const actors=createNativeActorSkinRuntime(pass);
   const draw=t=>actors.drawActor({actorId:'gunner',pose:{
     state:'idle',time:.4,action:{state:'fire',time:t,weight:1,blend:1}},
@@ -79,8 +81,17 @@ test('accepted source pistol fire bends weighted right arm and world wrist only 
   const edge=draw(0);
   assert.equal(edge.actorWebFireArmKick,null);
   assert.equal(edge.webFireArmKickApplied,false);
+  assert.equal(edge.webFireElbowCounterKickApplied,false);
   const kicked=draw(.15);
   assert.ok(kicked.webFireArmKickApplied);
+  assert.equal(kicked.webFireElbowCounterKickApplied,true);
+  // A single shoulder rotation leaves shoulder/elbow forward axes parallel.
+  // The second authored pivot now bends the elbow relative to the shoulder,
+  // while the full forearm/weapon subtree still follows one GPU palette.
+  const shoulderForwardY=kicked.boneModelMatrices[1*16+9];
+  const elbowForwardY=kicked.boneModelMatrices[2*16+9];
+  assert.ok(Math.abs(shoulderForwardY-elbowForwardY)>.05,
+    'the elbow must actually articulate, not just translate with the shoulder');
   const torsoOnly=pass.draw({instance:pass.createStateInstance('idle'),time:.4,
     action:{state:'fire',time:.15,weight:1,blend:1},
     webPoseLean:kicked.actorWebPoseReaction,
@@ -99,5 +110,6 @@ test('accepted source pistol fire bends weighted right arm and world wrist only 
   noChain.bones[2]={...noChain.bones[2],name:'unrelated-elbow'};
   const alternate=createNativeSkinPass(glFixture().gl,noChain);
   assert.equal(alternate.webFireArmKickAvailable,false);
+  assert.equal(alternate.webFireElbowCounterKickAvailable,false);
   alternate.dispose();
 });
