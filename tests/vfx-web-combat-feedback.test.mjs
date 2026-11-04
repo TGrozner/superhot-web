@@ -39,6 +39,7 @@ test('no impact can create NaN effects or an arbitrary hit confirmation',()=>{
 test('hit sparks and marker respect active real time across a 100ms frame or two 50ms frames',()=>{
   const once=createWebImpactFeedback(),split=createWebImpactFeedback();
   for(const effect of [once,split])recordWebImpact(effect,{kind:'kill',...contact});
+  const initialAngles=once.particles.map(p=>[p.rx,p.ry,p.rz]);
   advanceWebImpactFeedback(once,0.1);
   advanceWebImpactFeedback(split,0.05);
   advanceWebImpactFeedback(split,0.05);
@@ -47,7 +48,9 @@ test('hit sparks and marker respect active real time across a 100ms frame or two
   assert.equal(once.particles.length,split.particles.length);
   for(let i=0;i<once.particles.length;i++){
     const a=once.particles[i],b=split.particles[i];
-    for(const key of ['x','y','z','vx','vy','vz','life'])
+    assert.ok(['rx','ry','rz'].some((key,j)=>Math.abs(a[key]-initialAngles[i][j])>.1),
+      'live shards should visibly tumble instead of translating with frozen rotations');
+    for(const key of ['x','y','z','vx','vy','vz','life','rx','ry','rz'])
       assert.ok(Math.abs(a[key]-b[key])<1e-10,`${key} must not depend on frame split`);
   }
   // Before this fix, the old 50ms clamp left these particles and the hit
