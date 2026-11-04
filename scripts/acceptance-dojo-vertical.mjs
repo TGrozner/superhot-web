@@ -144,21 +144,25 @@ export function assessDojoVertical(trace) {
   // Require trusted DOM click receipts recorded by the real browser sampler.
   // Missing receipts are INCOMPLETE rather than a native contradiction.
   const actions = trace.uiActions;
+  const validUiAction = a => isRecord(a) && integer(a.frameId) && (
+    (a.type === 'start' && (
+      (['start-button','play-original'].includes(a.buttonId) &&
+        ['playing','menu'].includes(a.activeScreen)) ||
+      (a.buttonId === 'scene' && a.activeScreen === 'playing'))) ||
+    (a.type === 'restart' && a.buttonId === 'again-button' &&
+      a.activeScreen === 'win'));
   if (actions !== undefined && (!Array.isArray(actions) || actions.length > 32 ||
-      actions.some(a => !isRecord(a) || !['start','restart'].includes(a.type) ||
-        !['start-button','play-original','again-button'].includes(a.buttonId) ||
-        !integer(a.frameId) || !['playing','menu','win'].includes(a.activeScreen)))) {
+      actions.some(a => !validUiAction(a)))) {
     errors.push('invalid owner browser UI-click telemetry');
     return report(DOJO_VERTICAL_STATUS.INVALID);
   }
-  checks.startButtonClickObserved = Array.isArray(actions) && actions.some(a =>
-    a.type === 'start' && ['start-button','play-original'].includes(a.buttonId) &&
-    ['playing','menu'].includes(a.activeScreen) && a.frameId < frames[start].frameId);
+  checks.startGestureObserved = Array.isArray(actions) && actions.some(a =>
+    validUiAction(a) && a.type === 'start' && a.frameId < frames[start].frameId);
   checks.winRestartButtonClickObserved = Array.isArray(actions) && actions.some(a =>
     a.type === 'restart' && a.buttonId === 'again-button' &&
     a.activeScreen === 'win' && a.frameId >= frames[win].frameId &&
     a.frameId < frames[restart].frameId);
-  if (!checks.startButtonClickObserved) errors.push('no trusted owner Start button click observed before first combat frame');
+  if (!checks.startGestureObserved) errors.push('no trusted owner Start button/canvas gesture observed before first combat frame');
   if (!checks.winRestartButtonClickObserved) errors.push('no trusted owner win-screen Replay button click between win and restart frames');
   observed.uiClicks = Array.isArray(actions) ? actions.length : 0;
   // Browser-originating input attempts are only receipts. We must additionally
