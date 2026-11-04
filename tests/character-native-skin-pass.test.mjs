@@ -1231,6 +1231,82 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
 });
 
 
+test('Dojo source-named neck chain actually animates the GPU head with no Head bone', () => {
+  // Independent, noncommercial rig fixture using ONLY the published source
+  // joint NAMES/ancestry, not source vertices, bind poses or animation bytes.
+  // The real 62-joint Dojo rig has no literal Head: neck 01 is parent of
+  // neck Top and both are skinned. The previous regex disabled this feature.
+  const translated = (x, y, z) => {
+    const m = identity();
+    m[12] = x; m[13] = y; m[14] = z;
+    return m;
+  };
+  const rest = {
+    positions: [0,0,0, 0,1,0, 0,.4,0, 1,0,0],
+    rotations: Array.from({length:4}, () => [0,0,0,1]).flat(),
+    scales: Array.from({length:4}, () => [1,1,1]).flat(),
+  };
+  const base = sourcePackage();
+  const pkg = sourcePackage({
+    bones: [
+      {name:'root',parent:-1,position:[0,0,0],rotation:[0,0,0,1],scale:[1,1,1]},
+      {name:'jnt_Neck_01',parent:0,position:[0,1,0],rotation:[0,0,0,1],scale:[1,1,1]},
+      {name:'jnt_Neck_Top',parent:1,position:[0,.4,0],rotation:[0,0,0,1],scale:[1,1,1]},
+      {name:'hand',parent:0,position:[1,0,0],rotation:[0,0,0,1],scale:[1,1,1]},
+    ],
+    mesh: {
+      ...base.mesh,
+      positions: [0,1,0, .4,1.4,0, 0,2,0],
+      jointIndices: [1,0,0,0, 2,0,0,0, 2,0,0,0],
+      inverseBindMatrices: [
+        ...identity(), ...translated(0,-1,0),
+        ...translated(0,-1.4,0), ...translated(-1,0,0),
+      ],
+    },
+    clips: {idle:{duration:1,sampleRate:1,frames:[rest,rest]}},
+    states: {idle:{clip:'idle',playback:'loop',speed:1}},
+    weaponAttachment: {
+      bone:'hand',localMatrix:identity(),
+      source:'synthetic neck-branch fixture',coordinates:'authored rig',
+    },
+  });
+  const {gl,calls} = mockGl();
+  const pass = createNativeSkinPass(gl,pkg);
+  assert.equal(pass.webHeadTrackingAvailable,true);
+  assert.equal(pass.webHeadPivotBone,1);
+  assert.equal(pass.webHeadSampleBone,2);
+  assert.equal(pass.webHeadPivotIdentity,'source jnt_Neck_01 -> jnt_Neck_Top');
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (time, cameraPosition) => actors.drawActor({
+    actorId:'dojo-neck-test',pose:{state:'idle',time},
+    modelMatrix:identity(),viewProjection:identity(),
+    cameraPosition,shaderTime:time*10,color:[.8,.1,.2,1],
+  });
+  const initial = draw(0,{x:5,y:4,z:5});
+  assert.equal(initial.actorWebHeadLook,null);
+  const moving = draw(.12,{x:5,y:4,z:5});
+  assert.equal(moving.webHeadLookApplied,true,
+    'Dojo neck chain must no longer disable all Web head motion');
+  assert.ok(moving.actorWebHeadLook.yaw>.1);
+  assert.ok(moving.actorWebHeadLook.pitch>.05);
+  assert.ok(Math.abs(moving.boneModelMatrices[2*16+8] -
+    initial.boneModelMatrices[2*16+8])>.05,
+    'the source-neutral weighted terminal neck joint turns in GPU pose');
+  near(Array.from(moving.weaponAttachmentMatrix),Array.from(initial.weaponAttachmentMatrix));
+  near(Array.from(moving.boneModelMatrices.slice(3*16,4*16)),
+    Array.from(initial.boneModelMatrices.slice(3*16,4*16)));
+  assert.equal(calls.filter(c=>c[0]==='draw').length,2,
+    'do not add a second draw or material pass for Dojo head motion');
+  pass.dispose();
+
+  const noChain={...pkg,bones:pkg.bones.map((bone,i)=>
+    i===2?{...bone,name:'not-an-authored-neck-tip'}:bone)};
+  const unknown=createNativeSkinPass(mockGl().gl,noChain);
+  assert.equal(unknown.webHeadTrackingAvailable,false,
+    'unrecognized rig identities must remain unchanged instead of guessed');
+  unknown.dispose();
+});
+
 test('Web stun anchors its contact side through player movement and resets on a new event', () => {
   const pkg = transitionPackage();
   pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
