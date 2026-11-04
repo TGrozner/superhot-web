@@ -57,3 +57,25 @@ test('hit sparks and marker respect active real time across a 100ms frame or two
   assert.equal(once.hitKind,null);
   assert.equal(once.particles.length,0);
 });
+
+test('confirmed hit and kill fragments eject toward the shooter, not into target geometry',()=>{
+  const feedback=createWebImpactFeedback();
+  const shot={point:{x:0,y:1,z:0},direction:{x:0,y:0,z:-1}};
+  for(const kind of ['hit','kill']){
+    resetWebImpactFeedback(feedback);
+    assert.equal(recordWebImpact(feedback,{kind,...shot}),true);
+    assert.ok(feedback.particles.length>0);
+    assert.ok(feedback.particles.every(p=>p.vz>0),
+      'incoming -Z shot should eject visible red fragments toward +Z');
+    assert.ok(feedback.particles.every(p=>p.z>shot.point.z),
+      'spawn red fragments in front of the hit surface, not behind the target');
+    const before=feedback.particles.map(p=>p.z);
+    advanceWebImpactFeedback(feedback,0.05);
+    assert.ok(feedback.particles.every((p,i)=>p.z>before[i]),
+      'the live render path should move confirmed debris out of the target');
+  }
+  resetWebImpactFeedback(feedback);
+  recordWebImpact(feedback,{kind:'wall',...shot});
+  assert.ok(feedback.particles.every(p=>p.vz>0),
+    'existing wall ejection still faces back toward the incoming shot');
+});
