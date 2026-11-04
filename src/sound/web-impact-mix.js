@@ -222,16 +222,16 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // This layer shares the spatial path, gain trim and existing voice budget.
         const snap = attackByCue[cue];
         if (snap) {
-          const [hz, weight, tail] = snap;
-          const bright = context.createBiquadFilter();
-          bright.type = cue === 'katana' ? 'bandpass' : 'highpass';
-          bright.frequency.value = Math.min(hz, context.sampleRate * 0.43);
-          const accent = context.createGain();
-          accent.gain.setValueAtTime(volume * weight, at);
-          accent.gain.exponentialRampToValueAtTime(0.0001, at + tail);
-          noise.connect(bright);
-          bright.connect(accent);
-          accent.connect(out);
+            const [hz, weight, tail] = snap;
+            const bright = context.createBiquadFilter();
+            bright.type = cue === 'katana' ? 'bandpass' : 'highpass';
+            bright.frequency.value = Math.min(hz, context.sampleRate * 0.43);
+            const accent = context.createGain();
+            accent.gain.setValueAtTime(volume * weight, at);
+            accent.gain.exponentialRampToValueAtTime(0.0001, at + tail);
+            noise.connect(bright);
+            bright.connect(accent);
+            accent.connect(out);
         }
         noise.onended = ended;
         voice.sources.push(noise);
