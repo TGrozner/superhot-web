@@ -151,10 +151,30 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
       activeScreen:current.activeScreen});
   };
   const onMouseDown = event => {
-    // The first click merely requests pointer lock in src/main.js; not a shot.
-    if (event.isTrusted !== true || event.button !== 0 ||
-        document.pointerLockElement !== document.getElementById?.('scene')) return;
-    recordInput('fire');
+    if (event.isTrusted !== true || event.button !== 0 || stopped) return;
+    const scene = document.getElementById?.('scene');
+    if (document.pointerLockElement === scene) {
+      // Once locked, a primary press is a fire ATTEMPT, not a proven hit.
+      recordInput('fire');
+      return;
+    }
+    // src/main.js also starts the real Dojo encounter from a first primary
+    // mousedown on the canvas during its rendered preview. A button-only
+    // recorder missed this legitimate route and falsely failed the 7/7 gate.
+    // Require the real canvas target, source scene, pre-start controls and
+    // a trusted gesture; never count a scene-mode/control-panel click.
+    if (ready || !scene || event.target !== scene ||
+        document.getElementById?.('scene-controls')?.hidden !== false) return;
+    let frame;
+    try { frame = window.__superhotGetRenderedFrameSnapshot?.(); }
+    catch { return; }
+    const source = frame?.nativeScene?.source;
+    if (frame?.activeScreen !== 'playing' ||
+        !Number.isSafeInteger(frame.frameId) || frame.frameId < 0 ||
+        source?.sceneBuildIndex !== 10 || source?.serializedOwner !== 'level10' ||
+        !/(?:^|[\\/])SHRL_Dojo2\.unity$/i.test(source?.scenePath ?? '')) return;
+    uiActions.push({type:'start',buttonId:'scene',
+      frameId:frame.frameId,activeScreen:'playing'});
   };
   const onUp = event => pressed.delete(event.code);
   const onBlur = () => pressed.clear();

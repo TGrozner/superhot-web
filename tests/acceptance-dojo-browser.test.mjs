@@ -43,7 +43,9 @@ function mockBrowser() {
     setFrame(n){seq=n;}, setScreen(value){screen=value;},
     setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
     setPointerLock(value){pointerLocked=value;},
-    mouse(button=0,trusted=true){documentListeners.get('mousedown')?.({button,isTrusted:trusted});},
+    mouse(button=0,trusted=true,target=sceneCanvas){
+      documentListeners.get('mousedown')?.({button,isTrusted:trusted,target});
+    },
     setSceneBuildIndex(index){source.sceneBuildIndex=index;},
     tick(){intervalCallback();},
     click(buttonId, trusted=true){documentListeners.get('click')?.({isTrusted:trusted,
@@ -254,6 +256,36 @@ test('SH10 does not accept an attempted Replay click outside win screen',()=>{
   } finally {mock.teardown();}
 });
 
+
+test('SH10 owner-canvas preview click is a trusted Start receipt, not a gunshot',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.mouse(0,true,{id:'scene-mode'}); // Runtime has a separate UI bug; never credit it as Start.
+    mock.mouse(0,false); // synthetic mousedown must not satisfy acceptance.
+    mock.mouse(2); // secondary click must not satisfy Start.
+    assert.equal(recorder.ready,false);
+    mock.mouse(0); // real canvas primary mousedown, before pointer lock.
+    mock.setControlsHidden(true);mock.setFrame(2);mock.tick();
+    const receipt=recorder.stop();
+    assert.deepEqual(receipt.uiActions,[
+      {type:'start',buttonId:'scene',frameId:1,activeScreen:'playing'},
+    ]);
+    assert.deepEqual(receipt.inputActions,[]);
+    assert.equal(receipt.frames[0].frameId,2);
+  } finally {mock.teardown();}
+});
+
+test('SH10 wrong scene cannot forge the canvas-start Dojo receipt',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);mock.setSceneBuildIndex(28);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.mouse(0);
+    assert.deepEqual(recorder.stop().uiActions,[]);
+  } finally {mock.teardown();}
+});
 
 test('SH10 browser input receipts exclude first mouse-lock click and synthetic or nonplaying actions',()=>{
   const mock=mockBrowser();
