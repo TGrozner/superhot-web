@@ -74,15 +74,20 @@ export function recordWebImpact(feedback,{kind,point,direction}){
 /** Effects move on unscaled time: readable even in slow-motion; pause freezes. */
 export function advanceWebImpactFeedback(feedback,realDelta){
   if(!Number.isFinite(realDelta)||realDelta<0)throw new RangeError('Real delta must be nonnegative');
-  const dt=Math.min(realDelta,.05);
-  feedback.hitSeconds=Math.max(0,feedback.hitSeconds-dt);
+  // A browser hitch must not extend real-time hit markers or keep expired
+  // particles alive. The caller supplies ACTIVE elapsed seconds, not a capped
+  // world/physics delta. One analytic gravity step preserves the same flight
+  // at 30/60 Hz and after a single delayed frame. Web-authored VFX, not MCD.
+  feedback.hitSeconds=Math.max(0,feedback.hitSeconds-realDelta);
   if(feedback.hitSeconds===0)feedback.hitKind=null;
   for(let i=feedback.particles.length-1;i>=0;i--){
     const p=feedback.particles[i];
-    p.life-=dt;
+    p.life-=realDelta;
     if(p.life<=0){feedback.particles.splice(i,1);continue;}
-    p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;
-    p.vy-=1.6*dt;
+    p.x+=p.vx*realDelta;
+    p.y+=p.vy*realDelta-0.8*realDelta*realDelta;
+    p.z+=p.vz*realDelta;
+    p.vy-=1.6*realDelta;
   }
 }
 
