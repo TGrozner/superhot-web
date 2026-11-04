@@ -5,6 +5,7 @@ import {createWebImpactMix} from '../src/sound/web-impact-mix.js';
 function fakeAudio(state = 'running') {
   const nodes = [];
   const gains = [];
+  const filters = [];
   const param = (value = 0) => ({value,
     setValueAtTime(v) { this.value = v; },
     exponentialRampToValueAtTime(v) { this.value = v; },
@@ -22,11 +23,11 @@ function fakeAudio(state = 'running') {
       attack: param(), release: param()}),
     createBuffer: (_channels, length) => ({getChannelData: () => new Float32Array(length)}),
     createBufferSource: source, createOscillator: source,
-    createBiquadFilter: () => ({...base(), frequency: param()}),
+    createBiquadFilter: () => { const n = {...base(), frequency: param()}; filters.push(n); return n; },
     createPanner: () => ({...base(), positionX: param(), positionY: param(),
       positionZ: param()}),
   };
-  return {ctx, nodes, gains};
+  return {ctx, nodes, gains, filters};
 }
 
 test('original Web gunshot is scheduled with HRTF and kept inside the voice budget', () => {
@@ -129,4 +130,29 @@ test('stolen Web voice fades for 8ms rather than hard-cutting, and cleans up', (
   priorTone.onended();
   assert.equal(mix.getActiveVoices(), 1);
   mix.dispose();
+});
+
+test('Web HRTF emitters soften with distance and follow the active listener', () => {
+  const {ctx, filters} = fakeAudio();
+  ctx.listener = {positionX: {value: 0}, positionY: {value: 0}, positionZ: {value: 0}};
+  const mix = createWebImpactMix(ctx);
+  assert.equal(mix.emit('enemy-shot', {position: {x: 1, y: 0, z: 0}}).spatial, true);
+  assert.equal(mix.emit('enemy-shot', {position: {x: 50, y: 0, z: 0}}).spatial, true);
+  const lowpasses = filters.filter(node => node.type === 'lowpass');
+  assert.equal(lowpasses.length, 2);
+  assert.ok(lowpasses[0].frequency.value > lowpasses[1].frequency.value);
+  assert.ok(lowpasses[1].frequency.value >= 1200);
+  ctx.listener.positionX.value = 49;
+  mix.emit('enemy-shot', {position: {x: 50, y: 0, z: 0}});
+  assert.equal(filters.filter(node => node.type === 'lowpass')[2].frequency.value,
+    lowpasses[0].frequency.value);
+  mix.emit('enemy-shot'); // Non-positional cue has no extra coloration.
+  assert.equal(filters.filter(node => node.type === 'lowpass').length, 3);
+  mix.dispose();
+
+  const oldBrowser = fakeAudio();
+  const oldMix = createWebImpactMix(oldBrowser.ctx);
+  assert.equal(oldMix.emit('enemy-shot', {position: {x: 50, y: 0, z: 0}}).status, 'started');
+  assert.equal(oldBrowser.filters.filter(node => node.type === 'lowpass').length, 0);
+  oldMix.dispose();
 });
