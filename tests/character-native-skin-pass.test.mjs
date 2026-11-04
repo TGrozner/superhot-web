@@ -997,8 +997,13 @@ test('Web hit stagger follows the actual rendered facing and live player camera,
 });
 
 test('Web inertial bank eases to idle, freezes on paused time and yields to source transitions', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic inertial test socket', coordinates: 'synthetic bone local',
+  };
   const { gl, calls } = mockGl();
-  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const pass = createNativeSkinPass(gl, pkg);
   const actors = createNativeActorSkinRuntime(pass);
   const draw = (actorId, state, x, z, clock, transition = null) => {
     const model = identity();
