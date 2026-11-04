@@ -36,6 +36,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         samples[i] = seed / 2147483648 - 1;
     }
     const voices = new Set();
+    const retired = new Set();
     let drone = null;
     let disposed = false;
     let mixLevel = 1;
@@ -59,6 +60,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
     };
     function release(voice) {
         voices.delete(voice);
+        retired.delete(voice);
         for (const src of voice.sources) {
             src.onended = null;
             try {
@@ -69,6 +71,27 @@ export function createWebImpactMix(context, maxVoices = 24) {
         }
         voice.gain.disconnect();
         voice.panner?.disconnect();
+    }
+    // A stolen still-audible transient needs a short release to avoid a click.
+    // Retired tails are capped separately to bound work during extreme bursts.
+    function retire(voice) {
+        voices.delete(voice);
+        if (retired.size >= 8) {
+            const oldest = retired.values().next().value;
+            if (oldest)
+                release(oldest);
+        }
+        retired.add(voice);
+        const at = context.currentTime;
+        voice.gain.gain.cancelScheduledValues(at);
+        voice.gain.gain.setValueAtTime(voice.gain.gain.value, at);
+        voice.gain.gain.linearRampToValueAtTime(0, at + 0.008);
+        for (const src of voice.sources) {
+            try {
+                src.stop(at + 0.008);
+            }
+            catch { /* already ended */ }
+        }
     }
     function emit(cue, { position, intensity = 1 } = {}) {
         const at = context.currentTime;
@@ -104,7 +127,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             if (victim === null || victim.priority > priority) {
                 return { status: 'blocked', source: 'web-original-synthesis', at: null, spatial: false };
             }
-            release(victim);
+            retire(victim);
         }
         // Each successful cue uses a fresh noise region and a subtle tonal detune.
         // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
@@ -200,7 +223,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             return;
         stopAmbience();
         disposed = true;
-        for (const voice of [...voices])
+        for (const voice of [...voices, ...retired])
             release(voice);
         for (const bus of [weapons, impacts, footsteps, ambient])
             bus.disconnect();

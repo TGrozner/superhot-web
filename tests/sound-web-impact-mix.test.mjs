@@ -13,7 +13,7 @@ function fakeAudio(state = 'running') {
   const base = () => ({connect(dst) { return dst; }, disconnect() {}});
   const source = () => {
     const n = {...base(), frequency: param(), onended: null,
-      start(...args) { this.startArgs = args; }, stop() { this.stopped = true; }};
+      start(...args) { this.startArgs = args; }, stop(...args) { this.stopped = true; this.stopArgs = args; }};
     nodes.push(n); return n;
   };
   const ctx = {state, currentTime: 2.25, sampleRate: 8000, destination: base(),
@@ -110,5 +110,23 @@ test('rapid Web shots rotate noise slices and subtly detune rather than repeat i
   assert.ok(pitches.every(hz => hz >= 49 && hz <= 55));
   assert.equal(new Set(pitches).size, 8);
   assert.ok(noises.every(n => n.startArgs[2] === 0.14));
+  mix.dispose();
+});
+
+test('stolen Web voice fades for 8ms rather than hard-cutting, and cleans up', () => {
+  const {ctx, nodes, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  assert.equal(mix.emit('step').status, 'started');
+  const priorNoise = nodes[0];
+  const priorTone = nodes[1];
+  const priorGain = gains.at(-3); // voice output, before burst and oscillator body
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.deepEqual(priorNoise.stopArgs, [ctx.currentTime + 0.008]);
+  assert.deepEqual(priorTone.stopArgs, [ctx.currentTime + 0.008]);
+  assert.equal(priorGain.gain.value, 0);
+  priorNoise.onended();
+  priorTone.onended();
+  assert.equal(mix.getActiveVoices(), 1);
   mix.dispose();
 });
