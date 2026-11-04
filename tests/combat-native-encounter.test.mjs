@@ -464,3 +464,44 @@ test('J3 Web close-range pressure: armed enemies backpedal safely when rushed, n
   assert.equal(trapped.encounter.canAttack,true,
     'retreat never changes the established clear-muzzle firing gate');
 });
+
+test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and unreachable flank keep their route',()=>{
+  // Entirely synthetic game space. This is creative Web behavior, not MCD.
+  const data=scene();
+  const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
+  const alone=setup(data), solo=firstSpawn(alone,target);
+  const together=setup(data), squad=firstSpawn(together,target);
+  const wingman={id:'armed-wingman',x:2,y:0,z:8,alive:true,active:true,
+    reaction:{hasWeapon:true}};
+  const initial=p(squad.x,squad.y,squad.z);
+
+  for(let frame=0;frame<8;frame++) {
+    advanceNativeEncounter(alone,input([solo],{...target,scaledDeltaTime:.2}));
+    advanceNativeEncounter(together,input([squad,wingman],{...target,scaledDeltaTime:.2}));
+    assert.ok(Math.hypot(squad.x-initial.x,squad.z-initial.z)<=6,
+      'the flanker never teleports or outruns its normal speed budget');
+  }
+  assert.deepEqual(alone.actors.get(solo.id)?.encounter.target,target.playerFeet,
+    'a lone gunner keeps the direct pursuit objective');
+  assert.ok(Math.hypot(squad.encounter.target.x-target.playerFeet.x,
+    squad.encounter.target.z-target.playerFeet.z)>.9,
+  'the second armed actor triggers a real lateral route goal');
+  assert.ok(Math.abs(squad.z-solo.z)>.1,
+    'different navmesh waypoints produce visibly distinct approaches');
+  assert.equal(squad.encounter.canAttack,false,
+    'a tactical route cannot grant firing permission without a real muzzle');
+  assert.equal(squad.reaction.dead,false,'squad tactics do not inflict damage');
+
+  const edge={playerFeet:p(14,0,9.8),playerPosition:p(14,1.6,9.8)};
+  const edgeRuntime=setup(data), edgeEnemy=firstSpawn(edgeRuntime,edge);
+  edgeEnemy.encounter.webTacticalSide=1; // offset points beyond the synthetic tile
+  advanceNativeEncounter(edgeRuntime,input([edgeEnemy,wingman],{...edge,scaledDeltaTime:.2}));
+  assert.deepEqual(edgeEnemy.encounter.target,edge.playerFeet,
+    'a flank beyond the baked surface fails closed to a real direct route');
+  assert.ok(edgeEnemy.x>2,'an unavailable flank never strands an otherwise navigable chase');
+
+  wingman.reaction.hasWeapon=false;
+  advanceNativeEncounter(together,input([squad,wingman],{...target,scaledDeltaTime:.2}));
+  assert.deepEqual(squad.encounter.target,target.playerFeet,
+    'an unarmed neighbor cannot force the ranged squad tactic');
+});

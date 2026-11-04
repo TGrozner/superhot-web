@@ -98,6 +98,26 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
   return false;
 }
 
+// J3 Web-authored approach lanes: two armed enemies should not both march
+// directly toward the same point before they reach firing range. Route to
+// opposite, reachable positions near the player; never offset the player
+// hitbox, grant firing permission, or bypass the existing path/capsule checks.
+// This is tactical Web design, not a source MCD spawn or AI assignment.
+function webSquadApproachGoal(runtime, enemy, playerFeet, enemies) {
+  if (!enemy.reaction?.hasWeapon || !enemies.some(other =>
+    other !== enemy && participating(other) && other.reaction?.hasWeapon === true)) return null;
+  const dx=playerFeet.x-enemy.x, dz=playerFeet.z-enemy.z;
+  const length=Math.hypot(dx,dz);
+  const offset=Math.min(runtime.body.radius*3.5,runtime.armedStopDistance*0.7);
+  if(!Number.isFinite(length) || length<=EPSILON || offset<=EPSILON)return null;
+  const side=enemy.encounter.webTacticalSide;
+  const goal={x:playerFeet.x-dz/length*side*offset,
+    y:playerFeet.y,z:playerFeet.z+dx/length*side*offset};
+  const sample=sampleNativeNavigation(runtime.nav,goal,runtime.body.stepOffset+EPSILON);
+  if(!sample || Math.hypot(sample.position.x-goal.x,sample.position.z-goal.z)>EPSILON)return null;
+  return goal;
+}
+
 // J3 Web-only squad movement: a follower whose routed step is blocked by
 // another living actor briefly takes a swept sidestep instead of stacking up
 // behind them. This changes feet only; it cannot authorize a shot or hit.
@@ -409,10 +429,21 @@ function moveEnemy(runtime, enemy, input) {
     return;
   }
   if (scaledDeltaTime === 0) return;
-  if (!state.route || !state.target || distance(state.target,playerFeet) > runtime.body.radius ||
+  // When armed allies are pursuing together, seek opposite safe approach
+  // lanes before resuming the normal stop-radius strafe / retreat behavior.
+  // An unreachable offset is never substituted for the direct source route.
+  const flankGoal=armed && playerDistance>stopDistance+runtime.body.radius*2
+    ? webSquadApproachGoal(runtime,enemy,playerFeet,enemies) : null;
+  const desiredTarget=flankGoal ?? playerFeet;
+  if (!state.route || !state.target || distance(state.target,desiredTarget) > runtime.body.radius ||
       state.route.cursor >= state.route.points.length) {
-    state.route=findNativeRoute(runtime.nav,start,playerFeet,{maxSnapDistance:runtime.maxSnapDistance});
-    state.target={...playerFeet};
+    let destination=desiredTarget;
+    state.route=findNativeRoute(runtime.nav,start,destination,{maxSnapDistance:runtime.maxSnapDistance});
+    if(!state.route && flankGoal) {
+      destination=playerFeet;
+      state.route=findNativeRoute(runtime.nav,start,destination,{maxSnapDistance:runtime.maxSnapDistance});
+    }
+    state.target={...destination};
   }
   if (!state.route) { enemy.runtime.speed=0; return; }
   // Navigation uses its baked surface; the body follows the actual collider
