@@ -689,7 +689,7 @@ function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
  * Rotate only the head descendants in model space, never the hips, arms or
  * weapon socket. This is NOT an Animator/IK claim or an additional draw.
  */
-function applyWebHeadLook(loaded, scratch, head, affected, yaw, pitch = 0, roll = 0) {
+function applyWebSubtreeRotation(loaded, scratch, head, affected, yaw, pitch = 0, roll = 0) {
   const globals = scratch.globals;
   const pivot = head * 16;
   const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
@@ -1339,6 +1339,24 @@ export function createNativeSkinPass(gl, sourcePackage, {
   // Protect every hand/weapon socket even on unfamiliar source hierarchies.
   const webHeadTrackingAvailable = webHeadIndex >= 0 &&
     !webHeadBones.includes(loaded.weaponAttachment?.bone);
+  // Apply the post-shot arm kick only to an evidenced right shoulder/weapon
+  // hierarchy. Other avatars remain unchanged, not procedurally guessed.
+  const shoulder = loaded.bones.findIndex(b => b.name === 'jnt_R_Arm_Shoulder');
+  const elbow = loaded.bones.findIndex(b => b.name === 'jnt_R_Arm_Elbow');
+  const wrist = loaded.bones.findIndex(b => b.name === 'jnt_R_Arm_Wrist');
+  const fireArm = shoulder >= 0 && elbow >= 0 && wrist >= 0 &&
+    loaded.bones[elbow].parent === shoulder && loaded.bones[wrist].parent === elbow
+    ? shoulder : -1;
+  const fireArmBones = [];
+  if (fireArm >= 0) {
+    for (let bone = 0; bone < loaded.jointCount; bone++) {
+      for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
+        if (ancestor === fireArm) { fireArmBones.push(bone); break; }
+      }
+    }
+  }
+  const webFireArmKickAvailable = fireArm >= 0 && loaded.weaponAttachment != null &&
+    fireArmBones.includes(loaded.weaponAttachment.bone);
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1368,7 +1386,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
                   cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
                   color, transition = null, action = null, solvedPose = null,
-                  webPoseLean = null, webHeadLook = null, webHitFlash = 0, webFireGlow = 0 } = {}) {
+                  webPoseLean = null, webHeadLook = null, webFireArmKick = null,
+                  webHitFlash = 0, webFireGlow = 0 } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1432,6 +1451,14 @@ export function createNativeSkinPass(gl, sourcePackage, {
           solvedPose !== null) {
         throw new RangeError('Web head movement requires a live, independent Head bone and bounded yaw/pitch/roll');
       }
+    }
+    if (webFireArmKick !== null && (
+        !webFireArmKickAvailable || typeof webFireArmKick !== 'object' ||
+        !Number.isFinite(webFireArmKick.pitch) || Math.abs(webFireArmKick.pitch) > .28 ||
+        !Number.isFinite(webFireArmKick.yaw) || Math.abs(webFireArmKick.yaw) > .18 ||
+        !Number.isFinite(webFireArmKick.roll) || Math.abs(webFireArmKick.roll) > .18 ||
+        solvedPose !== null)) {
+      throw new RangeError('Web gun kick requires source right-arm weapon chain and bounded angles');
     }
     if (!Number.isFinite(webHitFlash) || webHitFlash < 0 || webHitFlash > 1) {
       throw new RangeError('Web-only hit flash must be a finite intensity in [0,1]');
@@ -1510,8 +1537,13 @@ export function createNativeSkinPass(gl, sourcePackage, {
     if (webHeadLook !== null &&
         (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
          (webHeadLook.roll ?? 0) !== 0)) {
-      applyWebHeadLook(loaded, scratch, webHeadIndex, webHeadBones,
+      applyWebSubtreeRotation(loaded, scratch, webHeadIndex, webHeadBones,
         webHeadLook.yaw, webHeadLook.pitch ?? 0, webHeadLook.roll ?? 0);
+    }
+    if (webFireArmKick !== null &&
+        (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0)) {
+      applyWebSubtreeRotation(loaded, scratch, fireArm, fireArmBones,
+        webFireArmKick.yaw, webFireArmKick.pitch, webFireArmKick.roll);
     }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
@@ -1561,6 +1593,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
          (webHeadLook.roll ?? 0) !== 0),
       webHeadLookDesign: webHeadLook === null ? null :
         (webHeadLook.design ?? 'Web-only independent head gaze'),
+      webFireArmKickApplied: webFireArmKick !== null &&
+        (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0),
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       webHitFlashIntensity: webHitFlash,
@@ -1631,6 +1665,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
     availableActions: loaded.availableActions,
     availableTransitions: loaded.availableTransitions,
     webHeadTrackingAvailable,
+    webFireArmKickAvailable,
+    webFireArmPivotBone: webFireArmKickAvailable ? fireArm : null,
     webHeadPivotBone: webHeadTrackingAvailable ? webHeadIndex : null,
     // Gaze height reads the authored terminal neck/head joint. The actual
     // deformation still pivots the whole source neck branch at neckBase.
