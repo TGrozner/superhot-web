@@ -452,7 +452,7 @@ export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
     lookBuffer: 0, lookPendingDegrees: 0, lookMeasuredAt: 0,
     // null until a writable time tick actually receives a look modifier.
     // Preserve flicks accumulated during the source's two startup delays.
-    lookLastDeliveredAt: null, yaw, pitch,
+    lookLastDeliveredAt: null, lookMode: 'web', yaw, pitch,
   };
 }
 
@@ -503,13 +503,29 @@ export function stepMcdGameplayClock(clock, {
       (!Number.isFinite(lookPathDegrees) || lookPathDegrees < 0)) {
     throw new RangeError('lookPathDegrees must be finite and nonnegative');
   }
-  clock.realTime += unscaledDt;
   if (paused) {
-    // Do not turn an interrupted/focus-lost camera jump into a look pulse.
+    // WEB comfort behavior, not a native pause/CameraLookTimeControl claim:
+    // pointer-lock loss must not replay a buffered flick after resume.
+    // Do not advance realTime or the world while interrupted.
     clock.lookPendingDegrees = 0;
     clock.yaw = yaw; clock.pitch = pitch;
+    if (clock.lookMode !== 'source') {
+      clock.lookBuffer = 0;
+      clock.lookMeasuredAt = clock.realTime;
+      clock.lookLastDeliveredAt = null;
+      clock.source.shifters[2].currentTimeModifier = 0;
+      if (clock.source.delayedUpdates === 0) {
+        // Snapshot the already-registered non-look contributions without
+        // advancing a synthetic LateUpdate: retain movement, jump, pulses
+        // and forced override, but drop the stale look-only next-frame scale.
+        const projection = advanceMcdSourceTime(clock.source);
+        clock.timeScale = projection.timeScale;
+        clock.aggregate = projection.aggregate;
+      }
+    }
     return { worldDelta: 0, appliedTimeScale: 0, timeScale: 0, aggregate: clock.aggregate };
   }
+  clock.realTime += unscaledDt;
   // Update consumes the previously applied scale; LateUpdate writes the next.
   const appliedTimeScale = clock.timeScale;
   const worldDelta = Math.fround(Math.fround(dt) * appliedTimeScale);
@@ -534,6 +550,7 @@ export function stepMcdGameplayClock(clock, {
     if (sourceLookSample === null || typeof sourceLookSample !== 'object') {
       throw new TypeError('sourceLookSample must provide source state and guards');
     }
+    clock.lookMode = 'source';
     // Reuse the original source-model Update: WORLD rotation, explicit gates,
     // warmup, delayed samples and buffered drain. Never invent a source camera.
     lookSourceResult = advanceMcdSourceLookTimeshift(
@@ -545,6 +562,7 @@ export function stepMcdGameplayClock(clock, {
     clock.lookPendingDegrees = 0;
     clock.yaw = yaw; clock.pitch = pitch; // keep the Web-only fallback anchored
   } else {
+    clock.lookMode = 'web';
     // Count the path between *simulation* frames, not just the net angle
     // from the last ~60 Hz sample. On 120+ Hz displays a quick aim reversal
     // otherwise cancels out before the next time-shifter measurement.
