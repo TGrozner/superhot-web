@@ -114,8 +114,8 @@ test('low-FPS grounded strides and a landing schedule cues while teleports remai
   assert.equal(tick(9, 0.6), null); // 6.36m teleport in 200ms is still rejected.
   assert.deepEqual(cues.map(cue => cue.cue), ['step', 'step']);
   // Existing bridge provides the eye position (y=1.6 in this test), not feet.
-  assert.equal(cues[0].position.y, 0.35);
-  assert.equal(cues[1].position.y, 0.35);
+  assert.ok(Math.abs(cues[0].position.y - 0.35) < 1e-10);
+  assert.ok(Math.abs(cues[1].position.y - 0.35) < 1e-10);
   assert.ok(Math.abs(cues[0].position.z + 0.22) < 1e-10);
   assert.ok(Math.abs(cues[1].position.z - 0.22) < 1e-10);
 
@@ -125,6 +125,6 @@ test('low-FPS grounded strides and a landing schedule cues while teleports remai
   assert.equal(tick(1.3, 1.4, false), null);
   assert.equal(tick(2.6, 1.6, true)?.status, 'started');
   assert.deepEqual(cues.map(cue => cue.cue), ['step', 'step', 'landing']);
-  assert.equal(cues[2].position.y, 0.35);
+  assert.ok(Math.abs(cues[2].position.y - 0.35) < 1e-10);
   assert.equal(tick(2.6, 1.8), null);
 });
