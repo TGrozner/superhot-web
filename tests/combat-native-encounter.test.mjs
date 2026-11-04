@@ -501,8 +501,11 @@ test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and 
   const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
   const alone=setup(data), solo=firstSpawn(alone,target);
   const together=setup(data), squad=firstSpawn(together,target);
-  const wingman={id:'armed-wingman',x:2,y:0,z:8,alive:true,active:true,
-    reaction:{hasWeapon:true}};
+  // A real local fireteam member, not an incomplete armed marker that can
+  // globally affect the flanking decision without an encounter runtime.
+  const wingman={...squad,id:'armed-wingman',x:2,y:0,z:8,clock:0,
+    reaction:{...squad.reaction},runtime:{...squad.runtime},
+    encounter:{...squad.encounter,route:null,target:null,webTacticalSide:-1}};
   const initial=p(squad.x,squad.y,squad.z);
 
   for(let frame=0;frame<8;frame++) {
@@ -525,7 +528,10 @@ test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and 
   const edge={playerFeet:p(14,0,9.8),playerPosition:p(14,1.6,9.8)};
   const edgeRuntime=setup(data), edgeEnemy=firstSpawn(edgeRuntime,edge);
   edgeEnemy.encounter.webTacticalSide=1; // offset points beyond the synthetic tile
-  advanceNativeEncounter(edgeRuntime,input([edgeEnemy,wingman],{...edge,scaledDeltaTime:.2}));
+  const edgeWingman={...wingman,x:2,y:0,z:8,clock:0,
+    reaction:{...wingman.reaction},runtime:{...wingman.runtime},
+    encounter:{...wingman.encounter,route:null,target:null}};
+  advanceNativeEncounter(edgeRuntime,input([edgeEnemy,edgeWingman],{...edge,scaledDeltaTime:.2}));
   assert.deepEqual(edgeEnemy.encounter.target,edge.playerFeet,
     'a flank beyond the baked surface fails closed to a real direct route');
   assert.ok(edgeEnemy.x>2,'an unavailable flank never strands an otherwise navigable chase');
