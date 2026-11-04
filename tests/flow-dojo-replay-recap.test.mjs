@@ -331,10 +331,15 @@ test('visible chrono challenge does not award success for an unshown hundredth o
   assert.equal(miss.completedChallenge, null,
     '22.02 beats the exact old PB but does not satisfy the displayed SOUS 22.0 target');
   assert.match(miss.text, /DÉFI À RETENTER : SOUS 22.0 S POUR LE RECORD/);
+  assert.match(miss.text, /22.02 s/, 'failed chrono must display its real hundredth');
   assert.deepEqual(miss.best.pendingChallenge, {kind:'time',target:22});
   const success = result(6, {best:miss.best, score:1120, elapsedSeconds:21.99});
   assert.equal(success.completedChallenge, 'time');
   assert.match(success.text, /DÉFI RÉUSSI : CHRONO/);
+  assert.match(success.text, /21.99 s/, 'successful chrono must show a time below 22.0');
+  const edge = result(6,{best:miss.best,score:1120,elapsedSeconds:21.999});
+  assert.equal(edge.completedChallenge,'time');
+  assert.match(edge.text, /21.999 s/, 'near-threshold success cannot display rounded 22.00 s');
 
   const historicalGoal = {...assigned.best,pendingChallenge:{kind:'time',target:22.049}};
   const historicalRetry = result(6, {best:historicalGoal,score:1000,elapsedSeconds:25});
