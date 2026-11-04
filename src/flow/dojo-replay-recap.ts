@@ -20,7 +20,7 @@ export interface DojoReplayRun {
   readonly elapsedSeconds: number;
 }
 
-export type DojoReplayChallengeKind = 'kills' | 'score' | 'time' | 'no-shots' | 'dodges' | 'style';
+export type DojoReplayChallengeKind = 'kills' | 'score' | 'time' | 'no-shots' | 'dodges' | 'style' | 'survive';
 export interface DojoReplayChallenge {
   readonly kind: DojoReplayChallengeKind;
   /** Current-run target; 0 is used for boolean goals. */
@@ -93,7 +93,7 @@ function isChallenge(value: unknown): value is DojoReplayChallenge {
   const kind = value['kind'], target = value['target'];
   if (kind === 'kills' || kind === 'score') return isCount(target) && target >= 1;
   if (kind === 'time') return target > 0;
-  return (kind === 'no-shots' || kind === 'dodges' || kind === 'style') && target === 0;
+  return (kind === 'no-shots' || kind === 'dodges' || kind === 'style' || kind === 'survive') && target === 0;
 }
 
 /**
@@ -167,6 +167,7 @@ function challengeCompleted(challenge: Readonly<DojoReplayChallenge> | null, run
   if (challenge === null) return false;
   if (challenge.kind === 'kills') return run.kills >= challenge.target;
   if (!run.victory) return false;
+  if (challenge.kind === 'survive') return true;
   if (challenge.kind === 'score') return run.score >= challenge.target;
   if (challenge.kind === 'time') return run.elapsedSeconds < challenge.target;
   if (challenge.kind === 'no-shots') return run.shots === 0;
@@ -312,9 +313,8 @@ export function createDojoReplayRecap(snapshot: unknown,
     replayTarget = stillNeeded > 0 && goal <= run.quota
       ? `VISE ${goal} ÉLIMINATION${goal === 1 ? '' : 'S'} AU PROCHAIN ESSAI`
       : 'SURVIS JUSQU’À LA VICTOIRE';
-    if (replayTarget !== 'SURVIS JUSQU’À LA VICTOIRE') {
-      nextChallenge = Object.freeze({kind:'kills',target:goal});
-    }
+    nextChallenge = Object.freeze(replayTarget === 'SURVIS JUSQU’À LA VICTOIRE'
+      ? {kind:'survive',target:0} : {kind:'kills',target:goal});
   } else if (best !== null && best.victories > 0) {
     // Compare only to the PREVIOUS same-quota PB, never a just-written PB.
     if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
@@ -344,6 +344,7 @@ export function createDojoReplayRecap(snapshot: unknown,
   const completedLabel = completedChallenge === null ? null : {
     'kills':'ÉLIMINATIONS', 'score':'SCORE', 'time':'CHRONO',
     'no-shots':'SANS TIRER', 'dodges':'3 ESQUIVES', 'style':'STYLE S',
+    'survive':'SURVIE',
   }[completedChallenge];
   const completedText = completedLabel === null ? '' : ` · DÉFI RÉUSSI : ${completedLabel}`;
   // Store exactly the next displayed goal, never a guess about a native run.
