@@ -6,12 +6,14 @@ function fakeAudio(state = 'running') {
   const nodes = [];
   const gains = [];
   const filters = [];
+  const delays = [];
   const param = (value = 0) => ({value,
     setValueAtTime(v) { this.value = v; },
     exponentialRampToValueAtTime(v) { this.value = v; },
     linearRampToValueAtTime(v) { this.value = v; },
     cancelScheduledValues() {}, setTargetAtTime(v) { this.value = v; }});
-  const base = () => ({connect(dst) { return dst; }, disconnect() {}});
+  const base = () => ({connections: [], connect(dst) { this.connections.push(dst); return dst; },
+    disconnect() { this.disconnected = true; }});
   const source = () => {
     const n = {...base(), frequency: param(), onended: null,
       start(...args) { this.startArgs = args; }, stop(...args) { this.stopped = true; this.stopArgs = args; }};
@@ -23,11 +25,12 @@ function fakeAudio(state = 'running') {
       attack: param(), release: param()}),
     createBuffer: (_channels, length) => ({getChannelData: () => new Float32Array(length)}),
     createBufferSource: source, createOscillator: source,
+    createDelay: () => { const n = {...base(), delayTime: param()}; delays.push(n); return n; },
     createBiquadFilter: () => { const n = {...base(), frequency: param()}; filters.push(n); return n; },
     createPanner: () => ({...base(), positionX: param(), positionY: param(),
       positionZ: param()}),
   };
-  return {ctx, nodes, gains, filters};
+  return {ctx, nodes, gains, filters, delays};
 }
 
 test('original Web gunshot is scheduled with HRTF and kept inside the voice budget', () => {
@@ -138,21 +141,52 @@ test('Web HRTF emitters soften with distance and follow the active listener', ()
   const mix = createWebImpactMix(ctx);
   assert.equal(mix.emit('enemy-shot', {position: {x: 1, y: 0, z: 0}}).spatial, true);
   assert.equal(mix.emit('enemy-shot', {position: {x: 50, y: 0, z: 0}}).spatial, true);
-  const lowpasses = filters.filter(node => node.type === 'lowpass');
+  // The shared fixed 2450Hz room-return filter is not a positional filter.
+  const lowpasses = filters.filter(node => node.type === 'lowpass' && node.frequency.value !== 2450);
   assert.equal(lowpasses.length, 2);
   assert.ok(lowpasses[0].frequency.value > lowpasses[1].frequency.value);
   assert.ok(lowpasses[1].frequency.value >= 1200);
   ctx.listener.positionX.value = 49;
   mix.emit('enemy-shot', {position: {x: 50, y: 0, z: 0}});
-  assert.equal(filters.filter(node => node.type === 'lowpass')[2].frequency.value,
+  assert.equal(filters.filter(node => node.type === 'lowpass' && node.frequency.value !== 2450)[2].frequency.value,
     lowpasses[0].frequency.value);
   mix.emit('enemy-shot'); // Non-positional cue has no extra coloration.
-  assert.equal(filters.filter(node => node.type === 'lowpass').length, 3);
+  assert.equal(filters.filter(node => node.type === 'lowpass' && node.frequency.value !== 2450).length, 3);
   mix.dispose();
 
   const oldBrowser = fakeAudio();
   const oldMix = createWebImpactMix(oldBrowser.ctx);
   assert.equal(oldMix.emit('enemy-shot', {position: {x: 50, y: 0, z: 0}}).status, 'started');
-  assert.equal(oldBrowser.filters.filter(node => node.type === 'lowpass').length, 0);
+  assert.equal(oldBrowser.filters.filter(node => node.type === 'lowpass' && node.frequency.value !== 2450).length, 0);
   oldMix.dispose();
+});
+
+test('Web room slapback is a shared, filtered combat send and does not echo footsteps', () => {
+  const {ctx, nodes, gains, filters, delays} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 2);
+  assert.equal(delays.length, 1);
+  assert.equal(delays[0].delayTime.value, 0.09);
+  const roomTone = filters.find(n => n.type === 'lowpass' && n.frequency.value === 2450);
+  assert.ok(roomTone);
+  const [master, weapons, impacts, steps, ambience, send, wet] = gains;
+  assert.equal(send.gain.value, 0.34);
+  assert.equal(wet.gain.value, 0.34);
+  assert.ok(weapons.connections.includes(send));
+  assert.ok(impacts.connections.includes(send));
+  assert.ok(!steps.connections.includes(send));
+  assert.ok(!ambience.connections.includes(send));
+  assert.ok(send.connections.includes(delays[0]));
+  assert.ok(delays[0].connections.includes(roomTone));
+  assert.ok(roomTone.connections.includes(wet));
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(mix.emit('shatter').status, 'started');
+  assert.equal(mix.emit('step').status, 'blocked'); // Priority cap unchanged.
+  assert.equal(delays.length, 1); // No per-event delay allocations.
+  assert.equal(mix.getActiveVoices(), 2);
+  mix.dispose();
+  assert.equal(delays[0].disconnected, true);
+  assert.equal(send.disconnected, true);
+  assert.equal(wet.disconnected, true);
+  assert.equal(master.disconnected, true);
+  assert.ok(nodes.length >= 4);
 });

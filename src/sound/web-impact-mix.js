@@ -28,6 +28,28 @@ export function createWebImpactMix(context, maxVoices = 24) {
     ambient.gain.value = 0.13;
     for (const bus of [weapons, impacts, footsteps, ambient])
         bus.connect(dynamics);
+    // Synthetic Web room slapback, not a recovered Unity reflection or impulse response.
+    // Post-spatialization send colors weapon/item and impact cues, not footsteps.
+    // One shared delay/filter pair keeps node count constant during burst combat.
+    const roomReflections = [];
+    if (typeof context.createDelay === 'function') {
+        const send = context.createGain();
+        const delay = context.createDelay(0.25);
+        const tone = context.createBiquadFilter();
+        const returnGain = context.createGain();
+        send.gain.value = 0.34;
+        delay.delayTime.value = 0.09;
+        tone.type = 'lowpass';
+        tone.frequency.value = 2450;
+        returnGain.gain.value = 0.34;
+        weapons.connect(send);
+        impacts.connect(send);
+        send.connect(delay);
+        delay.connect(tone);
+        tone.connect(returnGain);
+        returnGain.connect(dynamics);
+        roomReflections.push(send, delay, tone, returnGain);
+    }
     const noiseBed = context.createBuffer(1, Math.ceil(context.sampleRate * 0.5), context.sampleRate);
     const samples = noiseBed.getChannelData(0);
     let seed = 0x3ad9f12;
@@ -242,6 +264,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
         disposed = true;
         for (const voice of [...voices, ...retired])
             release(voice);
+        for (const node of roomReflections)
+            node.disconnect();
         for (const bus of [weapons, impacts, footsteps, ambient])
             bus.disconnect();
         dynamics.disconnect();
