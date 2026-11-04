@@ -217,7 +217,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     } else {
       out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' ? impacts : weapons);
     }
-    const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : 2, priority};
+    const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority};
     voices.add(voice);
     const ended = () => {
       voice.pending--;
@@ -311,6 +311,25 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     voice.sources.push(osc);
     osc.start(at);
     osc.stop(at + duration);
+    // Web-authored short ear ring on player damage. It trails the impact
+    // without changing the native hit clip, mixer routing or voice budget.
+    // The pitch and envelope are original Web sound design, NOT Unity data.
+    if (cue === 'player-hit') {
+      const ring = context.createOscillator();
+      ring.type = 'sine';
+      ring.frequency.setValueAtTime(970 * texturePitch, at);
+      ring.frequency.exponentialRampToValueAtTime(570 * texturePitch, at + 0.42);
+      const ringGain = context.createGain();
+      ringGain.gain.setValueAtTime(0.0001, at);
+      ringGain.gain.linearRampToValueAtTime(volume * 0.115, at + 0.024);
+      ringGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
+      ring.connect(ringGain);
+      ringGain.connect(out);
+      ring.onended = ended;
+      voice.sources.push(ring);
+      ring.start(at);
+      ring.stop(at + 0.42);
+    }
     // Creative Web crystal fracture: two short inharmonic glass rings.
     // Reuses the existing spatial output and the same 24-voice budget.
     if (cue === 'shatter') {
