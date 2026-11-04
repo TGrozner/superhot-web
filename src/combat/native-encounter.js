@@ -32,6 +32,28 @@ const WEB_DISENGAGE = Object.freeze({
   diagonalBias: 0.6,
 });
 
+// J3 Web-authored paired pressure: one armed squadmate closes the gap while
+// others hold their firing distance. Pick by stable actor identity, not array
+// iteration or frame timing; an ally's death ends the push immediately.
+// This is a navigation goal only and does not authorize an attack or bypass
+// capsule collisions. No native MCD tactical claim.
+const WEB_SQUAD_PUSH = Object.freeze({
+  stopDistanceFraction: 0.67,
+  minimumStopBodyRadii: 3.2,
+  disengageFraction: 0.62,
+});
+function webSquadBreacher(enemy, enemies) {
+  if (!enemy.reaction?.hasWeapon) return false;
+  let first=null, count=0;
+  for (const candidate of enemies) {
+    if (!participating(candidate) || candidate.reaction?.hasWeapon !== true ||
+        !candidate.encounter) continue;
+    count++;
+    if (first===null || String(candidate.id)<String(first.id)) first=candidate;
+  }
+  return count>1 && first===enemy;
+}
+
 /** Keep the native collision/navmesh as the authority even for Web-only
  * tactics. Never teleport an actor or cross a blocking actor/player.
  * Blocked lanes reverse once, then the enemy simply holds its position.
@@ -393,13 +415,23 @@ function moveEnemy(runtime, enemy, input) {
   state.webAllyBlockingShot=worldMuzzleClear &&
     webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,playerPosition,enemies);
   state.canAttack=worldMuzzleClear && !state.webAllyBlockingShot;
-  const stopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
+  // A single, stable armed squadmate pressures the player while its allies
+  // maintain their normal firing ring. No assigned partner, blocked line of
+  // sight or deferred shot means the ordinary chase/stop behavior applies.
+  const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
+    webSquadBreacher(enemy,enemies);
+  const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
+  const stopDistance=breaching
+    ? Math.min(normalStopDistance,Math.max(
+        runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
+        normalStopDistance*WEB_SQUAD_PUSH.stopDistanceFraction))
+    : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
   const stop=state.visible && playerDistance <= stopDistance;
-  // Web-only close-quarters pressure: give ground before resuming strafing.
-  // Using the source stop radius as a ceiling avoids inventing a larger chase
-  // distance; the five-body-radius cap keeps this a near-contact reaction.
-  const disengageDistance=Math.min(stopDistance*WEB_DISENGAGE.stopRadiusFraction,
+  // The pushing actor's close-contact retreat must not cancel the shorter
+  // approach ring. Everyone else retains the original Web retreat distance.
+  const disengageDistance=Math.min(stopDistance*(breaching
+    ? WEB_SQUAD_PUSH.disengageFraction : WEB_DISENGAGE.stopRadiusFraction),
     runtime.body.radius*WEB_DISENGAGE.maximumBodyRadii);
   const disengaging=stop && armed && !enemy.runtime.pendingShot &&
     playerDistance<disengageDistance;
@@ -418,7 +450,8 @@ function moveEnemy(runtime, enemy, input) {
     tacticalTime%WEB_STRAFE.cycleSeconds<
       (needsFiringLane ? WEB_STRAFE.peekSeconds : WEB_STRAFE.activeSeconds);
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
-    (disengaging || tactical) ? 'walking' : stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
+    (disengaging || tactical) ? 'walking' : stop ? 'standing'
+      : armed && !breaching ? 'walking' : 'running',scaledDeltaTime);
   const dx=playerPosition.x-start.x, dz=playerPosition.z-start.z;
   if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   if (stop) {
