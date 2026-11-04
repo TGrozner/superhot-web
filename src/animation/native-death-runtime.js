@@ -5,6 +5,9 @@ import { moveNativeFragmentSphere } from '../vfx/native-fragment-physics.js';
 const axes=['x','y','z'];
 // Browser-side frame budget only: never advertise it as a Unity fixed-step policy.
 const WEB_MAX_DEATH_SUBSTEPS = 4;
+// Web-only grounded rest threshold: skip repeated full PBD passes for a corpse
+// that has been continuously supported and truly motionless for a short time.
+const WEB_GROUNDED_REST_SECONDS = 0.3;
 const zero=()=>({x:0,y:0,z:0});
 const point=m=>({x:m[12],y:m[13],z:m[14]});
 const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
@@ -153,7 +156,8 @@ export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatr
   });
   const runtime={definition,collisionScene,bodies,joints,byBone,sourceWorld,sourceLocal,inverseModel:inverse(model),
     boneWorldMatrices:sourceWorld.map(m=>m.slice()),boneModelMatrices:new Float32Array(boneModelMatrices),
-    elapsed:0,cleanupRequested:false,gravity:vector(definition.gravity),physics:'source-anchored-angular-PBD-static-contacts-not-PhysX'};
+    elapsed:0,cleanupRequested:false,resting:false,restCandidateSeconds:0,
+    restSupportBox:null,gravity:vector(definition.gravity),physics:'source-anchored-angular-PBD-static-contacts-not-PhysX'};
   runtime.getBoneWorldMatrix=index=>runtime.boneWorldMatrices[index]??null;
   return runtime;
 }
@@ -164,6 +168,10 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   const body=boneIndex==null?runtime.bodies.find(b=>b.source.partId===partId):runtime.byBone.get(boneIndex);
   if(!body)throw new RangeError('Impact has no source Rigidbody');
   const value=vector(force);
+  if(mode==='Impulse'||mode==='ConstantForce') {
+    // An actual later impact/force must always wake a settled Web corpse.
+    runtime.resting=false;runtime.restCandidateSeconds=0;runtime.restSupportBox=null;
+  }
   if(mode==='Impulse') {
     const contactPoint=hitPoint===null?null:vector(hitPoint);
     // Web-only game feel: a verified, localized hit should move the whole
@@ -367,6 +375,22 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
     return {boneModelMatrices:runtime.boneModelMatrices,contacts:[],
       cleanupRequested:false,droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
   }
+  if(limitWebFrameWork && runtime.resting) {
+    const support=runtime.restSupportBox;
+    if(support?.enabled && runtime.collisionScene.boxes.includes(support)) {
+      // The source Kill clock still advances while the purely Web solver
+      // sleeps. This does not alter cleanup timing or source-authored poses.
+      runtime.elapsed=target;
+      const cleanupRequested=runtime.elapsed>=runtime.definition.cleanupAfterSeconds;
+      if(cleanupRequested)runtime.cleanupRequested=true;
+      return {boneModelMatrices:runtime.boneModelMatrices,contacts:[],
+        cleanupRequested,droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
+    }
+    // A formerly supporting source collider can be disabled (e.g. a door).
+    // Resume integration instead of leaving a corpse hovering on stale ground.
+    runtime.resting=false;runtime.restCandidateSeconds=0;runtime.restSupportBox=null;
+  }
+  const restBefore=limitWebFrameWork?runtime.bodies.map(body=>body.world.slice()):null;
   const contacts=[];
   // Web game-feel policy: at 30 fps, four exact 150 Hz source steps
   // cover only 26.7 ms of a 33.3 ms frame. The corpse then falls in slow
@@ -432,6 +456,35 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       // Likewise, do not create spin from a joint-correction quaternion.
     }
     runtime.elapsed+=dt;remaining-=dt;composePose(runtime);
+  }
+  if(restBefore && acceptedDelta>0) {
+    // Rest only after a REAL upward static contact and 300ms with *all*
+    // bodies slow and their solved WORLD poses nearly unchanged. Never sleep
+    // free-falling, spinning or actively forced limbs. This is a Web game-feel
+    // and CPU budget policy, NOT Unity/PhysX sleeping.
+    const groundContact=contacts.find(c=>c.normal?.y>0.55 && c.collider);
+    const support=groundContact && runtime.collisionScene.boxes.find(
+      box=>box.enabled && box.collider===groundContact.collider);
+    const steady=!!support && runtime.bodies.every((body,i)=>{
+      if(body.forces.length || length(body.velocity)>0.07 ||
+          length(body.angularVelocity)>0.08)return false;
+      const before=restBefore[i];
+      if(!before)return false;
+      if(length(sub(body.position,point(before)))>0.0015)return false;
+      for(const index of [0,1,2,4,5,6,8,9,10])
+        if(Math.abs(body.world[index]-before[index])>0.004)return false;
+      return true;
+    });
+    if(steady) {
+      runtime.restCandidateSeconds+=acceptedDelta;
+      if(runtime.restCandidateSeconds>=WEB_GROUNDED_REST_SECONDS){
+        runtime.resting=true;
+        runtime.restSupportBox=support;
+      }
+    }else{
+      runtime.restCandidateSeconds=0;
+      runtime.restSupportBox=null;
+    }
   }
   runtime.elapsed=target;
   const cleanupRequested=!runtime.cleanupRequested&&runtime.elapsed>=runtime.definition.cleanupAfterSeconds;

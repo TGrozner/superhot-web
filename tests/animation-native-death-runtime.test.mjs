@@ -237,3 +237,48 @@ test('Web ragdoll keeps natural 30 Hz fall without an unbounded hitch catch-up',
     'a single hitch must not integrate the full fall in one unstable catch-up');
   assert.ok(Array.from(hitched.boneModelMatrices).every(Number.isFinite));
 });
+
+
+test('Web corpses settle only on live grounded contact, sleep, then wake for real impacts or lost support',()=>{
+  const grounded=()=>{
+    const def=definition();
+    def.bodies=[def.bodies[0]];
+    def.joints=[];
+    const scene=floor();
+    const runtime=createNativeDeathRuntime({
+      definition:def,collisionScene:scene,
+      boneModelMatrices:new Float32Array([
+        ...matrix(0,0,0),...matrix(0,0.1,0),
+        ...matrix(0,1.1,0),...matrix(0.2,1.1,0),
+      ]),
+      modelMatrix:matrix(0,0,0),initialVelocity:{x:0,y:0,z:0},
+    });
+    for(let step=0;step<45;step++)
+      advanceNativeDeathRuntime(runtime,1/60,{limitWebFrameWork:true});
+    assert.equal(runtime.resting,true,'stable floor contacts should retire expensive PBD passes');
+    return {runtime,scene};
+  };
+
+  const {runtime}=grounded();
+  const settledPose=Array.from(runtime.boneModelMatrices);
+  const beforeTime=runtime.elapsed;
+  const tick=advanceNativeDeathRuntime(runtime,1/30,{limitWebFrameWork:true});
+  assert.deepEqual(Array.from(runtime.boneModelMatrices),settledPose);
+  assert.deepEqual(tick.contacts,[]);
+  near(runtime.elapsed,beforeTime+1/30);
+
+  const yBeforeHit=runtime.bodies[0].position.y;
+  applyNativeDeathForce(runtime,{boneIndex:1,mode:'Impulse',vector:{x:0,y:12,z:0}});
+  assert.equal(runtime.resting,false,'a later projectile must wake the solved body');
+  advanceNativeDeathRuntime(runtime,1/60,{limitWebFrameWork:true});
+  assert.ok(runtime.bodies[0].position.y>yBeforeHit+0.001,
+    'woken upward impulse must move the body away from its support');
+
+  const displaced=grounded();
+  const originalY=displaced.runtime.bodies[0].position.y;
+  displaced.scene.boxes[0].enabled=false;
+  advanceNativeDeathRuntime(displaced.runtime,1/30,{limitWebFrameWork:true});
+  assert.equal(displaced.runtime.resting,false,'disabled source support must wake physics');
+  assert.ok(displaced.runtime.bodies[0].position.y<originalY-0.001,
+    'body must fall when its support is removed');
+});
