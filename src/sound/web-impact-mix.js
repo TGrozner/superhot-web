@@ -39,6 +39,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
     let drone = null;
     let disposed = false;
     let mixLevel = 1;
+    // Web-authored texture cycle: repeated rapid shots should not be sample-identical.
+    let transientSerial = 0;
     /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
     function setMixLevel(level) {
         if (!Number.isFinite(level) || level < 0 || level > 1)
@@ -104,6 +106,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
             }
             release(victim);
         }
+        // Each successful cue uses a fresh noise region and a subtle tonal detune.
+        // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
+        const textureIndex = transientSerial++ % 8;
+        const texturePitch = 1 + (textureIndex - 3.5) * 0.012;
         const out = context.createGain();
         out.gain.value = intensity;
         let panner = null;
@@ -143,11 +149,11 @@ export function createWebImpactMix(context, maxVoices = 24) {
         burst.connect(out);
         noise.onended = ended;
         voice.sources.push(noise);
-        noise.start(at, 0, duration);
+        noise.start(at, textureIndex * 0.025, duration);
         const osc = context.createOscillator();
         osc.type = cue === 'player-shot' || cue === 'enemy-shot' ? 'sawtooth' : 'triangle';
-        osc.frequency.setValueAtTime(startHz, at);
-        osc.frequency.exponentialRampToValueAtTime(endHz, at + duration);
+        osc.frequency.setValueAtTime(startHz * texturePitch, at);
+        osc.frequency.exponentialRampToValueAtTime(endHz * texturePitch, at + duration);
         const body = context.createGain();
         body.gain.setValueAtTime(volume * 0.48, at);
         body.gain.exponentialRampToValueAtTime(0.0001, at + duration);

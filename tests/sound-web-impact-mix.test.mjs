@@ -96,3 +96,19 @@ test('Web accents can be trimmed beside original-mode buffers without scheduling
   assert.equal(layer.emit('player-shot').status, 'started');
   layer.dispose();
 });
+
+test('rapid Web shots rotate noise slices and subtly detune rather than repeat identically', () => {
+  const {ctx, nodes} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 8);
+  for (let i = 0; i < 8; i++) {
+    assert.equal(mix.emit('player-shot').status, 'started');
+  }
+  const noises = nodes.filter((_, i) => i % 2 === 0);
+  const tones = nodes.filter((_, i) => i % 2 === 1);
+  assert.ok(noises.every((n, i) => Math.abs(n.startArgs[1] - i * 0.025) < 1e-10));
+  const pitches = tones.map(n => n.frequency.value);
+  assert.ok(pitches.every(hz => hz >= 49 && hz <= 55));
+  assert.equal(new Set(pitches).size, 8);
+  assert.ok(noises.every(n => n.startArgs[2] === 0.14));
+  mix.dispose();
+});
