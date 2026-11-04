@@ -856,7 +856,8 @@ function shoot() {
         direction:cameraAxes(state.camera.yaw,state.camera.pitch).forward,kind:'melee',
       });
     }
-    else audio.empty();
+    if (nativeGameplay()) audio.punch({hit: Boolean(hit), position: state.camera});
+    else if (!hit) audio.empty();
     return;
   }
   if (state.ammo <= 0) {
@@ -1579,7 +1580,8 @@ function update(dt, activeRealDt) {
     }
   }
   if (state.transition>0) {
-    state.transition-=dt;
+    // A Dojo victory should not take twice as long at 10 FPS because physics dt is capped.
+    state.transition-=nativeGameplay() ? activeRealDt : dt;
     if (state.transition<=0) {
       if (containersPreviewEnabled || state.levelIndex === LEVELS.length - 1) finish(true);
       else {state.health=Math.min(3,state.health+1);loadLevel(state.levelIndex+1);}
