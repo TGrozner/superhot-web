@@ -119,7 +119,7 @@ test('stolen Web voice fades for 8ms rather than hard-cutting, and cleans up', (
   assert.equal(mix.emit('step').status, 'started');
   const priorNoise = nodes[0];
   const priorTone = nodes[1];
-  const priorGain = gains.at(-1);
+  const priorGain = gains.at(-3); // voice output, before burst and oscillator body
   assert.equal(mix.emit('player-shot').status, 'started');
   assert.equal(mix.getActiveVoices(), 1);
   assert.deepEqual(priorNoise.stopArgs, [ctx.currentTime + 0.008]);
