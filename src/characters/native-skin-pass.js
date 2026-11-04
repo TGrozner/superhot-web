@@ -683,6 +683,37 @@ function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
   }
 }
 
+
+/**
+ * Web-only independent head gaze on the existing sampled skeleton.
+ * Rotate only the head descendants in model space, never the hips, arms or
+ * weapon socket. This is NOT an Animator/IK claim or an additional draw.
+ */
+function applyWebHeadLook(loaded, scratch, head, affected, yaw) {
+  const globals = scratch.globals;
+  const pivot = head * 16;
+  const px = globals[pivot + 12], pz = globals[pivot + 14];
+  const cosine = Math.cos(yaw), sine = Math.sin(yaw);
+  for (const bone of affected) {
+    const offset = bone * 16;
+    for (let column = 0; column < 4; column++) {
+      const entry = offset + column * 4;
+      const translation = column === 3;
+      const x = globals[entry] - (translation ? px : 0);
+      const z = globals[entry + 2] - (translation ? pz : 0);
+      globals[entry] = cosine * x + sine * z + (translation ? px : 0);
+      globals[entry + 2] = -sine * x + cosine * z + (translation ? pz : 0);
+    }
+  }
+  // The GPU palette must receive the same head transforms as the CPU hit pose.
+  for (let index = 0; index < loaded.weightedBoneIndices.length; index++) {
+    const bone = loaded.weightedBoneIndices[index];
+    if (!affected.includes(bone)) continue;
+    multiplyInto(globals, bone * 16, loaded.mesh.inverseBindMatrices, bone * 16,
+      scratch.palette, index * 16);
+  }
+}
+
 function composeInto(position, rotation, scale, output) {
   const x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3];
   const xx = x*x, yy = y*y, zz = z*z, xy = x*y, xz = x*z, yz = y*z;
@@ -1269,6 +1300,23 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const hip = loaded.bones.findIndex(bone => /hip|pelvis/i.test(bone.name));
   const spine = loaded.bones.findIndex(bone => /spine/i.test(bone.name));
   const webLeanPivot = hip >= 0 ? hip : spine >= 0 ? spine : 0;
+  // Named Head is the sole allowed pivot: never invent bone identities.
+  const webHeadIndex = loaded.bones.findIndex(bone =>
+    /(?:^|[^a-zA-Z])head$/i.test(bone.name));
+  const webHeadBones = [];
+  if (webHeadIndex >= 0) {
+    for (let bone = webHeadIndex; bone < loaded.jointCount; bone++) {
+      for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
+        if (ancestor === webHeadIndex) {
+          webHeadBones.push(bone);
+          break;
+        }
+      }
+    }
+  }
+  // Protect every hand/weapon socket even on unfamiliar source hierarchies.
+  const webHeadTrackingAvailable = webHeadIndex >= 0 &&
+    !webHeadBones.includes(loaded.weaponAttachment?.bone);
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1298,7 +1346,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
                   cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
                   color, transition = null, action = null, solvedPose = null,
-                  webPoseLean = null, webHitFlash = 0, webFireGlow = 0 } = {}) {
+                  webPoseLean = null, webHeadLook = null, webHitFlash = 0, webFireGlow = 0 } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1352,6 +1400,13 @@ export function createNativeSkinPass(gl, sourcePackage, {
       }
       if (solvedPose !== null) {
         throw new TypeError('A solved death pose cannot also receive a Web-only animation lean');
+      }
+    }
+    if (webHeadLook !== null) {
+      if (!webHeadTrackingAvailable || !webHeadLook || typeof webHeadLook !== 'object' ||
+          !Number.isFinite(webHeadLook.yaw) || Math.abs(webHeadLook.yaw) > .38 ||
+          solvedPose !== null) {
+        throw new RangeError('Web head gaze requires a live, independent Head bone and bounded yaw');
       }
     }
     if (!Number.isFinite(webHitFlash) || webHitFlash < 0 || webHitFlash > 1) {
@@ -1428,6 +1483,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
       applyWebPoseLean(loaded, scratch, webLeanPivot,
         webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0);
     }
+    if (webHeadLook !== null && webHeadLook.yaw !== 0) {
+      applyWebHeadLook(loaded, scratch, webHeadIndex, webHeadBones, webHeadLook.yaw);
+    }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
       // precomposed fire path has already composed the same final hand pose here.
@@ -1471,6 +1529,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       nativeClipSampled: solvedPose === null, runtimeEnemyInstanceVerified: false,
       solvedPoseApplied: solvedPose !== null,
       solvedPoseProvenance: solvedPose?.provenance ?? null,
+      webHeadLookApplied: webHeadLook !== null && webHeadLook.yaw !== 0,
+      webHeadLookDesign: webHeadLook !== null ? 'Web-only independent head gaze' : null,
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       webHitFlashIntensity: webHitFlash,
@@ -1540,6 +1600,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
     actionLayers: loaded.actionLayers, actionPrecompositions: loaded.actionPrecompositions,
     availableActions: loaded.availableActions,
     availableTransitions: loaded.availableTransitions,
+    webHeadTrackingAvailable,
     rig,
     createInstance, createStateInstance, loadInstance, draw, dispose,
   });
