@@ -5,6 +5,7 @@
  * kills, modify the encounter quota, reset combat or own timers/inputs.
  * A completed 6-kill round and a 7-kill round have SEPARATE records.
  * Creative Web streaks are stored in the existing per-quota localStorage key.
+ * Only games in the SAME format contribute to its streak, not all Dojo runs.
  * Caller owns persistence and UI. No assets or private data required.
  */
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -148,7 +149,7 @@ function displayRunSeconds(seconds, goal) {
     }
     return String(seconds);
 }
-function existingChallengePrompt(challenge) {
+function existingChallengePrompt(challenge, quota) {
     switch (challenge.kind) {
         case 'kills':
             return `VISE ${challenge.target} ÉLIMINATION${challenge.target === 1 ? '' : 'S'} AU PROCHAIN ESSAI`;
@@ -158,7 +159,7 @@ function existingChallengePrompt(challenge) {
         case 'dodges': return 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
         case 'style': return 'DÉCROCHE LE STYLE S';
         case 'survive': return 'SURVIS JUSQU’À LA VICTOIRE';
-        case 'streak': return `FAIS ${challenge.target} VICTOIRES D’AFFILÉE`;
+        case 'streak': return `FAIS ${challenge.target} VICTOIRES D’AFFILÉE (FORMAT ${quota} UNIQUEMENT)`;
     }
 }
 // Meaningful feedback after a missed persistent goal, derived from the FINAL
@@ -188,8 +189,8 @@ function describeUnfinishedChallenge(challenge, run, currentStreak) {
     }
     if (challenge.kind === 'streak') {
         const missing = Math.max(0, challenge.target - currentStreak);
-        return run.victory ? `SÉRIE ${currentStreak}/${challenge.target} · ${missing} VICTOIRE${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'}`
-            : `SÉRIE BRISÉE · REPARS DE 0/${challenge.target}`;
+        return run.victory ? `SÉRIE ${currentStreak}/${challenge.target} · ${missing} VICTOIRE${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'} · FORMAT ${run.quota} UNIQUEMENT`
+            : `SÉRIE BRISÉE · REPARS DE 0/${challenge.target} · FORMAT ${run.quota} UNIQUEMENT`;
     }
     if (challenge.kind === 'style') {
         const grade = gradeDojoStyle(run).grade;
@@ -326,9 +327,9 @@ export function createDojoReplayRecap(snapshot, best = null) {
         ? ` · MAÎTRISE ${masteryCount}/3${newMedals.length ? ` · MÉDAILLE : ${newMedals.join(' + ')}` : ''}`
         : '';
     const streakText = run.victory && nextBest !== null && nextBest.currentStreak >= 2
-        ? ` · SÉRIE ${nextBest.currentStreak}${nextBest.currentStreak > (best?.bestStreak ?? 0)
+        ? ` · SÉRIE ${nextBest.currentStreak} (FORMAT ${run.quota} UNIQUEMENT)${nextBest.currentStreak > (best?.bestStreak ?? 0)
             ? ' · RECORD SÉRIE' : ''}`
-        : !run.victory && previousStreak > 0 ? ` · SÉRIE ${previousStreak} BRISÉE` : '';
+        : !run.victory && previousStreak > 0 ? ` · SÉRIE ${previousStreak} BRISÉE (FORMAT ${run.quota} UNIQUEMENT)` : '';
     // Web-only post-round coaching. In particular a first win or a loss
     // deserves a concrete next attempt, not only a record comparison. Keep
     // provenance separate from native MCD RunEnding and never mutate gameplay.
@@ -379,7 +380,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
     if (run.victory && replayTarget === null && nextBest !== null &&
         nextBest.masteryMask === 7 && nextBest.bestStreak < Number.MAX_SAFE_INTEGER) {
         const target = Math.max(2, nextBest.bestStreak + 1);
-        replayTarget = `FAIS ${target} VICTOIRES D’AFFILÉE`;
+        replayTarget = `FAIS ${target} VICTOIRES D’AFFILÉE (FORMAT ${run.quota} UNIQUEMENT)`;
         nextChallenge = Object.freeze({ kind: 'streak', target });
     }
     // Keep the PREVIOUS assigned challenge until a real round completes it.
@@ -387,7 +388,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
     const retainingChallenge = priorChallenge !== null && completedChallenge === null;
     if (retainingChallenge) {
         nextChallenge = priorChallenge;
-        replayTarget = existingChallengePrompt(priorChallenge);
+        replayTarget = existingChallengePrompt(priorChallenge, run.quota);
     }
     const retryDetail = retainingChallenge && priorChallenge !== null
         ? describeUnfinishedChallenge(priorChallenge, run, nextBest?.currentStreak ?? 0) : null;
@@ -397,7 +398,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
     const completedLabel = completedChallenge === null ? null : {
         'kills': 'ÉLIMINATIONS', 'score': 'SCORE', 'time': 'CHRONO',
         'no-shots': 'SANS TIRER', 'dodges': '3 ESQUIVES', 'style': 'STYLE S',
-        'survive': 'SURVIE', 'streak': 'SÉRIE DE VICTOIRES',
+        'survive': 'SURVIE', 'streak': `SÉRIE DE VICTOIRES FORMAT ${run.quota}`,
     }[completedChallenge];
     const completedText = completedLabel === null ? '' : ` · DÉFI RÉUSSI : ${completedLabel}`;
     // Store exactly the next displayed goal, never a guess about a native run.
