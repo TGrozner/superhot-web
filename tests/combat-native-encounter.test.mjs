@@ -574,7 +574,7 @@ test('J3 Web final-survivor pressure closes the finishing gap but yields to rein
     'closer pursuit cannot grant firing permission without a muzzle');
 
   const reinforcement={
-    ...last,id:'native-encounter-0',x:2,z:6,clock:0,
+    ...last,id:'armed-reinforcement-0',x:2,z:6,clock:0,
     reaction:{...last.reaction},runtime:{...last.runtime},
     encounter:{...last.encounter,route:null,target:null},
   };
