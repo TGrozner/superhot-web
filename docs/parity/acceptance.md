@@ -613,8 +613,9 @@ Node fixture, a GPU draw submission or a clicked button with native 1:1 parity.
 The recorder now includes bounded scalar-only `gameplay.visual` metadata from
 the same already-rendered browser frame: number of source-world draw calls,
 hands draw calls/triangles, the reported hand pose/socket flags, and whether
-the source door-warning envelope and Web spotlights are active. It does **not**
-store original textures, model names, IDs, shader contents, pixel images,
+the source warning, projector draw receipts and separate creative Web red-wash
+GPU draw receipts are active. Submission is **not** visible pixel proof.
+It does **not** store original textures, model names, IDs, shader contents, pixel images,
 proprietary meshes, camera paths, or assets. Missing fields stay `null`.
 Known warning status tokens are allowlisted, not copied from arbitrary source
 strings.
@@ -651,8 +652,8 @@ especially door warning ROI, and a second time-separated frame. The
 snapshot-only report has **no pixels, no matched native camera and no
 reference RGB/light measurements**. Visual parity stays **UNKNOWN**. The
 SH-10 script does not edit a gameplay/renderer owner file; the first proven
-Web spotlights gap goes to SH-05/SH-13, and contact/physics issues go to
-SH-03/SH-06.
+Any no-light GPU submission candidate goes to SH-05/SH-13 only after an
+actual doorway/camera viewport check; contact/physics issues go to SH-03/SH-06.
 
 **Clock recorder correction:** `gameplay.moving` is now a **Web keyboard
 axis intent** (physical `KeyboardEvent.code`) matching the real
