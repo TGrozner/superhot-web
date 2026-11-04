@@ -1115,8 +1115,14 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
         ...identity(), ...moved(0,-1,0), ...moved(0,-1.4,0), ...moved(-1,0,0),
       ],
     },
-    clips: {idle: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]}},
-    states: {idle: {clip:'idle', playback:'loop', speed:1}},
+    clips: {
+      idle: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
+      hit: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
+    },
+    states: {
+      idle: {clip:'idle', playback:'loop', speed:1},
+      hit: {clip:'hit', playback:'clamp', speed:1},
+    },
     weaponAttachment: {
       bone:'hand', localMatrix:identity(),
       source:'authored head-gaze fixture', coordinates:'authored test basis',
@@ -1189,6 +1195,38 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   }});
   assert.equal(dead.webHeadLookApplied, false, 'externally solved death remains authoritative');
   assert.equal(dead.actorWebHeadLook, null);
+
+  // An accepted real hit state may add a secondary, Web-only head whiplash.
+  // It must never move weapon attachments, shoulders or the root independently.
+  const hit = (time, origin, solvedPose = null) => actors.drawActor({
+    actorId:'hit-watchman',
+    pose:{state:'hit', time, hitOrigin:origin, hitEventId:'bullet-1', solvedPose},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:[-5, 1.4, 0], shaderTime:1 + time,
+    color:[.8,.1,.2,1],
+  });
+  const initialHit = hit(0, {x:5,y:1,z:0});
+  assert.equal(initialHit.actorWebHeadLook, null, 'firing/contact edge does not snap the head');
+  const stagger = hit(.12, {x:5,y:1,z:0});
+  assert.equal(stagger.actorWebHeadLook?.design, 'Web-only secondary hit head whiplash');
+  assert.ok(stagger.actorWebHeadLook.roll < -.08, 'head bends away from a right-side impact');
+  assert.equal(stagger.webHeadLookApplied, true);
+
+  const torsoOnly = pass.draw({
+    instance:pass.createStateInstance('hit'), time:.12,
+    modelMatrix:identity(), viewProjection:identity(),
+    color:[.8,.1,.2,1], webPoseLean:stagger.actorWebPoseReaction,
+  });
+  for (const bone of [0,1,3]) {
+    near(Array.from(stagger.boneModelMatrices.slice(bone*16,(bone+1)*16)),
+      Array.from(torsoOnly.boneModelMatrices.slice(bone*16,(bone+1)*16)));
+  }
+  near(Array.from(stagger.weaponAttachmentMatrix),
+    Array.from(torsoOnly.weaponAttachmentMatrix));
+  assert.ok(Math.abs(stagger.boneModelMatrices[2*16] - torsoOnly.boneModelMatrices[2*16]) > .02,
+    'only the existing Head subtree receives the second deformation');
+  const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  assert.ok(palette.length > 0, 'head whiplash uses the existing GPU palette');
   pass.dispose();
 });
 
