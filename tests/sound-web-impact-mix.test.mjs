@@ -280,7 +280,7 @@ test('live shatter gains two glass rings without stealing more voices or leaving
   assert.equal(mix.getActiveVoices(), 0);
 });
 
-test('Web player shot layers a delayed slide action without new sources or enemy-side changes', () => {
+test('Web player shot layers a delayed slide action independently of enemy muzzle pressure', () => {
   const {ctx, nodes, filters, gains} = fakeAudio();
   const ramps = [];
   const createGain = ctx.createGain;
@@ -306,8 +306,8 @@ test('Web player shot layers a delayed slide action without new sources or enemy
     Math.abs(at - (ctx.currentTime + 0.054)) < 1e-12));
   assert.equal(mix.emit('enemy-shot').status, 'started');
   assert.equal(nodes.length, 4);
-  assert.equal(nodes[2].connections.length, 2);
-  assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
+  assert.equal(nodes[2].connections.length, 3); // Enemy burst, crack and its own pressure layer.
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 2); // Player slide + enemy pressure.
   mix.dispose();
 });
 
@@ -418,4 +418,35 @@ test('Web unarmed punch distinguishes air swing from a contact crunch in one voi
   assert.equal(mix.getActiveVoices(), 2);
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
+});
+
+test('active enemy shots carry a spatial Web-only muzzle pressure layer without another voice', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const ramps = [];
+  const createGain = ctx.createGain;
+  ctx.createGain = () => {
+    const gain = createGain();
+    const original = gain.gain.linearRampToValueAtTime;
+    gain.gain.linearRampToValueAtTime = function(value, time) {
+      ramps.push({gain, value, time});
+      return original.call(this, value, time);
+    };
+    return gain;
+  };
+  const mix = createWebImpactMix(ctx, 2);
+  assert.equal(mix.emit('enemy-shot', {position: {x: 4, y: 1, z: -2}}).spatial, true);
+  assert.equal(nodes.length, 2); // One noise buffer and one oscillator, as before.
+  assert.equal(nodes[0].connections.length, 3); // Burst, crack and muzzle-pressure coloration.
+  const lowBand = filters.find(f => f.type === 'bandpass' && f.frequency.value === 720);
+  assert.ok(lowBand);
+  const pressure = gains.find(g => lowBand.connections.includes(g));
+  assert.ok(pressure);
+  assert.ok(ramps.some(r => r.gain === pressure &&
+    Math.abs(r.value - 0.42 * 0.45) < 1e-12 &&
+    Math.abs(r.time - (ctx.currentTime + 0.018)) < 1e-12));
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(filters.filter(f => f.type === 'bandpass' && f.frequency.value === 720).length, 1);
+  assert.equal(mix.emit('step').status, 'blocked'); // Existing combat-priority cap.
+  mix.dispose();
 });
