@@ -280,7 +280,7 @@ test('live shatter gains two glass rings without stealing more voices or leaving
   assert.equal(mix.getActiveVoices(), 0);
 });
 
-test('Web player shot layers a delayed slide action without new sources or enemy-side changes', () => {
+test('Web player shot layers a delayed slide action independently of enemy muzzle pressure', () => {
   const {ctx, nodes, filters, gains} = fakeAudio();
   const ramps = [];
   const createGain = ctx.createGain;
@@ -306,8 +306,8 @@ test('Web player shot layers a delayed slide action without new sources or enemy
     Math.abs(at - (ctx.currentTime + 0.054)) < 1e-12));
   assert.equal(mix.emit('enemy-shot').status, 'started');
   assert.equal(nodes.length, 4);
-  assert.equal(nodes[2].connections.length, 2);
-  assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
+  assert.equal(nodes[2].connections.length, 3); // Enemy burst, crack and its own pressure layer.
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 2); // Player slide + enemy pressure.
   mix.dispose();
 });
 
