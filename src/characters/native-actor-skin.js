@@ -116,30 +116,45 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, camer
 }
 
 /**
- * WEB game-feel: bank toward observed travel AND observed heading changes.
- * Idle enemies lean briefly into turns instead of spinning like rigid figures.
- * The movement sample is one actor's previous successful GPU draw; first
- * frames, teleports, abrupt yaw snaps and pauses deliberately cannot bank.
- * Fire/actions and solved death poses always take priority over this accent.
+ * WEB game-feel: bank toward observed travel AND observed heading changes,
+ * then ease into and out of that bank at the same rate on 30/60 FPS draws.
+ * A stationary guard settles instead of snapping rigidly upright. Paused
+ * world time preserves the last GPU posture; an actual action/transition,
+ * teleport, clock rewind or death cancels the bank.
  *
- * @param {Map<string | number, {time: number, x: number, z: number, fx: number, fz: number}>} frames
+ * Per-actor history is committed ONLY after a successful GPU draw, so an
+ * invalid frame cannot alter the next frame's visual/weapon/hitbox pose.
+ * This is an intentional Web animation layer, not a recovered MCD controller.
+ *
+ * @param {Map<string | number, {time: number, x: number, z: number, fx: number, fz: number, bankPitch: number, bankRoll: number}>} frames
  * @param {string | number} actorId
  * @param {{name: string}} identity
  * @param {number[] | Float32Array} modelMatrix
  * @param {number | undefined} shaderTime
  * @param {object | null} solvedPose
  * @param {object | null} action
+ * @param {object | null} transition
  * @returns {{kind: string, pitch: number, roll: number, design: string} | null}
  */
 function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTime,
-                            solvedPose, action) {
+                            solvedPose, action, transition) {
   const locomoting = identity.name === 'walk' || identity.name === 'run';
-  if (solvedPose !== null || action !== null ||
+  if (solvedPose !== null || action !== null || transition !== null ||
       (!locomoting && identity.name !== 'idle') ||
       !Number.isFinite(shaderTime) || !modelMatrix || modelMatrix.length !== 16) return null;
   const previous = frames.get(actorId);
   if (!previous) return null;
+  const describe = (pitch, roll) => Object.freeze({
+    kind: locomoting ? 'locomotion' : 'turn', pitch, roll,
+    design: 'Web-only inertial travel and turn banking',
+  });
   const dt = shaderTime - previous.time;
+  // Freeze the exact bank while game time is paused. Re-evaluating a zero-dt
+  // velocity would drop the pose instantly, even though the source clip froze.
+  if (dt === 0) {
+    return Math.abs(previous.bankPitch) + Math.abs(previous.bankRoll) >= .012
+      ? describe(previous.bankPitch, previous.bankRoll) : null;
+  }
   if (!(dt > 0 && dt <= .15)) return null;
   const dx = modelMatrix[12] - previous.x;
   const dz = modelMatrix[14] - previous.z;
@@ -147,11 +162,10 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
       Math.hypot(dx, dz) > 1.5) return null;
   const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
   const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
-  if (rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  if (!Number.isFinite(rightLength) || !Number.isFinite(forwardLength) ||
+      rightLength < 1e-6 || forwardLength < 1e-6) return null;
   const fx = modelMatrix[8] / forwardLength;
   const fz = modelMatrix[10] / forwardLength;
-  // Signed angle between the *observed* forward axes. Ignore teleport-like
-  // facing snaps instead of creating a fictitious multi-revolution turn.
   const headingChange = Math.atan2(previous.fx * fz - previous.fz * fx,
     previous.fx * fx + previous.fz * fz);
   if (!Number.isFinite(headingChange) || Math.abs(headingChange) > .7) return null;
@@ -160,16 +174,15 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
   const advance = locomoting
     ? (dx * modelMatrix[8] + dz * modelMatrix[10]) / (dt * forwardLength) : 0;
   const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
-  const pitch = clamp(-advance * .022, .11);
-  // Web-authored degrees of banking, not source animation parameters.
-  // Both live strafing and target-facing turns contribute to a single capped
-  // lean, so the GPU palette, animated hit shapes and weapon socket agree.
-  const roll = clamp(-strafe * .05 - headingChange / dt * .035, .18);
+  // First-order damped response is independent of frame rate. Target angles
+  // retain the bounded Web-only game-feel from the original movement bank.
+  const pitchTarget = clamp(-advance * .022, .11);
+  const rollTarget = clamp(-strafe * .05 - headingChange / dt * .035, .18);
+  const response = 1 - Math.exp(-14 * dt);
+  const pitch = previous.bankPitch + (pitchTarget - previous.bankPitch) * response;
+  const roll = previous.bankRoll + (rollTarget - previous.bankRoll) * response;
   if (Math.abs(pitch) + Math.abs(roll) < .012) return null;
-  return Object.freeze({
-    kind: locomoting ? 'locomotion' : 'turn', pitch, roll,
-    design: 'Web-only responsive travel and turn anticipation',
-  });
+  return describe(pitch, roll);
 }
 
 /**
@@ -314,7 +327,7 @@ export function createNativeActorSkinRuntime(skinPass) {
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
       modelMatrix, cameraPosition)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
-        modelMatrix, shaderTime, solvedPose, action)
+        modelMatrix, shaderTime, solvedPose, action, transitionDescriptor)
       ?? webIdleReaction(actorId, pose, selected.identity,
         solvedPose, action, transitionDescriptor);
     // Web game-feel: a hard impact reads instantly against the red crystalline
@@ -350,9 +363,12 @@ export function createNativeActorSkinRuntime(skinPass) {
       movementFrames.delete(actorId);
     } else if (Number.isFinite(shaderTime)) {
       const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+      const movementBank = reaction?.kind === 'locomotion' || reaction?.kind === 'turn'
+        ? reaction : null;
       movementFrames.set(actorId, {
         time: shaderTime, x: modelMatrix[12], z: modelMatrix[14],
         fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
+        bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
       });
       if (movementFrames.size > 128) {
         for (const [id, sample] of movementFrames) {
