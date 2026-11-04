@@ -20,8 +20,15 @@ export interface DojoReplayRun {
   readonly elapsedSeconds: number;
 }
 
+export type DojoReplayChallengeKind = 'kills' | 'score' | 'time' | 'no-shots' | 'dodges' | 'style' | 'survive';
+export interface DojoReplayChallenge {
+  readonly kind: DojoReplayChallengeKind;
+  /** Current-run target; 0 is used for boolean goals. */
+  readonly target: number;
+}
+
 export interface DojoReplayBest {
-  readonly schemaVersion: 4;
+  readonly schemaVersion: 5;
   readonly quota: DojoWebQuota;
   readonly victories: number;
   /** Only attempts tracked since this feature, plus known legacy victories. */
@@ -35,6 +42,8 @@ export interface DojoReplayBest {
   readonly bestStreak: number;
   /** Bitmask: STYLE S (1), shot-free win (2), three clean dodges (4). Web-authored. */
   readonly masteryMask: number;
+  /** Goal shown after the LAST tracked round, not a native objective. */
+  readonly pendingChallenge: Readonly<DojoReplayChallenge> | null;
 }
 
 export type DojoReplayMilestone =
@@ -60,6 +69,8 @@ export interface DojoReplayRecap {
   /** Three optional, independent Web challenges per 6/7-kill quota. */
   readonly masteryCount: number;
   readonly newMedals: readonly string[];
+  /** Fulfilled previous challenge, only after the next recorded round. */
+  readonly completedChallenge: DojoReplayChallengeKind | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -77,6 +88,14 @@ function isSeconds(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function isChallenge(value: unknown): value is DojoReplayChallenge {
+  if (!isRecord(value) || !isSeconds(value['target'])) return false;
+  const kind = value['kind'], target = value['target'];
+  if (kind === 'kills' || kind === 'score') return isCount(target) && target >= 1;
+  if (kind === 'time') return target > 0;
+  return (kind === 'no-shots' || kind === 'dodges' || kind === 'style' || kind === 'survive') && target === 0;
+}
+
 /**
  * Decode untrusted storage; invalid JSON/foreign quota/unknown schema means
  * "no stored record", never a crash or a borrowed 6-vs-7 score.
@@ -87,17 +106,18 @@ export function readDojoReplayBest(json: string | null, quota: DojoWebQuota): Do
   try { value = JSON.parse(json); } catch { return null; }
   if (!isRecord(value) ||
       (value['schemaVersion'] !== 1 && value['schemaVersion'] !== 2 &&
-       value['schemaVersion'] !== 3 && value['schemaVersion'] !== 4) ||
+       value['schemaVersion'] !== 3 && value['schemaVersion'] !== 4 &&
+       value['schemaVersion'] !== 5) ||
       value['quota'] !== quota || !isCount(value['victories']) ||
-      (value['schemaVersion'] !== 4 && value['victories'] < 1) ||
+      (value['schemaVersion'] !== 4 && value['schemaVersion'] !== 5 && value['victories'] < 1) ||
       !isCount(value['bestScore']) || !isSeconds(value['fastestSeconds'])) return null;
-  const v4 = value['schemaVersion'] === 4;
+  const v4plus = value['schemaVersion'] === 4 || value['schemaVersion'] === 5;
   if (value['victories'] === 0 &&
-      (!v4 || value['bestScore'] !== 0 || value['fastestSeconds'] !== 0)) return null;
+      (!v4plus || value['bestScore'] !== 0 || value['fastestSeconds'] !== 0)) return null;
   // Existing v1 personal records cannot establish any past streak. Upgrade
   // without fabricating wins or discarding a saved best score/time.
   let currentStreak = 0, bestStreak = 0;
-  if (value['schemaVersion'] === 2 || value['schemaVersion'] === 3 || v4) {
+  if (value['schemaVersion'] === 2 || value['schemaVersion'] === 3 || v4plus) {
     const current = value['currentStreak'];
     const record = value['bestStreak'];
     if (!isCount(current) || !isCount(record) ||
@@ -105,19 +125,22 @@ export function readDojoReplayBest(json: string | null, quota: DojoWebQuota): Do
     currentStreak = current;
     bestStreak = record;
   }
-  const masteryMask = (value['schemaVersion'] === 3 || v4) ? value['masteryMask'] : 0;
+  const masteryMask = (value['schemaVersion'] === 3 || v4plus) ? value['masteryMask'] : 0;
   if (!isCount(masteryMask) || masteryMask > 7) return null;
-  const trackedAttempts = v4 ? value['trackedAttempts'] : value['victories'];
-  const bestFailedKills = v4 ? value['bestFailedKills'] : 0;
+  const trackedAttempts = v4plus ? value['trackedAttempts'] : value['victories'];
+  const bestFailedKills = v4plus ? value['bestFailedKills'] : 0;
   if (!isCount(trackedAttempts) || trackedAttempts < 1 ||
       trackedAttempts < value['victories'] || !isCount(bestFailedKills) ||
       bestFailedKills > quota) return null;
+  const pending = value['schemaVersion'] === 5 ? value['pendingChallenge'] : null;
+  if (pending !== null && !isChallenge(pending)) return null;
   return Object.freeze({
-    schemaVersion: 4, quota,
+    schemaVersion: 5, quota,
     victories: value['victories'],
     bestScore: value['bestScore'],
     fastestSeconds: value['fastestSeconds'],
     currentStreak, bestStreak, masteryMask, trackedAttempts, bestFailedKills,
+    pendingChallenge: pending === null ? null : Object.freeze({kind:pending.kind,target:pending.target}),
   });
 }
 
@@ -138,6 +161,18 @@ function validateRun(value: unknown): DojoReplayRun {
     throw new RangeError('Dojo Web win contradicts the recorded 6/7 quota');
   }
   return run;
+}
+
+function challengeCompleted(challenge: Readonly<DojoReplayChallenge> | null, run: DojoReplayRun): boolean {
+  if (challenge === null) return false;
+  if (challenge.kind === 'kills') return run.kills >= challenge.target;
+  if (!run.victory) return false;
+  if (challenge.kind === 'survive') return true;
+  if (challenge.kind === 'score') return run.score >= challenge.target;
+  if (challenge.kind === 'time') return run.elapsedSeconds < challenge.target;
+  if (challenge.kind === 'no-shots') return run.shots === 0;
+  if (challenge.kind === 'dodges') return run.dodges >= 3;
+  return gradeDojoStyle(run).grade === 'S';
 }
 
 function gradeDojoStyle(run: DojoReplayRun): {grade: DojoWebStyleGrade; nextTarget: number | null} {
@@ -163,7 +198,7 @@ function gradeDojoStyle(run: DojoReplayRun): {grade: DojoWebStyleGrade; nextTarg
 export function createDojoReplayRecap(snapshot: unknown,
   best: Readonly<DojoReplayBest> | null = null): DojoReplayRecap {
   const run = validateRun(snapshot);
-  if (best !== null && (best.schemaVersion !== 4 || best.quota !== run.quota ||
+  if (best !== null && (best.schemaVersion !== 5 || best.quota !== run.quota ||
       !isCount(best.victories) || !isCount(best.trackedAttempts) ||
       best.trackedAttempts < 1 || best.trackedAttempts < best.victories ||
       !isCount(best.bestFailedKills) || best.bestFailedKills > run.quota ||
@@ -171,12 +206,16 @@ export function createDojoReplayRecap(snapshot: unknown,
       (best.victories === 0 && (best.bestScore !== 0 || best.fastestSeconds !== 0)) ||
       !isCount(best.currentStreak) || !isCount(best.bestStreak) ||
       best.currentStreak > best.bestStreak || best.bestStreak > best.victories ||
-      !isCount(best.masteryMask) || best.masteryMask > 7)) {
+      !isCount(best.masteryMask) || best.masteryMask > 7 ||
+      (best.pendingChallenge !== null && !isChallenge(best.pendingChallenge)))) {
     throw new TypeError('Dojo replay record does not match this quota');
   }
   let milestone: DojoReplayMilestone = 'retry';
   let nextBest = best;
   const previousStreak = best?.currentStreak ?? 0;
+  const priorChallenge = best?.pendingChallenge ?? null;
+  const completedChallenge = challengeCompleted(priorChallenge, run)
+    ? priorChallenge?.kind ?? null : null;
   if (run.victory) {
     const first = best === null || best.victories === 0;
     const scoreRecord = first || run.score > (best?.bestScore ?? 0);
@@ -189,7 +228,7 @@ export function createDojoReplayRecap(snapshot: unknown,
     const earnedMask = (style.grade === 'S' ? 1 : 0) |
       (run.shots === 0 ? 2 : 0) | (run.dodges >= 3 ? 4 : 0);
     nextBest = Object.freeze({
-      schemaVersion: 4, quota: run.quota,
+      schemaVersion: 5, quota: run.quota,
       trackedAttempts: Math.min(Number.MAX_SAFE_INTEGER, (best?.trackedAttempts ?? 0) + 1),
       bestFailedKills: best?.bestFailedKills ?? 0,
       victories: Math.min(Number.MAX_SAFE_INTEGER, (best?.victories ?? 0) + 1),
@@ -198,18 +237,20 @@ export function createDojoReplayRecap(snapshot: unknown,
         : Math.min(run.elapsedSeconds, best?.fastestSeconds ?? run.elapsedSeconds),
       currentStreak, bestStreak: Math.max(currentStreak, best?.bestStreak ?? 0),
       masteryMask: (best?.masteryMask ?? 0) | earnedMask,
+      pendingChallenge: null,
     });
   } else {
     // A loss now contributes real, bounded progress even before FIRST clear.
     // "trackedAttempts" never pretends to reconstruct unknown legacy defeats.
     nextBest = Object.freeze({
-      schemaVersion: 4, quota: run.quota,
+      schemaVersion: 5, quota: run.quota,
       trackedAttempts: Math.min(Number.MAX_SAFE_INTEGER, (best?.trackedAttempts ?? 0) + 1),
       bestFailedKills: Math.max(best?.bestFailedKills ?? 0, Math.min(run.quota, run.kills)),
       victories: best?.victories ?? 0, bestScore: best?.bestScore ?? 0,
       fastestSeconds: best?.fastestSeconds ?? 0,
       currentStreak: 0, bestStreak: best?.bestStreak ?? 0,
       masteryMask: best?.masteryMask ?? 0,
+      pendingChallenge: null,
     });
   }
   // A partial best is meaningful only before the first clear, and only when
@@ -265,31 +306,51 @@ export function createDojoReplayRecap(snapshot: unknown,
   // deserves a concrete next attempt, not only a record comparison. Keep
   // provenance separate from native MCD RunEnding and never mutate gameplay.
   let replayTarget: string | null = null;
+  let nextChallenge: DojoReplayChallenge | null = null;
   if (!run.victory) {
     // Before a first clear, beat the best unfinished round, not just this loss.
     const goal = Math.max(run.kills, best?.victories === 0 ? best.bestFailedKills : 0) + 1;
     replayTarget = stillNeeded > 0 && goal <= run.quota
       ? `VISE ${goal} ÉLIMINATION${goal === 1 ? '' : 'S'} AU PROCHAIN ESSAI`
       : 'SURVIS JUSQU’À LA VICTOIRE';
+    nextChallenge = Object.freeze(replayTarget === 'SURVIS JUSQU’À LA VICTOIRE'
+      ? {kind:'survive',target:0} : {kind:'kills',target:goal});
   } else if (best !== null && best.victories > 0) {
     // Compare only to the PREVIOUS same-quota PB, never a just-written PB.
     if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
       replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;
+      nextChallenge = Object.freeze({kind:'score',target:best.bestScore + 1});
     } else if (run.elapsedSeconds >= best.fastestSeconds && best.fastestSeconds > 0) {
       replayTarget = `SOUS ${best.fastestSeconds.toFixed(1)} S POUR UN NOUVEAU RECORD`;
+      nextChallenge = Object.freeze({kind:'time',target:best.fastestSeconds});
     }
   }
   if (run.victory && replayTarget === null) {
     // First clear, double-record and mastered runs share the same meaningful
     // next objectives. Already earned badges are never suggested again.
     const mask = nextBest?.masteryMask ?? 0;
-    if ((mask & 2) === 0) replayTarget = 'GAGNE SANS TIRER';
-    else if ((mask & 4) === 0) replayTarget = 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
-    else if ((mask & 1) === 0) replayTarget = 'DÉCROCHE LE STYLE S';
+    if ((mask & 2) === 0) {
+      replayTarget = 'GAGNE SANS TIRER';
+      nextChallenge = Object.freeze({kind:'no-shots',target:0});
+    } else if ((mask & 4) === 0) {
+      replayTarget = 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
+      nextChallenge = Object.freeze({kind:'dodges',target:0});
+    } else if ((mask & 1) === 0) {
+      replayTarget = 'DÉCROCHE LE STYLE S';
+      nextChallenge = Object.freeze({kind:'style',target:0});
+    }
   }
   const replayTargetText = replayTarget === null ? '' : ` · DÉFI : ${replayTarget}`;
+  const completedLabel = completedChallenge === null ? null : {
+    'kills':'ÉLIMINATIONS', 'score':'SCORE', 'time':'CHRONO',
+    'no-shots':'SANS TIRER', 'dodges':'3 ESQUIVES', 'style':'STYLE S',
+    'survive':'SURVIE',
+  }[completedChallenge];
+  const completedText = completedLabel === null ? '' : ` · DÉFI RÉUSSI : ${completedLabel}`;
+  // Store exactly the next displayed goal, never a guess about a native run.
+  if (nextBest !== null) nextBest = Object.freeze({...nextBest,pendingChallenge:nextChallenge});
   return Object.freeze({
-    text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${replayTargetText}`,
+    text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${completedText}${replayTargetText}`,
     milestone, best: nextBest,
     shouldPersist: true,
     provenance: 'WEB_ONLY',
@@ -298,5 +359,6 @@ export function createDojoReplayRecap(snapshot: unknown,
     currentStreak: nextBest?.currentStreak ?? 0,
     bestStreak: nextBest?.bestStreak ?? 0,
     replayTarget, masteryCount, newMedals:Object.freeze(newMedals),
+    completedChallenge,
   });
 }

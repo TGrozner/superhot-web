@@ -76,7 +76,7 @@ test('Dojo win streak survives reload, upgrades legacy personal bests and resets
   const legacy = readDojoReplayBest(JSON.stringify({
     schemaVersion:1, quota:6, victories:8, bestScore:1900, fastestSeconds:19.4,
   }), 6);
-  assert.equal(legacy.schemaVersion, 4);
+  assert.equal(legacy.schemaVersion, 5);
   assert.equal(legacy.currentStreak, 0, 'legacy history cannot prove a streak');
   assert.equal(legacy.bestStreak, 0);
   const one = result(6, {best:legacy, score:700, elapsedSeconds:25});
@@ -150,7 +150,7 @@ test('Dojo mastery medals unlock across actual victories and remain isolated per
     schemaVersion:2, quota:6, victories:5, bestScore:900, fastestSeconds:18,
     currentStreak:2, bestStreak:3,
   }), 6);
-  assert.equal(upgradedV2.schemaVersion, 4);
+  assert.equal(upgradedV2.schemaVersion, 5);
   assert.equal(upgradedV2.currentStreak, 2);
   assert.equal(upgradedV2.masteryMask, 0, 'historical medals cannot be inferred');
   assert.equal(readDojoReplayBest(JSON.stringify({...second.best, masteryMask:8}), 6), null);
@@ -216,10 +216,69 @@ test('failed Dojo rounds persist best partial clear and unlock a real first vict
     schemaVersion:3, quota:7, victories:5, bestScore:1700, fastestSeconds:25,
     currentStreak:2, bestStreak:3, masteryMask:5,
   }), 7);
-  assert.equal(legacy.schemaVersion, 4);
+  assert.equal(legacy.schemaVersion, 5);
   assert.equal(legacy.trackedAttempts, 5);
   assert.equal(legacy.bestFailedKills, 0);
   assert.equal(legacy.masteryMask, 5);
   assert.equal(readDojoReplayBest(JSON.stringify({...better.best, trackedAttempts:0}), 7), null);
   assert.equal(readDojoReplayBest(JSON.stringify({...better.best, fastestSeconds:2}), 7), null);
+});
+
+test('the previous replay goal is genuinely completed on the next attempt, even on a partial loss', () => {
+  const lose = (kills, best = null) => createDojoReplayRecap({
+    quota:7, victory:false, kills, shots:5, dodges:1,
+    score:kills * 100, elapsedSeconds:19,
+  }, best);
+  const first = lose(4);
+  assert.deepEqual(first.best.pendingChallenge, {kind:'kills', target:5});
+  assert.equal(first.completedChallenge, null);
+  const second = lose(2, readDojoReplayBest(JSON.stringify(first.best), 7));
+  assert.equal(second.completedChallenge, null, 'a weaker round must not claim completion');
+  assert.deepEqual(second.best.pendingChallenge, {kind:'kills',target:5});
+  const third = lose(5, readDojoReplayBest(JSON.stringify(second.best), 7));
+  assert.equal(third.completedChallenge, 'kills');
+  assert.match(third.text, /DÉFI RÉUSSI : ÉLIMINATIONS/);
+  assert.deepEqual(third.best.pendingChallenge, {kind:'kills',target:6});
+  const afterQuota = lose(7, third.best);
+  assert.deepEqual(afterQuota.best.pendingChallenge, {kind:'survive',target:0});
+  const clear = result(7, {best:readDojoReplayBest(JSON.stringify(afterQuota.best), 7)});
+  assert.equal(clear.completedChallenge, 'survive');
+  assert.match(clear.text, /DÉFI RÉUSSI : SURVIE/);
+  assert.equal(readDojoReplayBest(JSON.stringify(clear.best), 6), null, '6/7 goals must not cross');
+});
+
+test('shot-free mastery, score and speed replay targets are verified against the next real round', () => {
+  const first = result(6, {score:900, elapsedSeconds:22, shots:5, dodges:1});
+  assert.deepEqual(first.best.pendingChallenge, {kind:'no-shots',target:0});
+  const noShot = result(6, {best:first.best, shots:0, dodges:0, score:850, elapsedSeconds:30});
+  assert.equal(noShot.completedChallenge, 'no-shots');
+  assert.match(noShot.text, /DÉFI RÉUSSI : SANS TIRER/);
+  assert.deepEqual(noShot.best.pendingChallenge, {kind:'score',target:901});
+  const missed = result(6, {best:noShot.best, score:800, elapsedSeconds:28, shots:8});
+  assert.equal(missed.completedChallenge, null);
+  assert.deepEqual(missed.best.pendingChallenge, {kind:'score',target:901});
+  const beat = result(6, {best:readDojoReplayBest(JSON.stringify(missed.best),6),
+    score:905, elapsedSeconds:30, shots:8});
+  assert.equal(beat.completedChallenge, 'score');
+  assert.deepEqual(beat.best.pendingChallenge, {kind:'time',target:22});
+  const faster = result(6, {best:beat.best, score:910, elapsedSeconds:21, shots:8});
+  assert.equal(faster.completedChallenge, 'time');
+  assert.match(faster.text, /DÉFI RÉUSSI : CHRONO/);
+  assert.notEqual(faster.best.pendingChallenge?.kind, 'time');
+});
+
+test('legacy replay records never fabricate an already-pending challenge', () => {
+  const old = result(6, {score:2100}).best;
+  const asV4 = {...old, schemaVersion:4};
+  delete asV4.pendingChallenge;
+  const upgraded = readDojoReplayBest(JSON.stringify(asV4),6);
+  assert.equal(upgraded.schemaVersion,5);
+  assert.equal(upgraded.pendingChallenge,null);
+  assert.equal(result(6,{best:upgraded}).completedChallenge,null);
+  assert.equal(readDojoReplayBest(JSON.stringify({
+    ...old,pendingChallenge:{kind:'score',target:Infinity},
+  }),6),null);
+  assert.equal(readDojoReplayBest(JSON.stringify({
+    ...old,pendingChallenge:{kind:'fake',target:0},
+  }),6),null);
 });
