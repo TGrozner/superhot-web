@@ -136,7 +136,7 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
  * constraints. Fail closed near a wall or teammate; never teleport, bypass a
  * collision or create permission to shoot. Returns true only when feet moved.
  */
-function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
+function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime, {avoidApproaching=null}={}) {
   const start=position(enemy), state=enemy.encounter;
   const awayX=start.x-playerFeet.x, awayZ=start.z-playerFeet.z;
   const length=Math.hypot(awayX,awayZ);
@@ -153,7 +153,8 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:candidate.x/magnitude*travel,y:0,z:candidate.z/magnitude*travel,
     },runtime.body).position;
-    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON)continue;
+    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON ||
+        (avoidApproaching && distance(moved,avoidApproaching)<distance(start,avoidApproaching)-EPSILON))continue;
     if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
@@ -742,7 +743,12 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
       !enemy.runtime.pendingShot) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'running',scaledDeltaTime);
-    const moved=tryWebDisengage(runtime,enemy,state.webSuppressionFrom,enemies,scaledDeltaTime);
+    // A shot from behind must not make a suppressed gunner rush the player.
+    // Side-step instead if every safe retreat vector shortens that gap.
+    const moved=tryWebDisengage(runtime,enemy,state.webSuppressionFrom,enemies,scaledDeltaTime,
+      {avoidApproaching:playerFeet}) ||
+      tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+        {sideOverride:state.webTacticalSide});
     state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
     state.canAttack=false;
     if (!moved || state.webSuppressionRemaining<=EPSILON) {
