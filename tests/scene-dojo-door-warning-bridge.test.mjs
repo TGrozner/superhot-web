@@ -127,8 +127,10 @@ test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotl
     const expected = expectedWorld[index];
     packet.spotlight.position.forEach((value, axis) =>
       assert.ok(Math.abs(value - expected.spot[axis]) < 0.00001));
-    packet.falseLight.position.forEach((value, axis) =>
-      assert.ok(Math.abs(value - expected.falseLight[axis]) < 0.00001));
+    const fillTravel = Math.hypot(...packet.falseLight.position.map(
+      (value, axis) => value - expected.falseLight[axis]));
+    assert.ok(fillTravel > 0.35 && fillTravel < 1.8,
+      'at source midpoint the Web red fill now travels within its bounded doorway path');
     // The 1-second pose is deliberately Web-animated: verify a valid
     // live 3D cookie basis, not a frozen source direction.
     const basis = [packet.spotlight.direction, packet.spotlight.right, packet.spotlight.up];
@@ -161,6 +163,9 @@ test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotl
       assert.ok(Math.abs(value - expectedWorld[index].forward[axis]) < 0.0001));
     assert.deepEqual(packet.spotlight.up, [0, 1, 0]);
     assert.equal(packet.spotlight.spotAngle, 99);
+    packet.falseLight.position.forEach((value, axis) =>
+      assert.ok(Math.abs(value - expectedWorld[index].falseLight[axis]) < 0.00001,
+        'REJOUER restores the exact authored initial false-light pose'));
   });
 });
 
