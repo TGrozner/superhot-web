@@ -556,6 +556,9 @@ const warningPacketsUnchanged = (packets, snapshot) => {
  * Unknown bounds deliberately bypass culling: never drop visible pixels.
  */
 const dojoWorldInstanceSphere = (scene, instance) => {
+  // Only scene-builder qualified, static world-pass meshes have a stable
+  // source-to-GPU bound. Synthetic/unclassified objects fail open.
+  if (instance.classification?.worldPassEligible !== true) return null;
   const bounds = scene.meshes?.get(instance.meshId)?.mesh?.bounds;
   const center = bounds?.center, m = instance.model;
   if (!Array.isArray(center) || center.length !== 3 ||
