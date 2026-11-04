@@ -40,3 +40,22 @@ test('Web gait rejects a paused frame and malformed position without emitting', 
   assert.equal(count, 0);
   assert.throws(() => gait.advance({position:p(Infinity), grounded:true, timeSeconds:3.2}), /finite/);
 });
+
+test('Web gait snapshots a camera that moves in place between frames', () => {
+  const cues = [];
+  const camera = p(0);
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, request});
+    return {status:'started', source:'web-original-synthesis', at:1, spatial:true};
+  });
+  const advance = timeSeconds => gait.advance({position:camera, grounded:true, timeSeconds});
+  assert.equal(advance(1), null);
+  camera.x = 0.7;
+  assert.equal(advance(1.1), null);
+  camera.x = 1.4;
+  assert.equal(advance(1.2)?.status, 'started');
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].request.position.x, 1.4);
+  camera.x = 40; // Historical dispatched position must not alias the live camera.
+  assert.equal(cues[0].request.position.x, 1.4);
+});
