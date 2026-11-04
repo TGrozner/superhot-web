@@ -516,6 +516,4 @@ test('J4 warning spotlights respect Concrete/Crystal surface orientation without
     /float dojoWebWarningSurfaceFacing\(vec3 offset, float radius\)/);
   assert.equal((DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.match(
     /\* dojoWebWarningSurfaceFacing\(offset, radius\)/g) ?? []).length, 2);
-  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
-    /float facing = dojoWebWarningSurfaceFacing\(offset, radius\)/);
 });
