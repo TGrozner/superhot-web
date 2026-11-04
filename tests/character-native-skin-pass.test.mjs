@@ -935,3 +935,63 @@ test('Web J4 gunshot glow uses accepted fire actions and never tints a solved de
   }), /fire glow must be a finite intensity/);
   pass.dispose();
 });
+
+test('Web hit stagger follows the actual rendered facing and live player camera, not actor parity', () => {
+  const pkg = transitionPackage();
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'authored socket fixture', coordinates: 'authored local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (cameraPosition, modelMatrix = identity(), solvedPose = null) =>
+    actors.drawActor({
+      actorId: 'same-actor',
+      pose: { state: 'hit', time: .11, ...(solvedPose ? { solvedPose } : {}) },
+      cameraPosition, modelMatrix, viewProjection: identity(), color: [.8, .1, .2, 1],
+    });
+
+  const fromRight = draw([4, 1, 0]);
+  const fromLeft = draw([-4, 1, 0]);
+  assert.equal(fromRight.actorWebPoseReaction.hitDirectionProvenance,
+    'Web camera-facing proxy, not contact origin');
+  assert.ok(fromRight.actorWebPoseReaction.roll > .2);
+  assert.ok(fromLeft.actorWebPoseReaction.roll < -.2);
+  assert.ok(fromRight.actorWebPoseReaction.yaw < -.15,
+    'right-side hits twist away from the player');
+  assert.ok(fromLeft.actorWebPoseReaction.yaw > .15,
+    'left-side hits twist in the opposite direction');
+  assert.ok(fromRight.weaponAttachmentMatrix[8] < -.1 &&
+    fromLeft.weaponAttachmentMatrix[8] > .1,
+    'the weapon socket inherits the directional torso twist');
+  assert.ok(fromRight.weaponAttachmentMatrix[13] > .2);
+  assert.ok(fromLeft.weaponAttachmentMatrix[13] < -.2);
+  assert.ok(fromRight.boneModelMatrices[16 + 13] > .2,
+    'socket and bone matrix must share the GPU pose');
+  const front = draw({ x: 0, y: 1, z: 4 });
+  const rear = draw({ x: 0, y: 1, z: -4 });
+  assert.ok(front.actorWebPoseReaction.pitch < -.15, 'frontal impact throws shoulders back');
+  assert.ok(rear.actorWebPoseReaction.pitch > .15, 'rearward hit throws shoulders forward');
+
+  const turn = [0,0,-1,0, 0,1,0,0, 1,0,0,0, 0,0,0,1];
+  const rotated = draw([4, 1, 0], turn);
+  assert.ok(rotated.actorWebPoseReaction.pitch < -.15,
+    'camera direction is projected into the rotated enemy basis');
+  const fallback = draw(null);
+  assert.equal(fallback.actorWebPoseReaction.hitDirectionProvenance, 'actor-id fallback');
+  const overlapping = draw([0, 1, 0]);
+  assert.equal(overlapping.actorWebPoseReaction.hitDirectionProvenance, 'actor-id fallback');
+
+  const solved = draw([4, 1, 0], identity(), {
+    rig: pass.rig, provenance: 'authored death fixture',
+    boneModelMatrices: new Float32Array([...identity(), ...identity()]),
+  });
+  assert.equal(solved.actorWebPoseReaction, null, 'ragdoll owns its own pose');
+  assert.equal(solved.webPoseLeanApplied, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 8,
+    'no added render passes for direction-aware impact feedback');
+  pass.dispose();
+});

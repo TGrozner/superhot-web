@@ -19,13 +19,50 @@
  */
 
 /**
+ * WEB-only directional damage stagger, using the already supplied live camera
+ * as an approximate attack origin. This is NOT the actual hit/contact vector:
+ * shots from other directions would need an explicit SH-03 event/SH-05 hook.
+ * Project into the enemy's rendered model basis rather than world X/Z, so
+ * mirrored/rotated enemies recoil consistently. Invalid/overlapping cameras
+ * retain the previous actor-id fallback instead of introducing NaNs.
+ *
+ * @param {number[] | Float32Array} modelMatrix column-major actor model matrix
+ * @param {{x: number, y: number, z: number} | number[] | Float32Array | null} cameraPosition
+ * @returns {{pitch: number, roll: number, yaw: number} | null}
+ */
+function webCameraHitDirection(modelMatrix, cameraPosition) {
+  if (!cameraPosition || !modelMatrix || modelMatrix.length !== 16) return null;
+  const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+  const cx = indexed ? cameraPosition[0] : cameraPosition.x;
+  const cz = indexed ? cameraPosition[2] : cameraPosition.z;
+  if (!Number.isFinite(cx) || !Number.isFinite(cz)) return null;
+  const dx = cx - modelMatrix[12];
+  const dz = cz - modelMatrix[14];
+  const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
+  const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  if (!Number.isFinite(rightLength) || !Number.isFinite(forwardLength) ||
+      rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  const lateral = (dx * modelMatrix[0] + dz * modelMatrix[2]) / rightLength;
+  const frontal = (dx * modelMatrix[8] + dz * modelMatrix[10]) / forwardLength;
+  const distance = Math.hypot(lateral, frontal);
+  if (!Number.isFinite(distance) || distance < .1) return null;
+  // The lean rotates around source hips. +roll leans away from a camera on
+  // the actor's right; -pitch leans backward from a camera in front.
+  return {
+    pitch: -.22 * frontal / distance,
+    roll: .32 * lateral / distance,
+    yaw: -.20 * lateral / distance,
+  };
+}
+
+/**
  * Reactive Web animation accents; these are a deliberate game-feel choice,
  * NOT source Animator clips or native timing. They only accompany an actual
  * available hit/punch clip or source-composable fire action; no missing source
  * animation, attack event or fire decision is synthesized.
  * Clock and actor identity come from the live Dojo gameplay caller.
  */
-function webPoseReaction(actorId, pose, identity, solvedPose) {
+function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, cameraPosition) {
   if (solvedPose !== null) return null;
   const hit = identity.name === 'hit';
   const melee = identity.name === 'punch';
@@ -47,10 +84,15 @@ function webPoseReaction(actorId, pose, identity, solvedPose) {
     const recovery = Math.min(1, (.9 - time) / .75);
     envelope = snap * recovery * Math.max(0, Math.min(1, weight)) *
       Math.max(0, Math.min(1, blend));
+  } else if (hit) {
+    // An immediate readable flinch, then a longer diminishing recovery.
+    // Pure Web tuning: no claim about MCD's impact kinetics.
+    if (pose.time <= 0 || pose.time >= .36) return null;
+    envelope = Math.min(1, pose.time / .045) *
+      Math.min(1, (.36 - pose.time) / .30);
   } else {
-    const duration = hit ? .32 : .36;
-    if (pose.time <= 0 || pose.time >= duration) return null;
-    envelope = Math.sin(Math.PI * pose.time / duration);
+    if (pose.time <= 0 || pose.time >= .36) return null;
+    envelope = Math.sin(Math.PI * pose.time / .36);
   }
   if (envelope <= 0) return null;
   let parity = typeof actorId === 'number' ? actorId % 2 : 0;
@@ -58,10 +100,17 @@ function webPoseReaction(actorId, pose, identity, solvedPose) {
     for (let i = 0; i < actorId.length; i++) parity = (parity + actorId.charCodeAt(i)) % 2;
   }
   const side = parity ? 1 : -1;
+  const direction = hit ? webCameraHitDirection(modelMatrix, cameraPosition) : null;
   return Object.freeze({
     kind: fire ? 'fire' : identity.name,
-    pitch: (fire ? .12 : hit ? .08 : -.14) * envelope,
-    roll: side * (fire ? .05 : hit ? .22 : .035) * envelope,
+    pitch: (hit ? (direction?.pitch ?? .08) : fire ? .12 : -.14) * envelope,
+    roll: (hit ? (direction?.roll ?? side * .22) : side * (fire ? .05 : .035)) * envelope,
+    // Web-only shoulder twist: a single GPU pose drives bones, hitboxes and
+    // the weapon socket. Externally solved death poses never receive it.
+    yaw: hit && direction ? direction.yaw * envelope : 0,
+    hitDirectionProvenance: hit
+      ? (direction ? 'Web camera-facing proxy, not contact origin' : 'actor-id fallback')
+      : null,
     design: 'Web-only reactive animation accent',
   });
 }
@@ -262,7 +311,8 @@ export function createNativeActorSkinRuntime(skinPass) {
         !actions.has(action.state))) {
       throw new RangeError('Source-composable actor action unavailable: ' + String(action?.state));
     }
-    const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose)
+    const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
+      modelMatrix, cameraPosition)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
         modelMatrix, shaderTime, solvedPose, action)
       ?? webIdleReaction(actorId, pose, selected.identity,
