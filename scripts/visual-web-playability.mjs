@@ -44,21 +44,22 @@ function paintedBounds(box) {
  * No RGB or VRAM measurements: WebGL does not expose total allocated VRAM.
  * 33.3ms is an explicitly WEB-authored 30 FPS readability warning, not MCD.
  * @param {{frame:object|null, metrics:object|null, boxes:VisibleBox[], width:number,
- *   height:number, frameBudgetMs?:number}} observation
+ *   height:number, frameBudgetMs?:number, combatStarted?:boolean}} observation
  */
 export function assessWebVisualReadability({
-  frame, metrics, boxes = [], width, height, frameBudgetMs = 33.3,
+  frame, metrics, boxes = [], width, height, frameBudgetMs = 33.3, combatStarted = true,
 }) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 ||
       !Number.isFinite(frameBudgetMs) || frameBudgetMs <= 0 ||
       !Array.isArray(boxes)) throw new TypeError('Valid Web viewport and visible DOM boxes required');
-  const playing = frame?.activeScreen === 'playing';
+  const playing = frame?.activeScreen === 'playing' && combatStarted === true;
   const scene = frame?.nativeScene?.source;
   const path = String(scene?.scenePath ?? '').replaceAll('\\', '/');
   const dojo = scene?.sceneBuildIndex === 10 && path.endsWith('/SHRL_Dojo2.unity');
   const warnings = [];
   if (!dojo) warnings.push({kind:'scene',detail:'Dojo/build10 not confirmed in rendered Web receipt'});
-  if (!playing) warnings.push({kind:'screen',detail:'Game is not in playing state'});
+  if (frame?.activeScreen !== 'playing') warnings.push({kind:'screen',detail:'Game is not in playing state'});
+  else if (!combatStarted) warnings.push({kind:'start',detail:'Dojo preview is visible, but combat was not started on the canvas'});
   const drawCalls = Number.isSafeInteger(frame?.totalWebGLDrawCalls) && frame.totalWebGLDrawCalls >= 0
     ? frame.totalWebGLDrawCalls : null;
   const p95FrameMs = Number.isFinite(metrics?.p95FrameMs) && metrics.p95FrameMs >= 0
@@ -127,7 +128,8 @@ export function assessWebVisualReadability({
     }
   }
   return {
-    state: playing && dojo ? 'WEB_DOJO_VISIBLE_QA_NOT_BROWSER_VERIFIED' : 'WEB_FRAME_NOT_READY',
+    state: playing && dojo ? 'WEB_DOJO_VISIBLE_QA_NOT_BROWSER_VERIFIED' :
+      frame?.activeScreen === 'playing' && !combatStarted ? 'WEB_PREVIEW_NOT_STARTED' : 'WEB_FRAME_NOT_READY',
     frameId: Number.isSafeInteger(frame?.frameId) ? frame.frameId : null,
     drawCalls, p95FrameMs, fpsAtP95: p95FrameMs > 0 ? 1000 / p95FrameMs : null,
     frameBudgetMs, overlayBoxesInspected: visible.length, warnings,
@@ -167,7 +169,7 @@ function readVisibleBoxes(windowRef, documentRef) {
  * keeping the readable panel update at 1Hz. No GPU readback or gameplay writes.
  *
  * transientWarnings counts samples (NOT distinct gameplay occurrences);
- * only warnings observed in the browser during an active Dojo are retained.
+ * only warnings observed after the actual Dojo START boundary are retained.
  */
 export function installWebVisualQa({
   windowRef=globalThis.window, documentRef=globalThis.document,
@@ -194,6 +196,10 @@ export function installWebVisualQa({
         frame, metrics:windowRef.__superhotSceneMetrics,
         boxes:readVisibleBoxes(windowRef,documentRef),
         width:windowRef.innerWidth,height:windowRef.innerHeight,frameBudgetMs,
+        // main.js sets this only after intentional START (or first canvas click).
+        // activeScreen remains 'playing' during preview; do not count those DOM
+        // frames as combat evidence, especially after input gating in #374.
+        combatStarted: documentRef.getElementById('scene-controls')?.hidden === true,
       });
       if(current.state==='WEB_DOJO_VISIBLE_QA_NOT_BROWSER_VERIFIED') {
         observedSamples++;
@@ -233,7 +239,8 @@ export function installWebVisualQa({
       'WEB DOJO · LIVE QA (opt-in)',
       'frame '+(m.frameId??'?')+' · draws '+(m.drawCalls??'?')+
         ' · p95 '+(m.p95FrameMs?.toFixed(1)??'?')+'ms',
-      m.state==='WEB_FRAME_NOT_READY'?'Not started / wrong scene':'Web scene ready',
+      m.state==='WEB_PREVIEW_NOT_STARTED'?'Preview · click canvas to start':
+        m.state==='WEB_FRAME_NOT_READY'?'Not started / wrong scene':'Web scene ready',
       ...warn, ...seen,
       'VRAM not measurable via WebGL2',
     ].join('\n');
