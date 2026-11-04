@@ -19,9 +19,11 @@
  */
 
 /**
- * WEB-only directional damage stagger, using the already supplied live camera
- * as an approximate attack origin. This is NOT the actual hit/contact vector:
- * shots from other directions would need an explicit SH-03 event/SH-05 hook.
+ * WEB-only directional damage stagger. An explicitly supplied gameplay impact
+ * origin is preferred; absent that, capture the live camera position ONCE at
+ * the first successful stun draw. Holding the origin for the stun avoids an
+ * enemy elastically flipping its recoil when the player circles the target.
+ * A camera-derived origin is NOT the actual hit/contact vector.
  * Project into the enemy's rendered model basis rather than world X/Z, so
  * mirrored/rotated enemies recoil consistently. Invalid/overlapping cameras
  * retain the previous actor-id fallback instead of introducing NaNs.
@@ -56,13 +58,42 @@ function webCameraHitDirection(modelMatrix, cameraPosition) {
 }
 
 /**
+ * Lock a Web impact origin per accepted stun event; the optional event ID
+ * allows SH-05 to distinguish two accepted stuns without inventing a clip
+ * transition. Only an explicit gameplay contact is called a contact.
+ * A camera fallback is labelled as a proxy, even when held across frames.
+ */
+function webHitSource(hitOrigin, cameraPosition) {
+  if (hitOrigin != null) {
+    if (typeof hitOrigin !== 'object' ||
+        !Number.isFinite(hitOrigin.x) ||
+        !Number.isFinite(hitOrigin.y) ||
+        !Number.isFinite(hitOrigin.z)) {
+      throw new TypeError('Web hitOrigin requires finite world-space x/y/z from an accepted contact');
+    }
+    return Object.freeze({
+      point: Object.freeze({x:hitOrigin.x,y:hitOrigin.y,z:hitOrigin.z}),
+      provenance: 'Web gameplay contact origin, not native MCD impulse',
+    });
+  }
+  const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+  const x = indexed ? cameraPosition[0] : cameraPosition?.x;
+  const y = indexed ? cameraPosition[1] : cameraPosition?.y;
+  const z = indexed ? cameraPosition[2] : cameraPosition?.z;
+  return Object.freeze({
+    point: [x,y,z].every(Number.isFinite) ? Object.freeze({x,y,z}) : null,
+    provenance: 'Web camera-facing proxy, not contact origin',
+  });
+}
+
+/**
  * Reactive Web animation accents; these are a deliberate game-feel choice,
  * NOT source Animator clips or native timing. They only accompany an actual
  * available hit/punch clip or source-composable fire action; no missing source
  * animation, attack event or fire decision is synthesized.
  * Clock and actor identity come from the live Dojo gameplay caller.
  */
-function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, cameraPosition) {
+function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSource) {
   if (solvedPose !== null) return null;
   const hit = identity.name === 'hit';
   const melee = identity.name === 'punch';
@@ -100,7 +131,7 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, camer
     for (let i = 0; i < actorId.length; i++) parity = (parity + actorId.charCodeAt(i)) % 2;
   }
   const side = parity ? 1 : -1;
-  const direction = hit ? webCameraHitDirection(modelMatrix, cameraPosition) : null;
+  const direction = hit ? webCameraHitDirection(modelMatrix, hitSource?.point) : null;
   return Object.freeze({
     kind: fire ? 'fire' : identity.name,
     pitch: (hit ? (direction?.pitch ?? .08) : fire ? .12 : -.14) * envelope,
@@ -109,7 +140,7 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, camer
     // the weapon socket. Externally solved death poses never receive it.
     yaw: hit && direction ? direction.yaw * envelope : 0,
     hitDirectionProvenance: hit
-      ? (direction ? 'Web camera-facing proxy, not contact origin' : 'actor-id fallback')
+      ? (direction ? hitSource.provenance : 'actor-id fallback')
       : null,
     design: 'Web-only reactive animation accent',
   });
@@ -407,8 +438,27 @@ export function createNativeActorSkinRuntime(skinPass) {
         !actions.has(action.state))) {
       throw new RangeError('Source-composable actor action unavailable: ' + String(action?.state));
     }
+    // A hit's first accepted frame freezes its attack origin. Repeated draws
+    // in the same stun cannot flip recoil just because the player moves.
+    // A new event ID, state-time rewind, replay or long gap re-anchors it.
+    const previousHit = movementFrames.get(actorId);
+    const hitEventId = pose.hitEventId ?? null;
+    if (selected.identity.name === 'hit' && hitEventId !== null &&
+        !(typeof hitEventId === 'string' && hitEventId.length > 0) &&
+        !Number.isFinite(hitEventId)) {
+      throw new TypeError('Web hitEventId must be a finite number or nonempty string');
+    }
+    const continuedHit = solvedPose === null && selected.identity.name === 'hit' &&
+      previousHit?.state === 'hit' && previousHit.hitSource &&
+      previousHit.hitEventId === hitEventId &&
+      Number.isFinite(shaderTime) && Number.isFinite(previousHit.time) &&
+      shaderTime >= previousHit.time && shaderTime - previousHit.time <= .75 &&
+      pose.time >= previousHit.poseTime;
+    const hitSource = selected.identity.name === 'hit' && solvedPose === null
+      ? (continuedHit ? previousHit.hitSource : webHitSource(pose.hitOrigin, cameraPosition))
+      : null;
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
-      modelMatrix, cameraPosition)
+      modelMatrix, hitSource)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
         modelMatrix, shaderTime, pose.time, solvedPose, action, transitionDescriptor)
       ?? webIdleReaction(actorId, pose, selected.identity,
@@ -457,6 +507,8 @@ export function createNativeActorSkinRuntime(skinPass) {
         fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
         bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
         gazeYaw: webHeadLook?.yaw ?? 0, gazePitch: webHeadLook?.pitch ?? 0,
+        hitEventId: selected.identity.name === 'hit' ? hitEventId : null,
+        hitSource,
         headLocal: webHeadIndex < 0 ? null : [
           report.boneModelMatrices[webHeadIndex*16 + 12],
           report.boneModelMatrices[webHeadIndex*16 + 13],
