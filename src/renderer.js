@@ -440,6 +440,7 @@ export function createRenderer(canvas) {
   function drawNativeActorSkin(actorId, modelMatrix, clip, time, {
     statePlayback = false, transition = null, action = null, solvedPose = null,
     shaderTime = 0, cameraPosition = currentCamera,
+    hitIncomingDirection = null, hitEventId = null,
   } = {}) {
     if (!actorSkinRuntime) return null;
     const selection = (name, elapsed) => statePlayback
@@ -452,6 +453,10 @@ export function createRenderer(canvas) {
     };
     if (action) pose.action = action;
     if (solvedPose) pose.solvedPose = solvedPose;
+    // Accepted Web contact evidence, never the contact point mislabelled
+    // as attack origin. SH-14 latches the direction by accepted stun event.
+    if (hitIncomingDirection !== null) pose.hitIncomingDirection = hitIncomingDirection;
+    if (hitEventId !== null) pose.hitEventId = hitEventId;
     const report = actorSkinRuntime.drawActor({
       actorId, pose, modelMatrix, viewProjection, shaderTime,
       cameraPosition, sourceLighting: nativeSkinLighting,
