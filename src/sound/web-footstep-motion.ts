@@ -44,16 +44,19 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
     if (typeof grounded !== 'boolean' || !Number.isFinite(timeSeconds)) {
       throw new TypeError('step grounded/timeSeconds invalid');
     }
+    // Callers often move a single camera object in place each frame.
+    // Never retain that reference: the next frame must compare two snapshots.
+    const current: WebImpactPoint = {x: position.x, y: position.y, z: position.z};
     if (!grounded || previous === null || previousTime === null ||
         timeSeconds < previousTime || timeSeconds - previousTime > maxFrameGap) {
-      previous = grounded ? position : null;
+      previous = grounded ? current : null;
       previousTime = timeSeconds;
       pendingMetres = 0;
       return null;
     }
     const dt = timeSeconds - previousTime;
-    const distance = Math.hypot(position.x - previous.x, position.z - previous.z);
-    previous = position;
+    const distance = Math.hypot(current.x - previous.x, current.z - previous.z);
+    previous = current;
     previousTime = timeSeconds;
     if (distance > maxFrameTravel) {
       pendingMetres = 0; // Spawn, fast-travel or focus recovery, not a stride.
@@ -65,7 +68,7 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
     // More movement in the same real-time interval makes a stronger Web step.
     const speed = distance / Math.max(dt, 1 / 120);
     const intensity = Math.min(1, Math.max(0.45, speed / 4.5));
-    return emit('step', {position, intensity});
+    return emit('step', {position: current, intensity});
   }
 
   return Object.freeze({advance, reset});
