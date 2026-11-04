@@ -254,7 +254,9 @@ function createWebWarningSweep(catalog, controller) {
       const sweep = Math.sin(2 * Math.PI * phase);
       const breathing = sweep * sweep;
       const focusTarget = activeCount > 1
-        ? 0.56 + 0.88 * base.urgency / totalUrgency : 1;
+        ? Math.max(0.65, Math.min(1.4,
+          1 + 0.55 * (activeCount * base.urgency / totalUrgency - 1)))
+        : 1;
       // Continuous transition when an alarm starts or expires: no one-frame
       // red flash, even if two spawns overlap at different phases.
       base.focusGain += (focusTarget - base.focusGain) * focusEase;
