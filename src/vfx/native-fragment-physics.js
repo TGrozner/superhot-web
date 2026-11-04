@@ -193,8 +193,11 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
       const floor = stepContacts.find(contact => contact.collider && contact.normal?.y > 0.55);
       const speed = Math.hypot(body.velocity.x, body.velocity.y, body.velocity.z);
       if (floor && speed < WEB_SHARD_REST_SPEED) {
-        body.webShardRestSeconds = body.webShardSupport === floor.collider
-          ? (body.webShardRestSeconds ?? 0) + dt : dt;
+        // A first contact halfway through a long swept substep has NOT been
+        // supported for the whole substep. Use the actual collision fraction.
+        const supportedDt = dt * Math.max(0, Math.min(1, 1 - floor.t));
+        body.webShardRestSeconds = (body.webShardSupport === floor.collider
+          ? (body.webShardRestSeconds ?? 0) : 0) + supportedDt;
         body.webShardSupport = floor.collider;
       } else {
         body.webShardRestSeconds = 0;
