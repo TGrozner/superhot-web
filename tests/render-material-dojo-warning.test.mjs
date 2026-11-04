@@ -355,6 +355,7 @@ test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warning
   ];
   const instance = (id, x, y, z, scale = 1) => ({
     id, layer: 8, meshId: 'source-box', model: at(x, y, z, scale),
+    classification: { worldPassEligible: true },
   });
   const sourceScene = {
     source: scene,
