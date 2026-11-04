@@ -29,6 +29,8 @@ export function recordWebDodge(feedback,{realTime,distance}){
 export function advanceWebDodgeFeedback(feedback,realDelta){
   if(!Number.isFinite(realDelta)||realDelta<0)
     throw new RangeError('Real delta must be nonnegative');
-  feedback.seconds=Math.max(0,feedback.seconds-Math.min(realDelta,.05));
+  // Active elapsed seconds belong to the caller. Do not clamp real-time VFX
+  // to the 50ms world-physics step: at 10 FPS that doubles UI lifetime.
+  feedback.seconds=Math.max(0,feedback.seconds-realDelta);
   return feedback.seconds/WEB_DODGE_VISIBLE_SECONDS;
 }
