@@ -531,3 +531,43 @@ test('J4 reactive Dojo doorway tracking eases abrupt player movements without de
   assert.deepEqual(active.spotlight.direction, [-0.99999999982, 0, 0.00001898408]);
   assert.equal(active.active, false);
 });
+
+test('J4 overlapping door lights prioritize the actual unscaled enemy arrival, not world-time elapsed', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const packets = bridge.packets();
+  const slow = warning(103);
+  const fast = warning(221);
+  slow.delay = 4;
+  fast.delay = 0.7;
+  assert.equal(bridge.accept(slow).status, 'triggered');
+  assert.equal(bridge.accept(fast).status, 'triggered');
+
+  bridge.advance(0.5, null, 0.2);
+  assert.deepEqual(packets.map(p => p.active), [true, true, false]);
+  assert.ok(packets[1].spotlight.intensity > packets[0].spotlight.intensity,
+    'the sooner arrival lights up despite both source curves being at the same phase');
+  const fastBeforeArrival = packets[1].spotlight.intensity;
+
+  // The spawner runs on unscaled time: a completed arrival releases priority
+  // even when SUPERHOT world time and the underlying source curve freeze.
+  bridge.advance(0, null, 0.6);
+  assert.equal(packets[1].active, true, 'the world-clock source light still runs independently');
+  assert.ok(packets[1].spotlight.intensity < fastBeforeArrival);
+  assert.ok(packets[0].spotlight.intensity > packets[1].spotlight.intensity,
+    'a completed arrival no longer overshadows an upcoming entrance');
+  assert.equal(bridge.packets(), packets, 'no new draw packets or per-frame array replacement');
+
+  bridge.reset();
+  assert.deepEqual(packets.map(p => p.active), [false, false, false]);
+  assert.deepEqual(packets.map(p => p.falseLight.slot), [-1, -1, -1]);
+
+  // Until SH-05 connects the unscaled clock, preserve the old visual ranking.
+  const compatible = createDojoDoorWarningBridge(browserScene());
+  compatible.accept(slow);
+  compatible.accept(fast);
+  compatible.advance(0.5);
+  assert.ok(Math.abs(compatible.packets()[0].spotlight.intensity -
+    compatible.packets()[1].spotlight.intensity) < 1e-9);
+  assert.throws(() => compatible.advance(0, null, -0.01), /unscaledDeltaSeconds/);
+  assert.throws(() => compatible.advance(0, null, Infinity), /unscaledDeltaSeconds/);
+});
