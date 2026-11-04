@@ -358,9 +358,13 @@ export function createNativeActorSkinRuntime(skinPass) {
   // One tiny previous-transform sample per actor. Never share camera or
   // movement history between enemies; the runtime is recreated per rig.
   const movementFrames = new Map();
-  const webHeadIndex = skinPass.webHeadTrackingAvailable === true
-    ? skinPass.rig.boneOrder.findIndex(name => /(?:^|[^a-zA-Z])head$/i.test(name))
-    : -1;
+  // The active Dojo source rig's head is the weighted Neck_01/Neck_Top
+  // branch, not a bone literally named Head. Read the indexed source
+  // sampler chosen by the GPU pass, or world-space gaze never activates.
+  // This is a Web animation pivot, NOT reconstructed native head IK.
+  const webHeadIndex = skinPass.webHeadTrackingAvailable === true &&
+    Number.isInteger(skinPass.webHeadSampleBone)
+    ? skinPass.webHeadSampleBone : -1;
 
   function choosePose(selection, label) {
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) {
