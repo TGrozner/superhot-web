@@ -704,3 +704,45 @@ test('J3 Web fair hunt: enemies sweep near last seen feet without tracking hidde
   assert.deepEqual(enemy.encounter.webLastSeenFeet,reappeared.playerFeet,
     'a new real sighting replaces the old search destination');
 });
+
+test('J3 Web squad sighting: nearby real observers share only witnessed feet, independent of actor order',()=>{
+  // Synthetic corridor and contacts, not a claim about the native MCD AI.
+  const data=scene();
+  const cover=[box(8,1,5,.4,2,5)];
+  const old={playerFeet:p(6,0,2),playerPosition:p(6,1.6,2)};
+  const spotted={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
+  const relocated={playerFeet:p(13,0,6),playerPosition:p(13,1.6,6)};
+  for(const reverse of [false,true]) {
+    const runtime=setup(data,cover),hunter=firstSpawn(runtime,old);
+    const spotter=firstSpawn(setup(data,cover),old);
+    hunter.x=6;hunter.z=6;
+    spotter.id='squad-spotter';spotter.x=11;spotter.z=2;
+    advanceNativeEncounter(runtime,input([hunter],{...old}));
+    assert.equal(hunter.encounter.visible,true,'hunter first witnesses the old position itself');
+    assert.deepEqual(hunter.encounter.webLastSeenFeet,old.playerFeet);
+    hunter.encounter.webSearchComplete=true;
+
+    const squad=reverse?[spotter,hunter]:[hunter,spotter];
+    advanceNativeEncounter(runtime,input(squad,{...spotted,scaledDeltaTime:.2}));
+    assert.equal(hunter.encounter.visible,false,'actual wall still blocks hunter sight');
+    assert.equal(spotter.encounter.visible,true,'teammate really sees around the wall');
+    assert.deepEqual(hunter.encounter.webLastSeenFeet,spotted.playerFeet,
+      'fresh witnessed location is shared within bounded squad range');
+    assert.equal(hunter.encounter.webSearchComplete,false,'new sighting restarts the hunt');
+    assert.deepEqual(hunter.encounter.target,spotted.playerFeet,'the route follows the witnessed feet');
+    assert.ok(hunter.x>6 && hunter.x<8,
+      'hunter advances towards the callout without crossing cover');
+
+    // Once the observer is gone, the occluded player may move freely without
+    // giving the hunter the new coordinates or permission to fire.
+    spotter.active=false;
+    advanceNativeEncounter(runtime,input(squad,{...relocated,scaledDeltaTime:0}));
+    assert.deepEqual(hunter.encounter.webLastSeenFeet,spotted.playerFeet);
+    assert.equal(hunter.encounter.canAttack,false);
+    spotter.active=true;spotter.x=19;spotter.z=2;
+    advanceNativeEncounter(runtime,input(squad,{...relocated,scaledDeltaTime:0}));
+    assert.equal(spotter.encounter.visible,true,'distant ally still has genuine sight');
+    assert.deepEqual(hunter.encounter.webLastSeenFeet,spotted.playerFeet,
+      'far-away sightings do not grant infinite-radius squad tracking');
+  }
+});

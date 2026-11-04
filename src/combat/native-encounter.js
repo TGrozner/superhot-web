@@ -46,6 +46,14 @@ const WEB_LAST_SEEN_SWEEP = Object.freeze({
 // iteration or frame timing; an ally's death ends the push immediately.
 // This is a navigation goal only and does not authorize an attack or bypass
 // capsule collisions. No native MCD tactical claim.
+// J3 Web-only squad callouts: a LIVE, unstunned ally with actual line of sight
+// can update a nearby hunter's remembered position, even across cover.
+// Sight is measured for all actors BEFORE movement, so list order cannot make
+// a teammate clairvoyant. Neither the caller nor the recipient gains a shot.
+const WEB_SQUAD_SIGHTING = Object.freeze({
+  rangeBodyRadii: 18,
+  newContactBodyRadii: 1,
+});
 const WEB_SQUAD_PUSH = Object.freeze({
   stopDistanceFraction: 0.67,
   minimumStopBodyRadii: 3.2,
@@ -508,7 +516,7 @@ function spawnEnemy(runtime, point, order, population) {
   return enemy;
 }
 
-function moveEnemy(runtime, enemy, input) {
+function moveEnemy(runtime, enemy, input, observingAllies) {
   const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
@@ -527,8 +535,9 @@ function moveEnemy(runtime, enemy, input) {
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
   // native eye/AimTarget bone, and cannot authorize firing.
-  const sightOrigin={x:start.x,y:start.y+runtime.aimHeight,z:start.z};
-  state.visible=nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2) === null;
+  // Measured once for the whole squad at the start of the frame; otherwise
+  // update order would change who has legitimately spotted the player.
+  state.visible=observingAllies.has(enemy);
   // Web-authored fairness: once an enemy has REALLY observed the player,
   // losing body sight freezes its last known feet instead of letting it track
   // live coordinates through walls. Actors that have never seen the player
@@ -537,6 +546,28 @@ function moveEnemy(runtime, enemy, input) {
     state.webLastSeenFeet={...playerFeet};
     state.webSearchRemaining=null;
     state.webSearchComplete=false;
+  } else {
+    // A nearby observer may call out a CURRENTLY witnessed location. Neither
+    // stale ally memories nor the player's hidden position can refresh it.
+    // An unchanged sighting cannot restart a finished cover investigation.
+    let allyWitnessed=false;
+    for(const ally of observingAllies) {
+      if(ally===enemy)continue;
+      if(Math.hypot(ally.x-start.x,ally.z-start.z)<=
+          runtime.body.radius*WEB_SQUAD_SIGHTING.rangeBodyRadii) {
+        allyWitnessed=true;
+        break;
+      }
+    }
+    if(allyWitnessed && (!state.webLastSeenFeet ||
+        Math.hypot(state.webLastSeenFeet.x-playerFeet.x,
+          state.webLastSeenFeet.z-playerFeet.z)>
+          runtime.body.radius*WEB_SQUAD_SIGHTING.newContactBodyRadii)) {
+      state.webLastSeenFeet={...playerFeet};
+      state.webSearchRemaining=null;
+      state.webSearchComplete=false;
+      state.route=null;
+    }
   }
   const pursuitFeet=!state.visible && state.webLastSeenFeet
     ? state.webLastSeenFeet : playerFeet;
@@ -709,7 +740,17 @@ export function advanceNativeEncounter(runtime, input) {
   const { scaledDeltaTime, unscaledDeltaTime, playerPosition, playerForward, playerFeet, enemies } = input;
   scalar(scaledDeltaTime,'scaledDeltaTime'); scalar(unscaledDeltaTime,'unscaledDeltaTime');
   if (readyForVictory(runtime,enemies)) return [];
-  for (const enemy of enemies) moveEnemy(runtime,enemy,input);
+  // Compute actual sightings before anyone moves: a nearby squad callout is
+  // valid only if its sender sees the player at THIS frame's original feet.
+  const observingAllies=new Set();
+  for(const enemy of enemies) {
+    if(!participating(enemy) || !enemy.encounter ||
+        enemy.reaction?.stunRemaining>0 || enemy.reaction?.stunnedThisFrame)continue;
+    const sightOrigin={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+    if(nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2)===null)
+      observingAllies.add(enemy);
+  }
+  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies);
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
     scaledDeltaTime,unscaledDeltaTime,enabled:true,spawningAreaInitialized:true,
     currentEnemyCount:enemies.filter(participating).length+runtime.arrivals.length,
