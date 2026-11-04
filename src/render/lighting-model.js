@@ -226,7 +226,21 @@ vec3 dojoDoorWarningSpotWebGlow(
   float energy = sourceIntensity
     * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
   return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
-}`.trim();
+}
+// J4 creative Web fill: the SH-04 doorway false-light already has a live
+// world position/intensity, but no recovered native shader/falloff/colour.
+// One cheap world-space red wash per enabled false-light; no texture/pass.
+vec3 dojoDoorFalseLightWashWeb(
+  vec3 worldPosition, vec3 lightPosition, float sourceIntensity
+) {
+  float radius = length(worldPosition - lightPosition);
+  if (sourceIntensity <= 0.0 || radius >= 4.0) return vec3(0.0);
+  float fade = dojoWebWarningSmooth(1.0 - radius / 4.0);
+  float energy = sourceIntensity * fade * fade;
+  return dojoWebWarningContrast(
+    vec3(1.0, 0.06, 0.10), dojoWebWarningCompression(energy));
+}
+`.trim();
 
 const sourceDoorId = value =>
   typeof value === 'string' && /^[A-Za-z0-9_.-]+::[1-9][0-9]*$/.test(value);
@@ -470,6 +484,34 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
   const glow = energy / (3 + energy);
   return Object.freeze({
     rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
+    cookieUv: null,
+  });
+}
+
+
+/**
+ * J4 Web-only floor/doorway fill from an EXISTING SH-07/SH-04 false-light
+ * position and intensity. 4 m radius and warm red grade are Web art choices:
+ * the native XulmFalseLight composition/colour/falloff remain unresolved.
+ * SH-05 owns the GPU uniform wiring; no extra lamp or texture is generated.
+ * @param {{position: number[], intensity: number, shaderParity: string}} falseLight
+ * @param {number[]} worldPosition
+ * @param {number} [webMaterialMode]
+ * @returns {{rgb: readonly number[], cookieUv: null}}
+ */
+export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMaterialMode = 2) {
+  if (falseLight?.shaderParity !== 'unverified-no-false-light-composition') {
+    throw new TypeError('Source-qualified false-light packet required');
+  }
+  const position = sourceLightVec3(falseLight.position, 'false-light position');
+  const point = sourceLightVec3(worldPosition, 'false-light sample');
+  const intensity = sourceLightNonnegative(falseLight.intensity, 'false-light intensity');
+  const distance = Math.hypot(...point.map((value, index) => value - position[index]));
+  if (intensity === 0 || distance >= 4) return zeroWebWarning();
+  const fade = dojoWebWarningSmooth(1 - distance / 4);
+  const energy = intensity * fade * fade;
+  return Object.freeze({
+    rgb: webWarningContrast([1, .06, .10], energy / (3 + energy), webMaterialMode),
     cookieUv: null,
   });
 }
