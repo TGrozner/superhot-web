@@ -23,6 +23,8 @@ function isChallenge(value) {
     const kind = value['kind'], target = value['target'];
     if (kind === 'kills' || kind === 'score')
         return isCount(target) && target >= 1;
+    if (kind === 'streak')
+        return isCount(target) && target >= 2;
     if (kind === 'time')
         return target > 0;
     return (kind === 'no-shots' || kind === 'dodges' || kind === 'style' || kind === 'survive') && target === 0;
@@ -104,7 +106,7 @@ function validateRun(value) {
     }
     return run;
 }
-function challengeCompleted(challenge, run) {
+function challengeCompleted(challenge, run, previousStreak) {
     if (challenge === null)
         return false;
     if (challenge.kind === 'kills')
@@ -113,6 +115,8 @@ function challengeCompleted(challenge, run) {
         return false;
     if (challenge.kind === 'survive')
         return true;
+    if (challenge.kind === 'streak')
+        return Math.min(Number.MAX_SAFE_INTEGER, previousStreak + 1) >= challenge.target;
     if (challenge.kind === 'score')
         return run.score >= challenge.target;
     if (challenge.kind === 'time')
@@ -154,11 +158,12 @@ function existingChallengePrompt(challenge) {
         case 'dodges': return 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
         case 'style': return 'DÉCROCHE LE STYLE S';
         case 'survive': return 'SURVIS JUSQU’À LA VICTOIRE';
+        case 'streak': return `FAIS ${challenge.target} VICTOIRES D’AFFILÉE`;
     }
 }
 // Meaningful feedback after a missed persistent goal, derived from the FINAL
 // score; a good partial score/time on a death is never credited as a win.
-function describeUnfinishedChallenge(challenge, run) {
+function describeUnfinishedChallenge(challenge, run, currentStreak) {
     if (challenge.kind === 'kills') {
         const missing = Math.max(0, challenge.target - run.kills);
         return `${missing} ÉLIMINATION${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'}`;
@@ -180,6 +185,11 @@ function describeUnfinishedChallenge(challenge, run) {
         const missing = Math.max(0, 3 - run.dodges);
         return missing > 0 ? `${missing} ESQUIVE${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'}`
             : '3 ESQUIVES ATTEINTES · VICTOIRE REQUISE';
+    }
+    if (challenge.kind === 'streak') {
+        const missing = Math.max(0, challenge.target - currentStreak);
+        return run.victory ? `SÉRIE ${currentStreak}/${challenge.target} · ${missing} VICTOIRE${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'}`
+            : `SÉRIE BRISÉE · REPARS DE 0/${challenge.target}`;
     }
     if (challenge.kind === 'style') {
         const grade = gradeDojoStyle(run).grade;
@@ -227,7 +237,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
     let nextBest = best;
     const previousStreak = best?.currentStreak ?? 0;
     const priorChallenge = best?.pendingChallenge ?? null;
-    const completedChallenge = challengeCompleted(priorChallenge, run)
+    const completedChallenge = challengeCompleted(priorChallenge, run, previousStreak)
         ? priorChallenge?.kind ?? null : null;
     if (run.victory) {
         const first = best === null || best.victories === 0;
@@ -364,6 +374,14 @@ export function createDojoReplayRecap(snapshot, best = null) {
             nextChallenge = Object.freeze({ kind: 'style', target: 0 });
         }
     }
+    // After all three medals, consecutive wins give mastered players a real
+    // endgame replay goal without modifying combat or an MCD checkpoint.
+    if (run.victory && replayTarget === null && nextBest !== null &&
+        nextBest.masteryMask === 7 && nextBest.bestStreak < Number.MAX_SAFE_INTEGER) {
+        const target = Math.max(2, nextBest.bestStreak + 1);
+        replayTarget = `FAIS ${target} VICTOIRES D’AFFILÉE`;
+        nextChallenge = Object.freeze({ kind: 'streak', target });
+    }
     // Keep the PREVIOUS assigned challenge until a real round completes it.
     // A defeat must not silently discard a shot-free, speed or score objective.
     const retainingChallenge = priorChallenge !== null && completedChallenge === null;
@@ -372,14 +390,14 @@ export function createDojoReplayRecap(snapshot, best = null) {
         replayTarget = existingChallengePrompt(priorChallenge);
     }
     const retryDetail = retainingChallenge && priorChallenge !== null
-        ? describeUnfinishedChallenge(priorChallenge, run) : null;
+        ? describeUnfinishedChallenge(priorChallenge, run, nextBest?.currentStreak ?? 0) : null;
     const retryDetailText = retryDetail === null ? '' : ` · BILAN DÉFI : ${retryDetail}`;
     const replayTargetText = replayTarget === null ? '' :
         ` · ${retainingChallenge ? 'DÉFI À RETENTER' : 'DÉFI'} : ${replayTarget}`;
     const completedLabel = completedChallenge === null ? null : {
         'kills': 'ÉLIMINATIONS', 'score': 'SCORE', 'time': 'CHRONO',
         'no-shots': 'SANS TIRER', 'dodges': '3 ESQUIVES', 'style': 'STYLE S',
-        'survive': 'SURVIE',
+        'survive': 'SURVIE', 'streak': 'SÉRIE DE VICTOIRES',
     }[completedChallenge];
     const completedText = completedLabel === null ? '' : ` · DÉFI RÉUSSI : ${completedLabel}`;
     // Store exactly the next displayed goal, never a guess about a native run.
