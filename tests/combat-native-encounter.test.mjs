@@ -1152,6 +1152,34 @@ test('J3 Web volleys: connected three-gunner chain grants only one real shot',()
     'reload-vacated center turn passes to C, never splits connected squad into two volleys');
   assert.ok(b.runtime.attackDelayRemaining>.8,'cooling gunner keeps its actual reload delay');
   assert.ok(c.runtime.pendingShot,'replacement gunner reaches the real Attack-Late request');
+
+  // A stunned B remains a SPATIAL bridge even though B cannot fire. The
+  // previous ready-only components split A and C and emitted two bullets in
+  // the same window. The Web fireteam must hold a single shooting slot.
+  for(const actor of actors) {
+    actor.runtime.pendingShot=null;
+    actor.runtime.targetNeedsReroll=false;
+    actor.runtime.attackDelayRemaining=-1;
+    actor.runtime.alertness=2;
+  }
+  b.reaction.stunRemaining=.4;
+  runtime.webVolleyClock=.8;
+  advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.1}));
+  const bridged=actors.filter(actor=>{
+    if(actor===b)return false;
+    advanceNativeEnemyWeapon(actor.runtime,settings,.1);
+    return runNativeEnemyGunAttack(actor.runtime,settings,{
+      scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+      sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+      aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+      allowAttacking:true,canShot:true,active:true,
+      animationTarget:target.playerPosition,
+    },()=>0).shot;
+  });
+  assert.deepEqual(bridged,[c],
+    'a stunned middle ally cannot split one physically connected fireteam into two shots');
+  assert.equal(b.encounter.canAttack,false,'stunned bridge stays unable to attack');
+  assert.ok(a.runtime.attackDelayRemaining>0,'other flank keeps its safe shot-delay floor');
 });
 
 
