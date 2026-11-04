@@ -5,6 +5,9 @@ import { moveNativeFragmentSphere } from '../vfx/native-fragment-physics.js';
 const axes=['x','y','z'];
 // Browser-side frame budget only: never advertise it as a Unity fixed-step policy.
 const WEB_MAX_DEATH_SUBSTEPS = 4;
+// Four swept substeps cover sustained 10 FPS frames; longer hitches remain capped.
+// This is a Web game-feel policy, not a Unity or PhysX fixed-step value.
+const WEB_MAX_DEATH_CONTINUOUS_FRAME_SECONDS = 0.1;
 // Web-only grounded rest threshold: skip repeated full PBD passes for a corpse
 // that has been continuously supported and truly motionless for a short time.
 const WEB_GROUNDED_REST_SECONDS = 0.3;
@@ -520,16 +523,14 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
   }
   const restBefore=limitWebFrameWork?runtime.bodies.map(body=>body.world.slice()):null;
   const contacts=[];
-  // Web game-feel policy: at 30 fps, four exact 150 Hz source steps
-  // cover only 26.7 ms of a 33.3 ms frame. The corpse then falls in slow
-  // motion just when the GPU is busy. Spend up to 33.3 ms of simulation in
-  // four slightly larger SWEPT steps, preserving the normal source step for
-  // healthy frames. Longer hitches still discard catch-up work (not the
-  // cleanup clock) so multiple corpses cannot trigger a frame spiral.
-  // This variable-step policy is NOT an extracted Unity/PhysX scheduler.
+  // Four swept PBD passes cover the complete active 100ms at sustained
+  // 10 FPS instead of making fallen enemies move at one-third real speed.
+  // At 30/60 FPS, preserve the existing smaller step; large stalls still
+  // discard catch-up simulation, not the source cleanup clock.
+  // This adaptive time step is original Web gameplay, not PhysX.
   const budgetedDelta=limitWebFrameWork
     ? Math.min(scaledDelta,Math.max(
-      WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta,1/30))
+      WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta,WEB_MAX_DEATH_CONTINUOUS_FRAME_SECONDS))
     : scaledDelta;
   const webStep=limitWebFrameWork
     ? Math.max(runtime.definition.fixedDelta,budgetedDelta/WEB_MAX_DEATH_SUBSTEPS)
