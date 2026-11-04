@@ -29,7 +29,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
     for (const bus of [weapons, impacts, footsteps, ambient])
         bus.connect(dynamics);
     // Synthetic Web room slapback, not a recovered Unity reflection or impulse response.
-    // Post-spatialization send creates a diffuse 90ms tail for shots/shatters only.
+    // Post-spatialization send colors weapon/item and impact cues, not footsteps.
     // One shared delay/filter pair keeps node count constant during burst combat.
     const roomReflections = [];
     if (typeof context.createDelay === 'function') {
