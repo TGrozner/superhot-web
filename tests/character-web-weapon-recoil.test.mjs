@@ -139,9 +139,11 @@ test('source-neutral +X Dojo arm lifts elbow and weapon after firing instead of 
     'the +X upper arm must visibly rise, not twist around its own axis');
   assert.ok(recoil.weaponAttachmentMatrix[13] > edgeWristY + .1,
     'weapon socket must follow the lifted +X forearm');
-  assert.ok(Math.abs(recoil.boneModelMatrices[2*16+9] -
-    recoil.boneModelMatrices[1*16+9]) > .05,
-    'the elbow must counter-flex relative to the lifted shoulder');
+  // A +X arm lifts about Z: compare the vertical component of each
+  // joint's +X axis, not the +Z-forward axis used by the other fixture.
+  assert.ok(Math.abs(recoil.boneModelMatrices[2*16+1] -
+    recoil.boneModelMatrices[1*16+1]) > .05,
+    'the +X elbow must counter-flex relative to the lifted shoulder');
   assert.equal(mock.getDraws(), 2);
   assert.equal(mock.palette.length, 2);
   pass.dispose();
