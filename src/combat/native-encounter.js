@@ -484,6 +484,7 @@ function spawnEnemy(runtime, point, order, population) {
       : Object.freeze({status:'web-pistol-fallback',reason:activation.reason}),
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
+      webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
@@ -512,6 +513,13 @@ function moveEnemy(runtime, enemy, input) {
   // native eye/AimTarget bone, and cannot authorize firing.
   const sightOrigin={x:start.x,y:start.y+runtime.aimHeight,z:start.z};
   state.visible=nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2) === null;
+  // Web-authored fairness: once an enemy has REALLY observed the player,
+  // losing body sight freezes its last known feet instead of letting it track
+  // live coordinates through walls. Actors that have never seen the player
+  // keep the established Dojo pursuit fallback; no new source AI claim.
+  if(state.visible)state.webLastSeenFeet={...playerFeet};
+  const pursuitFeet=!state.visible && state.webLastSeenFeet
+    ? state.webLastSeenFeet : playerFeet;
   const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
   const worldMuzzleClear=armed && muzzleKnown &&
     nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
@@ -557,6 +565,16 @@ function moveEnemy(runtime, enemy, input) {
     : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
   const stop=state.visible && playerDistance <= stopDistance;
+  // On reaching genuinely last-seen feet behind cover, hold/search there
+  // instead of magically following the hidden player's new route. The same
+  // nav/capsule path remains authoritative on the approach.
+  if(!state.visible && state.webLastSeenFeet &&
+      distance(start,pursuitFeet)<=runtime.body.radius*0.8) {
+    enemy.runtime.speed=0;
+    state.route=null;
+    state.target={...pursuitFeet};
+    return;
+  }
   // The pushing actor's close-contact retreat must not cancel the shorter
   // approach ring. Everyone else retains the original Web retreat distance.
   const disengageDistance=Math.min(stopDistance*(breaching
@@ -581,7 +599,8 @@ function moveEnemy(runtime, enemy, input) {
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
     (disengaging || tactical) ? 'walking' : stop ? 'standing'
       : armed && !breaching ? 'walking' : 'running',scaledDeltaTime);
-  const dx=playerPosition.x-start.x, dz=playerPosition.z-start.z;
+  const facing=state.visible || !state.webLastSeenFeet ? playerPosition : pursuitFeet;
+  const dx=facing.x-start.x, dz=facing.z-start.z;
   if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   if (stop) {
     if(disengaging && scaledDeltaTime>0) {
@@ -594,9 +613,10 @@ function moveEnemy(runtime, enemy, input) {
   // When armed allies are pursuing together, seek opposite safe approach
   // lanes before resuming the normal stop-radius strafe / retreat behavior.
   // An unreachable offset is never substituted for the direct source route.
-  const flankGoal=armed && playerDistance>stopDistance+runtime.body.radius*2
+  const flankGoal=armed && state.visible &&
+      playerDistance>stopDistance+runtime.body.radius*2
     ? webSquadApproachGoal(runtime,enemy,playerFeet,enemies) : null;
-  const desiredTarget=flankGoal ?? playerFeet;
+  const desiredTarget=flankGoal ?? pursuitFeet;
   if (!state.route || !state.target || distance(state.target,desiredTarget) > runtime.body.radius ||
       state.route.cursor >= state.route.points.length) {
     let destination=desiredTarget;
