@@ -9,7 +9,9 @@ const late=main.slice(main.indexOf('function flushDojoEnemyLateShots()'),
   main.indexOf('// Open the local-model view immediately'));
 
 test('accepted Dojo gun attack requests an independent sound before late pose',()=>{
-  const update=main.slice(main.indexOf('function update(dt)'),main.indexOf('function drawEnemy(enemy)'));
+  const updateStart=main.search(/function update\(dt(?:,\s*activeRealDt)?\)\s*\{/);
+  assert.notEqual(updateStart,-1,'gameplay update entry must be present');
+  const update=main.slice(updateStart,main.indexOf('function drawEnemy(enemy)'));
   assert.match(update,/runNativeEnemyGunAttack\(/);
   assert.match(update,/if\(attack\.shot\)\s*\{/);
   assert.match(update,/nativeEnemyFireAttackRequests\(attack,family,shooterPosition\)/);
