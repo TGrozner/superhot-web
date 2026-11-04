@@ -316,6 +316,15 @@ function contactsFor(runtime,body,displacement,contacts) {
       const inward=dot(tangent,normal);
       if(inward<0)tangent=sub(tangent,mul(normal,inward));
     }
+    // At t=0 the source floor contact has already changed the velocity.
+    // Apply that same tangential retention to the swept displacement, rather
+    // than gliding a whole Web substep at the PRE-impact speed. A glancing
+    // impulse still slides when friction permits it (and the next sweep still
+    // respects walls). This is Web integration, not a native PhysX rule.
+    const before=dot(incomingVelocity,tangent);
+    const after=dot(body.velocity,tangent);
+    const retention=before>1e-10?Math.min(1,Math.max(0,after/before)):0;
+    tangent=mul(tangent,retention);
     let admitted=length(tangent)>1e-9?1:0;
     if(admitted)for(const sphere of body.spheres) {
       const start=transform(from,sphere.center),end={
