@@ -41,6 +41,14 @@ const WEB_LAST_SEEN_SWEEP = Object.freeze({
   speedFraction:0.75,
 });
 
+// J3 Web-only witnessed-loss reaction: a nearby enemy that actually sees an
+// ally fall briefly retreats from the impact location. There is no global
+// death alarm, target reveal, invulnerability or native MCD behavior claim.
+const WEB_WITNESSED_LOSS = Object.freeze({
+  witnessBodyRadii:14,
+  retreatSeconds:0.55,
+});
+
 // J3 Web-authored paired pressure: one armed squadmate closes the gap while
 // others hold their firing distance. Pick by stable actor identity, not array
 // iteration or frame timing; an ally's death ends the push immediately.
@@ -368,7 +376,7 @@ export function createNativeEncounter(scene, collision, rng = Math.random, {
     collision, sightCollision, nav, body, maxSnapDistance, points, spawnerPosition, spawnerSettings, enemySettings,
     sourceFactoryPlan,
     spawner:createNativeSpawnerState(spawnerSettings, rng), rng, killTarget, killed:0,
-    actors:new Map(), countedDeaths:new Set(), arrivals:[], nextId:0,
+    actors:new Map(), countedDeaths:new Set(), webObservedDeaths:new Set(), arrivals:[], nextId:0,
     stunTime:scalar(enemy.StunTime, 'StunTime'), aimHeight:scalar(enemy.AimHeight, 'AimHeight'),
     armedStopDistance:scalar(enemy.MinimumDistanceToPlayer, 'MinimumDistanceToPlayer'),
     unarmedStopDistance:scalar(enemy.MeleeAttackDistance, 'MeleeAttackDistance'),
@@ -509,11 +517,46 @@ function spawnEnemy(runtime, point, order, population) {
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
       webSearchRemaining:null, webSearchComplete:false,
-      webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0},
+      webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
+      webLossRemaining:0,webLossFeet:null},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
   return enemy;
+}
+
+// Sample new actual death receipts before moving the squad. Keep a separate
+// seen set from kill accounting: main may call readyForVictory earlier in the
+// frame, and an old corpse must never re-trigger an endless evasive loop.
+// The collider ray from witness eye to the fallen body prevents wallhack panic.
+function applyWebWitnessedLoss(runtime,enemies) {
+  const recent=[];
+  for(const [id,actor] of runtime.actors) {
+    if(living(actor) || runtime.webObservedDeaths.has(id))continue;
+    runtime.webObservedDeaths.add(id);
+    recent.push(actor);
+  }
+  if(recent.length===0)return;
+  for(const enemy of enemies) {
+    if(!participating(enemy) || !enemy.encounter || !enemy.runtime ||
+        enemy.reaction?.stunRemaining>0 || enemy.reaction?.stunnedThisFrame ||
+        enemy.runtime.pendingShot)continue;
+    const eye={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+    let nearest=null,nearestDistance=Infinity;
+    for(const fallen of recent) {
+      if(fallen===enemy)continue;
+      const d=Math.hypot(enemy.x-fallen.x,enemy.z-fallen.z);
+      if(d>=nearestDistance || d>runtime.body.radius*WEB_WITNESSED_LOSS.witnessBodyRadii)continue;
+      const body={x:fallen.x,y:fallen.y+runtime.aimHeight*0.55,z:fallen.z};
+      if(nativeSphereHit(runtime.sightCollision,eye,body,.2)!==null)continue;
+      nearest=fallen;
+      nearestDistance=d;
+    }
+    if(nearest) {
+      enemy.encounter.webLossRemaining=WEB_WITNESSED_LOSS.retreatSeconds;
+      enemy.encounter.webLossFeet=position(nearest);
+    }
+  }
 }
 
 function moveEnemy(runtime, enemy, input, observingAllies) {
@@ -525,13 +568,19 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
   enemy.walking=false;
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
     cancelWebProjectileEvade(state);
+    state.webLossRemaining=0;
+    state.webLossFeet=null;
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
   }
   const armed=enemy.reaction.hasWeapon;
   if (!armed) enemy.runtime.pendingShot=null;
-  if (enemy.runtime.pendingShot) cancelWebProjectileEvade(state);
+  if (enemy.runtime.pendingShot) {
+    cancelWebProjectileEvade(state);
+    state.webLossRemaining=0;
+    state.webLossFeet=null;
+  }
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
   // native eye/AimTarget bone, and cannot authorize firing.
@@ -600,6 +649,22 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
     if(!moved || state.webDodgeRemaining===0) {
       state.webDodgeCooldown=WEB_PROJECTILE_EVADE.recoverySeconds;
       if(!moved)state.webDodgeRemaining=0;
+    }
+    if(moved)return;
+  }
+  // Witnessed teammate losses produce one brief, geometry-constrained retreat
+  // away from the ACTUAL corpse, not the player's hidden/current location.
+  // No gun permission is granted during this evasive beat.
+  if(state.webLossRemaining>0 && state.webLossFeet && scaledDeltaTime>0 &&
+      !enemy.runtime.pendingShot) {
+    advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+      'running',scaledDeltaTime);
+    const moved=tryWebDisengage(runtime,enemy,state.webLossFeet,enemies,scaledDeltaTime);
+    state.webLossRemaining=Math.max(0,state.webLossRemaining-scaledDeltaTime);
+    state.canAttack=false;
+    if(!moved || state.webLossRemaining<=EPSILON) {
+      state.webLossRemaining=0;
+      state.webLossFeet=null;
     }
     if(moved)return;
   }
@@ -740,6 +805,7 @@ export function advanceNativeEncounter(runtime, input) {
   const { scaledDeltaTime, unscaledDeltaTime, playerPosition, playerForward, playerFeet, enemies } = input;
   scalar(scaledDeltaTime,'scaledDeltaTime'); scalar(unscaledDeltaTime,'unscaledDeltaTime');
   if (readyForVictory(runtime,enemies)) return [];
+  applyWebWitnessedLoss(runtime,enemies);
   // Compute actual sightings before anyone moves: a nearby squad callout is
   // valid only if its sender sees the player at THIS frame's original feet.
   const observingAllies=new Set();
