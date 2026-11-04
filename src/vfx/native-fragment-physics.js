@@ -26,7 +26,7 @@ function closestTriangle(p,{a,b,c}) {
 
 // Sweep queries intentionally allow escape from overlap. Shards can begin
 // overlapping after their parent shatters; resolve that overlap before sweeping.
-function recoverPenetration(scene,position,radius,contacts) {
+function recoverPenetration(scene,position,velocity,radius,contacts) {
   for(let iteration=0;iteration<8;iteration++) {
     let changed=false;
     for(const box of scene.boxes) {
@@ -39,7 +39,7 @@ function recoverPenetration(scene,position,radius,contacts) {
         if(clearance<depth){depth=clearance;normal=along({x:0,y:0,z:0},plane.normal,distance<0?-1:1);}
       }
       let point;
-      if(inside){depth+=radius;point=along(position,normal,-(depth-radius));}
+      if(inside){depth+=radius;point=along(position,normal,depth-radius);}
       else {
         let squared=Infinity;
         for(const triangle of box.triangles) {
@@ -54,6 +54,12 @@ function recoverPenetration(scene,position,radius,contacts) {
       }
       if(depth<=1e-8)continue;
       for(const axis of axes)position[axis]+=normal[axis]*(depth+1e-8);
+      // Starting inside an authored solid has no trustworthy bounce TOI.
+      // Discard only velocity still moving INTO the recovered face: a shard
+      // can leave the overlap or slide along it without repeated ejection.
+      // This is a conservative Web depenetration rule, not native PhysX.
+      const inward=dot(velocity,normal);
+      if(inward<0)for(const axis of axes)velocity[axis]-=normal[axis]*inward;
       contacts.push({t:0,point,normal,collider:box.collider,penetration:depth});
       changed=true;
     }
@@ -74,7 +80,7 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
       (material.staticFriction!==undefined&&(!Number.isFinite(material.staticFriction)||material.staticFriction<0)))
     throw new TypeError('Finite source shape, contact material and collision view required');
   const contacts = [];
-  recoverPenetration(scene,position,radius,contacts);
+  recoverPenetration(scene,position,velocity,radius,contacts);
   const planes=[];
   let remaining = { ...displacement };
   // Web iteration bound, not a source solver parameter. Never advance an
