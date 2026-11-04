@@ -557,3 +557,25 @@ pass the already-computed `activeRealDt` on native Dojo gameplay updates,
 while preserving pause behavior and legacy timing. Until that shared-file
 change lands, a 10 FPS frame may still look capped. This is an intentionally
 original Web visual policy, **not** a reconstructed Unity HDR/VFX timing.
+
+### SH-06 / 2026-11-04 — Performance des débris au sol dans le Dojo
+
+`advanceNativeFragmentBody` suspends now its **Web-only** CCD workload after
+at least 0.2 seconds of consecutive, slow (<0.06 m/s) upward contact with
+the **existing sourced static Dojo collider**. The resting shard keeps its
+last collision-admitted position while `advanceGunPickupShardRuntime` still
+advances the authored disappearance/HDR clock and its existing Web visual
+spin. Contact time starts at the swept impact fraction, **not** at the
+beginning of a long hitch frame. A changed shard velocity/position, a disabled
+support collider, or an unbudgeted simulation call immediately wakes it.
+Airborne fragments and frictionless moving shards cannot sleep by elapsed
+time alone. This avoids repeated collision sweeps for settled fragments in
+multi-kill scenes without introducing assets or additional draw calls.
+
+The 0.2 s / 0.06 m/s thresholds are **creative browser performance policies,
+not MCD PhysX sleep parameters**. Source identity remains the active scene
+collision boxes; no new original physics data, animated play state, or
+fracture asset is inferred. Validate visually on standalone Pages after
+SH-05 merge: multiple kills and thrown items, resting vs sliding fragments,
+re-enabled/disabled collision surfaces, FPS at 30/60 Hz and replay. Node CI
+only proves the deterministic code path, not real browser frame times.

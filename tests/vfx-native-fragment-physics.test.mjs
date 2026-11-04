@@ -249,3 +249,55 @@ test('authored shard spin settles after a real contact, not during flight or sca
   assert.ok(Math.abs(angle(touched.shards[0])-angle(split.shards[0]))<1e-9,
     'post-contact spin should be stable across frame subdivisions');
 });
+
+test('grounded Dojo shards sleep without repeated sweeps, then wake on lost support or new impulse',()=>{
+  const physics=context();
+  physics.material={...physics.material,bounciness:0,staticFriction:2};
+  const shard=body();
+  shard.position={x:0,y:0.1,z:0};
+  shard.velocity={x:0,y:0,z:0};
+  const web={...physics,limitWebFrameWork:true};
+  for(let i=0;i<24;i++)advanceNativeFragmentBody(shard,1/60,web);
+  assert.equal(shard.webShardResting,true,'sustained sourced floor contact should settle the shard');
+  const position={...shard.position};
+  const boxes=physics.collisionScene.boxes;
+  let reads=0;
+  Object.defineProperty(physics.collisionScene,'boxes',{
+    configurable:true,get(){reads++;return boxes;},
+  });
+  assert.deepEqual(advanceNativeFragmentBody(shard,0.3,web),[],
+    'asleep fragments have no collision events to duplicate');
+  assert.deepEqual(shard.position,position,'sleep holds the source-collision-admitted position');
+  assert.ok(reads<=2,'resting shard should check support, not sweep the world again');
+  physics.collisionScene.setEnabled('floor',false);
+  advanceNativeFragmentBody(shard,0.2,web);
+  assert.equal(shard.webShardResting,false,'disabled authored floor must wake the shard');
+  assert.ok(shard.position.y<position.y,'gravity resumes when the supported surface vanishes');
+  physics.collisionScene.setEnabled('floor',true);
+  shard.position={x:0,y:0.1,z:0};
+  shard.velocity={x:0,y:0,z:0};
+  for(let i=0;i<24;i++)advanceNativeFragmentBody(shard,1/60,web);
+  assert.equal(shard.webShardResting,true);
+  shard.velocity={x:2,y:0,z:0};
+  advanceNativeFragmentBody(shard,1/60,web);
+  assert.equal(shard.webShardResting,false,'an external impulse cannot remain frozen');
+  assert.ok(shard.position.x>0,'the shard resumes physical motion');
+});
+
+test('one long falling frame does not count airborne time toward grounded shard sleep',()=>{
+  const physics=context();
+  physics.material={...physics.material,bounciness:0};
+  const shard=body();
+  shard.position={x:0,y:0.3,z:0};
+  shard.velocity={x:0,y:-1,z:0};
+  advanceNativeFragmentBody(shard,0.3,{...physics,limitWebFrameWork:true});
+  assert.ok(shard.position.y>=0.1-1e-7);
+  assert.notEqual(shard.webShardResting,true,
+    'a late floor contact in one browser hitch is not 300ms of continuous support');
+  const flight=body();
+  flight.position={x:0,y:3,z:0};
+  flight.velocity={x:0,y:0,z:0};
+  const noGround={...physics,collisionScene:{boxes:[]},gravity:{x:0,y:0,z:0},limitWebFrameWork:true};
+  for(let i=0;i<30;i++)advanceNativeFragmentBody(flight,1/60,noGround);
+  assert.notEqual(flight.webShardResting,true,'no source collider means no static sleep');
+});
