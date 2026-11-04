@@ -343,7 +343,9 @@ export function createDojoReplayRecap(snapshot, best = null) {
         nextChallenge = Object.freeze(replayTarget === 'SURVIS JUSQU’À LA VICTOIRE'
             ? { kind: 'survive', target: 0 } : { kind: 'kills', target: goal });
     }
-    else if (best !== null && best.victories > 0) {
+    // After complete mastery, prioritize consecutive-win goals over PB coaching.
+    // An already assigned PB challenge is still retained until completed.
+    else if (best !== null && best.victories > 0 && nextBest?.masteryMask !== 7) {
         // Compare only to the PREVIOUS same-quota PB, never a just-written PB.
         if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
             replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;
