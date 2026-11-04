@@ -7,7 +7,12 @@ export function createWebFootstepMotion(emit) {
     if (typeof emit !== 'function')
         throw new TypeError('step emitter required');
     const metresPerStep = 1.3;
-    const maxFrameTravel = 1.0;
+    // Web gait policy: valid grounded movement can exceed 1 m in a slow frame.
+    // A speed cap preserves strides while rejecting implausible teleports.
+    // These are creative Web limits, not recovered MCD movement constants.
+    const maxFrameTravel = 2.5;
+    const maxGroundMetresPerSecond = 10;
+    const maxAllowedTravel = (elapsedSeconds) => Math.min(maxFrameTravel, Math.max(0.05, elapsedSeconds * maxGroundMetresPerSecond));
     const maxFrameGap = 0.3;
     let previous = null;
     let previousTime = null;
@@ -67,7 +72,7 @@ export function createWebFootstepMotion(emit) {
             const finalTravel = lastAirPosition === null ? Infinity :
                 Math.hypot(current.x - lastAirPosition.x, current.z - lastAirPosition.z);
             const validLanding = airborneFrames >= 2 && airtime >= 0.08 &&
-                finalTravel <= maxFrameTravel;
+                finalTravel <= maxAllowedTravel(timeSeconds - previousTime);
             airborneSince = null;
             airborneFrames = 0;
             lastAirPosition = null;
@@ -90,7 +95,7 @@ export function createWebFootstepMotion(emit) {
         const distance = Math.hypot(current.x - previous.x, current.z - previous.z);
         previous = current;
         previousTime = timeSeconds;
-        if (distance > maxFrameTravel) {
+        if (distance > maxAllowedTravel(dt)) {
             pendingMetres = 0; // Spawn, fast-travel or focus recovery, not a stride.
             return null;
         }
