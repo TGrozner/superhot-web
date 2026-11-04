@@ -1632,6 +1632,10 @@ export function createNativeSkinPass(gl, sourcePackage, {
     availableTransitions: loaded.availableTransitions,
     webHeadTrackingAvailable,
     webHeadPivotBone: webHeadTrackingAvailable ? webHeadIndex : null,
+    // Gaze height reads the authored terminal neck/head joint. The actual
+    // deformation still pivots the whole source neck branch at neckBase.
+    webHeadSampleBone: webHeadTrackingAvailable
+      ? (namedHeadIndex >= 0 ? namedHeadIndex : neckTip) : null,
     webHeadPivotIdentity: webHeadTrackingAvailable ? webHeadPivotIdentity : null,
     rig,
     createInstance, createStateInstance, loadInstance, draw, dispose,
