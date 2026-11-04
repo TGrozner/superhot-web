@@ -586,6 +586,11 @@ test('J3 Web final-survivor pressure closes the finishing gap but yields to rein
 
 test('J3 Web projectile evade: visible player bullets trigger a bounded swept side-step, not clairvoyance',()=>{
   const runtime=setup(),enemy=firstSpawn(runtime);
+  // Known, unobstructed muzzle: evade must actually gate a live ranged attack.
+  enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+  enemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(runtime,input([enemy]));
+  assert.equal(enemy.encounter.canAttack,true,'an unobstructed gunner is initially allowed to fire');
   const aimedFrom=p(15,1,2);
   const bullet={friendly:true,type:'normal',pos:aimedFrom,direction:p(-1,0,0),speed:35};
   const start=p(enemy.x,enemy.y,enemy.z);
@@ -595,13 +600,17 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.ok(Math.abs(enemy.z-start.z)>.005,'enemy sidesteps a live approaching shot');
   assert.ok(Math.hypot(enemy.x-start.x,enemy.z-start.z)<.3,'single frame is speed-bounded');
   assert.ok(enemy.encounter.webDodgeRemaining>0,'dodge persists briefly, without teleporting');
-  assert.equal(enemy.encounter.canAttack,false,'evade does not manufacture a muzzle');
+  assert.equal(enemy.encounter.canAttack,false,
+    'an active evasive sidestep suppresses a new shot even with a clear real muzzle');
   const afterFirst=p(enemy.x,enemy.y,enemy.z);
   advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
   assert.ok(Math.abs(enemy.z-afterFirst.z)>.005,'evade remains legible after bullet moves on');
   for(let i=0;i<4;i++)advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
   assert.equal(enemy.encounter.webDodgeRemaining,0,'short dodge terminates');
   assert.ok(enemy.encounter.webDodgeCooldown>0,'same projectile cannot cause endless jitter');
+  advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
+  assert.equal(enemy.encounter.canAttack,true,
+    'a recovered gunner may fire again once the projectile dodge has ended');
 
   const hiddenRuntime=setup(scene(),[box(8,1,2,.3,3,2)]);
   const hidden=firstSpawn(hiddenRuntime);
@@ -784,4 +793,72 @@ test('J3 Web witnessed loss: visible nearby ally death prompts one swept retreat
   assert.equal(behind.encounter.webLossRemaining,0,
     'a wall prevents omniscient awareness of an ally dying on its other side');
   assert.equal(concealed.killed,1,'occlusion does not erase the real kill receipt');
+});
+
+
+test('J3 Web near-miss suppression: actual passing player bullet interrupts gunfire without wallhacks',()=>{
+  // Synthetic bullets and geometry; creative Web behavior, not an MCD timing claim.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const passing={friendly:true,pos:p(7,1,3.4),direction:p(-1,0,0),speed:22};
+  const runtime=setup(data),enemy=firstSpawn(runtime,player);
+  enemy.muzzlePosition=p(2,1.4,2);enemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(runtime,input([enemy],{...player,scaledDeltaTime:.12,playerProjectiles:[passing]}));
+  assert.ok(enemy.z<1.95,'visible near miss causes a real retreat away from the flight path');
+  assert.equal(enemy.encounter.canAttack,false,'suppression withholds a shot despite a clear muzzle');
+  assert.ok(enemy.encounter.webSuppressionRemaining>0,'brief follow-through persists after bullet leaves');
+  assert.equal(enemy.encounter.webDodgeRemaining,0,'near miss does not masquerade as a direct-hit dodge');
+  for(let i=0;i<5;i++)advanceNativeEncounter(runtime,input([enemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[],
+  }));
+  assert.equal(enemy.encounter.webSuppressionRemaining,0,'finite response expires without projectile');
+  assert.ok(enemy.encounter.webSuppressionCooldown>0,'same near miss cannot cause endless retreat');
+  const after=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+  }));
+  assert.equal(enemy.encounter.webSuppressionRemaining,0,'recovery suppresses repeated alarms');
+  assert.ok(Math.hypot(enemy.x-after.x,enemy.z-after.z)<.3,'normal movement budget still applies');
+
+  const covered=setup(data,[box(4,1,3.4,.2,2,.45)]),coveredEnemy=firstSpawn(covered,player);
+  coveredEnemy.muzzlePosition=p(2,1.4,2);coveredEnemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(covered,input([coveredEnemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+  }));
+  assert.equal(coveredEnemy.encounter.visible,true,'world cover blocks bullet, not player sight');
+  assert.equal(coveredEnemy.encounter.webSuppressionRemaining,0,'world cover prevents omniscient suppression');
+  assert.equal(coveredEnemy.encounter.canAttack,true,'no false gunfire lockout behind cover');
+
+  const uninvolved=setup(data),idle=firstSpawn(uninvolved,player);
+  advanceNativeEncounter(uninvolved,input([idle],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[{...passing,friendly:false}],
+  }));
+  assert.equal(idle.encounter.webSuppressionRemaining,0,'enemy-fired bullets do not cause player-shot panic');
+});
+
+
+test('J3 Web rear near-miss: suppression breaks laterally instead of charging the shooter',()=>{
+  // Player is ahead to the east; a legitimate projectile passes the enemy
+  // from behind to its west. Retreating from that line would move TOWARD the
+  // player, so suppression should sidestep on the real swept nav/capsule.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),enemy=firstSpawn(runtime,player);
+  enemy.muzzlePosition=p(2,1.4,2);
+  enemy.muzzleForward=p(1,0,0);
+  const start=p(enemy.x,enemy.y,enemy.z);
+  const rearShot={friendly:true,pos:p(.6,1,-4),direction:p(0,0,1),speed:50};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[rearShot],
+  }));
+  assert.ok(Math.abs(enemy.z-start.z)>.01,
+    'rear-side near miss causes actual lateral feet movement');
+  assert.ok(Math.hypot(enemy.x-player.playerFeet.x,enemy.z-player.playerFeet.z)>=
+    Math.hypot(start.x-player.playerFeet.x,start.z-player.playerFeet.z)-1e-6,
+    'suppression must never charge into the player while seeking space');
+  assert.equal(enemy.encounter.canAttack,false,'real lateral suppression still delays fire');
+  assert.ok(enemy.encounter.webSuppressionRemaining>0,
+    'the same finite Web reaction remains active after a successful side-step');
 });

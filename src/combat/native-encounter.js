@@ -136,7 +136,7 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
  * constraints. Fail closed near a wall or teammate; never teleport, bypass a
  * collision or create permission to shoot. Returns true only when feet moved.
  */
-function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
+function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime, {avoidApproaching=null}={}) {
   const start=position(enemy), state=enemy.encounter;
   const awayX=start.x-playerFeet.x, awayZ=start.z-playerFeet.z;
   const length=Math.hypot(awayX,awayZ);
@@ -153,7 +153,8 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:candidate.x/magnitude*travel,y:0,z:candidate.z/magnitude*travel,
     },runtime.body).position;
-    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON)continue;
+    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON ||
+        (avoidApproaching && distance(moved,avoidApproaching)<distance(start,avoidApproaching)-EPSILON))continue;
     if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
@@ -177,6 +178,16 @@ const WEB_PROJECTILE_EVADE = Object.freeze({
   dodgeSeconds: 0.38,
   recoverySeconds: 1.15,
   speedFraction: 1.12,
+});
+
+// J3 Web-original near-miss suppression: a REAL player projectile passing near
+// (but not directly into) a visible gunner briefly forces a covered retreat.
+// No damage, aim information, native MCD reaction or invulnerability is inferred.
+const WEB_NEAR_MISS = Object.freeze({
+  lookaheadSeconds: 0.35,
+  outerBodyRadii: 5.5,
+  retreatSeconds: 0.55,
+  recoverySeconds: 2.4,
 });
 
 /** Find the earliest observable player bullet that will pass near the body.
@@ -216,6 +227,44 @@ function webIncomingProjectile(runtime, enemy, projectiles) {
     threat={sideX:-v.z/speed*side,sideZ:v.x/speed*side};
   }
   return threat;
+}
+
+/** Detect a nearby passing bullet, excluding direct threats handled by the
+ * existing dodge. Cover between the projectile path and the gunner prevents a
+ * supernatural warning; only already-launched player projectiles qualify.
+ * @param {object} runtime Collision and body adapter.
+ * @param {object} enemy Live source-space actor.
+ * @param {object[]} projectiles Actual projectile snapshots.
+ * @returns {{x:number,y:number,z:number}|null} Nearest visible passage point.
+ */
+function webNearMissProjectile(runtime, enemy, projectiles) {
+  if (!Array.isArray(projectiles)) return null;
+  let earliest=Infinity, passage=null;
+  for (const projectile of projectiles) {
+    if (projectile?.friendly!==true || !projectile.pos) continue;
+    const origin=projectile.pos;
+    const velocity=projectile.velocity ?? {
+      x:projectile.direction?.x*projectile.speed,
+      y:projectile.direction?.y*projectile.speed,
+      z:projectile.direction?.z*projectile.speed,
+    };
+    if (![origin.x,origin.y,origin.z,velocity.x,velocity.y,velocity.z].every(Number.isFinite)) continue;
+    const speedSquared=velocity.x**2+velocity.z**2;
+    if (speedSquared<=EPSILON) continue;
+    const until=((enemy.x-origin.x)*velocity.x+(enemy.z-origin.z)*velocity.z)/speedSquared;
+    if (until<=0 || until>WEB_NEAR_MISS.lookaheadSeconds || until>=earliest) continue;
+    const closest={x:origin.x+velocity.x*until,y:origin.y+velocity.y*until,z:origin.z+velocity.z*until};
+    if (closest.y<enemy.y || closest.y>enemy.y+runtime.body.height) continue;
+    const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
+    if (separation<=runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii ||
+        separation>runtime.body.radius*WEB_NEAR_MISS.outerBodyRadii) continue;
+    const eye={x:enemy.x,y:enemy.y+runtime.aimHeight*0.55,z:enemy.z};
+    if (nativeSegmentHit(runtime.sightCollision,origin,closest)!==null ||
+        nativeSegmentHit(runtime.sightCollision,closest,eye)!==null) continue;
+    earliest=until;
+    passage=closest;
+  }
+  return passage;
 }
 
 /** Shift feet laterally without tunneling, teleportation or fake shooting.
@@ -518,7 +567,8 @@ function spawnEnemy(runtime, point, order, population) {
       webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
       webSearchRemaining:null, webSearchComplete:false,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
-      webLossRemaining:0,webLossFeet:null},
+      webLossRemaining:0,webLossFeet:null,
+      webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
@@ -566,20 +616,29 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
   state.canAttack=false;
   state.webAllyBlockingShot=false;
   enemy.walking=false;
+  state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
+    state.webSuppressionRemaining=0;
+    state.webSuppressionFrom=null;
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
   }
   const armed=enemy.reaction.hasWeapon;
-  if (!armed) enemy.runtime.pendingShot=null;
+  if (!armed) {
+    enemy.runtime.pendingShot=null;
+    state.webSuppressionRemaining=0;
+    state.webSuppressionFrom=null;
+  }
   if (enemy.runtime.pendingShot) {
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
+    state.webSuppressionRemaining=0;
+    state.webSuppressionFrom=null;
   }
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
@@ -641,6 +700,10 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
       state.webDodgeSideZ=threat.sideZ;
     }
   }
+  // A moving dodge is an evasive action, not a simultaneous firing stance.
+  // Block a NEW gun attack even when the muzzle was clear before side-stepping;
+  // an already committed pending shot has cancelled the dodge above.
+  if(state.webDodgeRemaining>0) state.canAttack=false;
   if(state.webDodgeRemaining>0 && !enemy.runtime.pendingShot && scaledDeltaTime>0) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'running',scaledDeltaTime);
@@ -667,6 +730,37 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
       state.webLossFeet=null;
     }
     if(moved)return;
+  }
+  // Genuine near-misses create a brief opportunity to reposition, but direct
+  // threats retain priority in the existing dodge. Preserve committed shots.
+  // Shooting permission is withheld during movement, not permanently disabled.
+  if (armed && state.visible && scaledDeltaTime>0 && !enemy.runtime.pendingShot &&
+      state.webDodgeRemaining<=0 && state.webSuppressionRemaining<=0 &&
+      state.webSuppressionCooldown<=EPSILON) {
+    const passage=webNearMissProjectile(runtime,enemy,playerProjectiles);
+    if (passage) {
+      state.webSuppressionFrom=passage;
+      state.webSuppressionRemaining=WEB_NEAR_MISS.retreatSeconds;
+    }
+  }
+  if (state.webSuppressionRemaining>0 && state.webSuppressionFrom && scaledDeltaTime>0 &&
+      !enemy.runtime.pendingShot) {
+    advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+      'running',scaledDeltaTime);
+    // A shot from behind must not make a suppressed gunner rush the player.
+    // Side-step instead if every safe retreat vector shortens that gap.
+    const moved=tryWebDisengage(runtime,enemy,state.webSuppressionFrom,enemies,scaledDeltaTime,
+      {avoidApproaching:playerFeet}) ||
+      tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+        {sideOverride:state.webTacticalSide});
+    state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
+    state.canAttack=false;
+    if (!moved || state.webSuppressionRemaining<=EPSILON) {
+      state.webSuppressionRemaining=0;
+      state.webSuppressionFrom=null;
+      state.webSuppressionCooldown=WEB_NEAR_MISS.recoverySeconds;
+    }
+    if (moved) return;
   }
   // A single, stable armed squadmate pressures the player while its allies
   // maintain their normal firing ring. No assigned partner, blocked line of
