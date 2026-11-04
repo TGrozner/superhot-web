@@ -166,6 +166,17 @@ float dojoWebWarningFalloff(float radius, float range, float along, float cosHal
   float cone = (along / radius - cosHalfAngle) / max(1.0 - cosHalfAngle, 0.0001);
   return distance * dojoWebWarningSmooth(cone / 0.2);
 }
+// J4 Web-only: the old spot projected onto back-facing Concrete/Crystal
+// with full strength. Match the already-shipped moving door fill response.
+// Normals are interpolated by the rasterizer; normalize in fragment space.
+// Without authored normals, preserve the established omnidirectional light.
+float dojoWebWarningSurfaceFacing(vec3 offset, float radius) {
+  if (uHasNormals == 0 || radius <= 0.0001) return 1.0;
+  float normalSquared = dot(vNormal, vNormal);
+  if (normalSquared <= 1e-8) return 1.0;
+  float towardLamp = dot(vNormal, -offset) * inversesqrt(normalSquared) / radius;
+  return 0.2 + 0.8 * clamp(towardLamp, 0.0, 1.0);
+}
 float dojoWebWarningCompression(float energy) {
   return energy / (3.0 + energy);
 }
@@ -213,7 +224,8 @@ vec3 dojoDoorWarningSpotWebPreview(
                    min(1.0 - cookieUv.x, 1.0 - cookieUv.y));
   float feather = dojoWebWarningSmooth(edge / 0.06);
   float energy = sourceIntensity * texture(sourceCookie, cookieUv).a * feather
-    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
+    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle)
+    * dojoWebWarningSurfaceFacing(offset, radius);
   return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
 }
 // Web-authored optional visual cue, NOT an MCD cookie substitute.
@@ -234,7 +246,8 @@ vec3 dojoDoorWarningSpotWebGlow(
   float radius = sqrt(distanceSquared);
   if (along / radius < cosHalfAngle) return vec3(0.0);
   float energy = sourceIntensity
-    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
+    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle)
+    * dojoWebWarningSurfaceFacing(offset, radius);
   return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
 }
 // J4 creative Web fill: the SH-04 doorway false-light already has a live
@@ -447,6 +460,14 @@ const dojoWebWarningWeight = (spotlight, radius, along) =>
   dojoWebWarningSmooth(((along / radius - spotlight.cosHalfAngle) /
     Math.max(1 - spotlight.cosHalfAngle, .0001)) / .2);
 const zeroWebWarning = () => Object.freeze({ rgb: Object.freeze([0, 0, 0]), cookieUv: null });
+// CPU mirror of the existing soft red-wash facing response, now shared by
+// source-cookie and Web procedural warnings. This is not a Unity shadow.
+const dojoWebWarningSurfaceFacing = (worldNormal, delta, radius) => {
+  if (worldNormal === null || radius <= .0001) return 1;
+  const n = unit(sourceLightVec3(worldNormal, 'warning worldNormal'));
+  const towardLamp = -n.reduce((sum, value, i) => sum + value * delta[i], 0) / radius;
+  return .2 + .8 * clamp01(towardLamp);
+};
 // Exact CPU counterpart of the shader's deliberately nonphysical red grading.
 const webWarningContrast = (color, strength, webMaterialMode = 2) => {
   // Suppressed/fully transparent warnings must be exact +0 in the CPU
@@ -469,7 +490,7 @@ const webWarningContrast = (color, strength, webMaterialMode = 2) => {
 };
 
 /** CPU mirror of the deliberately Web-styled, cookie-bearing GPU preview. */
-export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha, webMaterialMode = 2) {
+export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha, webMaterialMode = 2, worldNormal = null) {
   const point = sourceLightVec3(worldPosition, 'warning sample worldPosition');
   if (!Number.isFinite(cookieAlpha) || cookieAlpha < 0 || cookieAlpha > 1) {
     throw new RangeError('cookie alpha must be within [0,1]');
@@ -488,7 +509,8 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
   if (cookieUv.some(value => value < 0 || value > 1)) return zeroWebWarning();
   const edge = Math.min(cookieUv[0], cookieUv[1], 1 - cookieUv[0], 1 - cookieUv[1]);
   const energy = spotlight.intensity * cookieAlpha *
-    dojoWebWarningSmooth(edge / .06) * dojoWebWarningWeight(spotlight, radius, along);
+    dojoWebWarningSmooth(edge / .06) * dojoWebWarningWeight(spotlight, radius, along) *
+    dojoWebWarningSurfaceFacing(worldNormal, delta, radius);
   const glow = energy / (3 + energy);
   return Object.freeze({
     rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
@@ -501,7 +523,7 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
  * It deliberately requires an explicit Web fallback packet, never a phantom
  * Unity cookie. No image, mesh, URL or runtime event is generated here.
  */
-export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMaterialMode = 2) {
+export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMaterialMode = 2, worldNormal = null) {
   if (spotlight?.webPreviewMode !== 'web-procedural-no-cookie') {
     throw new TypeError('Explicit Web procedural warning packet required');
   }
@@ -511,7 +533,8 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
   const along = delta.reduce((sum,x,i) => sum + x * spotlight.direction[i], 0);
   if (radius <= 0 || radius > spotlight.range || along <= 0 ||
       along / radius < spotlight.cosHalfAngle) return zeroWebWarning();
-  const energy = spotlight.intensity * dojoWebWarningWeight(spotlight, radius, along);
+  const energy = spotlight.intensity * dojoWebWarningWeight(spotlight, radius, along) *
+    dojoWebWarningSurfaceFacing(worldNormal, delta, radius);
   const glow = energy / (3 + energy);
   return Object.freeze({
     rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),

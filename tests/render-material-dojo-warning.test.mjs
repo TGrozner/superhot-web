@@ -481,3 +481,39 @@ test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warning
   warning.reset();
   assert.equal(adapter.prepareForInstance('far', packets).spotlights.length, 0);
 });
+
+test('J4 warning spotlights respect Concrete/Crystal surface orientation without hiding alert', () => {
+  // Isolated packet: earlier cache-invalidation tests mutate a controller's
+  // live position arrays in place. Never let their moving beacon change the
+  // geometric front/back sample of this shader-only test.
+  const fixed = {
+    id: 'level10::7', active: true, rendererId: 'level10::71',
+    spotlight: {
+      enabled: true, position: [1, 2, 3], direction: [0, 0, 1],
+      right: [1, 0, 0], up: [0, 1, 0], range: 10, intensity: 30,
+      color: [1, 0, 0], spotAngle: 90, cullingMask: 256,
+      cookieTextureId: 'sceneDoorCookie_000',
+    },
+    falseLight: {enabled: false},
+  };
+  const spot = prepareDojoDoorWarningLighting(scene, [fixed], options).spotlights[0];
+  const at = [1, 2, 8], front = [0, 0, -1], back = [0, 0, 1];
+  const original = sampleDojoDoorWarningWebPreview(spot, at, .4);
+  const facing = sampleDojoDoorWarningWebPreview(spot, at, .4, 2, front);
+  const away = sampleDojoDoorWarningWebPreview(spot, at, .4, 2, back);
+  const shortNormal = sampleDojoDoorWarningWebPreview(spot, at, .4, 2, [0, 0, -.5]);
+  assert.deepEqual(facing, original, 'front-facing and unknown normal retain the current spot strength');
+  assert.deepEqual(shortNormal, facing, 'interpolated normals are normalized in fragment space');
+  assert.ok(away.rgb[0] > 0 && away.rgb[0] < facing.rgb[0],
+    'back-facing walls still have a readable 20% light-energy floor');
+  const noCookie = prepareDojoDoorWarningLighting(scene, [fixed], {
+    ...options, decodedCookies: new Set(), allowWebCookieFreeGlow: true,
+  }).spotlights[0];
+  const glowFront = sampleDojoDoorWarningWebGlow(noCookie, at, 3, front);
+  const glowBack = sampleDojoDoorWarningWebGlow(noCookie, at, 3, back);
+  assert.ok(glowBack.rgb[0] > 0 && glowBack.rgb[0] < glowFront.rgb[0]);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+    /float dojoWebWarningSurfaceFacing\(vec3 offset, float radius\)/);
+  assert.equal((DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.match(
+    /\* dojoWebWarningSurfaceFacing\(offset, radius\)/g) ?? []).length, 2);
+});
