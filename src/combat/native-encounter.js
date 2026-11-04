@@ -700,6 +700,10 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
       state.webDodgeSideZ=threat.sideZ;
     }
   }
+  // A moving dodge is an evasive action, not a simultaneous firing stance.
+  // Block a NEW gun attack even when the muzzle was clear before side-stepping;
+  // an already committed pending shot has cancelled the dodge above.
+  if(state.webDodgeRemaining>0) state.canAttack=false;
   if(state.webDodgeRemaining>0 && !enemy.runtime.pendingShot && scaledDeltaTime>0) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'running',scaledDeltaTime);
