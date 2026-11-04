@@ -404,6 +404,10 @@ const WEB_LOOK_BUFFER_CAP = Math.fround(0.6);
 // Creative Web sampler: account for a full 60 Hz window in float32 terms.
 // A JS 1/60 dt is slightly below Math.fround(1/60), so `>` missed it.
 const WEB_LOOK_SAMPLE_SECONDS = Math.fround(1 / 60);
+// WEB comfort budget: keep at most one residual camera pulse when two
+// 60 Hz windows have elapsed since it was actually delivered. This is
+// measured in active wall time, not in rendered frames or native MCD ticks.
+const WEB_LOOK_RESIDUAL_MAX_AGE_SECONDS = Math.fround(2 * WEB_LOOK_SAMPLE_SECONDS);
 const WEB_LOOK_GAIN = Math.fround(0.03);
 export const WEB_LOOK_ANGLE_CAP = WEB_LOOK_BUFFER_CAP / WEB_LOOK_GAIN;
 
@@ -445,7 +449,10 @@ export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
     source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
     // Web-only: start with the caller's actual view as the comparison anchor.
     // Do not discard the first ten simulation frames after start/replay.
-    lookBuffer: 0, lookPendingDegrees: 0, lookMeasuredAt: 0, yaw, pitch,
+    lookBuffer: 0, lookPendingDegrees: 0, lookMeasuredAt: 0,
+    // null until a writable time tick actually receives a look modifier.
+    // Preserve flicks accumulated during the source's two startup delays.
+    lookLastDeliveredAt: null, yaw, pitch,
   };
 }
 
@@ -548,6 +555,15 @@ export function stepMcdGameplayClock(clock, {
     clock.lookPendingDegrees = Math.min(WEB_LOOK_ANGLE_CAP, clock.lookPendingDegrees + degrees);
     clock.yaw = yaw; clock.pitch = pitch;
     if (Math.fround(clock.realTime - clock.lookMeasuredAt) >= WEB_LOOK_SAMPLE_SECONDS) {
+      // The #281 cap is in samples, not seconds. At 10 FPS, its second
+      // buffered pulse could otherwise keep the world fast for another
+      // 100ms after the player stopped aiming (vs ~17ms at 60 FPS).
+      // Do not age out undelivered startup flicks or fresh pointer input.
+      if (clock.lookLastDeliveredAt !== null && clock.lookPendingDegrees === 0
+          && Math.fround(clock.realTime - clock.lookLastDeliveredAt)
+            >= WEB_LOOK_RESIDUAL_MAX_AGE_SECONDS) {
+        clock.lookBuffer = 0;
+      }
       // Keep the #281 Web anti-linger cap: two short samples maximum.
       clock.lookBuffer = Math.min(
         WEB_LOOK_BUFFER_CAP,
@@ -560,6 +576,7 @@ export function stepMcdGameplayClock(clock, {
       // the first writable tick instead of consuming a real camera turn
       // invisibly during startup. Source-qualified models are unchanged.
       if (clock.source.delayedUpdates === 0) {
+        if (look.currentTimeModifier > 0) clock.lookLastDeliveredAt = clock.realTime;
         clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
       }
       clock.lookMeasuredAt = clock.realTime;
