@@ -79,6 +79,30 @@ test('overlapping Dojo shards recover at the real face and cannot immediately dr
   assert.ok(wallVelocity.x>=-1e-9);
 });
 
+test('source contact friction stops same-frame shard skating without suppressing slick surfaces',()=>{
+  // A long swept Web frame must not cross the remaining floor after the
+  // impact already stopped the shard's lateral velocity.
+  const ground=prepareNativeCollision([
+    {id:'floor',worldMatrix:matrix(0,-0.5,0),center:[0,0,0],size:[30,1,30]},
+  ]);
+  const input=()=>({position:{x:0,y:0.3,z:0},velocity:{x:2,y:-4,z:0}});
+  const material={bounciness:0,dynamicFriction:2,staticFriction:2,bounceThreshold:2};
+  const stuck=input();
+  const contacts=moveNativeFragmentSphere(ground,stuck.position,stuck.velocity,
+    {x:4,y:-1,z:0},0.1,material);
+  assert.ok(contacts.some(c=>c.collider.id==='floor'));
+  assert.ok(stuck.position.x>0.7 && stuck.position.x<1,
+    'a fully arrested tangent must not consume the rest of the frame as sideways motion');
+  assert.ok(Math.abs(stuck.velocity.x)<1e-9);
+  assert.ok(stuck.position.y>=0.1-1e-7);
+
+  const slick=input();
+  moveNativeFragmentSphere(ground,slick.position,slick.velocity,
+    {x:4,y:-1,z:0},0.1,{...material,dynamicFriction:0,staticFriction:0});
+  assert.ok(slick.position.x>3.9,
+    'a real zero-friction material must preserve the remaining tangent sweep');
+});
+
 test('resting contacts stop low-speed normal bounce and source friction stops sliding',()=>{
   const physics=context();physics.material.staticFriction=2;
   const shard=body();shard.position={x:0,y:0.1,z:0};shard.velocity={x:0.01,y:0,z:0};
