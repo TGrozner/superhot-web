@@ -67,6 +67,15 @@ const WEB_SQUAD_PUSH = Object.freeze({
   minimumStopBodyRadii: 3.2,
   disengageFraction: 0.62,
 });
+
+// J3 Web-original readable crossfire: nearby gunners with ACTUALLY clear
+// muzzles take alternating windows for new shots, rather than opening fire
+// simultaneously. Solo combat and already committed shots are unchanged.
+// This is Web balancing, not recovered MCD timings or squad coordination.
+const WEB_SQUAD_VOLLEY = Object.freeze({
+  beatSeconds: 0.75,
+  rangeBodyRadii: 18,
+});
 function webSquadBreacher(enemy, enemies) {
   if (!enemy.reaction?.hasWeapon) return false;
   let readyLead=null, armedCount=0;
@@ -437,6 +446,7 @@ export function createNativeEncounter(scene, collision, rng = Math.random, {
     sourceFactoryPlan,
     spawner:createNativeSpawnerState(spawnerSettings, rng), rng, killTarget, killed:0,
     actors:new Map(), countedDeaths:new Set(), webObservedDeaths:new Set(), arrivals:[], nextId:0,
+    webVolleyClock:0,
     stunTime:scalar(enemy.StunTime, 'StunTime'), aimHeight:scalar(enemy.AimHeight, 'AimHeight'),
     armedStopDistance:scalar(enemy.MinimumDistanceToPlayer, 'MinimumDistanceToPlayer'),
     unarmedStopDistance:scalar(enemy.MeleeAttackDistance, 'MeleeAttackDistance'),
@@ -496,6 +506,42 @@ function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
     const sidewaysX=muzzle.x+dx*t-other.x, sidewaysZ=muzzle.z+dz*t-other.z;
     return sidewaysX*sidewaysX+sidewaysZ*sidewaysZ<=radiusSquared;
   });
+}
+/** Compute real muzzle clearance once before any enemy moves, then rotate
+ * fresh firing turns within local visible squads. Covered, unarmed, stunned
+ * and otherwise busy gunners cannot waste an available squad firing window.
+ * Stable IDs make decisions independent of the actors' iteration order.
+ * @param {object} runtime Current source-geometry encounter runtime.
+ * @param {object[]} enemies Actual live actor list.
+ * @param {Set<object>} observers Actors that see the player this frame.
+ * @param {{x:number,y:number,z:number}} target Actual visible target point.
+ * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>}}
+ */
+function webSquadFireTurns(runtime, enemies, observers, target) {
+  const clear=new Set(), allyBlocked=new Set(), ready=[];
+  for(const enemy of enemies) {
+    if(!participating(enemy) || !enemy.encounter || !enemy.reaction?.hasWeapon ||
+        !observers.has(enemy) || !enemy.muzzlePosition || !enemy.muzzleForward)continue;
+    if(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,target)!==null)continue;
+    clear.add(enemy);
+    if(webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,target,enemies)) {
+      allyBlocked.add(enemy);
+      continue;
+    }
+    if(enemy.reaction.stunRemaining>0 || enemy.reaction.stunnedThisFrame ||
+        enemy.runtime?.pendingShot || enemy.encounter.webDodgeRemaining>0 ||
+        enemy.encounter.webSuppressionRemaining>0 || enemy.encounter.webLossRemaining>0)continue;
+    ready.push(enemy);
+  }
+  ready.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+  const turn=new Set();
+  for(const enemy of ready) {
+    const nearby=ready.filter(ally=>Math.hypot(ally.x-enemy.x,ally.z-enemy.z)<=
+      runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii);
+    const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%nearby.length;
+    if(nearby[index]===enemy)turn.add(enemy);
+  }
+  return {clear,allyBlocked,turn};
 }
 function nearestEnemy(enemies, point) {
   let nearest=null, best=Infinity;
@@ -620,7 +666,7 @@ function applyWebWitnessedLoss(runtime,enemies) {
   }
 }
 
-function moveEnemy(runtime, enemy, input, observingAllies) {
+function moveEnemy(runtime, enemy, input, observingAllies, fireTurns) {
   const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
@@ -691,17 +737,13 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
   const pursuitFeet=!state.visible && state.webLastSeenFeet
     ? state.webLastSeenFeet : playerFeet;
   const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
-  const worldMuzzleClear=armed && muzzleKnown &&
-    nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
-  // Both a world obstacle and an ally can occlude a shot, but only a real
-  // muzzle receipt authorizes repositioning. Existing strafing seeks a lane.
-  // Web fair-play: a clear elevated muzzle alone is not player awareness.
-  // A remembered or squad-reported location may drive pursuit, but cannot
-  // authorize a NEW shot while the enemy's own eye ray is obstructed.
-  // Committed pending shots retain their established resolution path.
-  state.webAllyBlockingShot=state.visible && worldMuzzleClear &&
-    webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,playerPosition,enemies);
-  state.canAttack=state.visible && worldMuzzleClear && !state.webAllyBlockingShot;
+  const worldMuzzleClear=fireTurns.clear.has(enemy);
+  // Real eye, muzzle and unobstructed ally lane remain mandatory. The Web
+  // volley only paces NEW shot opportunities: already committed shots survive.
+  // All clearances and turns use the same pre-movement frame snapshot.
+  state.webAllyBlockingShot=fireTurns.allyBlocked.has(enemy);
+  state.canAttack=state.visible && worldMuzzleClear && !state.webAllyBlockingShot &&
+    (fireTurns.turn.has(enemy) || Boolean(enemy.runtime.pendingShot));
   // An actual incoming player projectile may provoke a short tactical dodge
   // even while chasing. Original MCD enemy AI is not claimed here. No change
   // to existing tactics when the SH-05 projectile snapshot is absent.
@@ -841,7 +883,7 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
   // pauses remain once the muzzle line opens. No shot/damage gate is bypassed.
   const needsFiringLane=stop && armed && state.visible &&
     Boolean(enemy.muzzlePosition && enemy.muzzleForward) &&
-    !state.canAttack && !enemy.runtime.pendingShot;
+    (!worldMuzzleClear || state.webAllyBlockingShot) && !enemy.runtime.pendingShot;
   const tacticalTime=enemy.clock-WEB_STRAFE.warmupSeconds;
   const tactical=stop && armed && (state.canAttack || needsFiringLane) &&
     !enemy.runtime.pendingShot && Number.isFinite(tacticalTime) && tacticalTime>=0 &&
@@ -932,7 +974,12 @@ export function advanceNativeEncounter(runtime, input) {
     if(nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2)===null)
       observingAllies.add(enemy);
   }
-  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies);
+  // Progress the Web volley phase ONCE per gameplay step. No separate clock,
+  // RNG draw, native claim or shared-file wiring is required.
+  runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
+    (WEB_SQUAD_VOLLEY.beatSeconds*60);
+  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition);
+  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns);
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
     scaledDeltaTime,unscaledDeltaTime,enabled:true,spawningAreaInitialized:true,
     currentEnemyCount:enemies.filter(participating).length+runtime.arrivals.length,
