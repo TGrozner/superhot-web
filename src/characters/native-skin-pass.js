@@ -689,20 +689,26 @@ function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
  * Rotate only the head descendants in model space, never the hips, arms or
  * weapon socket. This is NOT an Animator/IK claim or an additional draw.
  */
-function applyWebHeadLook(loaded, scratch, head, affected, yaw) {
+function applyWebHeadLook(loaded, scratch, head, affected, yaw, pitch = 0) {
   const globals = scratch.globals;
   const pivot = head * 16;
-  const px = globals[pivot + 12], pz = globals[pivot + 14];
-  const cosine = Math.cos(yaw), sine = Math.sin(yaw);
+  const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
   for (const bone of affected) {
     const offset = bone * 16;
     for (let column = 0; column < 4; column++) {
       const entry = offset + column * 4;
       const translation = column === 3;
       const x = globals[entry] - (translation ? px : 0);
+      const y = globals[entry + 1] - (translation ? py : 0);
       const z = globals[entry + 2] - (translation ? pz : 0);
-      globals[entry] = cosine * x + sine * z + (translation ? px : 0);
-      globals[entry + 2] = -sine * x + cosine * z + (translation ? pz : 0);
+      // Positive pitch raises the forward axis; yaw preserves its old sign.
+      const pitchedY = cp * y + sp * z;
+      const pitchedZ = -sp * y + cp * z;
+      globals[entry] = cy * x + sy * pitchedZ + (translation ? px : 0);
+      globals[entry + 1] = pitchedY + (translation ? py : 0);
+      globals[entry + 2] = -sy * x + cy * pitchedZ + (translation ? pz : 0);
     }
   }
   // The GPU palette must receive the same head transforms as the CPU hit pose.
@@ -1305,7 +1311,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
     /(?:^|[^a-zA-Z])head$/i.test(bone.name));
   const webHeadBones = [];
   if (webHeadIndex >= 0) {
-    for (let bone = webHeadIndex; bone < loaded.jointCount; bone++) {
+    for (let bone = 0; bone < loaded.jointCount; bone++) {
       for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
         if (ancestor === webHeadIndex) {
           webHeadBones.push(bone);
@@ -1405,8 +1411,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
     if (webHeadLook !== null) {
       if (!webHeadTrackingAvailable || !webHeadLook || typeof webHeadLook !== 'object' ||
           !Number.isFinite(webHeadLook.yaw) || Math.abs(webHeadLook.yaw) > .38 ||
+          !Number.isFinite(webHeadLook.pitch ?? 0) || Math.abs(webHeadLook.pitch ?? 0) > .38 ||
           solvedPose !== null) {
-        throw new RangeError('Web head gaze requires a live, independent Head bone and bounded yaw');
+        throw new RangeError('Web head gaze requires a live, independent Head bone and bounded yaw/pitch');
       }
     }
     if (!Number.isFinite(webHitFlash) || webHitFlash < 0 || webHitFlash > 1) {
@@ -1483,8 +1490,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
       applyWebPoseLean(loaded, scratch, webLeanPivot,
         webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0);
     }
-    if (webHeadLook !== null && webHeadLook.yaw !== 0) {
-      applyWebHeadLook(loaded, scratch, webHeadIndex, webHeadBones, webHeadLook.yaw);
+    if (webHeadLook !== null && (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0)) {
+      applyWebHeadLook(loaded, scratch, webHeadIndex, webHeadBones,
+        webHeadLook.yaw, webHeadLook.pitch ?? 0);
     }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
@@ -1529,7 +1537,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
       nativeClipSampled: solvedPose === null, runtimeEnemyInstanceVerified: false,
       solvedPoseApplied: solvedPose !== null,
       solvedPoseProvenance: solvedPose?.provenance ?? null,
-      webHeadLookApplied: webHeadLook !== null && webHeadLook.yaw !== 0,
+      webHeadLookApplied: webHeadLook !== null &&
+        (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0),
       webHeadLookDesign: webHeadLook !== null ? 'Web-only independent head gaze' : null,
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',

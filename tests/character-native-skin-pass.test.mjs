@@ -1133,10 +1133,10 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     cameraPosition:null, shaderTime:time * 10,
     color:[.8,.1,.2,1],
   });
-  const draw = (time, x, z, extra = {}) => actors.drawActor({
+  const draw = (time, x, z, extra = {}, y = 1.5) => actors.drawActor({
     actorId: 'watchman', pose: {state:'idle', time, ...extra},
     modelMatrix: identity(), viewProjection: identity(),
-    cameraPosition: {x, y:1.5, z}, shaderTime: time * 10,
+    cameraPosition: {x, y, z}, shaderTime: time * 10,
     color: [.8,.1,.2,1],
   });
   const first = draw(0, 5, 5);
@@ -1165,7 +1165,23 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   near(Array.from(lookingLeft.weaponAttachmentMatrix),
     Array.from(control(.21).weaponAttachmentMatrix));
 
-  const dead = draw(.25, 5, 5, {solvedPose:{
+  const above = draw(.33, 0, 5, {}, 4.5);
+  assert.ok(above.actorWebHeadLook.pitch > .1, 'head looks up toward a higher player');
+  assert.ok(above.boneModelMatrices[2*16 + 9] > .1,
+    'the original Head branch pitches up without an additional GPU draw');
+  near(Array.from(above.weaponAttachmentMatrix),
+    Array.from(control(.33).weaponAttachmentMatrix));
+  const frozenAbove = draw(.33, 0, 5, {}, -3);
+  assert.equal(frozenAbove.actorWebHeadLook.pitch, above.actorWebHeadLook.pitch,
+    'frozen world-time pose ignores player altitude changes');
+  near(Array.from(frozenAbove.boneModelMatrices), Array.from(above.boneModelMatrices));
+  const below = draw(.46, 0, 5, {}, -3);
+  assert.ok(below.actorWebHeadLook.pitch < 0, 'head follows a player below the enemy');
+  assert.ok(below.boneModelMatrices[2*16 + 9] < 0);
+  near(Array.from(below.weaponAttachmentMatrix),
+    Array.from(control(.46).weaponAttachmentMatrix));
+
+  const dead = draw(.50, 5, 5, {solvedPose:{
     rig:pass.rig, provenance:'authored solved pose',
     boneModelMatrices:new Float32Array([
       ...identity(), ...moved(0,1,0), ...moved(0,1.4,0), ...moved(1,0,0),

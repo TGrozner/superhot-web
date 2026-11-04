@@ -219,8 +219,10 @@ function webIdleReaction(actorId, pose, identity, solvedPose, action, transition
 
 /**
  * Web-only anticipation: on the existing sampled Head branch, guards glance
- * toward the camera while their torso/weapon maintain the source pose. This
- * is deliberately NOT a native head IK controller or a projectile aim vector.
+ * toward the camera in both azimuth and elevation while their torso/weapon
+ * maintain the source pose. Vertical gaze uses the previous sampled, actual
+ * Head pivot instead of an invented humanoid head height. This is deliberately
+ * NOT a native head IK controller or a projectile aim vector.
  * Slow-world time damps movement; a frozen world pose freezes the gaze too.
  * Replays, teleports, attacks and death never carry a stale head transform.
  *
@@ -257,11 +259,31 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
       Array.from(String(actorId)).reduce((sum, ch) => sum + ch.charCodeAt(0) * .03, 0);
     target = Math.max(-.35, Math.min(.35, target + .06 * Math.sin(pose.time * 1.45 + phase)));
   }
-  const previousYaw = previous.gazeYaw ?? 0;
-  const yaw = dt === 0 ? previousYaw :
-    previousYaw + (target - previousYaw) * (1 - Math.exp(-12 * dt));
-  return Number.isFinite(yaw) && Math.abs(yaw) >= .008
-    ? Object.freeze({yaw, design: 'Web-only isolated head gaze'}) : null;
+  // The head pivot was sampled from this actor's actual skeleton on the
+  // previous successful draw. Transform it by the CURRENT actor model matrix:
+  // this follows stairs, different rig proportions and actor scale without
+  // guessing that every head is a fixed distance above the pelvis.
+  const head = previous.headLocal;
+  const cameraY = indexed ? cameraPosition[1] : cameraPosition.y;
+  let pitchTarget = 0;
+  if (head && Number.isFinite(cameraY) && frontal > .05) {
+    const headX = modelMatrix[0]*head[0] + modelMatrix[4]*head[1] +
+      modelMatrix[8]*head[2] + modelMatrix[12];
+    const headY = modelMatrix[1]*head[0] + modelMatrix[5]*head[1] +
+      modelMatrix[9]*head[2] + modelMatrix[13];
+    const headZ = modelMatrix[2]*head[0] + modelMatrix[6]*head[1] +
+      modelMatrix[10]*head[2] + modelMatrix[14];
+    const horizontal = Math.hypot(cx - headX, cz - headZ);
+    if (Number.isFinite(horizontal) && horizontal > 1) {
+      pitchTarget = Math.max(-.32, Math.min(.32, Math.atan2(cameraY - headY, horizontal)));
+    }
+  }
+  const blend = dt === 0 ? 0 : 1 - Math.exp(-12 * dt);
+  const yaw = (previous.gazeYaw ?? 0) * (1 - blend) + target * blend;
+  const pitch = (previous.gazePitch ?? 0) * (1 - blend) + pitchTarget * blend;
+  return Number.isFinite(yaw) && Number.isFinite(pitch) &&
+    (Math.abs(yaw) + Math.abs(pitch) >= .008)
+    ? Object.freeze({yaw, pitch, design: 'Web-only isolated 3D head gaze'}) : null;
 }
 
 /**
@@ -284,6 +306,9 @@ export function createNativeActorSkinRuntime(skinPass) {
   // One tiny previous-transform sample per actor. Never share camera or
   // movement history between enemies; the runtime is recreated per rig.
   const movementFrames = new Map();
+  const webHeadIndex = skinPass.webHeadTrackingAvailable === true
+    ? skinPass.rig.boneOrder.findIndex(name => /(?:^|[^a-zA-Z])head$/i.test(name))
+    : -1;
 
   function choosePose(selection, label) {
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) {
@@ -431,7 +456,12 @@ export function createNativeActorSkinRuntime(skinPass) {
         x: modelMatrix[12], z: modelMatrix[14],
         fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
         bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
-        gazeYaw: webHeadLook?.yaw ?? 0,
+        gazeYaw: webHeadLook?.yaw ?? 0, gazePitch: webHeadLook?.pitch ?? 0,
+        headLocal: webHeadIndex < 0 ? null : [
+          report.boneModelMatrices[webHeadIndex*16 + 12],
+          report.boneModelMatrices[webHeadIndex*16 + 13],
+          report.boneModelMatrices[webHeadIndex*16 + 14],
+        ],
       });
       if (movementFrames.size > 128) {
         for (const [id, sample] of movementFrames) {
