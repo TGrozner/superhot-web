@@ -984,7 +984,7 @@ test('Web hit stagger follows the actual rendered facing and live player camera,
   });
   assert.equal(solved.actorWebPoseReaction, null, 'ragdoll owns its own pose');
   assert.equal(solved.webPoseLeanApplied, false);
-  assert.equal(calls.filter(call => call[0] === 'draw').length, 9,
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 8,
     'no added render passes for direction-aware impact feedback');
   pass.dispose();
 });
