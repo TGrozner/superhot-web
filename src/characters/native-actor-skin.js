@@ -216,6 +216,54 @@ function webIdleReaction(actorId, pose, identity, solvedPose, action, transition
   });
 }
 
+
+/**
+ * Web-only anticipation: on the existing sampled Head branch, guards glance
+ * toward the camera while their torso/weapon maintain the source pose. This
+ * is deliberately NOT a native head IK controller or a projectile aim vector.
+ * Slow-world time damps movement; a frozen world pose freezes the gaze too.
+ * Replays, teleports, attacks and death never carry a stale head transform.
+ *
+ * @param {Map<string|number, object>} frames committed GPU actor histories
+ * @returns {{yaw: number, design: string} | null}
+ */
+function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPosition,
+                         action, transition, solvedPose, available) {
+  if (!available || solvedPose !== null || action !== null || transition !== null ||
+      !['idle', 'walk', 'run'].includes(identity.name) ||
+      !Number.isFinite(pose.time) || !modelMatrix || modelMatrix.length !== 16 ||
+      !cameraPosition) return null;
+  const previous = frames.get(actorId);
+  if (!previous || previous.state !== identity.name || pose.time < previous.poseTime) return null;
+  const dt = pose.time - previous.poseTime;
+  if (!Number.isFinite(dt) || dt > .15) return null;
+  const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+  const cx = indexed ? cameraPosition[0] : cameraPosition.x;
+  const cz = indexed ? cameraPosition[2] : cameraPosition.z;
+  if (!Number.isFinite(cx) || !Number.isFinite(cz)) return null;
+  const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
+  const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  if (!Number.isFinite(rightLength) || !Number.isFinite(forwardLength) ||
+      rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  const dx = cx - modelMatrix[12], dz = cz - modelMatrix[14];
+  const lateral = (dx * modelMatrix[0] + dz * modelMatrix[2]) / rightLength;
+  const frontal = (dx * modelMatrix[8] + dz * modelMatrix[10]) / forwardLength;
+  const distance = Math.hypot(lateral, frontal);
+  let target = distance > 1 && frontal > .05
+    ? Math.max(-.33, Math.min(.33, Math.atan2(lateral, frontal))) : 0;
+  if (identity.name === 'idle' && frontal > .05) {
+    // Deliberately authored small scanning offset, tied to world time.
+    const phase = typeof actorId === 'number' ? actorId * .61 :
+      Array.from(String(actorId)).reduce((sum, ch) => sum + ch.charCodeAt(0) * .03, 0);
+    target = Math.max(-.35, Math.min(.35, target + .06 * Math.sin(pose.time * 1.45 + phase)));
+  }
+  const previousYaw = previous.gazeYaw ?? 0;
+  const yaw = dt === 0 ? previousYaw :
+    previousYaw + (target - previousYaw) * (1 - Math.exp(-12 * dt));
+  return Number.isFinite(yaw) && Math.abs(yaw) >= .008
+    ? Object.freeze({yaw, design: 'Web-only isolated head gaze'}) : null;
+}
+
 /**
  * @param {ReturnType<import('./native-skin-pass.js').createNativeSkinPass>} skinPass
  */
@@ -343,6 +391,9 @@ export function createNativeActorSkinRuntime(skinPass) {
     // Web game-feel: a hard impact reads instantly against the red crystalline
     // silhouette. This pulse follows the live, already accepted hit state;
     // it never fabricates a hit event, clip, or ragdoll motion.
+    const webHeadLook = webHeadTracking(movementFrames, actorId, selected.identity,
+      pose, modelMatrix, cameraPosition, action, transitionDescriptor, solvedPose,
+      skinPass.webHeadTrackingAvailable === true);
     const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
       ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
     // WEB-authored warm afterglow follows an actual accepted fire action.
@@ -362,7 +413,7 @@ export function createNativeActorSkinRuntime(skinPass) {
       instance: selected.instance, time: selected.time,
       modelMatrix, viewProjection, color, cameraPosition,
       transition, action, solvedPose,
-      webPoseLean: reaction, webHitFlash, webFireGlow,
+      webPoseLean: reaction, webHeadLook, webHitFlash, webFireGlow,
     };
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
@@ -380,6 +431,7 @@ export function createNativeActorSkinRuntime(skinPass) {
         x: modelMatrix[12], z: modelMatrix[14],
         fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
         bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
+        gazeYaw: webHeadLook?.yaw ?? 0,
       });
       if (movementFrames.size > 128) {
         for (const [id, sample] of movementFrames) {
@@ -395,7 +447,7 @@ export function createNativeActorSkinRuntime(skinPass) {
       ...report, actorId, actorSourceSelection: selected.identity,
       boneModelMatrices: matrices, weaponAttachmentMatrix: socket,
       actorWebPoseReaction: reaction, actorWebHitFlash: webHitFlash,
-      actorWebFireGlow: webFireGlow,
+      actorWebFireGlow: webFireGlow, actorWebHeadLook: webHeadLook,
       // A serialized controller/state name is NOT proof of active native
       // Mecanim runtime branch or of 1:1 gameplay animation behavior.
       nativeActorControllerExecutionVerified: false,
