@@ -285,7 +285,7 @@ test('live shatter gains two glass rings without stealing more voices or leaving
   assert.equal(nodes[3].type, 'sine');
   assert.notEqual(nodes[2].frequency.value, nodes[3].frequency.value);
   assert.deepEqual(nodes.slice(2, 4).map(node => node.stopArgs), [
-    [ctx.currentTime + 0.36], [ctx.currentTime + 0.23],
+    [ctx.currentTime + 0.36], [ctx.currentTime + 0.047 + 0.23],
   ]);
   assert.equal(mix.getActiveVoices(), 1);
   assert.equal(mix.emit('step').status, 'blocked'); // Only one voice, despite four sources.
