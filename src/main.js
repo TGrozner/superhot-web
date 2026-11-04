@@ -1396,7 +1396,7 @@ function update(dt, activeRealDt) {
       },worldDt):{ready:false,targetInSight:false,position:toUnity(aim)};
       enemy.aimReady=aimed.ready;
       const attack=runNativeEnemyGunAttack(enemy.runtime,activeWeaponSettings,{
-        scaledDeltaTime:worldDt,unscaledDeltaTime:dt,targetSight:enemy.encounter.visible,
+        scaledDeltaTime:worldDt,unscaledDeltaTime:activeRealDt,targetSight:enemy.encounter.visible,
         sightMode:'all-directions',aimTargetInSight:enemy.encounter.canAttack&&aimed.targetInSight,aimReady:aimed.ready,
         weaponInRightPosition:enemy.encounter.canAttack,allowAttacking:true,canShot:true,
         active:enemy.alive&&enemy.reaction.hasWeapon&&enemy.reaction.stunRemaining===0,animationTarget:toUnity(aimed.position),
