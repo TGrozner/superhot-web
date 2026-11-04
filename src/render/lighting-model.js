@@ -547,6 +547,54 @@ const warningPacketsUnchanged = (packets, snapshot) => {
  *   (instanceId: string, packets: object[]) => object,
  *   cookieImage: (textureId: string) => ImageBitmap | null}}
  */
+
+/**
+ * J4 Web-only GPU optimization: cull warning projection conservatively when
+ * an authored static mesh cannot intersect the light's finite forward cone.
+ * The current world vertex shader applies uModel without displacement.
+ * sqrt(||M||1 * ||M||inf) bounds nonuniform scale and shear safely.
+ * Unknown bounds deliberately bypass culling: never drop visible pixels.
+ */
+const dojoWorldInstanceSphere = (scene, instance) => {
+  // Only scene-builder qualified, static world-pass meshes have a stable
+  // source-to-GPU bound. Synthetic/unclassified objects fail open.
+  if (instance.classification?.worldPassEligible !== true) return null;
+  const bounds = scene.meshes?.get(instance.meshId)?.mesh?.bounds;
+  const center = bounds?.center, m = instance.model;
+  if (!Array.isArray(center) || center.length !== 3 ||
+      !center.every(Number.isFinite) || !(bounds.radius >= 0) ||
+      !Number.isFinite(bounds.radius) ||
+      !m || m.length !== 16 || !Array.from(m).every(Number.isFinite)) return null;
+  const column = Math.max(
+    Math.abs(m[0]) + Math.abs(m[1]) + Math.abs(m[2]),
+    Math.abs(m[4]) + Math.abs(m[5]) + Math.abs(m[6]),
+    Math.abs(m[8]) + Math.abs(m[9]) + Math.abs(m[10]));
+  const row = Math.max(
+    Math.abs(m[0]) + Math.abs(m[4]) + Math.abs(m[8]),
+    Math.abs(m[1]) + Math.abs(m[5]) + Math.abs(m[9]),
+    Math.abs(m[2]) + Math.abs(m[6]) + Math.abs(m[10]));
+  const radius = bounds.radius * Math.sqrt(column * row);
+  const world = [
+    m[0] * center[0] + m[4] * center[1] + m[8] * center[2] + m[12],
+    m[1] * center[0] + m[5] * center[1] + m[9] * center[2] + m[13],
+    m[2] * center[0] + m[6] * center[1] + m[10] * center[2] + m[14],
+  ];
+  if (!Number.isFinite(radius) || !world.every(Number.isFinite)) return null;
+  return { center: world, radius };
+};
+
+const dojoSpotCouldReachSphere = (spot, sphere) => {
+  const delta = sphere.center.map((value, i) => value - spot.position[i]);
+  const distance = Math.hypot(...delta);
+  const slack = 1e-4 * Math.max(1, distance, spot.range, sphere.radius);
+  if (distance > spot.range + sphere.radius + slack) return false;
+  const along = delta.reduce((sum, value, i) => sum + value * spot.direction[i], 0);
+  if (along < -sphere.radius - slack) return false;
+  const lateral = Math.sqrt(Math.max(0, distance * distance - along * along));
+  return lateral - sphere.radius <=
+    Math.max(0, along + sphere.radius) * spot.tanHalfAngle + slack;
+};
+
 export function createDojoDoorWarningSceneAdapter(scene, images, {
   allowWebCookieFreeGlow = false,
 } = {}) {
@@ -573,6 +621,8 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
   const cookieImages = new Map();
   const cookieStatus = [];
   const layerPacketCache = new Map();
+  const instanceBoundCache = new Map();
+  const instanceLightCache = new Map();
   for (const doorId of qualifiedDoorKeys) {
     const textureId = doors[doorId]?.spotlight?.cookieTextureId;
     const sourceTexturePresent = typeof textureId === 'string' &&
@@ -598,6 +648,27 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
           'source-cookie-image-not-decoded',
     }));
   }
+
+  // Keep layer-wide validated uniforms, then cull only the spotlight entries
+  // outside each *static* authored mesh. False-light data stays untouched.
+  const forInstance = (instanceId, instance, layerResult) => {
+    if (layerResult.spotlights.length === 0) return layerResult;
+    const cached = instanceLightCache.get(instanceId);
+    if (cached?.layerResult === layerResult) return cached.packet;
+    if (!instanceBoundCache.has(instanceId))
+      instanceBoundCache.set(instanceId, dojoWorldInstanceSphere(scene, instance));
+    const sphere = instanceBoundCache.get(instanceId);
+    const lights = sphere ? layerResult.spotlights.filter(spot =>
+      dojoSpotCouldReachSphere(spot, sphere)) : layerResult.spotlights;
+    const skipped = layerResult.spotlights.length - lights.length;
+    const packet = skipped === 0 ? layerResult : Object.freeze({
+      ...layerResult,
+      spotlights: Object.freeze(lights),
+      webBoundsCulledSpotlights: skipped,
+    });
+    instanceLightCache.set(instanceId, { layerResult, packet });
+    return packet;
+  };
   return Object.freeze({
     cookieStatus: Object.freeze(cookieStatus),
     /**
@@ -615,7 +686,8 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
       // once per mesh; invalidate on ALL mutable controller/steering inputs.
       const cache = layerPacketCache.get(instance.layer);
       if (cache?.packets === packets &&
-          warningPacketsUnchanged(packets, cache.snapshot)) return cache.result;
+          warningPacketsUnchanged(packets, cache.snapshot))
+        return forInstance(instanceId, instance, cache.result);
       const result = prepareDojoDoorWarningLighting(source, packets, {
         verifiedDoorKeys: qualifiedDoorKeys,
         decodedCookies,
@@ -625,7 +697,7 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
       layerPacketCache.set(instance.layer, {
         packets, snapshot: packets.map(warningPacketSnapshot), result,
       });
-      return result;
+      return forInstance(instanceId, instance, result);
     },
     /** Return only a previously decoded source scene cookie; no fallback. */
     cookieImage(textureId) {

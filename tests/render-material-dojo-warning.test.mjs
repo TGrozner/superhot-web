@@ -340,3 +340,66 @@ test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering v
   assert.equal(inactive.spotlights.length, 0);
   assert.equal(inactive.falseLights.length, 0);
 });
+
+
+test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warnings', () => {
+  const key = 'level10::7089';
+  const doors = { [key]: { ...sourceDoor } };
+  const warning = createMcdDoorWarnings(doors);
+  warning.trigger(key);
+  warning.advance(1);
+  const packets = warning.packets();
+  const textureId = sourceDoor.spotlight.cookieTextureId;
+  const at = (x, y, z, scale = 1) => [
+    scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, x, y, z, 1,
+  ];
+  const instance = (id, x, y, z, scale = 1) => ({
+    id, layer: 8, meshId: 'source-box', model: at(x, y, z, scale),
+    classification: { worldPassEligible: true },
+  });
+  const sourceScene = {
+    source: scene,
+    textures: new Map([[textureId, { id: textureId }]]),
+    gameplay: { audio: { doors } },
+    meshes: new Map([['source-box', { mesh: { bounds: {
+      center: [0, 0, 0], radius: 0.5,
+    } } }]]),
+    instanceMap: new Map([
+      ['near', instance('near', 1, 2, 8)],
+      ['far', instance('far', 31, 2, 8)],
+      ['behind', instance('behind', 1, 2, 0)],
+      ['outside-cone', instance('outside-cone', 9, 2, 5)],
+      // A scaled mesh can still overlap the finite cone even when its
+      // *center* sits outside; its bounding sphere must retain the light.
+      ['scaled-edge', instance('scaled-edge', 1, 2, 14.5, 4)],
+      ['large-cone-edge', instance('large-cone-edge', 9, 2, 5, 12)],
+      // Missing bounds must not silently erase a rendered light.
+      ['no-geometry', { id: 'no-geometry', layer: 8 }],
+    ]),
+  };
+  const adapter = createDojoDoorWarningSceneAdapter(
+    sourceScene, new Map([[textureId, { width: 2, height: 2 }]]));
+  const near = adapter.prepareForInstance('near', packets);
+  assert.equal(near.spotlights.length, 1);
+  for (const id of ['far', 'behind', 'outside-cone']) {
+    const packet = adapter.prepareForInstance(id, packets);
+    assert.equal(packet.spotlights.length, 0, id);
+    assert.equal(packet.webBoundsCulledSpotlights, 1, id);
+    assert.strictEqual(adapter.prepareForInstance(id, packets), packet,
+      'reusing the same source tick also reuses per-instance GPU packet');
+    assert.equal(packet.falseLights.length, 1,
+      'bounding cull affects only spotlight projection, not false-light data');
+  }
+  assert.equal(adapter.prepareForInstance('scaled-edge', packets).spotlights.length, 1);
+  assert.equal(adapter.prepareForInstance('large-cone-edge', packets).spotlights.length, 1);
+  assert.strictEqual(adapter.prepareForInstance('no-geometry', packets), near,
+    'unknown mesh geometry fails open to avoid losing visible illumination');
+  // SH-04's live steering updates source packets in-place: previously culled
+  // geometry must light up on the very next warning update.
+  packets[0].spotlight.position[0] = 31;
+  const steered = adapter.prepareForInstance('far', packets);
+  assert.equal(steered.spotlights.length, 1);
+  assert.deepEqual(steered.spotlights[0].position, [31, 2, 3]);
+  warning.reset();
+  assert.equal(adapter.prepareForInstance('far', packets).spotlights.length, 0);
+});
