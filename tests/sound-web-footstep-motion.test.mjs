@@ -59,3 +59,42 @@ test('Web gait snapshots a camera that moves in place between frames', () => {
   camera.x = 40; // Historical dispatched position must not alias the live camera.
   assert.equal(cues[0].request.position.x, 1.4);
 });
+
+test('ground contact emits a single Web-only landing thud, not a stride or a spurious replay thump', () => {
+  const cues = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, ...request});
+    return {status: 'started', source: 'web-original-synthesis', at: 1, spatial: true};
+  });
+  const tick = (x, timeSeconds, grounded) =>
+    gait.advance({position: p(x), timeSeconds, grounded});
+
+  assert.equal(tick(0, 1, true), null);
+  assert.equal(tick(0.02, 1.05, false), null);
+  assert.equal(tick(0.06, 1.10, false), null);
+  assert.equal(tick(0.1, 1.16, false), null);
+  assert.equal(tick(0.12, 1.20, true)?.status, 'started');
+  assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
+  assert.ok(cues[0].intensity > 0.55);
+  assert.equal(tick(0.12, 1.25, true), null);
+  assert.equal(tick(0.12, 1.30, false), null);
+  assert.equal(tick(0.12, 1.34, true), null); // One-frame grounded jitter.
+  assert.equal(cues.length, 1);
+
+  gait.reset();
+  assert.equal(tick(0, 0, false), null); // Initial airborne spawn is not a landing.
+  assert.equal(tick(0, 0.1, false), null);
+  assert.equal(tick(0, 0.2, true), null);
+
+  gait.reset();
+  tick(0, 2, true);
+  tick(0, 2.05, false);
+  tick(0, 2.1, false);
+  assert.equal(tick(20, 2.15, true), null); // Teleport between last air/ground frames.
+  gait.reset();
+  tick(0, 3, true);
+  tick(0, 3.05, false);
+  tick(0, 3.1, false);
+  assert.equal(tick(0, 3.5, true), null); // Suspended tab / long frame gap.
+  assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
+});
