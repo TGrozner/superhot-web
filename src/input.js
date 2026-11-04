@@ -38,6 +38,8 @@ const SPRINT = ['ShiftLeft', 'ShiftRight'];
  * gameplay-clock path) hides that motion from the slow-motion shifter.
  *
  * Accumulate the *applied* yaw/pitch changes after any camera pitch clamp.
+ * Large single-event yaw rotations retain their winding (one full turn is
+ * motion, even when the final camera orientation matches the initial one).
  * Keep the existing Web anti-linger cap: large rapid flicks cannot queue a
  * long acceleration after the mouse stops. This is a Web comfort heuristic,
  * NOT a native input model or a source-qualified MCD parameter.
@@ -53,7 +55,16 @@ export function accumulateWebPointerLookPath(pendingDegrees, {
   if (!Number.isFinite(pendingDegrees) || pendingDegrees < 0) {
     throw new RangeError('pendingDegrees must be finite and nonnegative');
   }
-  const degrees = webLookDeltaDegrees(previousYaw, previousPitch, yaw, pitch);
+  // Camera yaw is deliberately unwrapped. A single large pointer-lock event
+  // can turn more than half a circle; a full revolution ends at the same pose
+  // and the shortest quaternion angle would incorrectly report zero travel.
+  // Keep the existing short-arc estimate for ordinary events and use the
+  // applied yaw/pitch path only when the event crosses 180 degrees.
+  const shortestDegrees = webLookDeltaDegrees(previousYaw, previousPitch, yaw, pitch);
+  const appliedYaw = yaw - previousYaw;
+  const degrees = Math.abs(appliedYaw) > Math.PI
+    ? Math.hypot(appliedYaw, pitch - previousPitch) * 180 / Math.PI
+    : shortestDegrees;
   return Math.min(WEB_LOOK_ANGLE_CAP, pendingDegrees + degrees);
 }
 
