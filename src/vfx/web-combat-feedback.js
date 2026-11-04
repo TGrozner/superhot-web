@@ -50,7 +50,10 @@ export function recordWebImpact(feedback,{kind,point,direction}){
     const radial=add(scale(side,Math.cos(theta)),scale(up,Math.sin(theta)));
     const speed=baseSpeed*(.48+(i%5)*.14);
     const velocity=add(scale(radial,speed),
-      scale(forward,enemy?(.28*speed):(-.32*speed)));
+      // Enemy hit bursts should eject toward the incoming projectile instead
+      // of disappearing INTO the red target mesh (wall contacts already do).
+      // Purely Web-authored visibility polish; direction is the accepted hit.
+      scale(forward,enemy?(-.38*speed):(-.32*speed)));
     const duration=(enemy?.24:.16)+(i%3)*.025;
     feedback.particles.push({
       x:point.x-forward.x*.025,y:point.y-forward.y*.025,z:point.z-forward.z*.025,
