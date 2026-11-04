@@ -103,6 +103,27 @@ test('source contact friction stops same-frame shard skating without suppressing
     'a real zero-friction material must preserve the remaining tangent sweep');
 });
 
+test('a source-restitution hit rebounds during the remaining swept frame, not one frame late',()=>{
+  const ground=prepareNativeCollision([
+    {id:'floor',worldMatrix:matrix(0,-0.5,0),center:[0,0,0],size:[30,1,30]},
+  ]);
+  const make=()=>({position:{x:0,y:0.3,z:0},velocity:{x:0,y:-4,z:0}});
+  const material={bounciness:0.5,dynamicFriction:0,bounceThreshold:2};
+  const bouncing=make();
+  const hits=moveNativeFragmentSphere(ground,bouncing.position,bouncing.velocity,
+    {x:0,y:-1,z:0},0.1,material);
+  assert.ok(hits.some(hit=>hit.collider.id==='floor'));
+  assert.ok(Math.abs(bouncing.velocity.y-2)<1e-8,
+    'existing source restitution must reflect impact velocity');
+  assert.ok(Math.abs(bouncing.position.y-0.5)<1e-5,
+    'remaining frame must include the outward rebound after floor contact');
+  const resting=make();
+  moveNativeFragmentSphere(ground,resting.position,resting.velocity,
+    {x:0,y:-1,z:0},0.1,{...material,bounciness:0});
+  assert.ok(Math.abs(resting.position.y-0.1)<1e-5,
+    'inelastic materials must not invent upward displacement');
+});
+
 test('resting contacts stop low-speed normal bounce and source friction stops sliding',()=>{
   const physics=context();physics.material.staticFriction=2;
   const shard=body();shard.position={x:0,y:0.1,z:0};shard.velocity={x:0.01,y:0,z:0};
