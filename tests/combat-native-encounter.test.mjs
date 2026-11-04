@@ -1084,4 +1084,30 @@ test('J3 Web volleys: connected three-gunner chain grants only one real shot',()
   assert.ok(a.runtime.attackDelayRemaining>0 && c.runtime.attackDelayRemaining>0,
     'both overlapping neighbors retain the safe cooldown floor');
   assert.ok(b.runtime.pendingShot,'selected gunner reached the actual Attack-Late pipeline');
+
+  // The center gunner still connects A to C spatially while reloading, but
+  // cannot waste the whole squad's turn. The next ready member C fires once;
+  // A must not create a second volley through the temporary cooldown gap.
+  for(const actor of actors) {
+    actor.runtime.pendingShot=null;
+    actor.runtime.targetNeedsReroll=false;
+    actor.runtime.attackDelayRemaining=actor===b ? 1 : -1;
+    actor.runtime.alertness=2;
+  }
+  runtime.webVolleyClock=.8;
+  advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.1}));
+  const resumed=actors.filter(actor=>{
+    advanceNativeEnemyWeapon(actor.runtime,settings,.1);
+    return runNativeEnemyGunAttack(actor.runtime,settings,{
+      scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+      sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+      aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+      allowAttacking:true,canShot:true,active:true,
+      animationTarget:target.playerPosition,
+    },()=>0).shot;
+  });
+  assert.deepEqual(resumed,[c],
+    'reload-vacated center turn passes to C, never splits connected squad into two volleys');
+  assert.ok(b.runtime.attackDelayRemaining>.8,'cooling gunner keeps its actual reload delay');
+  assert.ok(c.runtime.pendingShot,'replacement gunner reaches the real Attack-Late request');
 });

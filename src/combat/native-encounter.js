@@ -515,9 +515,10 @@ function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
  * @param {object[]} enemies Actual live actor list.
  * @param {Set<object>} observers Actors that see the player this frame.
  * @param {{x:number,y:number,z:number}} target Actual visible target point.
+ * @param {number} scaledDeltaTime Current weapon Update tick, not wall time.
  * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>,eligible:Set<object>}}
  */
-function webSquadFireTurns(runtime, enemies, observers, target) {
+function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime) {
   const clear=new Set(), allyBlocked=new Set(), ready=[];
   for(const enemy of enemies) {
     if(!participating(enemy) || !enemy.encounter || !enemy.reaction?.hasWeapon ||
@@ -554,7 +555,20 @@ function webSquadFireTurns(runtime, enemies, observers, target) {
     }
     squad.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
     const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%squad.length;
-    turn.add(squad[index]);
+    // A gunner that cannot finish its existing reload in this weapon Update
+    // must not consume the squad's entire firing window while a partner is
+    // already ready. Keep that gunner IN the component, though: removing it
+    // could split A-B-C into two firing squads and produce double volleys.
+    for (let offset=0;offset<squad.length;offset++) {
+      const candidate=squad[(index+offset)%squad.length];
+      const settings=candidate.activeWeaponSettings ?? runtime.enemySettings;
+      const nextTickCost=scaledDeltaTime*settings.weaponSpeedMultiplier*
+        settings.difficultyWeaponSpeedMultiplier;
+      if (candidate.runtime.attackDelayRemaining<nextTickCost) {
+        turn.add(candidate);
+        break;
+      }
+    }
   }
   return {clear,allyBlocked,turn,eligible:new Set(ready)};
 }
@@ -1002,7 +1016,7 @@ export function advanceNativeEncounter(runtime, input) {
   // RNG draw, native claim or shared-file wiring is required.
   runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
     (WEB_SQUAD_VOLLEY.beatSeconds*60);
-  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition);
+  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime);
   for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns);
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
     scaledDeltaTime,unscaledDeltaTime,enabled:true,spawningAreaInitialized:true,
