@@ -175,6 +175,8 @@ function createWebWarningSweep(catalog, controller) {
     bases.set(packet.id, {
       packet, direction, right, up, falseLightPosition, spawnTarget: null,
       urgency: 0, focusGain: 1,
+      // Web-only damped reactive steering; normal lighthouse sweep stays exact.
+      reactiveYaw: 0, reactivePitch: 0,
       intensity: door.spotlight.intensity,
       spotAngle: door.spotlight.spotAngle,
       duration: door.curve.at(-1).time,
@@ -185,6 +187,7 @@ function createWebWarningSweep(catalog, controller) {
     if (!base) return;
     base.spawnTarget = null; // No previous encounter target can survive REJOUER.
     base.focusGain = 1;
+    base.reactiveYaw = base.reactivePitch = 0;
     const spotlight = base.packet.spotlight;
     if (base.direction) {
       for (let axis = 0; axis < 3; axis++) {
@@ -286,9 +289,11 @@ function createWebWarningSweep(catalog, controller) {
       // J4 Web-authored lighthouse: as the red beam sweeps sideways its
       // aperture tightens; halfway through it glides up the doorway.
       // Keep a smooth, single-cycle warning, never a high-frequency strobe.
-      let yaw = WEB_WARNING_SWEEP_RADIANS * sweep;
-      let pitch = WEB_WARNING_PITCH_RADIANS *
+      const sweepYaw = WEB_WARNING_SWEEP_RADIANS * sweep;
+      const sweepPitch = WEB_WARNING_PITCH_RADIANS *
         Math.sin(Math.PI * phase) ** 2;
+      let yaw = sweepYaw;
+      let pitch = sweepPitch;
 
       // Interactive Web lighting: if a player is close enough to the beam
       // and actually in FRONT of its source, ease its sweep toward that
@@ -354,6 +359,17 @@ function createWebWarningSweep(catalog, controller) {
           }
         }
       }
+      // SH-04 Web polish: smoothly interpolate ONLY the player/spawn reaction.
+      // The deterministic 3D lighthouse sweep remains on its authored Web
+      // clock, while a camera crossing the doorway or a new spawn cue cannot
+      // snap the cone and moving red wash in a single 16 ms frame. A fixed
+      // exponential time constant is frame-rate independent, has no heap cost,
+      // and returns to the sweep when tracking is no longer eligible.
+      const reactiveEase = 1 - Math.exp(-14 * worldDeltaSeconds);
+      base.reactiveYaw += (yaw - sweepYaw - base.reactiveYaw) * reactiveEase;
+      base.reactivePitch += (pitch - sweepPitch - base.reactivePitch) * reactiveEase;
+      yaw = sweepYaw + base.reactiveYaw;
+      pitch = sweepPitch + base.reactivePitch;
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
       const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
       // One soft, moving patch of red light travels outward through the

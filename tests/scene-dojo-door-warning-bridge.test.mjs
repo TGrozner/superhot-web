@@ -487,3 +487,47 @@ test('J4 overlapping Dojo door arrivals focus the imminent entrance without a ne
   assert.ok(Math.abs(first.spotlight.intensity - second.spotlight.intensity) < 1e-9);
   assert.ok(Math.abs(first.falseLight.intensity - second.falseLight.intensity) < 1e-9);
 });
+
+test('J4 reactive Dojo doorway tracking eases abrupt player movements without delaying the base sweep', () => {
+  const tracked = createDojoDoorWarningBridge(browserScene());
+  const neutral = createDojoDoorWarningBridge(browserScene());
+  tracked.accept(warning(103));
+  neutral.accept(warning(103));
+  tracked.advance(0.5);
+  neutral.advance(0.5);
+  const active = tracked.packets()[0];
+  const directionBuffer = active.spotlight.direction;
+  const eye = { x: 9, y: 1.8, z: -15 };
+  const difference = () => Math.hypot(...directionBuffer.map((v, i) =>
+    v - neutral.packets()[0].spotlight.direction[i]));
+
+  tracked.advance(0.016, eye);
+  neutral.advance(0.016);
+  const firstFrame = difference();
+  assert.ok(firstFrame > 0.001 && firstFrame < 0.12,
+    'a 16ms player movement nudges the beam instead of instantly snapping to its target');
+  for (let i = 0; i < 12; i++) {
+    tracked.advance(0.016, eye);
+    neutral.advance(0.016);
+  }
+  const settled = difference();
+  assert.ok(settled > firstFrame * 1.5,
+    'stable player tracking gradually establishes a stronger beam cue');
+
+  // Player crosses behind the wall: reactive steering must release smoothly,
+  // without freezing the original sweeps or leaving an x-ray aim permanently.
+  tracked.advance(0.016, { x: 30, y: 1.8, z: -15 });
+  neutral.advance(0.016);
+  const releasing = difference();
+  assert.ok(releasing > 0 && releasing < settled,
+    'invalid/behind player aim decays rather than flipping abruptly');
+  for (let i = 0; i < 30; i++) {
+    tracked.advance(0.016, { x: 30, y: 1.8, z: -15 });
+    neutral.advance(0.016);
+  }
+  assert.ok(difference() < 0.01, 'the source-qualified lighthouse resumes its neutral sweep');
+  assert.equal(active.spotlight.direction, directionBuffer, 'the GPU vector remains stable');
+  tracked.reset();
+  assert.deepEqual(active.spotlight.direction, [-0.99999999982, 0, 0.00001898408]);
+  assert.equal(active.active, false);
+});
