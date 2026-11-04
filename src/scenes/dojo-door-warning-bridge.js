@@ -121,6 +121,10 @@ const WEB_WARNING_ARRIVAL_IRIS_FOCUS = 0.12;
 // the same GPU light/slot, never spawns a lamp or an unverified scene mesh.
 const WEB_WARNING_SPILL_FORWARD_METERS = 1.15;
 const WEB_WARNING_SPILL_LATERAL_METERS = 0.35;
+// Once a REAL enemy arrival has occurred, stop advertising a future spawn.
+// Web-only fade in unscaled seconds: the source warning envelope itself remains
+// on world time, but its extra incoming-threat glow/wash is released quickly.
+const WEB_WARNING_ARRIVAL_RELEASE_PER_SECOND = 12;
 
 function smooth01(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -177,6 +181,7 @@ function createWebWarningSweep(catalog, controller) {
       // An accepted spawn's delay runs in REAL seconds, unlike the source
       // light curve. Null means the event supplied no qualified delay.
       arrivalRemaining: null,
+      arrivalEmphasis: 1,
       urgency: 0, focusGain: 1,
       // Web-only damped reactive steering; normal lighthouse sweep stays exact.
       reactiveYaw: 0, reactivePitch: 0,
@@ -190,6 +195,7 @@ function createWebWarningSweep(catalog, controller) {
     if (!base) return;
     base.spawnTarget = null; // No previous encounter target can survive REJOUER.
     base.arrivalRemaining = null;
+    base.arrivalEmphasis = 1;
     base.focusGain = 1;
     base.reactiveYaw = base.reactivePitch = 0;
     const spotlight = base.packet.spotlight;
@@ -229,6 +235,7 @@ function createWebWarningSweep(catalog, controller) {
       ? [position.x, position.y, position.z] : null;
     base.arrivalRemaining = Number.isFinite(delaySeconds) && delaySeconds > 0
       ? delaySeconds : null;
+    base.arrivalEmphasis = 1;
   }
 
   function advance(playerWorldPosition, worldDeltaSeconds, unscaledDeltaSeconds) {
@@ -247,6 +254,13 @@ function createWebWarningSweep(catalog, controller) {
       // previous visual-only phase ranking rather than guess a time scale.
       if (unscaledDeltaSeconds != null && base.arrivalRemaining != null) {
         base.arrivalRemaining = Math.max(0, base.arrivalRemaining - unscaledDeltaSeconds);
+        // The source lamp can still be active in slowed world time after an
+        // enemy has already appeared in real time. Release only the Web
+        // crescendo, moving floor wash and incoming-route aim: no phantom
+        // second arrival. Keep the remaining source red warning intact.
+        base.arrivalEmphasis = base.arrivalRemaining === 0
+          ? base.arrivalEmphasis * Math.exp(-WEB_WARNING_ARRIVAL_RELEASE_PER_SECOND * unscaledDeltaSeconds)
+          : 1;
         base.urgency = base.arrivalRemaining > 0
           ? 0.05 + 1 / (0.25 + base.arrivalRemaining) ** 2 : 0.05;
       } else {
@@ -286,7 +300,8 @@ function createWebWarningSweep(catalog, controller) {
       const arrival = smooth01((phase - WEB_WARNING_ARRIVAL_START) /
           (WEB_WARNING_ARRIVAL_PEAK - WEB_WARNING_ARRIVAL_START)) *
         (1 - smooth01((phase - WEB_WARNING_ARRIVAL_PEAK) /
-          (WEB_WARNING_ARRIVAL_END - WEB_WARNING_ARRIVAL_PEAK)));
+          (WEB_WARNING_ARRIVAL_END - WEB_WARNING_ARRIVAL_PEAK))) *
+        base.arrivalEmphasis;
       // SH-07 has just sampled the original range; multiplication NEVER
       // compounds from the previous frame. The source envelope still fades.
       packet.spotlight.range *= 1 + WEB_WARNING_RANGE_GAIN * breathing;
@@ -331,7 +346,7 @@ function createWebWarningSweep(catalog, controller) {
               dz * base.right[2]) / distance;
             const vertical = (dx * base.up[0] + dy * base.up[1] +
               dz * base.up[2]) / distance;
-            const focus = WEB_WARNING_SPAWN_BLEND *
+            const focus = WEB_WARNING_SPAWN_BLEND * base.arrivalEmphasis *
               smooth01((phase - 0.2) / 0.55) *
               smooth01((forward - WEB_WARNING_SPAWN_MIN_FACING) /
                 (WEB_WARNING_SPAWN_FULL_FACING - WEB_WARNING_SPAWN_MIN_FACING));
@@ -395,7 +410,7 @@ function createWebWarningSweep(catalog, controller) {
       // All movement is relative to the verified initial false-light pose.
       const spill = base.falseLightPosition
         ? smooth01((phase - 0.12) / 0.55) *
-          (1 - smooth01((phase - 0.78) / 0.18)) : 0;
+          (1 - smooth01((phase - 0.78) / 0.18)) * base.arrivalEmphasis : 0;
       packet.spotlight.spotAngle = base.spotAngle *
         (1 - WEB_WARNING_IRIS_FOCUS * breathing -
           WEB_WARNING_ARRIVAL_IRIS_FOCUS * arrival);
