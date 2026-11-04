@@ -123,6 +123,18 @@ function challengeCompleted(challenge, run) {
         return run.dodges >= 3;
     return gradeDojoStyle(run).grade === 'S';
 }
+function existingChallengePrompt(challenge) {
+    switch (challenge.kind) {
+        case 'kills':
+            return `VISE ${challenge.target} ÉLIMINATION${challenge.target === 1 ? '' : 'S'} AU PROCHAIN ESSAI`;
+        case 'score': return `ATTEINS ${challenge.target} PTS POUR LE RECORD`;
+        case 'time': return `SOUS ${challenge.target} S POUR LE RECORD`;
+        case 'no-shots': return 'GAGNE SANS TIRER';
+        case 'dodges': return 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
+        case 'style': return 'DÉCROCHE LE STYLE S';
+        case 'survive': return 'SURVIS JUSQU’À LA VICTOIRE';
+    }
+}
 function gradeDojoStyle(run) {
     // #271 awards 100, 200, ... for consecutive kills within this 6/7 cap.
     // Dodge bonuses can exceed this COMBO-ONLY S benchmark. Web tuning, not MCD.
@@ -294,7 +306,15 @@ export function createDojoReplayRecap(snapshot, best = null) {
             nextChallenge = Object.freeze({ kind: 'style', target: 0 });
         }
     }
-    const replayTargetText = replayTarget === null ? '' : ` · DÉFI : ${replayTarget}`;
+    // Keep the PREVIOUS assigned challenge until a real round completes it.
+    // A defeat must not silently discard a shot-free, speed or score objective.
+    const retainingChallenge = priorChallenge !== null && completedChallenge === null;
+    if (retainingChallenge) {
+        nextChallenge = priorChallenge;
+        replayTarget = existingChallengePrompt(priorChallenge);
+    }
+    const replayTargetText = replayTarget === null ? '' :
+        ` · ${retainingChallenge ? 'DÉFI À RETENTER' : 'DÉFI'} : ${replayTarget}`;
     const completedLabel = completedChallenge === null ? null : {
         'kills': 'ÉLIMINATIONS', 'score': 'SCORE', 'time': 'CHRONO',
         'no-shots': 'SANS TIRER', 'dodges': '3 ESQUIVES', 'style': 'STYLE S',

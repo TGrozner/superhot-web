@@ -108,7 +108,8 @@ test('Dojo win streak survives reload, upgrades legacy personal bests and resets
 });
 
 test('replay target uses the previous same-quota PB and offers a shot-free challenge', () => {
-  const previous = result(6, {score:900, elapsedSeconds:22}).best;
+  // Simulate an older record with no active assigned challenge: PB coaching is still offered.
+  const previous = {...result(6, {score:900, elapsedSeconds:22}).best, pendingChallenge:null};
   const chaseScore = result(6, {best:previous, score:850, elapsedSeconds:30});
   assert.equal(chaseScore.replayTarget, '+51 PTS POUR UN NOUVEAU RECORD');
   assert.match(chaseScore.text, /DÉFI : \+51 PTS/);
@@ -281,4 +282,38 @@ test('legacy replay records never fabricate an already-pending challenge', () =>
   assert.equal(readDojoReplayBest(JSON.stringify({
     ...old,pendingChallenge:{kind:'fake',target:0},
   }),6),null);
+});
+
+
+test('unfinished Dojo replay challenge stays active across losses until a real completion', () => {
+  const first = result(6, {shots:8, score:900});
+  assert.deepEqual(first.best.pendingChallenge, {kind:'no-shots',target:0});
+  const defeat = createDojoReplayRecap({
+    quota:6, victory:false, kills:3, shots:6, dodges:0,
+    score:300, elapsedSeconds:16,
+  }, readDojoReplayBest(JSON.stringify(first.best),6));
+  assert.deepEqual(defeat.best.pendingChallenge, {kind:'no-shots',target:0});
+  assert.equal(defeat.completedChallenge, null);
+  assert.match(defeat.text, /DÉFI À RETENTER : GAGNE SANS TIRER/);
+  const shotWin = result(6, {best:defeat.best, shots:4, score:1000});
+  assert.deepEqual(shotWin.best.pendingChallenge, {kind:'no-shots',target:0});
+  assert.match(shotWin.text, /DÉFI À RETENTER : GAGNE SANS TIRER/);
+  const success = result(6, {best:shotWin.best, shots:0, score:1100});
+  assert.equal(success.completedChallenge, 'no-shots');
+  assert.match(success.text, /DÉFI RÉUSSI : SANS TIRER/);
+  assert.notEqual(success.best.pendingChallenge?.kind, 'no-shots');
+
+  const firstSeven = result(7, {score:900, shots:8, elapsedSeconds:22});
+  const scored = result(7, {best:firstSeven.best, shots:0, score:850, elapsedSeconds:25});
+  assert.deepEqual(scored.best.pendingChallenge, {kind:'score',target:901});
+  const setback = createDojoReplayRecap({
+    quota:7, victory:false, kills:2, shots:7, dodges:0,
+    score:500, elapsedSeconds:10,
+  }, readDojoReplayBest(JSON.stringify(scored.best),7));
+  assert.deepEqual(setback.best.pendingChallenge, {kind:'score',target:901});
+  assert.match(setback.text, /DÉFI À RETENTER : ATTEINS 901 PTS POUR LE RECORD/);
+  const earned = result(7, {best:setback.best, score:905, shots:3});
+  assert.equal(earned.completedChallenge, 'score');
+  assert.match(earned.text, /DÉFI RÉUSSI : SCORE/);
+  assert.equal(readDojoReplayBest(JSON.stringify(earned.best),6),null);
 });
