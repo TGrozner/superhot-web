@@ -1191,3 +1191,68 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   assert.equal(dead.actorWebHeadLook, null);
   pass.dispose();
 });
+
+
+test('Web stun anchors its contact side through player movement and resets on a new event', () => {
+  const pkg = transitionPackage();
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'authored socket fixture', coordinates: 'authored model frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, time, shaderTime, cameraPosition, extra = {}) =>
+    actors.drawActor({
+      actorId, pose: {state: 'hit', time, ...extra}, shaderTime,
+      cameraPosition, modelMatrix: identity(), viewProjection: identity(),
+      color: [.8, .1, .2, 1],
+    });
+
+  const start = draw('stunned-A', 0, 1, [4, 1, 0], {hitEventId: 'impact-1'});
+  assert.equal(start.actorWebPoseReaction, null, 'zero hit time keeps source weapon pose');
+  const right = draw('stunned-A', .11, 1.11, [4, 1, 0], {hitEventId: 'impact-1'});
+  const movingPlayer = draw('stunned-A', .18, 1.18, [-4, 1, 0],
+    {hitEventId: 'impact-1'});
+  assert.ok(right.actorWebPoseReaction.roll > .1);
+  assert.ok(movingPlayer.actorWebPoseReaction.roll > .1,
+    'a moving camera cannot reverse an already accepted stun impulse');
+  assert.equal(movingPlayer.actorWebPoseReaction.hitDirectionProvenance,
+    'Web camera-facing proxy, not contact origin');
+  assert.ok(movingPlayer.weaponAttachmentMatrix[8] < 0,
+    'the actual weapon socket follows the locked skinned recoil');
+
+  const other = draw('stunned-B', .11, 1.18, [-4, 1, 0], {hitEventId:'impact-1'});
+  assert.ok(other.actorWebPoseReaction.roll < -.1,
+    'another enemy has independent impact history');
+
+  const trueContact = draw('stunned-A', .21, 1.21, [4, 1, 0], {
+    hitEventId: 'impact-2', hitOrigin: {x:-4, y:1, z:0},
+  });
+  assert.ok(trueContact.actorWebPoseReaction.roll < -.1,
+    'new accepted contact overrides a camera on the opposite side');
+  assert.equal(trueContact.actorWebPoseReaction.hitDirectionProvenance,
+    'Web gameplay contact origin, not native MCD impulse');
+  const continued = draw('stunned-A', .27, 1.27, [4, 1, 0],
+    {hitEventId:'impact-2'});
+  assert.ok(continued.actorWebPoseReaction.roll < 0,
+    'contact origin remains fixed across later frames without repeated payload');
+
+  const beforeInvalid = calls.filter(call => call[0] === 'draw').length;
+  assert.throws(() => draw('stunned-A', .3, 1.3, [4, 1, 0],
+    {hitEventId:'invalid',hitOrigin:{x:NaN,y:1,z:0}}),
+  /hitOrigin requires finite world-space/);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, beforeInvalid,
+    'invalid external contact never produces a GPU draw or poisons the history');
+  const afterFailure = draw('stunned-A', .31, 1.31, [4, 1, 0],
+    {hitEventId:'impact-2'});
+  assert.ok(afterFailure.actorWebPoseReaction.roll < 0);
+
+  const replay = draw('stunned-A', .03, .01, [4, 1, 0],
+    {hitEventId:'impact-1'});
+  assert.ok(replay.actorWebPoseReaction.roll > 0,
+    'world-clock rewind clears the previous stun source');
+  pass.dispose();
+});
