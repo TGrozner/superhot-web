@@ -446,3 +446,44 @@ test('extreme ragdoll impact velocity is bounded only for realtime Dojo, not ord
   assert.ok(research.bodies[0].velocity.x>100,
     'unbudgeted physics keeps the original input for explicit research runs');
 });
+
+
+test('sleeping Dojo corpses reuse indexed source support; removed and disabled floors still wake',()=>{
+  const def=definition();def.bodies=[def.bodies[0]];def.joints=[];
+  const distant=Array.from({length:160},(_,i)=>({
+    id:'away-'+i,worldMatrix:matrix(100+i*2,0,0),
+    center:[0,0,0],size:[1,1,1],
+  }));
+  // Deliberately put the supporting floor LAST: the old includes() checked
+  // all 161 colliders on every sleeping frame, after every settled kill.
+  const scene=prepareNativeCollision([...distant,{
+    id:'last-floor',worldMatrix:matrix(0,-0.5,0),
+    center:[0,0,0],size:[50,1,50],
+  }]);
+  const runtime=createNativeDeathRuntime({
+    definition:def,collisionScene:scene,
+    boneModelMatrices:new Float32Array([
+      ...matrix(0,0,0),...matrix(0,0.1,0),
+      ...matrix(0,1.1,0),...matrix(0.2,1.1,0),
+    ]),
+    modelMatrix:matrix(0,0,0),initialVelocity:{x:0,y:0,z:0},
+  });
+  for(let i=0;i<45;i++)advanceNativeDeathRuntime(runtime,1/60,{limitWebFrameWork:true});
+  assert.equal(runtime.resting,true,'a real source floor should settle the corpse');
+  let arrayReads=0;
+  const underlying=scene.boxes;
+  scene.boxes=new Proxy(underlying,{get(target,key,receiver){
+    if(typeof key==='string'&&/^(0|[1-9]\\d*)$/.test(key))arrayReads++;
+    return Reflect.get(target,key,receiver);
+  }});
+  // One cache refresh may enumerate all boxes; the remaining 30 sleeping
+  // frames should only validate the original floor slot.
+  for(let i=0;i<30;i++)advanceNativeDeathRuntime(runtime,1/60,{limitWebFrameWork:true});
+  assert.equal(runtime.resting,true);
+  assert.ok(arrayReads<400,'sleep should no longer scan 161 boxes every frame');
+  const pose=runtime.bodies[0].position.y;
+  scene.boxes[160].enabled=false;
+  advanceNativeDeathRuntime(runtime,1/30,{limitWebFrameWork:true});
+  assert.equal(runtime.resting,false);
+  assert.ok(runtime.bodies[0].position.y<pose-0.001,'disabled source floor wakes falling body');
+});
