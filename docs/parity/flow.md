@@ -332,3 +332,11 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ / non vérifié.** La vérification CI sur le SHA de PR et le rendu Pages doivent être contrôlés séparément ; aucun smoke navigateur ni mesure FPS n'est revendiqué par cette preuve statique.
 
 **INCONNU — MCD.** La requête privée `superhot-research#233` sur l'initialisation de `SHRLManager` ne présentait encore aucun résultat. Les signaux Dojo live de `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, activation `RunEnding`, checkpoints et menus ne sont pas établis. Les séries sont une mécanique Web, pas native. Aucun fichier original ni extraction privée publiée.
+
+## SH-08 — objectif de score absolu entre deux runs (Web, 04/11/2026)
+
+**PROUVÉ — code Web.** Une manche à 800 points après un meilleur score de 1 000 points générait l'affichage « +201 PTS POUR UN NOUVEAU RECORD » alors que le score repart de zéro à chaque essai et que l'objectif `pendingChallenge.target` est **1 001**. Le texte pouvait être interprété à tort comme une cible de 201 points. La correction annonce « ATTEINS 1001 PTS POUR UN NOUVEAU RECORD », cohérent avec le défi persisté et le bilan d'une tentative ratée. Les points, quotas, armes, sauvegardes, timers et règles de victoire ne changent pas.
+
+**OBSERVÉ — contrôle automatisé ciblé.** `tests/flow-dojo-score-target.test.mjs` modélise victoire 1 000 → défi sans tir réussi à 800 → objectif 1 001 conservé après défaite → succès à 1 001. Le JavaScript ESM généré reste synchronisé avec le TypeScript strict. L'exécution CI et le smoke navigateur doivent être relevés distinctement sur la PR, puis sur le SHA déployé.
+
+**INCONNU — MCD natif.** Défis, médailles, score et séries sont des mécaniques de rejouabilité Web : ils n'établissent aucune donnée native Dojo. Les sources privées existantes (research #176/#177) décrivent statiquement la configuration `RunEnding` et `LevelTimeline → EndRunLevel`, sans capture de victoire. La requête `superhot-research#233` pour `SHRLManager.cs:1–180` n'avait aucun commentaire au dernier contrôle ; `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, checkpoints et destination native restent à confirmer sans duplicata.
