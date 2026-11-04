@@ -262,3 +262,12 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — validation attendue.** La validation se limite au test ciblé `flow-dojo-replay-recap.test.mjs`, à TypeScript strict avec JS généré et à la CI exacte de la PR. Le code de l'écran est consommé par `finish(win)` sans modification de `src/main.js`, CSS ou DOM. Aucune variation de spawn, score, timer, armes, F/E, comptage des morts ou succès. Les objectifs sont des conseils de rejouabilité **WEB_ONLY**, jamais des données natives MCD.
 
 **INCONNU.** Aucune observation navigateur faite pour cette livraison. Les gardes natifs actifs de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et les checkpoints restent non établis. SH-05 vérifie l'écran sur Pages après fusion (défaite 0/7, défaite 4/7, première victoire 6/6, maîtrise complète, REJOUER).
+
+
+## SH-08 / J4 — progrès sur défaites Dojo (Web, 2026-11-04)
+
+**PROUVÉ — source Web, pas MCD.** `src/main.js:finish(win)` fournit déjà les vrais compteurs finaux (kills, quota 6/7, victoire/défaite) et sauvegarde `recap.best` quand `shouldPersist`. Le schéma Web v4 de `src/flow/dojo-replay-recap.ts` mémorise désormais `trackedAttempts` et `bestFailedKills`, même avant une première victoire. Une défaite à 4/7 puis à 2/7 conserve le meilleur essai à 4/7 et propose de viser 5 ; une première vraie victoire reste affichée comme première victoire. Les anciennes sauvegardes v1/v2/v3 sont lues avec le total de victoires connu, sans inventer d'anciens échecs. Série, médailles et PB score/temps sont préservés, quotas distincts ; aucun délai, dommage, spawn, événement natif ni asset modifié.
+
+**OBSERVÉ — validation Web.** PR #335 sur branche SH-08, Verify #41760787685 **SUCCESS** sur SHA `ad611d3834c6b6cb5968a440c887ae0e3f82f353` (avant ce complément documentaire) : tests Node, TypeScript strict, JS compilé conforme et pack Pages vérifiés. Ce résultat n'est **pas** un smoke navigateur.
+
+**INCONNU — MCD natif.** L'activation réelle de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et la persistance/checkpoints MCD restent non qualifiés pour le Dojo exécuté. `bestFailedKills` est une simple donnée de rejouabilité **WEB_ONLY**, jamais un checkpoint natif. SH-05 conserve `main.js`, la fusion et les tests du site public ; aucun runner local ni ressource originale n'a été utilisé.
