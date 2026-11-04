@@ -7,8 +7,10 @@ import { createNativeActorSkinRuntime } from '../src/characters/native-actor-ski
 const id=()=>[1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
 const translated=(x,y,z)=>{const m=id();m[12]=x;m[13]=y;m[14]=z;return m;};
 const bone=(name,parent,pos)=>({name,parent,position:pos,rotation:[0,0,0,1],scale:[1,1,1]});
-function packageFixture() {
-  const pose={positions:[0,0,0, 0,1,0, 0,0,1, 0,0,1],
+function packageFixture(armAxis = 'z') {
+  const alongX = armAxis === 'x';
+  const segment = alongX ? [1,0,0] : [0,0,1];
+  const pose={positions:[0,0,0, 0,1,0, ...segment, ...segment],
     rotations:Array.from({length:4},()=>[0,0,0,1]).flat(),
     scales:Array.from({length:4},()=>[1,1,1]).flat()};
   return {
@@ -22,14 +24,16 @@ function packageFixture() {
       indices:'original authored indices; one source triangle submesh',
     },
     bones:[bone('root',-1,[0,0,0]),bone('jnt_R_Arm_Shoulder',0,[0,1,0]),
-      bone('jnt_R_Arm_Elbow',1,[0,0,1]),bone('jnt_R_Arm_Wrist',2,[0,0,1])],
-    mesh:{positions:[0,1,0,0,1,1,0,1,2],normals:[0,0,1,0,0,1,0,0,1],
+      bone('jnt_R_Arm_Elbow',1,segment),bone('jnt_R_Arm_Wrist',2,segment)],
+    mesh:{positions:alongX ? [0,1,0,1,1,0,2,1,.15] : [0,1,0,0,1,1,0,1,2],
+      normals:[0,0,1,0,0,1,0,0,1],
       indices:[0,1,2],indexComponentBits:16,
       submeshes:[{firstIndex:0,indexCount:3,baseVertex:0,topology:0}],
       jointIndices:[1,0,0,0,2,0,0,0,3,0,0,0],
       weights:[1,0,0,0,1,0,0,0,1,0,0,0],
       inverseBindMatrices:[...id(),...translated(0,-1,0),
-        ...translated(0,-1,-1),...translated(0,-1,-2)]},
+        ...(alongX ? translated(-1,-1,0) : translated(0,-1,-1)),
+        ...(alongX ? translated(-2,-1,0) : translated(0,-1,-2))]},
     clips:{idle:{duration:1,sampleRate:1,frames:[pose,pose]},
       fire:{duration:1,sampleRate:1,frames:[pose,pose]}},
     states:{idle:{clip:'idle',playback:'loop',speed:1},
@@ -112,4 +116,35 @@ test('accepted source pistol fire bends weighted right arm and world wrist only 
   assert.equal(alternate.webFireArmKickAvailable,false);
   assert.equal(alternate.webFireElbowCounterKickAvailable,false);
   alternate.dispose();
+});
+
+test('source-neutral +X Dojo arm lifts elbow and weapon after firing instead of twisting about its axis', () => {
+  const mock = glFixture();
+  const pass = createNativeSkinPass(mock.gl, packageFixture('x'));
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = time => actors.drawActor({
+    actorId: 'x-armed-enemy',
+    pose: {state: 'idle', time: .4,
+      action: {state: 'fire', time, weight: 1, blend: 1}},
+    modelMatrix: id(), viewProjection: id(), color: [.8,.1,.2,1],
+  });
+  const edge = draw(0);
+  assert.equal(edge.webFireArmKickApplied, false);
+  const edgeElbowY = edge.boneModelMatrices[2*16+13];
+  const edgeWristY = edge.weaponAttachmentMatrix[13];
+  const recoil = draw(.15);
+  assert.equal(recoil.webFireArmKickApplied, true);
+  assert.equal(recoil.webFireElbowCounterKickApplied, true);
+  assert.ok(recoil.boneModelMatrices[2*16+13] > edgeElbowY + .05,
+    'the +X upper arm must visibly rise, not twist around its own axis');
+  assert.ok(recoil.weaponAttachmentMatrix[13] > edgeWristY + .1,
+    'weapon socket must follow the lifted +X forearm');
+  // A +X arm lifts about Z: compare the vertical component of each
+  // joint's +X axis, not the +Z-forward axis used by the other fixture.
+  assert.ok(Math.abs(recoil.boneModelMatrices[2*16+1] -
+    recoil.boneModelMatrices[1*16+1]) > .05,
+    'the +X elbow must counter-flex relative to the lifted shoulder');
+  assert.equal(mock.getDraws(), 2);
+  assert.equal(mock.palette.length, 2);
+  pass.dispose();
 });
