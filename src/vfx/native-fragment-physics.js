@@ -52,6 +52,27 @@ function nearbyFragmentBoxes(scene, start, end, radius) {
   return { boxes: candidates.map(candidate => candidate.box) };
 }
 
+// Once a shard has settled, checking its original support must be cheap.
+// The active sweep already indexes the immutable source boxes by X; lazily
+// index their collider identities too, avoiding a full Dojo-box scan per
+// sleeping shard, per frame. Read box.enabled live so doors still wake them.
+function enabledShardSupport(scene, collider) {
+  const boxes = scene.boxes;
+  const index = fragmentBroadphases.get(scene);
+  if (!index || index.boxes !== boxes || index.count !== boxes.length)
+    return boxes.some(box => box.enabled && box.collider === collider);
+  if (!index.supportBoxes) {
+    const supports = new Map();
+    for (const { box } of index.sorted) {
+      const linked = supports.get(box.collider);
+      if (linked) linked.push(box);
+      else supports.set(box.collider, [box]);
+    }
+    index.supportBoxes = supports;
+  }
+  return index.supportBoxes.get(collider)?.some(box => box.enabled) ?? false;
+}
+
 const dot = (a, b) => a.x*b.x + a.y*b.y + a.z*b.z;
 const sub = (a,b) => ({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
 const along = (a,b,t) => ({x:a.x+b.x*t,y:a.y+b.y*t,z:a.z+b.z*t});
@@ -191,7 +212,7 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
     const p = body.webShardRestPosition;
     if (p && axes.every(axis => body.position[axis] === p[axis] &&
         Math.abs(body.velocity[axis]) < WEB_SHARD_REST_SPEED) &&
-        collisionScene.boxes.some(box => box.enabled && box.collider === body.webShardSupport))
+        enabledShardSupport(collisionScene, body.webShardSupport))
       return contacts;
     body.webShardResting = false;
     body.webShardRestSeconds = 0;
