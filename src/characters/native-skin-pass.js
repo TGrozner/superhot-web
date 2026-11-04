@@ -1554,16 +1554,42 @@ export function createNativeSkinPass(gl, sourcePackage, {
       applyWebSubtreeRotation(loaded, scratch, webHeadIndex, webHeadBones,
         webHeadLook.yaw, webHeadLook.pitch ?? 0, webHeadLook.roll ?? 0);
     }
+    // Lift the actually sampled shoulder-to-elbow segment, not a hardcoded
+    // model axis. The Dojo bind arm extends along +X, while test/other rigs
+    // may extend along +Z: Rx alone twists the Dojo arm without raising it.
+    // Keep the accepted source action pose, then add this WEB-only recoil.
+    let webFireArmKickApplied = false;
+    let webFireElbowCounterKickApplied = false;
     if (webFireArmKick !== null &&
         (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0)) {
-      applyWebSubtreeRotation(loaded, scratch, fireArm, fireArmBones,
-        webFireArmKick.yaw, webFireArmKick.pitch, webFireArmKick.roll);
-      // WEB-only follow-through: elbow bends opposite the shoulder's rise,
-      // using the actual post-action joint pivot and re-uploading the final
-      // wrist palette. At the accepted shot edge pitch=0, so no pre-shot drift.
-      if (webFireElbowCounterKickAvailable && webFireArmKick.pitch > 0) {
-        applyWebSubtreeRotation(loaded, scratch, elbow, fireElbowBones, 0,
-          -Math.min(.14, webFireArmKick.pitch * .58), 0);
+      const shoulderOffset = fireArm * 16;
+      const elbowOffset = elbow * 16;
+      const dx = scratch.globals[elbowOffset + 12] - scratch.globals[shoulderOffset + 12];
+      const dz = scratch.globals[elbowOffset + 14] - scratch.globals[shoulderOffset + 14];
+      const horizontal = Math.hypot(dx, dz);
+      // Vertical/degenerate arm: skip rather than twist on an arbitrary axis.
+      if (horizontal > 1e-5) {
+        const lift = webFireArmKick.pitch;
+        applyWebSubtreeRotation(loaded, scratch, fireArm, fireArmBones,
+          webFireArmKick.yaw, lift * dz / horizontal,
+          webFireArmKick.roll + lift * dx / horizontal);
+        webFireArmKickApplied = true;
+        // Sample the elbow->wrist axis AFTER the shoulder recoil. An opposite
+        // flex bends the forearm relative to the upper arm, preserving the
+        // final GPU palette, CPU hit pose and weapon socket on the same pose.
+        if (webFireElbowCounterKickAvailable && lift > 0) {
+          const wristOffset = wrist * 16;
+          const forearmDx = scratch.globals[wristOffset + 12] - scratch.globals[elbowOffset + 12];
+          const forearmDz = scratch.globals[wristOffset + 14] - scratch.globals[elbowOffset + 14];
+          const forearmHorizontal = Math.hypot(forearmDx, forearmDz);
+          if (forearmHorizontal > 1e-5) {
+            const flex = -Math.min(.14, lift * .58);
+            applyWebSubtreeRotation(loaded, scratch, elbow, fireElbowBones, 0,
+              flex * forearmDz / forearmHorizontal,
+              flex * forearmDx / forearmHorizontal);
+            webFireElbowCounterKickApplied = true;
+          }
+        }
       }
     }
     if (loaded.weaponAttachment) {
@@ -1614,10 +1640,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
          (webHeadLook.roll ?? 0) !== 0),
       webHeadLookDesign: webHeadLook === null ? null :
         (webHeadLook.design ?? 'Web-only independent head gaze'),
-      webFireArmKickApplied: webFireArmKick !== null &&
-        (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0),
-      webFireElbowCounterKickApplied: webFireArmKick !== null &&
-        webFireElbowCounterKickAvailable && webFireArmKick.pitch > 0,
+      webFireArmKickApplied,
+      webFireElbowCounterKickApplied,
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       webHitFlashIntensity: webHitFlash,
