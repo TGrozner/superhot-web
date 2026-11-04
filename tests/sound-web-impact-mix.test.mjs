@@ -341,3 +341,36 @@ test('Web-original thrown weapon has a descending air swish without extra voices
   assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
   mix.dispose();
 });
+
+test('katana miss has a Web-only air sweep distinct from the blade-contact cue', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const sweeps = [];
+  const createFilter = ctx.createBiquadFilter;
+  ctx.createBiquadFilter = () => {
+    const node = createFilter();
+    const ramp = node.frequency.exponentialRampToValueAtTime;
+    node.frequency.exponentialRampToValueAtTime = function(value, at) {
+      sweeps.push({node, value, at});
+      return ramp.call(this, value, at);
+    };
+    return node;
+  };
+  const mix = createWebImpactMix(ctx, 2);
+  const result = mix.emit('katana-swing', {position: {x: 0, y: 1, z: 0}});
+  assert.deepEqual(result, {status: 'started', source: 'web-original-synthesis',
+    at: ctx.currentTime, spatial: true}); // Scheduling, NOT audible proof.
+  assert.equal(nodes.length, 2); // Same existing noise+oscillator, one voice.
+  assert.equal(nodes[0].connections.length, 2); // Dry burst plus blade air.
+  const sweep = filters.find(node => node.type === 'bandpass' &&
+    sweeps.some(entry => entry.node === node && entry.value === 850 &&
+      Math.abs(entry.at - (ctx.currentTime + 0.24)) < 1e-12));
+  assert.ok(sweep);
+  const air = gains.find(node => sweep.connections.includes(node));
+  assert.ok(air);
+  assert.ok(air.connections.includes(gains[7])); // Existing spatialized output.
+  assert.equal(mix.emit('katana').status, 'started'); // Contact is independent.
+  assert.equal(nodes.length, 4);
+  assert.equal(mix.emit('step').status, 'blocked'); // Priority budget unchanged.
+  assert.equal(mix.getActiveVoices(), 2);
+  mix.dispose();
+});
