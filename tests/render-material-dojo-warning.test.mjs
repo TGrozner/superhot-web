@@ -333,6 +333,21 @@ test('J4 Web doorway wash favours the lamp-facing surface without hard-killing b
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade \* facing/);
 });
 
+test('J4 interpolated vertex normals keep doorway red wash as bright as the CPU unit-normal reference', () => {
+  const fill = prepareDojoDoorWarningLighting(scene, activeWarning().packets(), options).falseLights[0];
+  const point = [4, 3, 4];
+  const unitFacing = sampleDojoDoorFalseLightWebWash(fill, point, 2, [-1, 0, 0]);
+  const shortened = sampleDojoDoorFalseLightWebWash(fill, point, 2, [-0.5, 0, 0]);
+  assert.deepEqual(shortened.rgb, unitFacing.rgb,
+    'fragment interpolation should not dim a correctly oriented wall normal');
+  assert.equal(unitFacing.rgb[0], 0.25);
+  // The real GPU normal is interpolated even though the vertex shader normalizes.
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+    /float normalLength = length\(vNormal\);/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+    /dot\(vNormal \/ normalLength, lightPosition - worldPosition\)/);
+});
+
 test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering vectors', () => {
   const key = 'level10::7089';
   const door = {
