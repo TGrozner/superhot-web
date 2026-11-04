@@ -99,7 +99,7 @@ test('ground contact emits a single Web-only landing thud, not a stride or a spu
   assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
 });
 
-test('low-FPS grounded strides and a landing stay audible while teleports remain silent', () => {
+test('low-FPS grounded strides and a landing schedule cues while teleports remain silent', () => {
   const cues = [];
   const gait = createWebFootstepMotion((cue, request) => {
     cues.push({cue, ...request});
