@@ -248,6 +248,21 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       bright.connect(accent);
       accent.connect(out);
     }
+    // WEB-ORIGINAL mechanical slide tick AFTER the gunshot crack (not Unity data).
+    // Gating the existing noise source adds no voices, buffers or timers.
+    if (cue === 'player-shot') {
+      const actionTone = context.createBiquadFilter();
+      actionTone.type = 'bandpass';
+      actionTone.frequency.value = Math.min(2600, context.sampleRate * 0.42);
+      const action = context.createGain();
+      action.gain.setValueAtTime(0.0001, at);
+      action.gain.setValueAtTime(0.0001, at + 0.046);
+      action.gain.linearRampToValueAtTime(volume * 0.32, at + 0.054);
+      action.gain.exponentialRampToValueAtTime(0.0001, at + 0.098);
+      noise.connect(actionTone);
+      actionTone.connect(action);
+      action.connect(out);
+    }
     noise.onended = ended;
     voice.sources.push(noise);
     noise.start(at, textureIndex * 0.025, duration);
