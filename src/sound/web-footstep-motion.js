@@ -14,6 +14,11 @@ export function createWebFootstepMotion(emit) {
     const maxGroundMetresPerSecond = 10;
     const maxAllowedTravel = (elapsedSeconds) => Math.min(maxFrameTravel, Math.max(0.05, elapsedSeconds * maxGroundMetresPerSecond));
     const maxFrameGap = 0.3;
+    // Web-authored shoe locations: gameplay passes the camera/ear position.
+    // Put ground contacts below the ears, and alternate modest lateral feet.
+    const footDownFromCamera = 1.25;
+    const footLateralOffset = 0.22;
+    let footSide = -1;
     let previous = null;
     let previousTime = null;
     let pendingMetres = 0;
@@ -29,6 +34,7 @@ export function createWebFootstepMotion(emit) {
         airborneSince = null;
         airborneFrames = 0;
         lastAirPosition = null;
+        footSide = -1;
     }
     function advance({ position, grounded, timeSeconds }) {
         if (!position || ![position.x, position.y, position.z].every(Number.isFinite)) {
@@ -81,7 +87,7 @@ export function createWebFootstepMotion(emit) {
             previousTime = timeSeconds;
             pendingMetres = 0;
             // Creative Web-only contact thud, not a Unity animation/event marker.
-            return validLanding ? emit('landing', { position: current,
+            return validLanding ? emit('landing', { position: { ...current, y: current.y - footDownFromCamera },
                 intensity: Math.min(1.1, 0.55 + airtime * 0.35) }) : null;
         }
         groundedBaseline = true;
@@ -92,7 +98,9 @@ export function createWebFootstepMotion(emit) {
             return null;
         }
         const dt = timeSeconds - previousTime;
-        const distance = Math.hypot(current.x - previous.x, current.z - previous.z);
+        const dx = current.x - previous.x;
+        const dz = current.z - previous.z;
+        const distance = Math.hypot(dx, dz);
         previous = current;
         previousTime = timeSeconds;
         if (distance > maxAllowedTravel(dt)) {
@@ -106,7 +114,15 @@ export function createWebFootstepMotion(emit) {
         // More movement in the same real-time interval makes a stronger Web step.
         const speed = distance / Math.max(dt, 1 / 120);
         const intensity = Math.min(1, Math.max(0.45, speed / 4.5));
-        return emit('step', { position: current, intensity });
+        // Lateral offset is perpendicular to movement, never a guessed MCD bone marker.
+        const side = footSide * footLateralOffset;
+        footSide = -footSide;
+        const contact = {
+            x: current.x - dz / distance * side,
+            y: current.y - footDownFromCamera,
+            z: current.z + dx / distance * side,
+        };
+        return emit('step', { position: contact, intensity });
     }
     return Object.freeze({ advance, reset });
 }
