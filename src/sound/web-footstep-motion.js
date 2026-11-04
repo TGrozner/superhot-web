@@ -1,7 +1,8 @@
 /**
  * A Web-only walking accent: one step per 1.3 horizontal world metres.
  * Call after actual player movement with the resolved ground-contact state;
- * camera look, idle frames, airborne movement and teleports make no step.
+ * Camera look, idle frames and airborne movement itself remain silent; a
+ * real grounded return after a substantial jump makes a stronger footfall.
  */
 export function createWebFootstepMotion(emit) {
     if (typeof emit !== 'function')
@@ -12,10 +13,14 @@ export function createWebFootstepMotion(emit) {
     let previous = null;
     let previousTime = null;
     let pendingMetres = 0;
+    let airborneSince = null;
+    let airborneApexY = null;
     function reset() {
         previous = null;
         previousTime = null;
         pendingMetres = 0;
+        airborneSince = null;
+        airborneApexY = null;
     }
     function advance({ position, grounded, timeSeconds }) {
         if (!position || ![position.x, position.y, position.z].every(Number.isFinite)) {
@@ -24,9 +29,38 @@ export function createWebFootstepMotion(emit) {
         if (typeof grounded !== 'boolean' || !Number.isFinite(timeSeconds)) {
             throw new TypeError('step grounded/timeSeconds invalid');
         }
-        if (!grounded || previous === null || previousTime === null ||
-            timeSeconds < previousTime || timeSeconds - previousTime > maxFrameGap) {
-            previous = grounded ? position : null;
+        if (!grounded) {
+            const continuous = airborneSince !== null && previousTime !== null &&
+                timeSeconds >= previousTime && timeSeconds - previousTime <= maxFrameGap;
+            airborneSince = continuous ? airborneSince : timeSeconds;
+            airborneApexY = continuous
+                ? Math.max(airborneApexY ?? position.y, position.y) : position.y;
+            previous = null;
+            previousTime = timeSeconds;
+            pendingMetres = 0;
+            return null;
+        }
+        if (airborneSince !== null) {
+            const airDuration = timeSeconds - airborneSince;
+            const descent = (airborneApexY ?? position.y) - position.y;
+            const continuous = previousTime !== null && timeSeconds >= previousTime &&
+                timeSeconds - previousTime <= maxFrameGap;
+            airborneSince = null;
+            airborneApexY = null;
+            previous = position;
+            previousTime = timeSeconds;
+            pendingMetres = 0;
+            // Creative Web landing feedback, not an MCD animation/audio marker.
+            // Continuity, airborne duration and vertical displacement avoid a
+            // phantom stomp on pauses, short steps, teleports and replay.
+            if (continuous && airDuration >= 0.16 && descent >= 0.32) {
+                return emit('step', { position, intensity: Math.min(1.65, 0.8 + descent * 0.55) });
+            }
+            return null;
+        }
+        if (previous === null || previousTime === null || timeSeconds < previousTime ||
+            timeSeconds - previousTime > maxFrameGap) {
+            previous = position;
             previousTime = timeSeconds;
             pendingMetres = 0;
             return null;

@@ -40,3 +40,34 @@ test('Web gait rejects a paused frame and malformed position without emitting', 
   assert.equal(count, 0);
   assert.throws(() => gait.advance({position:p(Infinity), grounded:true, timeSeconds:3.2}), /finite/);
 });
+
+test('real jump landing adds one stronger Web footfall, but not for tiny hops or time gaps', () => {
+  const cues = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, ...request});
+    return {status: 'started', source: 'web-original-synthesis', at: 1, spatial: true};
+  });
+  const tick = (height, time, grounded) =>
+    gait.advance({position: p(0, height), timeSeconds: time, grounded});
+  assert.equal(tick(1.6, 1, true), null);
+  assert.equal(tick(1.95, 1.1, false), null);
+  assert.equal(tick(2.38, 1.2, false), null);
+  assert.equal(tick(2.1, 1.3, false), null);
+  assert.equal(tick(1.6, 1.45, true)?.status, 'started');
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].cue, 'step'); // Existing output bus; no new cue/asset.
+  assert.ok(cues[0].intensity > 1 && cues[0].intensity <= 1.65);
+  assert.equal(tick(1.75, 2.1, false), null);
+  assert.equal(tick(1.6, 2.2, true), null); // Tiny drop.
+  assert.equal(tick(1.95, 3, false), null);
+  assert.equal(tick(2.6, 4, false), null); // Paused/hitched airborne frame resets arc.
+  assert.equal(tick(1.6, 4.1, true), null); // Too short after resumption.
+  assert.equal(tick(1.95, 5, false), null);
+  assert.equal(tick(2.38, 5.1, false), null);
+  assert.equal(tick(1.6, 5.6, true), null); // Long gap is not a grounded contact.
+  gait.reset();
+  assert.equal(tick(2.5, 6, false), null);
+  gait.reset();
+  assert.equal(tick(1.6, 6.1, true), null); // Replay: no old airborne state.
+  assert.equal(cues.length, 1);
+});
