@@ -69,14 +69,25 @@ const WEB_SQUAD_PUSH = Object.freeze({
 });
 function webSquadBreacher(enemy, enemies) {
   if (!enemy.reaction?.hasWeapon) return false;
-  let first=null, count=0;
+  let readyLead=null, armedCount=0;
   for (const candidate of enemies) {
     if (!participating(candidate) || candidate.reaction?.hasWeapon !== true ||
         !candidate.encounter) continue;
-    count++;
-    if (first===null || String(candidate.id)<String(first.id)) first=candidate;
+    armedCount++;
+    // A stunned, dodging or suppressed point man cannot maintain the push.
+    // Keep his squad slot, but hand the assault to the lowest-ID available
+    // gunner. No new fire permission or target knowledge is conferred.
+    const busy=candidate.reaction.stunRemaining>0 ||
+      candidate.reaction.stunnedThisFrame ||
+      candidate.encounter.webDodgeRemaining>0 ||
+      candidate.encounter.webSuppressionRemaining>0 ||
+      candidate.encounter.webLossRemaining>0 ||
+      Boolean(candidate.runtime?.pendingShot);
+    if (busy) continue;
+    if (readyLead===null || String(candidate.id)<String(readyLead.id))
+      readyLead=candidate;
   }
-  return count>1 && first===enemy;
+  return armedCount>1 && readyLead===enemy;
 }
 
 // J3 Web-only last-stand pressure: the final armed opponent must not become
