@@ -301,3 +301,34 @@ test('one long falling frame does not count airborne time toward grounded shard 
   for(let i=0;i<30;i++)advanceNativeFragmentBody(flight,1/60,noGround);
   assert.notEqual(flight.webShardResting,true,'no source collider means no static sleep');
 });
+
+
+test('many distant Dojo boxes are pruned from shard sweeps without changing exact near contacts',()=>{
+  const authored=(id,x,y)=>({id,worldMatrix:matrix(x,y,0),center:[0,0,0],size:[12,1,12]});
+  const floorBox=authored('floor',0,-0.5);
+  const distant=Array.from({length:96},(_,i)=>authored('far-'+i,100+i*4,-0.5));
+  const scene=prepareNativeCollision([floorBox,...distant]);
+  const nearOnly=prepareNativeCollision([floorBox]);
+  let boxReads=0;
+  scene.boxes=new Proxy(scene.boxes,{
+    get(target,key,receiver) {
+      if(typeof key==='string' && key!=='' && Number.isInteger(Number(key)))boxReads++;
+      return Reflect.get(target,key,receiver);
+    },
+  });
+  const material={bounciness:0,dynamicFriction:0,staticFriction:0,bounceThreshold:1};
+  const run=collisionScene=>{
+    const position={x:0,y:0.22,z:0},velocity={x:0,y:-3,z:0};
+    const hits=moveNativeFragmentSphere(collisionScene,position,velocity,
+      {x:0,y:-0.4,z:0},0.1,material);
+    return {position,velocity,hits:hits.map(hit=>({t:hit.t,id:hit.collider?.id}))};
+  };
+  const expected=run(nearOnly);
+  assert.ok(expected.hits.some(hit=>hit.id==='floor'));
+  assert.deepEqual(run(scene),expected,'broadphase must not change contacts or response');
+  boxReads=0; // index was built on the first call; hot shard steps must not scan all boxes
+  assert.deepEqual(run(scene),expected);
+  assert.ok(boxReads<16,'a warm fragmented Dojo scene must not enumerate every distant collider');
+  scene.setEnabled('floor',false);
+  assert.deepEqual(run(scene).hits,[],'a cached index must respect a disabled source support');
+});
