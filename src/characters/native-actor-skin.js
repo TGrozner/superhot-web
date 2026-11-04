@@ -168,6 +168,24 @@ function webHitHeadWhiplash(reaction, available) {
 }
 
 /**
+ * Web-authored, post-fire articulated right-arm kick on the validated Dojo
+ * pistol shoulder chain. The source fire pose has already been sampled;
+ * no new shot, muzzle direction or animation clip is invented. Unlike a
+ * second full-body lean, the kick moves the already-posed arm/weapon socket
+ * relative to the chest, while leaving the left arm and head alone.
+ */
+function webFireRightArmKick(reaction, available) {
+  if (!available || reaction?.kind !== 'fire') return null;
+  const pitch = Math.min(.23, Math.max(0, reaction.pitch * 1.45));
+  const roll = Math.max(-.05, Math.min(.05, reaction.roll * .45));
+  if (pitch < .008 && Math.abs(roll) < .008) return null;
+  return Object.freeze({
+    pitch, yaw: 0, roll,
+    design: 'Web-only right-shoulder gunshot kick after accepted fire',
+  });
+}
+
+/**
  * WEB game-feel: bank toward observed travel AND observed heading changes,
  * then ease into and out of that bank using elapsed GAME-WORLD animation
  * seconds, even when slow motion advances the Red Crystal shader on a different
@@ -496,6 +514,8 @@ export function createNativeActorSkinRuntime(skinPass) {
       ?? webHeadTracking(movementFrames, actorId, selected.identity,
         pose, modelMatrix, cameraPosition, action, transitionDescriptor, solvedPose,
         skinPass.webHeadTrackingAvailable === true);
+    const webFireArmKick = webFireRightArmKick(reaction,
+      skinPass.webFireArmKickAvailable === true);
     const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
       ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
     // WEB-authored warm afterglow follows an actual accepted fire action.
@@ -515,7 +535,7 @@ export function createNativeActorSkinRuntime(skinPass) {
       instance: selected.instance, time: selected.time,
       modelMatrix, viewProjection, color, cameraPosition,
       transition, action, solvedPose,
-      webPoseLean: reaction, webHeadLook, webHitFlash, webFireGlow,
+      webPoseLean: reaction, webHeadLook, webFireArmKick, webHitFlash, webFireGlow,
     };
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
@@ -557,6 +577,7 @@ export function createNativeActorSkinRuntime(skinPass) {
       boneModelMatrices: matrices, weaponAttachmentMatrix: socket,
       actorWebPoseReaction: reaction, actorWebHitFlash: webHitFlash,
       actorWebFireGlow: webFireGlow, actorWebHeadLook: webHeadLook,
+      actorWebFireArmKick: webFireArmKick,
       // A serialized controller/state name is NOT proof of active native
       // Mecanim runtime branch or of 1:1 gameplay animation behavior.
       nativeActorControllerExecutionVerified: false,
