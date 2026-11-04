@@ -478,3 +478,36 @@ test('each Web combat cue releases all its transient processing nodes on source 
   }
   mix.dispose();
 });
+
+test('Web gunfire and confirmed impacts temporarily duck footsteps, not native audio', () => {
+  const {ctx, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx);
+  const footstepBus = gains[3];
+  assert.equal(footstepBus.gain.value, 0.3);
+  const cancels = [];
+  const automation = [];
+  footstepBus.gain.cancelScheduledValues = at => cancels.push(at);
+  footstepBus.gain.setTargetAtTime = (value, at, constant) => {
+    automation.push({value, at, constant});
+  };
+  // Footfalls, swings and object handling must never sidechain themselves.
+  for (const cue of ['step', 'landing', 'pickup', 'throw', 'katana-swing', 'punch-swing']) {
+    assert.equal(mix.emit(cue).status, 'started');
+  }
+  assert.equal(cancels.length, 0);
+  assert.equal(automation.length, 0);
+  // Repeated combat cues restart a short duck/recovery envelope on the same bus.
+  const combat = ['player-shot', 'enemy-shot', 'player-hit', 'impact', 'shatter',
+    'katana', 'punch-contact'];
+  for (const cue of combat) {
+    assert.equal(mix.emit(cue).status, 'started');
+    assert.equal(cancels.length, combat.indexOf(cue) + 1);
+    assert.deepEqual(automation.slice(-2), [
+      {value: 0.10, at: ctx.currentTime, constant: 0.012},
+      {value: 0.3, at: ctx.currentTime + 0.14, constant: 0.18},
+    ]);
+  }
+  assert.equal(mix.getActiveVoices(), 13);
+  mix.dispose();
+  assert.equal(mix.getActiveVoices(), 0);
+});
