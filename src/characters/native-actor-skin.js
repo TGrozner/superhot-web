@@ -28,7 +28,7 @@
  *
  * @param {number[] | Float32Array} modelMatrix column-major actor model matrix
  * @param {{x: number, y: number, z: number} | number[] | Float32Array | null} cameraPosition
- * @returns {{pitch: number, roll: number} | null}
+ * @returns {{pitch: number, roll: number, yaw: number} | null}
  */
 function webCameraHitDirection(modelMatrix, cameraPosition) {
   if (!cameraPosition || !modelMatrix || modelMatrix.length !== 16) return null;
@@ -48,7 +48,11 @@ function webCameraHitDirection(modelMatrix, cameraPosition) {
   if (!Number.isFinite(distance) || distance < .1) return null;
   // The lean rotates around source hips. +roll leans away from a camera on
   // the actor's right; -pitch leans backward from a camera in front.
-  return { pitch: -.22 * frontal / distance, roll: .32 * lateral / distance };
+  return {
+    pitch: -.22 * frontal / distance,
+    roll: .32 * lateral / distance,
+    yaw: -.20 * lateral / distance,
+  };
 }
 
 /**
@@ -101,6 +105,9 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, camer
     kind: fire ? 'fire' : identity.name,
     pitch: (hit ? (direction?.pitch ?? .08) : fire ? .12 : -.14) * envelope,
     roll: (hit ? (direction?.roll ?? side * .22) : side * (fire ? .05 : .035)) * envelope,
+    // Web-only shoulder twist: a single GPU pose drives bones, hitboxes and
+    // the weapon socket. Externally solved death poses never receive it.
+    yaw: hit && direction ? direction.yaw * envelope : 0,
     hitDirectionProvenance: hit
       ? (direction ? 'Web camera-facing proxy, not contact origin' : 'actor-id fallback')
       : null,
