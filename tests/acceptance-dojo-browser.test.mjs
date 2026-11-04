@@ -11,7 +11,7 @@ function mockBrowser() {
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
   const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
     nativeScene:{source},
-    generatedManifest:{drawCalls:360,privateSourceName:'DO_NOT_SERIALIZE'},
+    generatedManifest:{drawCalls:360,warningWebFalseLightDrawCalls:14,privateSourceName:'DO_NOT_SERIALIZE'},
     nativeHands:{handsDrawCalls:2,handsTriangles:140,sourcePoseSampled:true,
       webKatanaSocketApplied:true,privateRig:'DO_NOT_SERIALIZE'},
     gameplay:{doorWarning:{readiness:'source-catalog-present',
@@ -75,6 +75,7 @@ test('SH10 browser recorder samples rendered frame telemetry without private ite
       handsSourcePoseSampled:true,katanaSocketApplied:true,
       warningReadiness:'source-catalog-present',warningEventStatus:'triggered',
       warningActiveEnvelopes:1,warningRenderedSpotlights:0,
+      warningWebFalseLightDrawCalls:14,
     });
     assert.equal(data.frames[1].nativeScene.source.serializedOwner,'level10');
     assert.equal(JSON.stringify(data).includes('PRIVATE_NAME'),false);
