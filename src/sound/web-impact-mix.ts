@@ -400,6 +400,16 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       ambient.gain.cancelScheduledValues(at);
       ambient.gain.setTargetAtTime(0.03, at, 0.015);
       ambient.gain.setTargetAtTime(0.13, at + 0.14, 0.22);
+      // WEB-ORIGINAL combat clarity: transient shots and confirmed contacts
+      // briefly duck synthetic footsteps, never source-backed scene WAVs.
+      // Movement cues and pickup/throw do not lower the walking bus.
+      if (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
+          cue === 'impact' || cue === 'shatter' || cue === 'katana' ||
+          cue === 'punch-contact') {
+        footsteps.gain.cancelScheduledValues(at);
+        footsteps.gain.setTargetAtTime(0.10, at, 0.012);
+        footsteps.gain.setTargetAtTime(0.3, at + 0.14, 0.18);
+      }
     }
     return {status: 'started', source: 'web-original-synthesis', at, spatial: panner !== null};
   }
