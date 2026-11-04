@@ -7,6 +7,7 @@ import {
   createDojoDoorWarningSceneAdapter,
   sampleDojoDoorWarningWebPreview,
   sampleDojoDoorWarningWebGlow,
+  sampleDojoDoorFalseLightWebWash,
 } from '../src/render/lighting-model.js';
 
 // Synthetic geometry and curve: no private coordinates, cookie PNG or native shader.
@@ -284,6 +285,35 @@ test('opt-in Web-only glow retains real door joins, masks, envelopes and missing
   /Explicit Web procedural/);
 });
 
+
+
+test('J4 authored moving false-light becomes a bounded Web red floor wash, not a phantom source shader', () => {
+  const controller = activeWarning();
+  const fill = prepareDojoDoorWarningLighting(scene, controller.packets(), options).falseLights[0];
+  const atLamp = sampleDojoDoorFalseLightWebWash(fill, [2, 3, 4]);
+  assert.ok(Math.abs(atLamp.rgb[0] - 4 / 7) < 1e-12);
+  assert.ok(atLamp.rgb[1] < 0 && atLamp.rgb[2] < 0,
+    'red warning remains distinguishable from bright concrete');
+  const halfway = sampleDojoDoorFalseLightWebWash(fill, [4, 3, 4]);
+  assert.ok(Math.abs(halfway.rgb[0] - 0.25) < 1e-12,
+    'Web-only 4 m quadratic smooth falloff has a deterministic CPU/GPU contract');
+  assert.deepEqual(sampleDojoDoorFalseLightWebWash(fill, [6, 3, 4]).rgb, [0, 0, 0]);
+  assert.deepEqual(sampleDojoDoorFalseLightWebWash({ ...fill, intensity: 0 }, [2, 3, 4]).rgb,
+    [0, 0, 0]);
+  const moved = { ...fill, position: [3, 3, 4] };
+  assert.ok(sampleDojoDoorFalseLightWebWash(moved, [3, 3, 4]).rgb[0] > halfway.rgb[0],
+    'animated source false-light position moves the visible Web wash');
+  const crystal = sampleDojoDoorFalseLightWebWash(fill, [2, 3, 4], 3);
+  assert.ok(crystal.rgb[1] > atLamp.rgb[1] && crystal.rgb[2] > atLamp.rgb[2],
+    'Web-authored Red Crystal glint shares the existing material grade');
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /vec3 dojoDoorFalseLightWashWeb\\(/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade/);
+  assert.throws(() => sampleDojoDoorFalseLightWebWash(
+    { ...fill, shaderParity: 'native-verified' }, [2, 3, 4]),
+  /Source-qualified/);
+  controller.reset();
+  assert.equal(prepareDojoDoorWarningLighting(scene, controller.packets(), options).falseLights.length, 0);
+});
 
 test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering vectors', () => {
   const key = 'level10::7089';
