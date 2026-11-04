@@ -1,5 +1,5 @@
 import { createMcdDoorWarnings } from '../sound/mcd-door-warning.js';
-import { prepareNativeCollision, nativeSegmentHit } from './native-collision.js';
+import { prepareDoorVisibility, doorSegmentOccluded } from './door-visibility.js';
 
 // Static Unity references, NOT a runtime/visibility assertion. All three
 // SpawnerPoint components point at distinct SpawnerDoors components in level10.
@@ -153,7 +153,7 @@ function finiteBasisVector(value) {
  * the private scene catalog or SH-07 source values are allowed.
  * @param {object} catalog The prepared Dojo door catalog (read-only).
  * @param {ReturnType<typeof createMcdDoorWarnings>} controller Live source controller.
- * @param {ReturnType<typeof prepareNativeCollision> | null} collision Prepared solid Dojo blockers.
+ * @param {ReturnType<typeof prepareDoorVisibility> | null} collision Compact solid Dojo sight blockers.
  * @returns {{advance: () => void, restore: (id?: string) => void}}
  */
 function createWebWarningSweep(catalog, controller, collision) {
@@ -382,8 +382,14 @@ function createWebWarningSweep(catalog, controller, collision) {
               dz * base.right[2]) / distance;
             const vertical = (dx * base.up[0] + dy * base.up[1] +
               dz * base.up[2]) / distance;
-            const focus = WEB_WARNING_SPAWN_BLEND * base.arrivalEmphasis *
-              smooth01((phase - 0.2) / 0.55) *
+            // If the world clock freezes before an imminent REAL arrival,
+            // the existing door beam must still point toward the accepted
+            // spawn route while its real-time light floor comes on.
+            // Never aim at unknown targets or behind solid scene cover.
+            const visualFocus = base.arrivalEmphasis *
+              smooth01((phase - 0.2) / 0.55);
+            const focus = WEB_WARNING_SPAWN_BLEND *
+              Math.max(visualFocus, realNotice) *
               smooth01((forward - WEB_WARNING_SPAWN_MIN_FACING) /
                 (WEB_WARNING_SPAWN_FULL_FACING - WEB_WARNING_SPAWN_MIN_FACING));
             // A spawn behind solid Dojo cover must not turn the doorway's
@@ -395,7 +401,7 @@ function createWebWarningSweep(catalog, controller, collision) {
               y: origin[1] + dy / distance * 0.08,
               z: origin[2] + dz / distance * 0.08,
             } : null;
-            const blocked = rayStart && nativeSegmentHit(collision, rayStart, {
+            const blocked = rayStart && doorSegmentOccluded(collision, rayStart, {
               x: base.spawnTarget[0], y: base.spawnTarget[1], z: base.spawnTarget[2],
             });
             if (focus > 0 && !blocked) {
@@ -441,7 +447,7 @@ function createWebWarningSweep(catalog, controller, collision) {
             y: origin[1] + dy / distance * 0.08,
             z: origin[2] + dz / distance * 0.08,
           } : null;
-          const blocked = rayStart && nativeSegmentHit(collision, rayStart, playerWorldPosition);
+          const blocked = rayStart && doorSegmentOccluded(collision, rayStart, playerWorldPosition);
           if (weight > 0 && !blocked) {
             const aimYaw = Math.max(-WEB_WARNING_TRACK_MAX_YAW,
               Math.min(WEB_WARNING_TRACK_MAX_YAW, Math.atan2(across, forward)));
@@ -459,7 +465,13 @@ function createWebWarningSweep(catalog, controller, collision) {
       // snap the cone and moving red wash in a single 16 ms frame. A fixed
       // exponential time constant is frame-rate independent, has no heap cost,
       // and returns to the sweep when tracking is no longer eligible.
-      const reactiveEase = 1 - Math.exp(-14 * worldDeltaSeconds);
+      // The accepted enemy countdown is unscaled. During SUPERHOT slowdown,
+      // orient the EXISTING light in real time as well; otherwise the new
+      // late-arrival glow shines in the stale initial direction until spawn.
+      // Preserve old world-clock callers, and never slow a larger world step.
+      const steeringSeconds = unscaledDeltaSeconds == null
+        ? worldDeltaSeconds : Math.max(worldDeltaSeconds, unscaledDeltaSeconds);
+      const reactiveEase = 1 - Math.exp(-14 * steeringSeconds);
       base.reactiveYaw += (yaw - sweepYaw - base.reactiveYaw) * reactiveEase;
       base.reactivePitch += (pitch - sweepPitch - base.reactivePitch) * reactiveEase;
       yaw = sweepYaw + base.reactiveYaw;
@@ -540,10 +552,10 @@ export function createDojoDoorWarningBridge(scene) {
     : null;
   const controller = preparedCatalog ? createMcdDoorWarnings(preparedCatalog) : null;
   // The same source BoxColliders as the live Dojo movement/weapon systems,
-  // prepared once rather than rebuilding them each warning frame. No collider
+  // prepared as compact affine slabs once, not triangle/contact meshes. No collider
   // data means no invented occlusion and retains the existing sweep behavior.
   const collision = controller && Array.isArray(scene?.colliders) && scene.colliders.length
-    ? prepareNativeCollision(scene.colliders) : null;
+    ? prepareDoorVisibility(scene.colliders) : null;
   const webSweep = controller ? createWebWarningSweep(preparedCatalog, controller, collision) : null;
   const readiness = qualified ? (hasCatalog ? 'source-catalog-present' : 'missing-private-door-catalog')
     : 'not-dojo-build10-source';

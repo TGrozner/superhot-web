@@ -812,3 +812,57 @@ test('J4 real-time enemy arrivals illuminate a frozen-world door without inventi
   assert.equal(noDelay.packets()[0].spotlight.range, 0);
   assert.equal(noDelay.packets()[0].falseLight.intensity, 0);
 });
+
+test('J4 real-time arrival beacon points at the verified doorway route while world-time is frozen', () => {
+  // Web presentation only: an accepted spawn countdown advances in real time
+  // but the source light curve cannot advance when the world is stationary.
+  // This tests the already-published three-light Dojo scene, no asset proxy.
+  const incoming = warning(103);
+  incoming.delay = 2;
+  incoming.point.position = { x: 10, y: 1.7, z: -14 };
+  const visible = createDojoDoorWarningBridge(browserScene());
+  const unknown = createDojoDoorWarningBridge(browserScene());
+  const oldClock = createDojoDoorWarningBridge(browserScene());
+  const noLocation = warning(103);
+  noLocation.delay = 2;
+
+  for (const [bridge, event] of [
+    [visible, incoming], [unknown, noLocation], [oldClock, incoming],
+  ]) {
+    assert.equal(bridge.accept(event).status, 'triggered');
+  }
+  const packet = visible.packets()[0];
+  const originalBuffer = packet.spotlight.direction;
+  visible.advance(0, null, 1.65); // 350 ms to a real spawn, source still frozen.
+  unknown.advance(0, null, 1.65);
+  oldClock.advance(0); // No real-time clock signal: must not invent an aim.
+
+  assert.equal(packet.elapsed, 0, 'never advance source light time with spawn time');
+  assert.ok(packet.spotlight.range > 3, 'existing light has real-time warning range');
+  assert.ok(packet.spotlight.direction[2] > 0.2,
+    'real-time warning cone turns toward the visible verified spawn route');
+  assert.equal(packet.spotlight.direction, originalBuffer, 'no GPU packet/buffer churn');
+  assert.ok(Math.abs(unknown.packets()[0].spotlight.direction[2]) < 0.001,
+    'real-time light without an accepted spawn position must not point at a guess');
+  assert.ok(Math.abs(oldClock.packets()[0].spotlight.direction[2]) < 0.001,
+    'legacy callers without real seconds keep the original frozen direction');
+
+  // The visual cone may only guide a visible route. BoxCollider occlusion
+  // remains authoritative even for unscaled real-time targeting.
+  const wall = {
+    id: 'test-realtime-wall', center: [0, 0, 0], size: [0.8, 3, 0.8],
+    worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 13, 1.7, -16, 1],
+    layer: { index: 0 }, isTrigger: false,
+    initial: { enabled: true, activeInHierarchy: true },
+  };
+  const covered = createDojoDoorWarningBridge(browserScene({ colliders: [wall] }));
+  covered.accept(incoming);
+  covered.advance(0, null, 1.65);
+  assert.ok(Math.abs(covered.packets()[0].spotlight.direction[2]) < 0.001,
+    'opaque Dojo cover prevents real-time spawn tracking');
+
+  visible.reset();
+  assert.equal(packet.active, false);
+  assert.deepEqual(originalBuffer, [-0.99999999982, 0, 0.00001898408],
+    'REJOUER restores the original published Dojo light orientation');
+});
