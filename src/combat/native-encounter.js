@@ -98,6 +98,29 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
   return false;
 }
 
+// J3 Web-only squad movement: a follower whose routed step is blocked by
+// another living actor briefly takes a swept sidestep instead of stacking up
+// behind them. This changes feet only; it cannot authorize a shot or hit.
+function tryWebSquadDetour(runtime, enemy, from, playerFeet, enemies, scaledDeltaTime) {
+  const dx=playerFeet.x-from.x, dz=playerFeet.z-from.z, length=Math.hypot(dx,dz);
+  const travel=Math.min(runtime.body.radius*0.8,enemy.runtime.speed*scaledDeltaTime*0.8);
+  if(!Number.isFinite(length) || length<=EPSILON || !Number.isFinite(travel) || travel<=EPSILON)return null;
+  const preferred=enemy.encounter.webTacticalSide;
+  for(const side of [preferred,-preferred]) {
+    const moved=moveNativeCharacter(runtime.collision,from,{
+      x:-dz/length*travel*side,y:0,z:dx/length*travel*side,
+    },runtime.body).position;
+    if(Math.hypot(moved.x-from.x,moved.z-from.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+       occupied(runtime,from,moved,enemies,enemy) ||
+       occupiedSegment(from,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.encounter.webTacticalSide=side;
+    return moved;
+  }
+  return null;
+}
+
 function scalar(value, name) {
   if (!Number.isFinite(value) || value < 0) throw new TypeError(name+' must be finite and nonnegative');
   return value;
@@ -404,10 +427,17 @@ function moveEnemy(runtime, enemy, input) {
       x:segment.to.x-actual.x,y:Math.min(0,segment.to.y-actual.y),z:segment.to.z-actual.z,
     },runtime.body).position;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    const allyBlocked=occupied(runtime,actual,moved,enemies,enemy);
     if (!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z) > EPSILON ||
-        occupied(runtime,actual,moved,enemies,enemy) ||
+        allyBlocked ||
         occupiedSegment(actual,moved,playerFeet,runtime.body.radius*2,runtime.body.height)) {
       state.route=null;
+      // Only an actor blockage triggers the detour: a wall, disconnected
+      // navmesh, unknown muzzle, or the player's capsule is never bypassed.
+      if(allyBlocked && !enemy.runtime.pendingShot) {
+        const sidestep=tryWebSquadDetour(runtime,enemy,actual,playerFeet,enemies,scaledDeltaTime);
+        if(sidestep)actual=sidestep;
+      }
       break;
     }
     actual=moved;
