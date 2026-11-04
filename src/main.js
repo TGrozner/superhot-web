@@ -1216,7 +1216,7 @@ function update(dt, activeRealDt) {
   state.recoil = Math.max(0, state.recoil - dt * 4.8);
   // Dojo VFX use active elapsed time after a frame hitch; legacy scenes retain capped physics time.
   advanceWebImpactFeedback(webImpactFeedback,nativeGameplay()?activeRealDt:dt);
-  advanceWebDodgeFeedback(webDodgeFeedback,dt);
+  advanceWebDodgeFeedback(webDodgeFeedback,nativeGameplay()?activeRealDt:dt);
   // Web game feel: Dojo player attacks recover on ACTIVE real time, not the
   // nearly frozen world clock. Keep nominal pistol/katana/throw/punch delays;
   // legacy previews still use their capped simulation dt. update() is never
