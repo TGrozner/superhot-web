@@ -267,10 +267,28 @@ test('SH10 delayed counter after each death also fails closed, while an aligned 
   assert.deepEqual(aligned.observed.killDeathDesyncedFrameIds,[]);
 });
 
+test('SH10 a real canvas mousedown can start the Dojo preview without a Start button',()=>{
+  const data=complete();
+  data.uiActions[0]={type:'start',buttonId:'scene',frameId:0,activeScreen:'playing'};
+  const result=report(data);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.COMPLETE,JSON.stringify(result.errors));
+  assert.equal(result.checks.startGestureObserved,true);
+  assert.equal(result.nativeParityVerdict,'UNKNOWN');
+});
+
+test('SH10 never credits a control-panel mousedown or scene click from menu as Dojo Start',()=>{
+  const wrongTarget=complete();
+  wrongTarget.uiActions[0].buttonId='scene-mode';
+  assert.equal(report(wrongTarget).status,DOJO_VERTICAL_STATUS.INVALID);
+  const wrongScreen=complete();
+  wrongScreen.uiActions[0]={type:'start',buttonId:'scene',frameId:0,activeScreen:'menu'};
+  assert.equal(report(wrongScreen).status,DOJO_VERTICAL_STATUS.INVALID);
+});
+
 test('SH10 cannot certify start→win→restart from counters without trusted browser UI receipts',()=>{
   const withoutStart=complete();
   withoutStart.uiActions=withoutStart.uiActions.filter(a=>a.type!=='start');
-  failure(withoutStart,/no trusted owner Start button click/);
+  failure(withoutStart,/no trusted owner Start button\/canvas gesture/);
   const withoutRestart=complete();
   withoutRestart.uiActions=withoutRestart.uiActions.filter(a=>a.type!=='restart');
   failure(withoutRestart,/no trusted owner win-screen Replay button click/);
