@@ -712,6 +712,15 @@ document.addEventListener('visibilitychange', () => {
 });
 document.addEventListener('keydown', (event) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+  // The Dojo preview is already on the PLAYING screen, but the round has
+  // not started. Do not allow free movement, a jump or F/E item mutations
+  // before the player deliberately starts combat on the canvas.
+  if (state.screen === 'playing' && nativeGameplay() && !nativeCombatStarted &&
+      ['KeyW', 'KeyZ', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown',
+        'ArrowLeft', 'ArrowRight', 'Space', 'KeyF', 'KeyE'].includes(event.code)) {
+    event.preventDefault();
+    return;
+  }
   keys.add(event.code);
   if (event.repeat) return;
   if (state.screen === 'menu' && event.code === 'Enter') { start(); return; }
@@ -750,13 +759,18 @@ document.addEventListener('contextmenu', (event) => { if (state.screen === 'play
 document.addEventListener('mousedown', (event) => {
   if ((event.button !== 0 && event.button !== 2) || state.screen !== 'playing') return;
   if (document.pointerLockElement !== canvas) {
+    // A document-level listener also receives clicks on scene-mode, buttons
+    // and overlays. Only an intentional primary click on the actual canvas
+    // may start the Dojo preview, never a click on those HTML controls.
+    if (event.target !== canvas) return;
     if (nativeGameplay() && !nativeCombatStarted) {
-      // First click after preview is the actual round start. Re-anchor the
-      // active frame interval, so the next rAF never charges pre-click time.
+      if (event.button !== 0) return;
+      // The first canvas click starts the round, not a pistol shot.
       state.runClock = 0;
       activeSinceTimestampMs = performance.now();
+      nativeCombatStarted = true;
+      setScreen('playing'); // Hide preview controls as soon as combat starts.
     }
-    nativeCombatStarted = true;
     initializeAudio(); requestMouse(); return;
   }
   if (event.button === 2) throwWeapon();
@@ -1186,11 +1200,20 @@ function update(dt, activeRealDt) {
     state.reload -= dt;
     if (state.reload <= 0) { state.reload = 0; state.ammo = 6; }
   }
-  const fwd = (keys.has('KeyW') || keys.has('KeyZ') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
-  const horizontal = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
+  const native = nativeGameplay();
+  // Keep world/animation settling active in the preview while ignoring
+  // physical player input until the first accepted combat-start gesture.
+  const playerInputActive = !native || nativeCombatStarted;
+  const fwd = playerInputActive
+    ? (keys.has('KeyW') || keys.has('KeyZ') || keys.has('ArrowUp') ? 1 : 0) -
+      (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0)
+    : 0;
+  const horizontal = playerInputActive
+    ? (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) -
+      (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0)
+    : 0;
   // KeyboardEvent.code follows physical keys: works on both QWERTY and AZERTY layouts.
   const moving = Math.hypot(fwd, horizontal) > 0;
-  const native = nativeGameplay();
   let worldDt;
   if (native) {
     const tick = stepMcdGameplayClock(nativeClock, {
