@@ -39,6 +39,16 @@ test('SH10 an ACTIVE source door-warning envelope without GPU spotlight is an ex
   assert.equal(result.nativeParityVerdict,'UNKNOWN');
 });
 
+test('SH10 a Web red-wash draw counts even without source spotlights',()=>{
+  const result=assessDojoVisibleIntegrations(trace([
+    {},{warningActiveEnvelopes:1,warningRenderedSpotlights:0,warningWebFalseLightDrawCalls:12},
+  ]));
+  assert.equal(result.status,DOJO_VISIBLE_STATUS.OBSERVED);
+  assert.equal(result.observed.warningFalseLightDrawFrames,1);
+  assert.equal(result.observed.warningAnyLightDrawFrames,1);
+  assert.equal(result.pixelComparisonPerformed,false);
+});
+
 test('SH10 source door-warning with nonzero rendered lights is OBSERVED, not native light parity',()=>{
   const result=assessDojoVisibleIntegrations(trace([
     {},{warningEventStatus:'triggered',warningActiveEnvelopes:1,warningRenderedSpotlights:1},
