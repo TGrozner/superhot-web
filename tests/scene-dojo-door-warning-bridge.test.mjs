@@ -866,3 +866,54 @@ test('J4 real-time arrival beacon points at the verified doorway route while wor
   assert.deepEqual(originalBuffer, [-0.99999999982, 0, 0.00001898408],
     'REJOUER restores the original published Dojo light orientation');
 });
+
+test('J4 imminent visible spawn keeps door warning pointed at the enemy route, not a nearby player', () => {
+  // Web gameplay choice: a player standing beside the doorway must not steal
+  // the red telegraph as a real, accepted enemy entry approaches. No source
+  // assets, extra lights or simulated scene models are involved.
+  const event = warning(103);
+  event.delay = 2;
+  event.point.position = { x: 10, y: 1.7, z: -14 };
+  const camera = { x: 12, y: 1.8, z: -22 }; // Opposite side of the spotlight sweep.
+  const noPosition = warning(103);
+  noPosition.delay = 2;
+  const entrance = createDojoDoorWarningBridge(browserScene());
+  const competing = createDojoDoorWarningBridge(browserScene());
+  const playerOnly = createDojoDoorWarningBridge(browserScene());
+  for (const bridge of [entrance, competing]) {
+    assert.equal(bridge.accept(event).status, 'triggered');
+  }
+  assert.equal(playerOnly.accept(noPosition).status, 'triggered');
+  // 300 ms before spawn: the curve has progressed, so both player tracking
+  // and route steering would normally compete for the very same GPU beam.
+  entrance.advance(1, null, 1.7);
+  competing.advance(1, camera, 1.7);
+  playerOnly.advance(1, camera, 1.7);
+  const routeDirection = entrance.packets()[0].spotlight.direction;
+  const sharedDirection = competing.packets()[0].spotlight.direction;
+  const cameraDirection = playerOnly.packets()[0].spotlight.direction;
+  assert.ok(routeDirection[2] > 0.25, 'the accepted visible entry has a clear route cue');
+  assert.ok(Math.abs(sharedDirection[2] - routeDirection[2]) < 0.02,
+    'imminent real spawn retains priority even when the nearby eye pulls the other way');
+  assert.ok(cameraDirection[2] < -0.04,
+    'without a verified route the existing nearby-player reaction remains active');
+  assert.equal(competing.packets().filter(packet => packet.active).length, 1);
+  assert.equal(competing.packets()[0].spotlight.direction, sharedDirection,
+    'live GPU basis is reused');
+
+  // Cover hides the route, not the eye: never prioritize an unseen spawn.
+  const cover = {
+    id: 'synthetic-entry-cover', center: [0, 0, 0], size: [0.8, 3, 0.8],
+    worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 13, 1.7, -16, 1],
+    isTrigger: false, initial: { enabled: true, activeInHierarchy: true },
+  };
+  const hiddenRoute = createDojoDoorWarningBridge(browserScene({ colliders: [cover] }));
+  hiddenRoute.accept(event);
+  hiddenRoute.advance(1, camera, 1.7);
+  assert.ok(Math.abs(hiddenRoute.packets()[0].spotlight.direction[2] - cameraDirection[2]) < 1e-9,
+    'an occluded spawn cannot suppress a visible player warning');
+  competing.reset();
+  assert.equal(competing.packets()[0].active, false);
+  assert.deepEqual(competing.packets()[0].spotlight.direction,
+    [-0.99999999982, 0, 0.00001898408], 'REJOUER restores the original door direction');
+});
