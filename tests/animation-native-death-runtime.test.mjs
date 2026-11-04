@@ -473,7 +473,7 @@ test('sleeping Dojo corpses reuse indexed source support; removed and disabled f
   let arrayReads=0;
   const underlying=scene.boxes;
   scene.boxes=new Proxy(underlying,{get(target,key,receiver){
-    if(typeof key==='string'&&/^(0|[1-9]\\d*)$/.test(key))arrayReads++;
+    if(typeof key==='string' && Number.isInteger(Number(key)) && String(Number(key))===key)arrayReads++;
     return Reflect.get(target,key,receiver);
   }});
   // One cache refresh may enumerate all boxes; the remaining 30 sleeping
