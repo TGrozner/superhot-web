@@ -646,11 +646,13 @@ function multiplyInto(a, aOffset, b, bOffset, output, outputOffset) {
 
 /**
  * Web-only hit/melee readability layer, applied AFTER sampled source clips.
- * Every global bone receives the same rigid lean around the sampled hips;
- * this keeps the GPU skin palette, socket, hit shapes and death handoff in
- * exactly the same pose. No new keyframes, source claims or GPU draws.
+ * A source-identified hip -> spine hierarchy lets the upper body recoil
+ * while planted hips and legs retain their sampled world poses. Other rigs
+ * retain the previous whole-body fallback; no unnamed joint is guessed.
+ * GPU palette, socket and hit shapes use the same final matrices.
+ * No new keyframes, source claims or GPU draws.
  */
-function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
+function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0, affected = null) {
   const globals = scratch.globals;
   const pivot = pivotBone * 16;
   const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
@@ -658,6 +660,7 @@ function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
   const cr = Math.cos(roll), sr = Math.sin(roll);
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   for (let bone = 0; bone < loaded.jointCount; bone++) {
+    if (affected !== null && !affected.includes(bone)) continue;
     const offset = bone * 16;
     for (let column = 0; column < 4; column++) {
       const entry = offset + column * 4;
@@ -1308,6 +1311,19 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const hip = loaded.bones.findIndex(bone => /hip|pelvis/i.test(bone.name));
   const spine = loaded.bones.findIndex(bone => /spine/i.test(bone.name));
   const webLeanPivot = hip >= 0 ? hip : spine >= 0 ? spine : 0;
+  // Dojo: jnt_Hips -> jnt_Spine_01 is a proven branch distinct from
+  // both leg chains. Do not rotate the feet during a gunshot or hit.
+  // Unidentified rigs use the old whole-body behavior, never an
+  // approximate spine guessed from joint order.
+  const webLeanUpperBones = hip >= 0 && spine >= 0 &&
+    loaded.bones[spine].parent === hip
+    ? loaded.bones.flatMap((_bone, index) => {
+        for (let ancestor = index; ancestor >= 0;
+          ancestor = loaded.bones[ancestor].parent) {
+          if (ancestor === spine) return [index];
+        }
+        return [];
+      }) : null;
   // The published Dojo EnemyMerged rig has NO Head-named bone. Its
   // source-named jnt_Neck_01 -> jnt_Neck_Top branch carries the upper-neck
   // and head surface (both joints have positive source skin weights). Using
@@ -1546,7 +1562,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
     }
     if (webPoseLean !== null) {
       applyWebPoseLean(loaded, scratch, webLeanPivot,
-        webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0);
+        webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0,
+        webLeanUpperBones);
     }
     if (webHeadLook !== null &&
         (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
