@@ -777,19 +777,25 @@ renderer hook, native asset, private runner, new dependency or CI browser
 claim is introduced.
 
 After loading **SHRL_Dojo2 / build10 on Pages**, open DevTools and arm
-**before** clicking Start. You may mark a new phase while paused: intervals
-resume only once the real Dojo encounter is active and visible. Returning to
-the game can require Resume after DevTools releases pointer lock:
+**before** clicking Start. **Do not reopen DevTools during the fight:** releasing
+pointer lock can pause the game and distort the FPS sample. Once playing,
+use physical **number-row 7 = idle, 8 = combat, 9 = ragdolls, 0 = save** to
+switch phases and export the trace without losing focus. These keys are scoped
+to this opt-in capture, ignored while hidden/inactive or typing in editable
+controls, and removed after save/stop. Route markers 1–6 remain separate.
+A key-0 export is an owner-browser file download; it does not upload anything.
+You may still mark from the console while paused; samples resume only when
+Dojo gameplay is visible:
 
 ```js
 const { startDojoFpsCapture } = await import('/superhot-web/scripts/acceptance-dojo-fps.mjs');
 window.sh10fps = startDojoFpsCapture();
 window.sh10fps.mark('idle');      // arm now, click Start, then stand still for >=120 frames
-// When actual fighting starts:
-window.sh10fps.mark('combat');    // fight for at least 120 visible frames
-// Optional, while several defeated enemies are still rendered:
-window.sh10fps.mark('ragdolls');
-window.sh10fps.save('dojo-fps.json');
+// During actual gameplay, press 8 to start combat and 9 for ragdolls.
+// After >=120 visible rAF frames in each of idle + combat, press 0 to save.
+// The following manual calls remain an alternative ONLY when focus is not lost:
+// window.sh10fps.mark('combat'); window.sh10fps.mark('ragdolls');
+// window.sh10fps.save('dojo-fps.json');
 ```
 
 For **localhost root** use `/scripts/acceptance-dojo-fps.mjs` instead.
@@ -806,7 +812,7 @@ node scripts/acceptance-dojo-fps-report.mjs --trace private/dojo-fps.json
 node --test tests/acceptance-dojo-fps.test.mjs
 ```
 
-The CLI exits 2 on missing/corrupt/insufficient samples. It computes nearest-rank
+The optional hotkeys are a capture ergonomics fix, not a gameplay feature; they have no effect until the module is imported and the recorder started. Avoid multiple simultaneous recorders. The CLI exits 2 on missing/corrupt/insufficient samples. It computes nearest-rank
 p50/p95/p99 **browser frame intervals**, FPS at p95 frametime, hitch counts,
 and reported WebGL draw calls for each operator-labelled segment. It requires
 at least 120 active visible rAF intervals in each of idle and combat and at
