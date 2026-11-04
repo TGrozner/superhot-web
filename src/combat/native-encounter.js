@@ -192,6 +192,20 @@ function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime)
   return true;
 }
 
+/** Interrupt a live Web dodge instead of pausing its remaining time across a
+ * stun, despawn or committed shot. The recovery blocks repeated reactions to
+ * the same in-flight bullet after the interrupt ends.
+ * @param {object} state Live encounter state for an enemy.
+ * @returns {void}
+ */
+function cancelWebProjectileEvade(state) {
+  if (!(state.webDodgeRemaining>0)) return;
+  state.webDodgeRemaining=0;
+  state.webDodgeSideX=0;
+  state.webDodgeSideZ=0;
+  state.webDodgeCooldown=Math.max(state.webDodgeCooldown,WEB_PROJECTILE_EVADE.recoverySeconds);
+}
+
 // J3 Web-authored approach lanes: two armed enemies should not both march
 // directly toward the same point before they reach firing range. Route to
 // opposite, reachable positions near the player; never offset the player
@@ -469,12 +483,14 @@ function moveEnemy(runtime, enemy, input) {
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
+    cancelWebProjectileEvade(state);
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
   }
   const armed=enemy.reaction.hasWeapon;
   if (!armed) enemy.runtime.pendingShot=null;
+  if (enemy.runtime.pendingShot) cancelWebProjectileEvade(state);
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
   // native eye/AimTarget bone, and cannot authorize firing.
