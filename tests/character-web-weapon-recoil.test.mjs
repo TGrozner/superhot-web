@@ -13,9 +13,14 @@ function packageFixture() {
     scales:Array.from({length:4},()=>[1,1,1]).flat()};
   return {
     schemaVersion:1,source:{owner:'authored-web-fixture',mesh:1},
-    coordinates:{space:'test',axes:'+X,+Y,+Z',units:'test',quaternion:'[x,y,z,w]',
-      boneOrder:'parent first',inverseBindMatrices:'column major',
-      skinEquation:'linear blend',indices:'one triangle'},
+    coordinates:{
+      space:'synthetic renderer-local space',axes:'+X right, +Y up, +Z forward',
+      units:'authored test units',quaternion:'[x,y,z,w]',
+      boneOrder:'parent-first; joint indices address bones',
+      inverseBindMatrices:'flat column-major matrices for WebGL',
+      skinEquation:'vertex = sum(weight * boneModelMatrix * inverseBindMatrix * meshVertex)',
+      indices:'original authored indices; one source triangle submesh',
+    },
     bones:[bone('root',-1,[0,0,0]),bone('jnt_R_Arm_Shoulder',0,[0,1,0]),
       bone('jnt_R_Arm_Elbow',1,[0,0,1]),bone('jnt_R_Arm_Wrist',2,[0,0,1])],
     mesh:{positions:[0,1,0,0,1,1,0,1,2],normals:[0,0,1,0,0,1,0,0,1],
