@@ -63,7 +63,7 @@ test('100ms real DOM sampling preserves a short clash missed by 1s panel refresh
   const documentRef={
     body:{append(){}},
     createElement:()=>({style:{},setAttribute(){},remove(){removed=true;}}),
-    getElementById:id=>active?elements[id]??null:null,
+    getElementById:id=>id==='scene-controls'?{hidden:true}:active?elements[id]??null:null,
   };
   const windowRef={
     innerWidth:640,innerHeight:360,
@@ -105,7 +105,7 @@ test('Web QA reads real text ink bounds: nowrap banner may overflow its CSS box'
   const documentRef={
     body:{append(){}},
     createElement:()=>({style:{},setAttribute(){},remove(){}}),
-    getElementById:id=>id==='chain-banner'?banner:null,
+    getElementById:id=>id==='scene-controls'?{hidden:true}:id==='chain-banner'?banner:null,
     createRange:()=>({
       selectNodeContents(element){assert.equal(element,banner);},
       getBoundingClientRect:()=>textInk,
@@ -174,7 +174,7 @@ test('Live Web QA detects pickup text covered by the later HUD hint strip, not b
     getBoundingClientRect:()=>({left:0,top:132,width:320,height:48})};
   const documentRef={
     body:{append(){}},createElement:()=>({style:{},setAttribute(){},remove(){}}),
-    getElementById:id=>id==='pickup-prompt'?pickupEl:id==='hint-bar'?hintEl:null,
+    getElementById:id=>id==='scene-controls'?{hidden:true}:id==='pickup-prompt'?pickupEl:id==='hint-bar'?hintEl:null,
     createRange:()=>({selectNodeContents(el){assert.equal(el,pickupEl);},
       getBoundingClientRect:()=>pickup.textBounds}),
   };
@@ -189,6 +189,35 @@ test('Live Web QA detects pickup text covered by the later HUD hint strip, not b
   const qa=installWebVisualQa({windowRef,documentRef});
   assert.equal(qa.getReport().warnings.some(w=>w.kind==='pickup-text-in-controls'),true);
   assert.equal(qa.getReport().transientWarnings[0].kind,'pickup-text-in-controls');
+  qa.stop();
+  assert.equal(timers.size,0);
+});
+
+test('Dojo preview is not counted as live combat visual evidence before canvas START',()=>{
+  const startUi={hidden:false};
+  const timers=new Map();
+  const documentRef={
+    body:{append(){}},
+    createElement:()=>({style:{},setAttribute(){},remove(){}}),
+    getElementById:id=>id==='scene-controls'?startUi:null,
+  };
+  const windowRef={
+    innerWidth:320,innerHeight:240,
+    __superhotGetRenderedFrameSnapshot:()=>playing,
+    __superhotSceneMetrics:{p95FrameMs:52},
+    setInterval:(fn,ms)=>{timers.set(ms,fn);return ms;},
+    clearInterval:ms=>timers.delete(ms),
+  };
+  const qa=installWebVisualQa({windowRef,documentRef});
+  assert.equal(qa.getReport().state,'WEB_PREVIEW_NOT_STARTED');
+  assert.equal(qa.getReport().observedSamples,0);
+  assert.deepEqual(qa.getReport().warnings.map(w=>w.kind),['start']);
+  timers.get(100)();
+  assert.equal(qa.getReport().observedSamples,0);
+  startUi.hidden=true; // the main.js canvas START boundary, not just activeScreen
+  timers.get(100)();
+  assert.equal(qa.getReport().observedSamples,1);
+  assert.equal(qa.getReport().state,'WEB_DOJO_VISIBLE_QA_NOT_BROWSER_VERIFIED');
   qa.stop();
   assert.equal(timers.size,0);
 });
