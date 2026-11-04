@@ -362,6 +362,12 @@ function createWebWarningSweep(catalog, controller, collision) {
         Math.sin(Math.PI * phase) ** 2;
       let yaw = sweepYaw;
       let pitch = sweepPitch;
+      // Once a verified, visible enemy entry is imminent, its accepted route
+      // owns the existing red beacon. Otherwise a nearby player can pull the
+      // beam away from the entrance precisely as the enemy arrives.
+      // The rule is Web-authored: never suppress player tracking for unknown,
+      // hidden or already-completed arrivals.
+      let visibleArrivalPriority = 0;
 
       // Interactive Web lighting: if a player is close enough to the beam
       // and actually in FRONT of its source, ease its sweep toward that
@@ -405,6 +411,7 @@ function createWebWarningSweep(catalog, controller, collision) {
               x: base.spawnTarget[0], y: base.spawnTarget[1], z: base.spawnTarget[2],
             });
             if (focus > 0 && !blocked) {
+              visibleArrivalPriority = realNotice;
               const aimYaw = Math.max(-WEB_WARNING_SPAWN_MAX_YAW,
                 Math.min(WEB_WARNING_SPAWN_MAX_YAW, Math.atan2(across, forward)));
               const aimPitch = Math.max(-WEB_WARNING_SPAWN_MAX_PITCH,
@@ -435,7 +442,7 @@ function createWebWarningSweep(catalog, controller, collision) {
           const facing = smooth01((forward - WEB_WARNING_TRACK_FACING_START) /
             (WEB_WARNING_TRACK_FACING_FULL - WEB_WARNING_TRACK_FACING_START));
           const weight = WEB_WARNING_TRACK_STRENGTH * near * facing *
-            Math.sin(Math.PI * phase) ** 2;
+            Math.sin(Math.PI * phase) ** 2 * (1 - visibleArrivalPriority);
           // J4 Web cover readability: do not let the door beam deliberately
           // follow the player's hidden position through a solid Dojo box.
           // Reuse the exact active BoxCollider sight query already used by
