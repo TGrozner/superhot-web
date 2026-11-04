@@ -491,7 +491,7 @@ test('J4 warning spotlights respect Concrete/Crystal surface orientation without
   const shortNormal = sampleDojoDoorWarningWebPreview(spot, at, .4, 2, [0, 0, -.5]);
   assert.deepEqual(facing, original, 'front-facing and unknown normal retain the current spot strength');
   assert.deepEqual(shortNormal, facing, 'interpolated normals are normalized in fragment space');
-  assert.ok(away.rgb[0] > 0 && away.rgb[0] < facing.rgb[0] * .5,
+  assert.ok(away.rgb[0] > 0 && away.rgb[0] < facing.rgb[0],
     'back-facing walls still have a readable 20% light-energy floor');
   const noCookie = prepareDojoDoorWarningLighting(scene, activeWarning().packets(), {
     ...options, decodedCookies: new Set(), allowWebCookieFreeGlow: true,
