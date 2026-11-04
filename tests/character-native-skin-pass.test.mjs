@@ -320,8 +320,8 @@ function mockGl({ uniformLimit = 256 } = {}) {
     frontFace: value => { winding = value; calls.push(['winding', value]); },
     uniformMatrix4fv: (location, _transpose, value) => calls.push(['matrix', location.name, Array.from(value)]),
     uniform3f: () => {}, uniform2f: () => {},
-    uniform4f: (location, first) => {
-      if (location.name === 'uWebHitFlash') calls.push(['hitFlash', location.name, first]);
+    uniform4f: (location, first, second) => {
+      if (location.name === 'uWebHitFlash') calls.push(['hitFlash', location.name, first, second]);
     },
     drawElements: (mode, count, type, offset) => calls.push(['draw', mode, count, type, offset]),
     deleteBuffer: value => calls.push(['deleteBuffer', value]),
@@ -885,5 +885,45 @@ test('Web J3 sentry breathing and real turning animate the same GPU bones/socket
   assert.equal(death.actorWebPoseReaction, null);
   assert.equal(calls.filter(call => call[0] === 'draw').length, 7,
     'no extra draw calls or fabricated meshes for Web-only pose accents');
+  pass.dispose();
+});
+
+test('Web J4 gunshot glow uses accepted fire actions and never tints a solved death', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const actors = createNativeActorSkinRuntime(pass);
+  const fire = (time, blend = 1) => actors.drawActor({
+    actorId: 'source-fire-guard',
+    pose: { state: 'idle', time: .4,
+      action: { state: 'fire', time, weight: 1, blend } },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+
+  assert.equal(fire(0, 0).actorWebFireGlow, 0, 'action blend zero has no pre-shot flash');
+  const glowing = fire(.08);
+  assert.ok(glowing.actorWebFireGlow > .45 && glowing.actorWebFireGlow < 1);
+  assert.equal(glowing.webFireGlowIntensity, glowing.actorWebFireGlow);
+  assert.equal(glowing.webFireGlowDesign, 'Web-only warm discharge afterglow');
+  assert.equal(glowing.actorWebHitFlash, 0, 'fire never masquerades as damage');
+  assert.equal(fire(.3).actorWebFireGlow, 0, 'fire color must settle quickly');
+  assert.equal(fire(.08, 0).actorWebFireGlow, 0, 'no action blend = no fire glow');
+  const dead = actors.drawActor({
+    actorId: 'source-fire-guard',
+    pose: { state: 'idle', time: .4, solvedPose: {
+      rig: pass.rig, provenance: 'authored J4 fixture',
+      boneModelMatrices: new Float32Array([...identity(), ...identity()]),
+    } },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+  assert.equal(dead.actorWebFireGlow, 0, 'solved ragdoll receives no glow');
+  const uniforms = calls.filter(call => call[0] === 'hitFlash' && call[1] === 'uWebHitFlash');
+  assert.deepEqual(uniforms.map(call => call[3]), [0, glowing.actorWebFireGlow, 0, 0, 0]);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 5,
+    'afterglow uses existing single GPU skin draw');
+  assert.throws(() => pass.draw({
+    instance: pass.createStateInstance('idle'), time: .1,
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+    webFireGlow: 2,
+  }), /fire glow must be a finite intensity/);
   pass.dispose();
 });
