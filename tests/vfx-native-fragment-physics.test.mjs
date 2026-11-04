@@ -55,6 +55,30 @@ test('a fragment initially overlapping its impact floor is recovered above the a
   assert.ok(shard.position.y>=0.1-1e-7);
 });
 
+test('overlapping Dojo shards recover at the real face and cannot immediately drive back inside',()=>{
+  const physics=context(),position={x:0,y:-0.02,z:0};
+  const velocity={x:1.5,y:-3,z:0};
+  const contacts=moveNativeFragmentSphere(physics.collisionScene,position,velocity,
+    {x:0,y:0,z:0},0.1,physics.material);
+  const floorContact=contacts.find(c=>c.collider.id==='floor' && c.penetration>0);
+  assert.ok(floorContact,'the initial overlap must produce a real source floor contact');
+  assert.ok(Math.abs(floorContact.point.y)<1e-7,
+    'penetration impact point must lie on the floor face, not behind the sphere');
+  assert.ok(position.y>=0.1-1e-7,'depenetration must keep the sphere outside');
+  assert.ok(velocity.y>=-1e-9,'inward velocity must not push the shard straight back inside');
+  assert.equal(velocity.x,1.5,'the tangent of a hit still permits a sideways slide');
+
+  const wallPos={x:2.005,y:2,z:0},wallVelocity={x:-4,y:0,z:0};
+  const wallContacts=moveNativeFragmentSphere(physics.collisionScene,wallPos,wallVelocity,
+    {x:0,y:0,z:0},0.1,physics.material);
+  const side=wallContacts.find(c=>c.collider.id==='wall' && c.penetration>0);
+  assert.ok(side);
+  assert.ok(Math.abs(side.point.x-2.01)<1e-7,
+    'embedded shards must report the nearest real wall face');
+  assert.ok(wallPos.x>=2.11-1e-7);
+  assert.ok(wallVelocity.x>=-1e-9);
+});
+
 test('resting contacts stop low-speed normal bounce and source friction stops sliding',()=>{
   const physics=context();physics.material.staticFriction=2;
   const shard=body();shard.position={x:0,y:0.1,z:0};shard.velocity={x:0.01,y:0,z:0};
