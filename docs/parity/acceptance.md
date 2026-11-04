@@ -849,6 +849,8 @@ pixels. Do not commit real owner traces to Git.
 
 ```bash
 node scripts/acceptance-dojo-fps-report.mjs --trace private/dojo-fps.json
+# For ragdoll optimization reviews: opt-in strict observation gate.
+node scripts/acceptance-dojo-fps-report.mjs --trace private/dojo-fps.json --require-ragdolls
 node --test tests/acceptance-dojo-fps.test.mjs
 ```
 
@@ -856,7 +858,13 @@ The optional hotkeys are a capture ergonomics fix, not a gameplay feature; they 
 p50/p95/p99 **browser frame intervals**, FPS at p95 frametime, hitch counts,
 and reported WebGL draw calls for each operator-labelled segment. It requires
 at least 120 active visible rAF intervals in each of idle and combat and at
-least one draw sample in both. A positive status means **owner-supplied Web
+least one draw sample in both. By default this does **not** require a
+ragdolls segment, so its green status cannot validate ragdoll performance.
+For ragdoll FPS reviews use `--require-ragdolls`: at least 120 rAF intervals
+in the **ragdolls-labelled** segment plus a draw sample within that phase
+observing >=2 concurrently active ragdolls. Draw counts are sampled at most
+once per second; this does **not** prove two bodies remained active for all
+120 measured frames. A positive status means **owner-supplied Web
 samples analyzed**, not GPU timestamp-query measurements, not a human FPS
 comfort verdict, not a passed full Dojo run, and not native MCD parity.
 Compare two builds only at matching browser, resolution, DPR, GPU, workload

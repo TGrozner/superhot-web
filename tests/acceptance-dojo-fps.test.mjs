@@ -30,6 +30,28 @@ test('SH-10 FPS: incomplete/invalid provenance cannot become a fake measured pas
   assert.equal(assessDojoFpsCapture(corrupted).status,'WEB_DOJO_FPS_INVALID');
 });
 
+test('SH-10 FPS: opt-in ragdoll gate refuses an idle/combat-only false green',()=>{
+  assert.equal(assessDojoFpsCapture(sample()).status,
+    'WEB_DOJO_FPS_SAMPLED_OWNER_MARKED_NOT_GPU_BENCHMARK');
+  const none=assessDojoFpsCapture(sample(),{requireRagdolls:true});
+  assert.equal(none.status,'WEB_DOJO_FPS_INCOMPLETE');
+  assert.match(none.issues.join(' '),/ragdoll gate/);
+  const short=sample();short.segments.push(segment('ragdolls',119));
+  assert.equal(assessDojoFpsCapture(short,{requireRagdolls:true}).status,
+    'WEB_DOJO_FPS_INCOMPLETE');
+  const onlyOne=sample();
+  onlyOne.segments.push(segment('ragdolls'));
+  onlyOne.segments[2].drawSamples[0].ragdolls=1;
+  assert.equal(assessDojoFpsCapture(onlyOne,{requireRagdolls:true}).status,
+    'WEB_DOJO_FPS_INCOMPLETE');
+  const two=sample();two.segments.push(segment('ragdolls'));
+  const result=assessDojoFpsCapture(two,{requireRagdolls:true});
+  assert.equal(result.status,'WEB_DOJO_FPS_SAMPLED_OWNER_MARKED_NOT_GPU_BENCHMARK');
+  assert.equal(result.observations.ragdolls.frames,125);
+  assert.equal(result.observations.ragdolls.maxActiveRagdolls,2);
+  assert.equal(result.browserExecutionIndependentlyVerified,false);
+});
+
 test('SH-10 FPS: physical 7/8/9 and 0 mark/save real-browser phases without DevTools focus changes',()=>{
   const originalWindow=globalThis.window, originalDocument=globalThis.document;
   const callbacks=new Map(), listeners=new Map(), downloads=[];

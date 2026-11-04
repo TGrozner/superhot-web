@@ -31,12 +31,15 @@ const nearestRank = (sorted, p) => sorted[Math.max(0, Math.ceil(sorted.length * 
 /**
  * Validates an owner-supplied browser trace and derives timing statistics.
  * It cannot authenticate the JSON's origin or establish native/gameplay parity.
- * A complete trace means >=120 rAF deltas each in idle and combat, with exact
- * Dojo source identity. Values are never performance thresholds or a GPU timer.
+ * The default trace requires >=120 rAF deltas each in idle and combat.
+ * The opt-in ragdoll gate additionally requires >=120 ragdolls-labelled deltas
+ * and a draw sample observing at least two live ragdolls in that phase.
+ * No status authenticates browser execution or establishes a GPU FPS target.
  * @param {DojoFpsTrace} trace
+ * @param {{requireRagdolls?:boolean}} [options]
  * @returns {object}
  */
-export function assessDojoFpsCapture(trace) {
+export function assessDojoFpsCapture(trace, {requireRagdolls=false}={}) {
   const observations = {};
   const issues = [];
   const report = status => ({status,
@@ -45,7 +48,8 @@ export function assessDojoFpsCapture(trace) {
     browserExecutionIndependentlyVerified:false, nativeParityVerdict:'UNKNOWN',
     observations, issues,
   });
-  if (trace?.schemaVersion !== 1 || trace?.captureKind !== 'SH10_DOJO_FPS_BROWSER_V1' ||
+  if (typeof requireRagdolls !== 'boolean' ||
+      trace?.schemaVersion !== 1 || trace?.captureKind !== 'SH10_DOJO_FPS_BROWSER_V1' ||
       !sourceMatches(trace?.nativeScene?.source) ||
       !bounded(trace?.viewport?.width,16384) || !bounded(trace?.viewport?.height,16384) ||
       !trace.viewport.width || !trace.viewport.height ||
@@ -100,6 +104,13 @@ export function assessDojoFpsCapture(trace) {
   }
   if (!observations.idle.appReportedDrawSamples || !observations.combat.appReportedDrawSamples) {
     issues.push('app-reported WebGL draw counts missing in idle/combat; frame timing only');
+    return report('WEB_DOJO_FPS_INCOMPLETE');
+  }
+  if (requireRagdolls && (!observations.ragdolls ||
+      observations.ragdolls.frames<120 ||
+      !observations.ragdolls.appReportedDrawSamples ||
+      (observations.ragdolls.maxActiveRagdolls ?? 0)<2)) {
+    issues.push('ragdoll gate needs >=120 rAF intervals in the ragdolls phase and a draw sample observing >=2 active ragdolls there');
     return report('WEB_DOJO_FPS_INCOMPLETE');
   }
   return report('WEB_DOJO_FPS_SAMPLED_OWNER_MARKED_NOT_GPU_BENCHMARK');
