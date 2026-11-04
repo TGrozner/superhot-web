@@ -95,6 +95,13 @@ function webLocalArmedSquads(runtime, enemies) {
       for (const candidate of armed) {
         if (!unassigned.has(candidate) ||
             Math.hypot(member.x-candidate.x,member.z-candidate.z)>range)continue;
+        // Nearby enemies in separate rooms are NOT one communicating squad.
+        // A real wall between their eye positions splits Web fireteams even
+        // when both independently see the player. Keep the same sight collision
+        // authority as attacks; never infer squad membership through cover.
+        const memberEye={x:member.x,y:member.y+runtime.aimHeight,z:member.z};
+        const candidateEye={x:candidate.x,y:candidate.y+runtime.aimHeight,z:candidate.z};
+        if(nativeSegmentHit(runtime.sightCollision,memberEye,candidateEye)!==null)continue;
         unassigned.delete(candidate);
         squad.push(candidate);
       }
