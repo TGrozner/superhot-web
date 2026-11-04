@@ -231,6 +231,7 @@ test('a Web landing thud routes through footsteps, not room reflections or comba
   assert.ok(filters.some(filter => filter.type === 'lowpass' && filter.frequency.value === 650));
   assert.ok(filters.some(filter => filter.type === 'highpass' && filter.frequency.value === 1800));
   assert.equal(mix.emit('player-shot').status, 'started');
-  assert.equal(mix.emit('landing').status, 'blocked'); // Higher-priority combat is protected.
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.equal(mix.emit('landing').status, 'blocked'); // Combat owns both live voices.
   mix.dispose();
 });
