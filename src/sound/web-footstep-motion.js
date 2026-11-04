@@ -12,10 +12,18 @@ export function createWebFootstepMotion(emit) {
     let previous = null;
     let previousTime = null;
     let pendingMetres = 0;
+    let groundedBaseline = false;
+    let airborneSince = null;
+    let airborneFrames = 0;
+    let lastAirPosition = null;
     function reset() {
         previous = null;
         previousTime = null;
         pendingMetres = 0;
+        groundedBaseline = false;
+        airborneSince = null;
+        airborneFrames = 0;
+        lastAirPosition = null;
     }
     function advance({ position, grounded, timeSeconds }) {
         if (!position || ![position.x, position.y, position.z].every(Number.isFinite)) {
@@ -27,9 +35,53 @@ export function createWebFootstepMotion(emit) {
         // Callers often move a single camera object in place each frame.
         // Never retain that reference: the next frame must compare two snapshots.
         const current = { x: position.x, y: position.y, z: position.z };
-        if (!grounded || previous === null || previousTime === null ||
-            timeSeconds < previousTime || timeSeconds - previousTime > maxFrameGap) {
+        // A landing needs an established grounded baseline and consecutive air
+        // samples. One-frame contact jitter or a fresh run must stay silent.
+        if (previousTime === null || timeSeconds < previousTime ||
+            timeSeconds - previousTime > maxFrameGap) {
             previous = grounded ? current : null;
+            previousTime = timeSeconds;
+            pendingMetres = 0;
+            groundedBaseline = grounded;
+            airborneSince = null;
+            airborneFrames = 0;
+            lastAirPosition = null;
+            return null;
+        }
+        if (timeSeconds === previousTime)
+            return null;
+        if (!grounded) {
+            if (groundedBaseline && airborneSince === null)
+                airborneSince = timeSeconds;
+            if (airborneSince !== null)
+                airborneFrames++;
+            lastAirPosition = current;
+            groundedBaseline = false;
+            previous = null;
+            previousTime = timeSeconds;
+            pendingMetres = 0;
+            return null;
+        }
+        if (airborneSince !== null) {
+            const airtime = timeSeconds - airborneSince;
+            const finalTravel = lastAirPosition === null ? Infinity :
+                Math.hypot(current.x - lastAirPosition.x, current.z - lastAirPosition.z);
+            const validLanding = airborneFrames >= 2 && airtime >= 0.08 &&
+                finalTravel <= maxFrameTravel;
+            airborneSince = null;
+            airborneFrames = 0;
+            lastAirPosition = null;
+            groundedBaseline = true;
+            previous = current;
+            previousTime = timeSeconds;
+            pendingMetres = 0;
+            // Creative Web-only contact thud, not a Unity animation/event marker.
+            return validLanding ? emit('landing', { position: current,
+                intensity: Math.min(1.1, 0.55 + airtime * 0.35) }) : null;
+        }
+        groundedBaseline = true;
+        if (previous === null) {
+            previous = current;
             previousTime = timeSeconds;
             pendingMetres = 0;
             return null;

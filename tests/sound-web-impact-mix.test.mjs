@@ -215,3 +215,22 @@ test('Web combat hits add a bright attack without extra voices or coloring foots
   assert.equal(mix.getActiveVoices(), 3);
   mix.dispose();
 });
+
+test('a Web landing thud routes through footsteps, not room reflections or combat priority', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 2);
+  const result = mix.emit('landing', {position: {x: 0, y: 1, z: 0}});
+  assert.equal(result.status, 'started');
+  assert.equal(nodes.length, 2); // No extra sources or voice pressure.
+  const footsteps = gains[3];
+  const output = gains[7];
+  // Spatialized landing goes from the voice output to HRTF, then the step bus.
+  const panner = output.connections[0];
+  assert.ok(panner.connections.includes(footsteps));
+  assert.ok(!footsteps.connections.includes(gains[5])); // No synthetic room echo.
+  assert.ok(filters.some(filter => filter.type === 'lowpass' && filter.frequency.value === 650));
+  assert.ok(filters.some(filter => filter.type === 'highpass' && filter.frequency.value === 1800));
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(mix.emit('landing').status, 'blocked'); // Higher-priority combat is protected.
+  mix.dispose();
+});

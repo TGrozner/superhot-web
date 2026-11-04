@@ -1,6 +1,6 @@
 /** SH-07: original Web sound design, NOT recovered MCD audio. */
 export type WebImpactCue = 'player-shot' | 'enemy-shot' | 'impact' | 'shatter'
-  | 'katana' | 'step' | 'pickup' | 'throw';
+  | 'katana' | 'step' | 'landing' | 'pickup' | 'throw';
 export interface WebImpactPoint {readonly x: number; readonly y: number; readonly z: number}
 export interface WebImpactRequest {readonly position?: WebImpactPoint; readonly intensity?: number}
 export interface WebImpactResult {
@@ -94,7 +94,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   const priorityByCue: Record<WebImpactCue, number> = {
     // Creative Web mix priorities: melee/player fire survive overlapping steps.
     'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
-    katana: 5, step: 1, pickup: 2, throw: 3,
+    katana: 5, step: 1, landing: 2, pickup: 2, throw: 3,
   };
 
   const attackByCue: Partial<Record<WebImpactCue, readonly [number, number, number]>> = {
@@ -105,6 +105,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     impact: [2800, 0.48, 0.014],
     shatter: [4800, 0.31, 0.043],
     katana: [3200, 0.32, 0.065],
+    landing: [1800, 0.21, 0.022],
   };
 
   function release(voice: Voice): void {
@@ -155,6 +156,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       shatter: [0.27, 2200, 1250, 220, 0.48],
       katana: [0.20, 1180, 1480, 325, 0.43],
       step: [0.075, -360, 108, 58, 0.22],
+      landing: [0.15, -650, 145, 54, 0.40],
       pickup: [0.08, 1400, 510, 880, 0.23],
       throw: [0.17, 890, 540, 180, 0.28],
     };
@@ -206,9 +208,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
         distanceFilter.connect(panner);
       }
       out.connect(distanceFilter ?? panner);
-      panner.connect(cue === 'step' ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
+      panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
     } else {
-      out.connect(cue === 'step' ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
+      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
     }
     const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: 2, priority};
     voices.add(voice);
@@ -258,7 +260,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     voice.sources.push(osc);
     osc.start(at);
     osc.stop(at + duration);
-    if (cue !== 'step') {
+    if (cue !== 'step' && cue !== 'landing') {
       ambient.gain.cancelScheduledValues(at);
       ambient.gain.setTargetAtTime(0.03, at, 0.015);
       ambient.gain.setTargetAtTime(0.13, at + 0.14, 0.22);
