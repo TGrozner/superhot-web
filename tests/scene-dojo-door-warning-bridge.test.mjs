@@ -571,3 +571,57 @@ test('J4 overlapping door lights prioritize the actual unscaled enemy arrival, n
   assert.throws(() => compatible.advance(0, null, -0.01), /unscaledDeltaSeconds/);
   assert.throws(() => compatible.advance(0, null, Infinity), /unscaledDeltaSeconds/);
 });
+
+test('J4 live door arrival releases false future-threat glow when spawn clock outruns slow motion', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const active = bridge.packets()[0];
+  const input = warning(103);
+  input.delay = 0.6; // Real-time spawn order, not SH-07 world-light duration.
+  input.point.position = { x: 10, y: 1.7, z: -14 };
+  assert.equal(bridge.accept(input).status, 'triggered');
+
+  bridge.advance(1.5, null, 0.3); // Source lamp in its Web arrival crescendo.
+  assert.equal(active.active, true);
+  const spotBeforeArrival = active.spotlight.intensity;
+  const fillBeforeArrival = active.falseLight.intensity;
+  const originalFill = [13.100007, 1.7, -17.899987];
+  const travelBeforeArrival = Math.hypot(...active.falseLight.position.map(
+    (v, i) => v - originalFill[i]));
+  assert.ok(spotBeforeArrival > 35 && fillBeforeArrival > 4);
+  assert.ok(travelBeforeArrival > 0.7);
+
+  // The real spawner has completed its delay, while SUPERHOT world time is
+  // completely frozen. Continuing the source red envelope is allowed, but
+  // another crescendo or forward-moving floor wash would advertise a phantom
+  // future enemy. Release only SH-04's authored Web emphasis in REAL time.
+  const packets = bridge.packets();
+  const fillBuffer = active.falseLight.position;
+  bridge.advance(0, null, 0.35);
+  assert.equal(active.active, true, 'never cancel SH-07 source warning clock');
+  assert.equal(bridge.packets(), packets, 'no additional lighting packets');
+  assert.equal(active.falseLight.position, fillBuffer, 'reuse existing GPU fill vector');
+  assert.ok(active.spotlight.intensity < spotBeforeArrival - 5,
+    'arrival crescendo releases without a second peak after the enemy appears');
+  assert.ok(active.falseLight.intensity < fillBeforeArrival * 0.6);
+  const travelAfterArrival = Math.hypot(...active.falseLight.position.map(
+    (v, i) => v - originalFill[i]));
+  assert.ok(travelAfterArrival < travelBeforeArrival * 0.1,
+    'moving red wash retreats rather than following the already arrived enemy');
+
+  // A retrigger is a genuinely new accepted threat and may use its own Web
+  // crescendo again. REJOUER must clear both the old arrival and the wash.
+  bridge.accept(input);
+  bridge.advance(1.5, null, 0.1);
+  assert.ok(active.spotlight.intensity > 35, 'new accepted warning starts fresh');
+  bridge.reset();
+  assert.equal(active.active, false);
+  assert.deepEqual(active.falseLight.position, originalFill);
+  assert.equal(active.falseLight.slot, -1);
+
+  // Historical adapters omitting real dt keep their existing visual treatment.
+  const legacy = createDojoDoorWarningBridge(browserScene());
+  legacy.accept(input);
+  legacy.advance(1.5);
+  legacy.advance(0);
+  assert.ok(legacy.packets()[0].spotlight.intensity > 35);
+});
