@@ -82,6 +82,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   let mixLevel = 1;
   // Web-authored texture cycle: repeated rapid shots should not be sample-identical.
   let transientSerial = 0;
+  // Web-original kill-chain color; do not count blocked/muted shatters.
+  let lastShatterAt = -Infinity;
+  let shatterChain = 0;
 
   /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
   function setMixLevel(level: number): void {
@@ -186,6 +189,13 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
         return {status: 'blocked', source: 'web-original-synthesis', at: null, spatial: false};
       }
       retire(victim);
+    }
+    // Use real AudioContext time for successive confirmed death cues.
+    // Creative Web feedback, not a recovered MCD combo rule or timer.
+    if (cue === 'shatter') {
+      const gap = at - lastShatterAt;
+      shatterChain = gap >= 0 && gap <= 1.5 ? Math.min(3, shatterChain + 1) : 0;
+      lastShatterAt = at;
     }
     // Each successful cue uses a fresh noise region and a subtle tonal detune.
     // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
@@ -389,28 +399,33 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       ring.start(at);
       ring.stop(at + 0.42);
     }
-    // Creative Web crystal fracture: two short inharmonic glass rings.
-    // Reuses the existing spatial output and the same 24-voice budget.
+    // Web-original crystalline kill chain: each rapid shatter raises the two
+    // inharmonic rings, and a delayed glint separates break from falling glass.
+    // Only already-present oscillators/gains; no additional sources or assets.
     if (cue === 'shatter') {
+        const pitchLift = 1 + shatterChain * 0.085;
+        const levelLift = 1 + shatterChain * 0.12;
         const glassTones = [
-            { hz: 1540, tail: 0.36, level: 0.26 },
-            { hz: 2690, tail: 0.23, level: 0.18 },
+            { hz: 1540, tail: 0.36, level: 0.26, onset: 0 },
+            { hz: 2690, tail: 0.23, level: 0.18, onset: 0.047 },
         ];
         for (const tone of glassTones) {
+            const ringAt = at + tone.onset;
             const ring = context.createOscillator();
             ring.type = 'sine';
-            ring.frequency.setValueAtTime(tone.hz * texturePitch, at);
-            ring.frequency.exponentialRampToValueAtTime(tone.hz * texturePitch * 0.985, at + tone.tail);
+            ring.frequency.setValueAtTime(tone.hz * texturePitch * pitchLift, ringAt);
+            ring.frequency.exponentialRampToValueAtTime(tone.hz * texturePitch * pitchLift * 0.985, ringAt + tone.tail);
             const ringGain = track(context.createGain());
             ringGain.gain.setValueAtTime(0.0001, at);
-            ringGain.gain.linearRampToValueAtTime(volume * tone.level, at + 0.008);
-            ringGain.gain.exponentialRampToValueAtTime(0.0001, at + tone.tail);
+            ringGain.gain.setValueAtTime(0.0001, ringAt);
+            ringGain.gain.linearRampToValueAtTime(volume * tone.level * levelLift, ringAt + 0.008);
+            ringGain.gain.exponentialRampToValueAtTime(0.0001, ringAt + tone.tail);
             ring.connect(ringGain);
             ringGain.connect(out);
             ring.onended = ended;
             voice.sources.push(ring);
-            ring.start(at);
-            ring.stop(at + tone.tail);
+            ring.start(ringAt);
+            ring.stop(ringAt + tone.tail);
         }
     }
     if (cue !== 'step' && cue !== 'landing') {
