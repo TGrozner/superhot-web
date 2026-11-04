@@ -746,3 +746,42 @@ test('J3 Web squad sighting: nearby real observers share only witnessed feet, in
       'far-away sightings do not grant infinite-radius squad tracking');
   }
 });
+
+test('J3 Web witnessed loss: visible nearby ally death prompts one swept retreat, cover blocks alarm',()=>{
+  // Entirely synthetic positions and Web-authored timing, NOT a native MCD AI claim.
+  const data=scene();
+  const player={playerFeet:p(20,0,2),playerPosition:p(20,1.6,2)};
+  const runtime=setup(data);
+  const witness=firstSpawn(runtime,player);
+  witness.x=6; witness.z=2;
+  witness.muzzlePosition=p(6,1.4,2);
+  witness.muzzleForward=p(1,0,0);
+  const fallen=firstSpawn(setup(data),player);
+  fallen.id='synthetic-fallen'; fallen.x=7; fallen.z=2;
+  runtime.actors.set(fallen.id,fallen);
+  fallen.alive=false; fallen.reaction.dead=true;
+
+  advanceNativeEncounter(runtime,input([witness,fallen],{...player,scaledDeltaTime:.2}));
+  assert.equal(runtime.killed,1,'the same actual death is counted for encounter progress');
+  assert.ok(witness.x<5.95,'a nearby real witness immediately retreats away from the fallen ally');
+  assert.ok(witness.encounter.webLossRemaining>0,'reaction persists for a short finite beat');
+  assert.equal(witness.encounter.canAttack,false,'the evasive beat grants no free shot');
+  assert.equal(witness.encounter.webLossFeet.x,7,'the retreat uses the witnessed corpse, not player tracking');
+  for(let frame=0;frame<5;frame++)
+    advanceNativeEncounter(runtime,input([witness,fallen],{...player,scaledDeltaTime:.2}));
+  assert.equal(witness.encounter.webLossRemaining,0,'one death cannot trigger permanent retreat');
+  advanceNativeEncounter(runtime,input([witness,fallen],{...player,scaledDeltaTime:0}));
+  assert.equal(witness.encounter.webLossRemaining,0,'an already-observed corpse never restarts panic');
+
+  const concealed=setup(data,[box(6,1,2,.5,2,2)]);
+  const behind=firstSpawn(concealed,player);
+  behind.x=4; behind.z=2;
+  const hidden=firstSpawn(setup(data),player);
+  hidden.id='synthetic-occluded-fallen';hidden.x=8;hidden.z=2;
+  concealed.actors.set(hidden.id,hidden);
+  hidden.alive=false;hidden.reaction.dead=true;
+  advanceNativeEncounter(concealed,input([behind,hidden],{...player,scaledDeltaTime:.2}));
+  assert.equal(behind.encounter.webLossRemaining,0,
+    'a wall prevents omniscient awareness of an ally dying on its other side');
+  assert.equal(concealed.killed,1,'occlusion does not erase the real kill receipt');
+});
