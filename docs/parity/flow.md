@@ -291,3 +291,12 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — vérification technique :** tests ciblés `tests/flow-dojo-replay-recap.test.mjs` sur séquences d'échecs successifs, réussite d'un défi sans victoire, victoire sans tir, objectifs de score/chrono et séparation 6/7. CI et Pages doivent être contrôlés après émission de la PR et fusion. Aucun smoke navigateur n'est présumé.
 
 **INCONNU — MCD :** valeurs natives live de `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, activation de `RunEnding`, transitions menus et sauvegardes. Le défi persistant Web ne constitue aucune preuve de progression/sequence/checkpoint original.
+
+
+## SH-08 / J4 — défi repris jusqu'à son accomplissement (Web-only, 04/11/2026)
+
+**PROUVÉ — anomalie de progression Web corrigée.** Le schéma v5 conserve déjà un `pendingChallenge` par quota 6/7, mais `createDojoReplayRecap` remplaçait cet objectif à la fin de chaque manche, même lorsque la manche n'avait **pas** rempli la condition. Exemple vérifiable avant correction : la première victoire attribue « GAGNE SANS TIRER » ; mourir ensuite à 3/6 remplaçait silencieusement cet objectif par une cible d'éliminations. Désormais, une tentative non réussie conserve exactement le même `kind/target` et affiche **« DÉFI À RETENTER »**, même après défaite ou victoire insuffisante. Une vraie réussite affiche **« DÉFI RÉUSSI »** puis calcule le prochain objectif depuis les compteurs existants. Les objectifs score et temps gardent leurs cibles numériques enregistrées, non recalculées à chaque essai.
+
+**OBSERVÉ / À VÉRIFIER — intégration.** `src/main.js:finish(win)` consomme déjà `recap.text` et persiste `recap.best`. Aucun raccord partagé, champ de stockage supplémentaire, changement de schéma, combat, chrono, bonus, spawn, F/E, input, asset ou runner nécessaire. Test ciblé : victoire → objectif sans tir → défaite → victoire avec tir → victoire sans tir ; et quota 7 / défi de score → défaite → score dépassé. Contrôler la CI sur SHA exact puis le rendu Pages après merge par SH-05 ; aucun smoke navigateur de cette tranche n'est affirmé.
+
+**INCONNU — MCD.** Cette continuité est une décision UX `WEB_ONLY` ; elle ne renseigne ni l'activation live de `RunEnding`, ni `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, ni les checkpoints/menus natifs. Aucune nouvelle requête corpus n'est lancée.
