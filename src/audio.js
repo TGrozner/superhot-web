@@ -726,6 +726,15 @@ export function createAudio(options = {}) {
     }), position);
   }
 
+  // Web-authored gritty sound ONLY for a resolved normal player bullet
+  // colliding with world geometry. Native wall sample remains unverified.
+  function wallImpact({position} = {}) {
+    if (!originalMode) return report('suppressed', 'wallImpact', {reason: 'original-mode-disabled'});
+    return webCombatAccent('wall-impact', report('blocked', 'wallImpact', {
+      reason: 'web-only-wall-clip-unverified',
+    }), position);
+  }
+
   function empty() {
     if (!originalMode) return proceduralEmpty();
     return playMcdClip('empty', 'pistolEmpty', {
@@ -1029,6 +1038,7 @@ export function createAudio(options = {}) {
     hit,
     punch,
     dodge,
+    wallImpact,
     empty,
     ready,
     scheduleReady,
