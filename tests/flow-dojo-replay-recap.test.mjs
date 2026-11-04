@@ -169,7 +169,7 @@ test('Dojo retry coaching never invents a PB or re-awards completed medals', () 
   const nearMaster = result(6, {shots:0, dodges:3, score:900});
   assert.equal(nearMaster.replayTarget, 'DÉCROCHE LE STYLE S');
   const mastered = result(6, {shots:0, dodges:3, score:2100});
-  assert.equal(mastered.replayTarget, null, 'three earned medals need no artificial challenge');
+  assert.match(mastered.replayTarget ?? '', /FAIS 2 VICTOIRES D’AFFILÉE/);
   const lostEarly = createDojoReplayRecap({
     quota:7, victory:false, kills:0, shots:3, dodges:0, score:0, elapsedSeconds:5,
   });
