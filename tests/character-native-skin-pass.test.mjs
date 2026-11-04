@@ -960,6 +960,13 @@ test('Web hit stagger follows the actual rendered facing and live player camera,
     'Web camera-facing proxy, not contact origin');
   assert.ok(fromRight.actorWebPoseReaction.roll > .2);
   assert.ok(fromLeft.actorWebPoseReaction.roll < -.2);
+  assert.ok(fromRight.actorWebPoseReaction.yaw < -.15,
+    'right-side hits twist away from the player');
+  assert.ok(fromLeft.actorWebPoseReaction.yaw > .15,
+    'left-side hits twist in the opposite direction');
+  assert.ok(fromRight.weaponAttachmentMatrix[8] < -.1 &&
+    fromLeft.weaponAttachmentMatrix[8] > .1,
+    'the weapon socket inherits the directional torso twist');
   assert.ok(fromRight.weaponAttachmentMatrix[13] > .2);
   assert.ok(fromLeft.weaponAttachmentMatrix[13] < -.2);
   assert.ok(fromRight.boneModelMatrices[16 + 13] > .2,
