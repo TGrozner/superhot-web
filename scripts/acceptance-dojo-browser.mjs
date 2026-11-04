@@ -117,7 +117,12 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     inputActions.push({kind,frameId:snapshot.frameId,activeScreen:'playing'});
   };
   const onDown = event => {
-    if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
+    // #374 blocks movement keys during Dojo preview. A W held before Start
+    // must not falsely label the first sampled combat frames as movement.
+    // A post-Start key repeat is accepted even before the interval sampler
+    // marks `ready`, exactly like the runtime's post-preview keydown path.
+    if (MOVEMENT_KEYS.has(event.code) &&
+        (ready || inspectDojoCaptureReadiness().ready)) pressed.add(event.code);
     const target = event.target;
     const editable = target?.isContentEditable ||
       ['INPUT','SELECT','TEXTAREA'].includes(target?.tagName);
