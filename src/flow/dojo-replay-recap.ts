@@ -221,20 +221,30 @@ export function createDojoReplayRecap(snapshot: unknown,
     ? ` · SÉRIE ${nextBest.currentStreak}${nextBest.currentStreak > (best?.bestStreak ?? 0)
       ? ' · RECORD SÉRIE' : ''}`
     : !run.victory && previousStreak > 0 ? ` · SÉRIE ${previousStreak} BRISÉE` : '';
-  // Personalized challenge uses the SAME quota's previous PBs, never a
-  // fabricated MCD checkpoint or kill-completion signal. New PBs are compared
-  // against the previous run, not the record updated above.
+  // Web-only post-round coaching. In particular a first win or a loss
+  // deserves a concrete next attempt, not only a record comparison. Keep
+  // provenance separate from native MCD RunEnding and never mutate gameplay.
   let replayTarget: string | null = null;
-  if (run.victory && best !== null) {
+  if (!run.victory) {
+    // The counter is for THIS attempt; no historic kill PB is inferred.
+    replayTarget = stillNeeded > 0
+      ? `VISE ${Math.min(run.quota, run.kills + 1)} ÉLIMINATION${run.kills === 0 ? '' : 'S'} AU PROCHAIN ESSAI`
+      : 'SURVIS JUSQU’À LA VICTOIRE';
+  } else if (best !== null) {
+    // Compare only to the PREVIOUS same-quota PB, never a just-written PB.
     if (run.score <= best.bestScore && best.bestScore < Number.MAX_SAFE_INTEGER) {
       replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;
     } else if (run.elapsedSeconds >= best.fastestSeconds && best.fastestSeconds > 0) {
       replayTarget = `SOUS ${best.fastestSeconds.toFixed(1)} S POUR UN NOUVEAU RECORD`;
-    } else if (((nextBest?.masteryMask ?? 0) & 2) === 0 && run.shots > 0) {
-      replayTarget = 'GAGNE SANS TIRER';
-    } else if (((nextBest?.masteryMask ?? 0) & 4) === 0 && run.dodges < 3) {
-      replayTarget = 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
     }
+  }
+  if (run.victory && replayTarget === null) {
+    // First clear, double-record and mastered runs share the same meaningful
+    // next objectives. Already earned badges are never suggested again.
+    const mask = nextBest?.masteryMask ?? 0;
+    if ((mask & 2) === 0) replayTarget = 'GAGNE SANS TIRER';
+    else if ((mask & 4) === 0) replayTarget = 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
+    else if ((mask & 1) === 0) replayTarget = 'DÉCROCHE LE STYLE S';
   }
   const replayTargetText = replayTarget === null ? '' : ` · DÉFI : ${replayTarget}`;
   return Object.freeze({
