@@ -542,3 +542,39 @@ test('J3 Web assault pressure: one armed squadmate closes fast while wingman cov
     'when the wingman dies, no solo enemy keeps an unjustified assault');
   assert.equal(lead.encounter.canAttack,false,'death does not grant an attack');
 });
+
+
+test('J3 Web projectile evade: visible player bullets trigger a bounded swept side-step, not clairvoyance',()=>{
+  const runtime=setup(),enemy=firstSpawn(runtime);
+  const aimedFrom=p(15,1,2);
+  const bullet={friendly:true,type:'normal',pos:aimedFrom,direction:p(-1,0,0),speed:35};
+  const start=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{
+    scaledDeltaTime:.12,playerProjectiles:[bullet],
+  }));
+  assert.ok(Math.abs(enemy.z-start.z)>.005,'enemy sidesteps a live approaching shot');
+  assert.ok(Math.hypot(enemy.x-start.x,enemy.z-start.z)<.3,'single frame is speed-bounded');
+  assert.ok(enemy.encounter.webDodgeRemaining>0,'dodge persists briefly, without teleporting');
+  assert.equal(enemy.encounter.canAttack,false,'evade does not manufacture a muzzle');
+  const afterFirst=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
+  assert.ok(Math.abs(enemy.z-afterFirst.z)>.005,'evade remains legible after bullet moves on');
+  for(let i=0;i<4;i++)advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
+  assert.equal(enemy.encounter.webDodgeRemaining,0,'short dodge terminates');
+  assert.ok(enemy.encounter.webDodgeCooldown>0,'same projectile cannot cause endless jitter');
+
+  const hiddenRuntime=setup(scene(),[box(8,1,2,.3,3,2)]);
+  const hidden=firstSpawn(hiddenRuntime);
+  advanceNativeEncounter(hiddenRuntime,input([hidden],{
+    scaledDeltaTime:.12,playerProjectiles:[bullet],
+  }));
+  assert.equal(hidden.encounter.webDodgeRemaining,0,'real wall blocks projectile awareness');
+  const invalidRuntime=setup();
+  // Ignore malformed/projectile-free input without relying on the caller.
+  const invalidEnemy=firstSpawn(invalidRuntime);
+  advanceNativeEncounter(invalidRuntime,input([invalidEnemy],{
+    scaledDeltaTime:.12,playerProjectiles:[{friendly:false,pos:aimedFrom,direction:p(-1,0,0),speed:35},
+      {friendly:true,pos:aimedFrom,direction:p(NaN,0,0),speed:35}],
+  }));
+  assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
+});
