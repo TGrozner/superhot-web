@@ -58,12 +58,37 @@ function webCameraHitDirection(modelMatrix, cameraPosition) {
 }
 
 /**
- * Lock a Web impact origin per accepted stun event; the optional event ID
- * allows SH-05 to distinguish two accepted stuns without inventing a clip
- * transition. Only an explicit gameplay contact is called a contact.
- * A camera fallback is labelled as a proxy, even when held across frames.
+ * Lock a Web incoming travel direction or a genuine attacker origin per
+ * accepted stun event; an event ID distinguishes repeated accepted stuns.
+ * hitOrigin is an ATTACK SOURCE position, not hit.point on the victim.
+ * A collision point can be nearly coincident with the model origin and
+ * cannot establish the projectile's incoming travel direction.
+ * An explicit velocity vector takes precedence and is source-qualified as
+ * Web gameplay evidence; the camera fallback remains only a proxy.
  */
-function webHitSource(hitOrigin, cameraPosition) {
+function webHitSource(hitOrigin, cameraPosition, hitIncomingDirection = null) {
+  if (hitIncomingDirection != null) {
+    if (typeof hitIncomingDirection !== 'object' ||
+        !Number.isFinite(hitIncomingDirection.x) ||
+        !Number.isFinite(hitIncomingDirection.y) ||
+        !Number.isFinite(hitIncomingDirection.z)) {
+      throw new TypeError('Web hitIncomingDirection requires finite world-space x/y/z from an accepted contact');
+    }
+    const {x, y, z} = hitIncomingDirection;
+    const magnitude = Math.hypot(x, y, z);
+    if (magnitude < 1e-6) {
+      throw new RangeError('Web hitIncomingDirection cannot be a zero travel vector');
+    }
+    const horizontal = Math.hypot(x, z);
+    return Object.freeze({
+      point: null,
+      incomingDirection: horizontal < 1e-6 ? null
+        : Object.freeze({x: x / horizontal, z: z / horizontal}),
+      provenance: horizontal < 1e-6
+        ? 'Web accepted vertical travel, planar hit direction unavailable'
+        : 'Web accepted projectile travel direction, not native MCD impulse',
+    });
+  }
   if (hitOrigin != null) {
     if (typeof hitOrigin !== 'object' ||
         !Number.isFinite(hitOrigin.x) ||
@@ -131,7 +156,14 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSo
     for (let i = 0; i < actorId.length; i++) parity = (parity + actorId.charCodeAt(i)) % 2;
   }
   const side = parity ? 1 : -1;
-  const direction = hit ? webCameraHitDirection(modelMatrix, hitSource?.point) : null;
+  // A contact location is not the projectile's source. Project a verified
+  // incoming travel vector from the actor center solely for the existing
+  // signed, model-space lean computation; do not label it an actual origin.
+  const incoming = hitSource?.incomingDirection;
+  const directionalPoint = incoming
+    ? {x: modelMatrix[12] - incoming.x, z: modelMatrix[14] - incoming.z}
+    : hitSource?.point;
+  const direction = hit ? webCameraHitDirection(modelMatrix, directionalPoint) : null;
   return Object.freeze({
     kind: fire ? 'fire' : identity.name,
     pitch: (hit ? (direction?.pitch ?? .08) : fire ? .12 : -.14) * envelope,
@@ -498,7 +530,8 @@ export function createNativeActorSkinRuntime(skinPass) {
       shaderTime >= previousHit.time && shaderTime - previousHit.time <= .75 &&
       pose.time >= previousHit.poseTime;
     const hitSource = selected.identity.name === 'hit' && solvedPose === null
-      ? (continuedHit ? previousHit.hitSource : webHitSource(pose.hitOrigin, cameraPosition))
+      ? (continuedHit ? previousHit.hitSource
+        : webHitSource(pose.hitOrigin, cameraPosition, pose.hitIncomingDirection))
       : null;
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
       modelMatrix, hitSource)
