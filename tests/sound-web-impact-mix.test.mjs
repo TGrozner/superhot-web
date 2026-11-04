@@ -249,7 +249,7 @@ test('Web-only player damage impact is local, punchy and survives a saturated gu
   assert.ok(filters.some(filter => filter.type === 'lowpass' && filter.frequency.value === 680));
   assert.ok(filters.some(filter => filter.type === 'highpass' && filter.frequency.value === 2600));
   assert.equal(mix.emit('player-shot').status, 'blocked'); // Damage cannot be stolen by shots.
-  assert.equal(nodes.length, 4); // Two sources per voice, no extra sub-bass oscillator.
+  assert.equal(nodes.length, 5); // Step 2 + damage 3; ear ring stays in one voice.
   mix.dispose();
 });
 
@@ -269,7 +269,7 @@ test('live shatter gains two glass rings without stealing more voices or leaving
 
   const finished = nodes.slice(0, 4).map(node => node.onended);
   assert.equal(mix.emit('player-hit').status, 'started'); // Damage preempts glass.
-  assert.equal(nodes.length, 6); // Damage still has just the original two sources.
+  assert.equal(nodes.length, 7); // Shatter 4 + damage 3; voice cap remains 1.
   for (const node of nodes.slice(0, 4)) {
     assert.deepEqual(node.stopArgs, [ctx.currentTime + 0.008]);
   }
