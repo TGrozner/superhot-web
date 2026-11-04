@@ -54,6 +54,22 @@ function webSquadBreacher(enemy, enemies) {
   return count>1 && first===enemy;
 }
 
+// J3 Web-only last-stand pressure: the final armed opponent must not become
+// passive simply because the squad breacher lost its covering wingman. Only
+// start the closer pursuit ring after the ACTUAL encounter death receipts
+// leave exactly one active actor and the kill quota is one away. Any new
+// arrival immediately restores ordinary squad/solo spacing; no forced shot.
+function webFinalSurvivorBreacher(runtime, enemy, enemies) {
+  if (runtime.killTarget<2 || runtime.killed<runtime.killTarget-1 ||
+      enemy.reaction?.hasWeapon!==true || !participating(enemy)) return false;
+  let alive=0;
+  for (const actor of enemies) if (participating(actor)) {
+    alive++;
+    if (actor!==enemy || alive>1) return false;
+  }
+  return alive===1;
+}
+
 /** Keep the native collision/navmesh as the authority even for Web-only
  * tactics. Never teleport an actor or cross a blocking actor/player.
  * Blocked lanes reverse once, then the enemy simply holds its position.
@@ -532,7 +548,7 @@ function moveEnemy(runtime, enemy, input) {
   // maintain their normal firing ring. No assigned partner, blocked line of
   // sight or deferred shot means the ordinary chase/stop behavior applies.
   const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
-    webSquadBreacher(enemy,enemies);
+    (webSquadBreacher(enemy,enemies) || webFinalSurvivorBreacher(runtime,enemy,enemies));
   const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(

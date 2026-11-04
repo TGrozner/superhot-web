@@ -544,6 +544,46 @@ test('J3 Web assault pressure: one armed squadmate closes fast while wingman cov
 });
 
 
+
+test('J3 Web final-survivor pressure closes the finishing gap but yields to reinforcements',()=>{
+  // Pure synthetic encounter: a real counted death, not a fake distance flag,
+  // activates the finishing chase without authorizing a shot or bypassing nav.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const early=setup(data),earlyEnemy=firstSpawn(early,target);
+  advanceNativeEncounter(early,input([earlyEnemy],{...target,scaledDeltaTime:.2}));
+  assert.equal(earlyEnemy.x,2,
+    'an ordinary lone gunner holds its established firing distance');
+
+  const runtime=setup(data),last=firstSpawn(runtime,target);
+  runtime.killTarget=2;
+  const corpse={
+    ...last,id:'synthetic-already-defeated',alive:false,active:false,
+    reaction:{...last.reaction,dead:true},
+  };
+  runtime.actors.set(corpse.id,corpse);
+  const before=p(last.x,last.y,last.z);
+  advanceNativeEncounter(runtime,input([last,corpse],{...target,scaledDeltaTime:.2}));
+  assert.equal(runtime.killed,1,'the actual encounter death receipt starts the final phase');
+  assert.ok(last.x>before.x+.05,
+    'the final armed opponent charges inside its normal firing ring');
+  assert.ok(last.x-before.x<=1.0+1e-6,
+    'final pressure remains constrained by its current move speed');
+  assert.equal(last.encounter.canAttack,false,
+    'closer pursuit cannot grant firing permission without a muzzle');
+
+  const reinforcement={
+    ...last,id:'armed-reinforcement-0',x:2,z:6,clock:0,
+    reaction:{...last.reaction},runtime:{...last.runtime},
+    encounter:{...last.encounter,route:null,target:null},
+  };
+  const atReinforcement=p(last.x,last.y,last.z);
+  advanceNativeEncounter(runtime,input([last,corpse,reinforcement],{...target,scaledDeltaTime:.2}));
+  assert.deepEqual(p(last.x,last.y,last.z),atReinforcement,
+    'a new living squadmate immediately cancels last-survivor pressure');
+});
+
 test('J3 Web projectile evade: visible player bullets trigger a bounded swept side-step, not clairvoyance',()=>{
   const runtime=setup(),enemy=firstSpawn(runtime);
   const aimedFrom=p(15,1,2);
