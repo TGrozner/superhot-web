@@ -545,6 +545,43 @@ test('J3 Web assault pressure: one armed squadmate closes fast while wingman cov
 
 
 
+test('J3 Web squad baton: wingman takes breach when point man is stunned or suppressed',()=>{
+  // Deliberate Web tactics, synthetic positions; no native MCD squad behavior.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data), lead=firstSpawn(runtime,target);
+  const wingman={
+    ...lead,id:'native-encounter-wingman',x:2,z:4,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+  };
+  lead.reaction.stunRemaining=.7;
+  advanceNativeEncounter(runtime,input([lead,wingman],{...target,scaledDeltaTime:.2}));
+  assert.equal(lead.x,2,'stun still immobilizes the original point man');
+  assert.ok(wingman.x>2.05,'wingman advances through its normal armed stop ring');
+  assert.equal(wingman.encounter.canAttack,false,'handoff never invents a muzzle or permits fire');
+  assert.ok(Math.hypot(wingman.x-lead.x,wingman.z-lead.z)>=.8,
+    'squad handoff cannot cross a teammate body');
+
+  lead.reaction.stunRemaining=0;
+  lead.encounter.webSuppressionRemaining=.6;
+  lead.encounter.webSuppressionFrom=p(1,0,2);
+  const before=wingman.x;
+  advanceNativeEncounter(runtime,input([lead,wingman],{...target,scaledDeltaTime:.2}));
+  assert.ok(wingman.x>before+.05,
+    'an actually suppressed point man leaves the assault to his active wingman');
+  assert.equal(lead.encounter.canAttack,false,'suppressed lead cannot sneak in a new shot');
+
+  lead.encounter.webSuppressionRemaining=0;
+  lead.encounter.webSuppressionFrom=null;
+  const holding=p(wingman.x,wingman.y,wingman.z);
+  advanceNativeEncounter(runtime,input([lead,wingman],{...target,scaledDeltaTime:.2}));
+  assert.deepEqual(p(wingman.x,wingman.y,wingman.z),holding,
+    'the recovered stable-ID lead reclaims the push; wingman holds his firing ring');
+});
+
+
 test('J3 Web final-survivor pressure closes the finishing gap but yields to reinforcements',()=>{
   // Pure synthetic encounter: a real counted death, not a fake distance flag,
   // activates the finishing chase without authorizing a shot or bypassing nav.
