@@ -776,13 +776,15 @@ gameplay. It reads app-reported draw counts at most once per second. No
 renderer hook, native asset, private runner, new dependency or CI browser
 claim is introduced.
 
-After loading **SHRL_Dojo2 / build10 on Pages** and clicking Start, in the
-browser console (do not leave DevTools blocking pointer lock):
+After loading **SHRL_Dojo2 / build10 on Pages**, open DevTools and arm
+**before** clicking Start. You may mark a new phase while paused: intervals
+resume only once the real Dojo encounter is active and visible. Returning to
+the game can require Resume after DevTools releases pointer lock:
 
 ```js
 const { startDojoFpsCapture } = await import('/superhot-web/scripts/acceptance-dojo-fps.mjs');
 window.sh10fps = startDojoFpsCapture();
-window.sh10fps.mark('idle');      // remain still for at least 120 visible frames
+window.sh10fps.mark('idle');      // arm now, click Start, then stand still for >=120 frames
 // When actual fighting starts:
 window.sh10fps.mark('combat');    // fight for at least 120 visible frames
 // Optional, while several defeated enemies are still rendered:
