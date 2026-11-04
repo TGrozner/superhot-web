@@ -1302,7 +1302,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const webLeanPivot = hip >= 0 ? hip : spine >= 0 ? spine : 0;
   // Named Head is the sole allowed pivot: never invent bone identities.
   const webHeadIndex = loaded.bones.findIndex(bone =>
-    /(?:^|[\\/.:_\\-\\s])head$/i.test(bone.name));
+    /(?:^|[^a-zA-Z])head$/i.test(bone.name));
   const webHeadBones = [];
   if (webHeadIndex >= 0) {
     for (let bone = webHeadIndex; bone < loaded.jointCount; bone++) {
