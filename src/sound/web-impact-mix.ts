@@ -263,6 +263,22 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       actionTone.connect(action);
       action.connect(out);
     }
+    // Web-original airborne weapon swish, NOT a recovered MCD throw sample.
+    // A descending band of the existing noise buffer follows the release.
+    // This adds no scheduled source, voice, timer or proprietary asset.
+    if (cue === 'throw') {
+      const swish = context.createBiquadFilter();
+      swish.type = 'bandpass';
+      swish.frequency.setValueAtTime(Math.min(3100, context.sampleRate * 0.43), at);
+      swish.frequency.exponentialRampToValueAtTime(Math.min(800, context.sampleRate * 0.23), at + duration);
+      const air = context.createGain();
+      air.gain.setValueAtTime(0.0001, at);
+      air.gain.linearRampToValueAtTime(volume * 0.38, at + 0.018);
+      air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+      noise.connect(swish);
+      swish.connect(air);
+      air.connect(out);
+    }
     noise.onended = ended;
     voice.sources.push(noise);
     noise.start(at, textureIndex * 0.025, duration);
