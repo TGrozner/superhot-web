@@ -534,7 +534,8 @@ export function createAudio(options = {}) {
   function itemCue(action, {itemId, position, realtimeSeconds} = {}) {
     if (!originalMode) return report('suppressed', action, {reason: 'original-mode-disabled'});
     const withItemAccent = (result) => {
-      const webCue = action === 'slice' ? 'katana' :
+      // Swing is an independent Web-authored air cue; blade contact keeps its own accent.
+      const webCue = action === 'swing' ? 'katana-swing' : action === 'slice' ? 'katana' :
         action === 'throw' ? 'throw' : action === 'pickup' ? 'pickup' : null;
       return webCue ? webCombatAccent(webCue, result, position) : result;
     };
