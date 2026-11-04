@@ -1,5 +1,5 @@
 /** SH-07: original Web sound design, NOT recovered MCD audio. */
-export type WebImpactCue = 'player-shot' | 'enemy-shot' | 'impact' | 'shatter'
+export type WebImpactCue = 'player-shot' | 'enemy-shot' | 'impact' | 'shatter' | 'player-hit'
   | 'katana' | 'step' | 'landing' | 'pickup' | 'throw';
 export interface WebImpactPoint {readonly x: number; readonly y: number; readonly z: number}
 export interface WebImpactRequest {readonly position?: WebImpactPoint; readonly intensity?: number}
@@ -92,17 +92,20 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     master.gain.setTargetAtTime(0.76 * level, at, 0.025);
   }
   const priorityByCue: Record<WebImpactCue, number> = {
-    // Creative Web mix priorities: melee/player fire survive overlapping steps.
+    // Creative Web mix priorities: damage feedback survives even shot bursts.
     'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
+    'player-hit': 6,
     katana: 5, step: 1, landing: 2, pickup: 2, throw: 3,
   };
 
   const attackByCue: Partial<Record<WebImpactCue, readonly [number, number, number]>> = {
+    // Player damage: dark body + short bright contact, Web-original synthesis.
     // Layered Web attack: a short high-band crack rides the existing noise source.
     // No additional voice, no original MCD clip or recovered Unity equalization.
     'player-shot': [3700, 0.45, 0.022],
     'enemy-shot': [3900, 0.32, 0.019],
     impact: [2800, 0.48, 0.014],
+    'player-hit': [2600, 0.34, 0.032],
     shatter: [4800, 0.31, 0.043],
     katana: [3200, 0.32, 0.065],
     landing: [1800, 0.21, 0.022],
@@ -153,6 +156,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       'player-shot': [0.14, 540, 150, 52, 0.62],
       'enemy-shot': [0.11, 1050, 240, 90, 0.42],
       impact: [0.15, 1800, 580, 145, 0.45],
+      'player-hit': [0.22, -680, 142, 44, 0.52],
       shatter: [0.27, 2200, 1250, 220, 0.48],
       katana: [0.20, 1180, 1480, 325, 0.43],
       step: [0.075, -360, 108, 58, 0.22],
@@ -208,9 +212,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
         distanceFilter.connect(panner);
       }
       out.connect(distanceFilter ?? panner);
-      panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
+      panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' ? impacts : weapons);
     } else {
-      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
+      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' ? impacts : weapons);
     }
     const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: 2, priority};
     voices.add(voice);
