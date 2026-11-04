@@ -1215,3 +1215,59 @@ test('J3 Web moving cover: a legal pre-step shot is vetoed if a strafe moves its
   },()=>0);
   assert.equal(attack.shot,false,'no projectile is requested through cover after the move');
 });
+
+test('J3 Web fireteams: solid cover separates nearby squads without silencing either gunner',()=>{
+  // Entirely synthetic geometry. Two gunners are close in world distance,
+  // with a real wall between their eyes but a clear diagonal to the player.
+  // Web-authored tactical coordination must not extend through solid rooms.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const target={playerFeet:p(9,0,4),playerPosition:p(9,1.6,4)};
+  const simulate=blocked=>{
+    const runtime=setup(data,blocked ? [box(2,1,4,1.6,2,.35)] : []);
+    const a=firstSpawn(runtime,target);
+    a.clock=0;
+    a.muzzlePosition=p(2,1.4,2);
+    a.muzzleForward=p(1,0,0);
+    const b={
+      ...a,id:'web-divider-wing',z:6,clock:0,
+      reaction:{...a.reaction},runtime:{...a.runtime},
+      encounter:{...a.encounter,route:null,target:null},
+      muzzlePosition:p(2,1.4,6),muzzleForward:p(1,0,0),
+    };
+    for(const actor of [a,b]) {
+      actor.runtime.pendingShot=null;
+      actor.runtime.targetNeedsReroll=false;
+      actor.runtime.attackDelayRemaining=-1;
+      actor.runtime.alertness=2;
+    }
+    const aEye=p(a.x,1.6,a.z),bEye=p(b.x,1.6,b.z);
+    assert.equal(nativeSegmentHit(runtime.sightCollision,aEye,bEye)!==null,blocked,
+      'only the divider determines whether these close gunners can communicate');
+    assert.ok(Math.hypot(a.x-b.x,a.z-b.z)<runtime.body.radius*18,
+      'the two enemies are within the original spatial squad radius');
+
+    runtime.webVolleyClock=0;
+    advanceNativeEncounter(runtime,input([b,a],{...target,scaledDeltaTime:.1}));
+    const settings={...runtime.enemySettings,family:'Pistol'};
+    const fired=[];
+    for(const actor of [a,b]) {
+      assert.equal(actor.encounter.visible,true,'each gunner independently sees the player');
+      assert.equal(actor.encounter.canAttack,true,'both true muzzle-to-player lines are clear');
+      advanceNativeEnemyWeapon(actor.runtime,settings,.1);
+      const result=runNativeEnemyGunAttack(actor.runtime,settings,{
+        scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+        sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+        aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+        allowAttacking:true,canShot:true,active:true,
+        animationTarget:target.playerPosition,
+      },()=>0);
+      if(result.shot)fired.push(actor.id);
+    }
+    return fired.length;
+  };
+  assert.equal(simulate(false),1,
+    'one open-room fireteam continues alternating rather than double-firing');
+  assert.equal(simulate(true),2,
+    'two wall-separated fireteams independently shoot in the same window');
+});
