@@ -4,6 +4,11 @@ const axes = ['x', 'y', 'z'];
 // Original Web frame budget: source fixed steps on normal frames, at most four
 // swept steps after a hitch. This is NOT an extracted Unity/PhysX policy.
 export const WEB_FRAGMENT_MAX_SUBSTEPS = 4;
+// Web-only sleep: grounded, nearly stationary shards stop wasting CCD sweeps
+// while their authored HDR fade and absolute-time visual spin still advance.
+// No PhysX sleep thresholds are inferred from these deliberately small values.
+const WEB_SHARD_REST_SECONDS = 0.2;
+const WEB_SHARD_REST_SPEED = 0.06;
 const dot = (a, b) => a.x*b.x + a.y*b.y + a.z*b.z;
 const sub = (a,b) => ({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
 const along = (a,b,t) => ({x:a.x+b.x*t,y:a.y+b.y*t,z:a.z+b.z*t});
@@ -136,6 +141,23 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
       typeof limitWebFrameWork !== 'boolean')
     throw new TypeError('Nonnegative delta, source gravity, drag and positive fixedDelta required');
   const contacts = [];
+  // The scene is static within a round, but its source colliders may be
+  // disabled (doors). Never sleep on air, on a removed support, or after
+  // an external re-impulse / position edit. Legacy unbudgeted calls remain live.
+  if (limitWebFrameWork && body.webShardResting) {
+    const p = body.webShardRestPosition;
+    if (p && axes.every(axis => body.position[axis] === p[axis] &&
+        Math.abs(body.velocity[axis]) < WEB_SHARD_REST_SPEED) &&
+        collisionScene.boxes.some(box => box.enabled && box.collider === body.webShardSupport))
+      return contacts;
+    body.webShardResting = false;
+    body.webShardRestSeconds = 0;
+    body.webShardSupport = null;
+  } else if (!limitWebFrameWork && body.webShardResting) {
+    body.webShardResting = false;
+    body.webShardRestSeconds = 0;
+    body.webShardSupport = null;
+  }
   let remaining = scaledDelta;
   // At 60fps, keep source-sized substeps. A slow Web frame would otherwise
   // multiply 150Hz fragment sweeps across every active shattered object.
@@ -164,8 +186,28 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
       contact.webImpactTimeInFrame = stepStart + dt * Math.max(0, Math.min(1, contact.t));
     }
     contacts.push(...stepContacts);
+    if (limitWebFrameWork) {
+      // Only an upward CONTACT against a real authored collider counts.
+      // A 300ms hitch cannot put an airborne shard to sleep from a single
+      // final contact: count supported SUBSTEPS, not the whole frame.
+      const floor = stepContacts.find(contact => contact.collider && contact.normal?.y > 0.55);
+      const speed = Math.hypot(body.velocity.x, body.velocity.y, body.velocity.z);
+      if (floor && speed < WEB_SHARD_REST_SPEED) {
+        body.webShardRestSeconds = body.webShardSupport === floor.collider
+          ? (body.webShardRestSeconds ?? 0) + dt : dt;
+        body.webShardSupport = floor.collider;
+      } else {
+        body.webShardRestSeconds = 0;
+        body.webShardSupport = null;
+      }
+    }
     remaining -= dt;
     steps++;
+  }
+  if (limitWebFrameWork && body.webShardRestSeconds >= WEB_SHARD_REST_SECONDS) {
+    body.webShardResting = true;
+    body.webShardRestPosition = { ...body.position };
+    for (const axis of axes) body.velocity[axis] = 0;
   }
   return contacts;
 }
