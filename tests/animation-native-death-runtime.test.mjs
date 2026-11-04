@@ -372,3 +372,42 @@ test('mid-frame floor glancing contact preserves surviving corpse slide, frictio
     'the second sweep must still stop at the next authored wall');
   assert.ok(corner.bodies[0].position.y>=0.1-1e-5);
 });
+
+
+test('grounded t=0 impact spends horizontal displacement according to contact friction',()=>{
+  // The body begins exactly touching an authored Dojo floor. It has enough
+  // downward and lateral velocity to hit at t=0 rather than halfway through.
+  // The collision adapter already applies source material friction to velocity;
+  // the remaining same-frame motion must respect that reduced velocity too.
+  const make=(friction)=>{
+    const def=definition();
+    def.bodies=[def.bodies[0]];def.joints=[];
+    def.fixedDelta=0.1;def.solverIterations=1;
+    def.gravity={x:0,y:0,z:0};
+    def.material={bounciness:0,dynamicFriction:friction,staticFriction:friction,bounceThreshold:2};
+    return createNativeDeathRuntime({
+      definition:def,collisionScene:floor(),
+      boneModelMatrices:new Float32Array([
+        ...matrix(0,0,0),...matrix(0,0.1,0),
+        ...matrix(0,1.1,0),...matrix(0.2,1.1,0),
+      ]),
+      modelMatrix:matrix(0,0,0),
+      initialVelocity:{x:3,y:-1,z:0},
+    });
+  };
+  const slick=make(0),grippy=make(3);
+  const slickFrame=advanceNativeDeathRuntime(slick,0.1);
+  const gripFrame=advanceNativeDeathRuntime(grippy,0.1);
+  for(const frame of [slickFrame,gripFrame])
+    assert.ok(frame.contacts.some(c=>c.collider?.id==='floor' && c.t<=1e-7),
+      'friction comparison must use an actual t=0 source collider contact');
+  assert.ok(slick.bodies[0].position.x>0.25,
+    'a frictionless floor must preserve the sideways impulse in this frame');
+  assert.ok(grippy.bodies[0].position.x<0.05,
+    'high floor friction must stop the same-frame post-impact skid');
+  for(const runtime of [slick,grippy]) {
+    assert.ok(runtime.bodies[0].position.y>=0.1-1e-6,
+      'the existing floor collision guard must remain active');
+    assert.ok(Array.from(runtime.boneModelMatrices).every(Number.isFinite));
+  }
+});
