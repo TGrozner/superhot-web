@@ -108,7 +108,8 @@ test('Dojo win streak survives reload, upgrades legacy personal bests and resets
 });
 
 test('replay target uses the previous same-quota PB and offers a shot-free challenge', () => {
-  const previous = result(6, {score:900, elapsedSeconds:22}).best;
+  // Simulate an older record with no active assigned challenge: PB coaching is still offered.
+  const previous = {...result(6, {score:900, elapsedSeconds:22}).best, pendingChallenge:null};
   const chaseScore = result(6, {best:previous, score:850, elapsedSeconds:30});
   assert.equal(chaseScore.replayTarget, '+51 PTS POUR UN NOUVEAU RECORD');
   assert.match(chaseScore.text, /DÉFI : \+51 PTS/);
