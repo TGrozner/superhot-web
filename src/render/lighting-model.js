@@ -391,6 +391,9 @@ export function prepareDojoDoorWarningLighting(sceneSource, livePackets, {
     nativeLightingParity: false,
     spotlights: Object.freeze(spotlights),
     falseLights: Object.freeze(falseLights),
+    // Web-only short-range illumination can be culled per mesh without
+    // rewriting the source false-light slots or their owner-qualified data.
+    webFalseLights: falseLights,
     omissions: Object.freeze(omissions),
     unresolved: Object.freeze([
       'native cookie projection and orientation',
@@ -694,7 +697,8 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
   // Keep layer-wide validated uniforms, then cull only the spotlight entries
   // outside each *static* authored mesh. False-light data stays untouched.
   const forInstance = (instanceId, instance, layerResult) => {
-    if (layerResult.spotlights.length === 0) return layerResult;
+    if (layerResult.spotlights.length === 0 && layerResult.webFalseLights.length === 0)
+      return layerResult;
     const cached = instanceLightCache.get(instanceId);
     if (cached?.layerResult === layerResult) return cached.packet;
     if (!instanceBoundCache.has(instanceId))
@@ -702,11 +706,21 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
     const sphere = instanceBoundCache.get(instanceId);
     const lights = sphere ? layerResult.spotlights.filter(spot =>
       dojoSpotCouldReachSphere(spot, sphere)) : layerResult.spotlights;
+    // Unlike source spotlight layers, the false-light's native GPU mask is
+    // unknown. This cull applies ONLY to the explicitly Web-authored 4 m wash.
+    const fills = sphere ? layerResult.webFalseLights.filter(fill => {
+      const distance = Math.hypot(...fill.position.map((value, i) => value - sphere.center[i]));
+      const slack = 1e-4 * Math.max(1, distance, sphere.radius);
+      return distance <= 4 + sphere.radius + slack;
+    }) : layerResult.webFalseLights;
     const skipped = layerResult.spotlights.length - lights.length;
-    const packet = skipped === 0 ? layerResult : Object.freeze({
+    const skippedFills = layerResult.webFalseLights.length - fills.length;
+    const packet = skipped === 0 && skippedFills === 0 ? layerResult : Object.freeze({
       ...layerResult,
       spotlights: Object.freeze(lights),
+      webFalseLights: Object.freeze(fills),
       webBoundsCulledSpotlights: skipped,
+      webBoundsCulledFalseLights: skippedFills,
     });
     instanceLightCache.set(instanceId, { layerResult, packet });
     return packet;
