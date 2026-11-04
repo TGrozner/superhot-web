@@ -183,9 +183,9 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // Use real AudioContext time for successive confirmed death cues.
         // Creative Web feedback, not a recovered MCD combo rule or timer.
         if (cue === 'shatter') {
-          const gap = at - lastShatterAt;
-          shatterChain = gap >= 0 && gap <= 1.5 ? Math.min(3, shatterChain + 1) : 0;
-          lastShatterAt = at;
+            const gap = at - lastShatterAt;
+            shatterChain = gap >= 0 && gap <= 1.5 ? Math.min(3, shatterChain + 1) : 0;
+            lastShatterAt = at;
         }
         // Each successful cue uses a fresh noise region and a subtle tonal detune.
         // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
