@@ -1084,3 +1084,85 @@ test('Web J4 slow-motion locomotion banks on world time, not unrelated crystal s
     'the slow-motion fix adds no extra indexed GPU draws');
   pass.dispose();
 });
+
+
+test('Web head gaze turns the sampled Head subtree without turning the real weapon socket or frozen poses', () => {
+  // Fully authored four-bone humanoid branch and two independent children:
+  // no Unity mesh, animation clip, controller or proprietary byte is copied.
+  const moved = (x, y, z) => {
+    const matrix = identity();
+    matrix[12] = x; matrix[13] = y; matrix[14] = z;
+    return matrix;
+  };
+  const idleFrame = {
+    positions: [0,0,0, 0,1,0, 0,.4,0, 1,0,0],
+    rotations: Array.from({length: 4}, () => [0,0,0,1]).flat(),
+    scales: Array.from({length: 4}, () => [1,1,1]).flat(),
+  };
+  const base = sourcePackage();
+  const pkg = sourcePackage({
+    bones: [
+      {name:'root', parent:-1, position:[0,0,0], rotation:[0,0,0,1], scale:[1,1,1]},
+      {name:'neck', parent:0, position:[0,1,0], rotation:[0,0,0,1], scale:[1,1,1]},
+      {name:'Head', parent:1, position:[0,.4,0], rotation:[0,0,0,1], scale:[1,1,1]},
+      {name:'hand', parent:0, position:[1,0,0], rotation:[0,0,0,1], scale:[1,1,1]},
+    ],
+    mesh: {
+      ...base.mesh,
+      positions: [0,1.4,0, .4,1.4,0, 0,2,0],
+      jointIndices: Array.from({length:3}, () => [2,0,0,0]).flat(),
+      inverseBindMatrices: [
+        ...identity(), ...moved(0,-1,0), ...moved(0,-1.4,0), ...moved(-1,0,0),
+      ],
+    },
+    clips: {idle: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]}},
+    states: {idle: {clip:'idle', playback:'loop', speed:1}},
+    weaponAttachment: {
+      bone:'hand', localMatrix:identity(),
+      source:'authored head-gaze fixture', coordinates:'authored test basis',
+    },
+  });
+  const {gl, calls} = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  assert.equal(pass.webHeadTrackingAvailable, true);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (time, x, z, extra = {}) => actors.drawActor({
+    actorId: 'watchman', pose: {state:'idle', time, ...extra},
+    modelMatrix: identity(), viewProjection: identity(),
+    cameraPosition: {x, y:1.5, z}, shaderTime: time * 10,
+    color: [.8,.1,.2,1],
+  });
+  const first = draw(0, 5, 5);
+  const firstSocket = Array.from(first.weaponAttachmentMatrix);
+  assert.equal(first.actorWebHeadLook, null, 'first pose does not invent a snap');
+  const lookingRight = draw(.1, 5, 5);
+  assert.equal(lookingRight.webHeadLookApplied, true);
+  assert.ok(lookingRight.actorWebHeadLook.yaw > .1);
+  assert.ok(lookingRight.boneModelMatrices[2*16 + 8] > .1,
+    'the real head bone rotates toward the right');
+  near(Array.from(lookingRight.boneModelMatrices.slice(0, 16)),
+    Array.from(first.boneModelMatrices.slice(0,16)));
+  near(Array.from(lookingRight.boneModelMatrices.slice(3*16,4*16)),
+    Array.from(first.boneModelMatrices.slice(3*16,4*16)));
+  near(Array.from(lookingRight.weaponAttachmentMatrix), firstSocket);
+  const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
+  assert.ok(palette[8] > .1, 'GPU palette receives the same head turn');
+
+  const paused = draw(.1, -5, 5);
+  assert.equal(paused.actorWebHeadLook.yaw, lookingRight.actorWebHeadLook.yaw,
+    'shader-only/camera changes never animate a frozen world frame');
+  near(Array.from(paused.boneModelMatrices), Array.from(lookingRight.boneModelMatrices));
+  const lookingLeft = draw(.21, -5, 5);
+  assert.ok(lookingLeft.actorWebHeadLook.yaw < 0, 'head glances to the opposite side');
+  near(Array.from(lookingLeft.weaponAttachmentMatrix), firstSocket);
+
+  const dead = draw(.25, 5, 5, {solvedPose:{
+    rig:pass.rig, provenance:'authored solved pose',
+    boneModelMatrices:new Float32Array([
+      ...identity(), ...moved(0,1,0), ...moved(0,1.4,0), ...moved(1,0,0),
+    ]),
+  }});
+  assert.equal(dead.webHeadLookApplied, false, 'externally solved death remains authoritative');
+  assert.equal(dead.actorWebHeadLook, null);
+  pass.dispose();
+});
