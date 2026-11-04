@@ -97,7 +97,7 @@ test('provisional cookie projector produces a visibly nonzero Web preview only i
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [9, 2, 4], 1).rgb, [0, 0, 0]);
   assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, [1, 2, 2], 1).rgb, [0, 0, 0]);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /texture\(sourceCookie, cookieUv\)\.a/);
-  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /radius > sourceRange/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /distanceSquared > sourceRange \* sourceRange/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /dojoWebWarningCompression/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /dojoWebWarningContrast/);
 });
@@ -307,6 +307,12 @@ test('J4 authored moving false-light becomes a bounded Web red floor wash, not a
   assert.ok(crystal.rgb[1] > atLamp.rgb[1] && crystal.rgb[2] > atLamp.rgb[2],
     'Web-authored Red Crystal glint shares the existing material grade');
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /vec3 dojoDoorFalseLightWashWeb\(/);
+  // GPU J4 hot path: reject distant wall pixels before expensive square roots.
+  // This is a static shader contract, not a measured GPU frame-time claim.
+  assert.equal((DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.match(
+    /distanceSquared > sourceRange \* sourceRange/g) ?? []).length, 2);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+    /distanceSquared >= 16\.0[\s\S]*?sqrt\(distanceSquared\)/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade/);
   assert.throws(() => sampleDojoDoorFalseLightWebWash(
     { ...fill, shaderParity: 'native-verified' }, [2, 3, 4]),
