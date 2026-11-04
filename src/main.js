@@ -31,6 +31,7 @@ import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
 import { createDojoDoorWarningBridge } from './scenes/dojo-door-warning-bridge.js';
 import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
 import { createDojoReplayRecap, readDojoReplayBest } from './flow/dojo-replay-recap.js';
+import { readDojoGlobalStreak, advanceDojoGlobalStreak } from './flow/dojo-global-streak.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -698,6 +699,19 @@ function finish(win) {
         catch { /* A blocked write must never interrupt REJOUER. */ }
       }
     } catch { /* Preserve the previously validated win/death screen. */ }
+    // Chronological Web-only streak spanning BOTH Dojo quotas. Per-format
+    // records do not contain enough history to reconstruct previous rounds.
+    try {
+      const globalKey = 'framebreak-dojo-global-streak-v1';
+      let raw = null;
+      try { raw = window.localStorage.getItem(globalKey); }
+      catch { /* Private storage: this round starts a volatile record. */ }
+      const {record, announcement} = advanceDojoGlobalStreak(
+        readDojoGlobalStreak(raw), {quota, victory: win});
+      if (announcement) stats += ` · ${announcement}`;
+      try { window.localStorage.setItem(globalKey, JSON.stringify(record)); }
+      catch { /* A blocked write never interrupts victory or REJOUER. */ }
+    } catch { /* Optional Web stat must never prevent terminal screen. */ }
   }
   $(win ? 'win-stats' : 'death-stats').textContent = stats;
   setScreen(win ? 'win' : 'dead');
@@ -1523,10 +1537,14 @@ function update(dt, activeRealDt) {
         });
       }
       else if (impact.type==='player') damagePlayer();
-      else if (impact.type==='wall' && bullet.friendly)
+      else if (impact.type==='wall' && bullet.friendly) {
         recordWebImpact(webImpactFeedback,{
           kind:'wall',point:contactPoint,direction:bullet.direction,
         });
+        // Only a resolved normal player bullet hitting a world collider:
+        // no speculative near-miss, thrown item or duplicate impact cue.
+        if (bullet.type==='normal') audio.wallImpact({position:contactPoint});
+      }
       if (bullet.type==='throw' && impact.type==='wall' && !native) {
         const p=add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
         state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0,ammo:bullet.ammo,
