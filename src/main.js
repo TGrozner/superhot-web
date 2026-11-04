@@ -9,7 +9,7 @@ import { parseObjGroupsIntoIndexedMesh } from './render/mesh-format.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { prepareNativeScene } from './scenes/native-scene-local.js';
-import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove } from './time.js';
+import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove, sampleActiveFrameDeltas } from './time.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativeGroundAt, nativeSegmentHit, nativeSphereHit } from './scenes/native-collision.js';
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
@@ -46,6 +46,8 @@ const shootFlash = $('shoot-flash');
 const audio = createAudio();
 // WEB game feel: unarmed punches recharge on real time, unlike source gun clocks.
 let unarmedFireDelayRealtime = false;
+// Active browser time, independent of capped physics dt; re-anchor START/RESUME/REJOUER.
+let activeSinceTimestampMs = performance.now();
 let webPointerPath = 0;
 const nativeHud = createNativeHud(hud, crosshair, $('health'), id => assetUrl(id));
 let renderer;
@@ -640,6 +642,7 @@ function resetGame() {
   state.kills = 0; state.runClock = 0; state.worldClock = 0;
   loadLevel(0);
   setScreen('playing');
+  activeSinceTimestampMs = performance.now();
 }
 function requestMouse() {
   canvas.focus({ preventScroll: true });
@@ -651,7 +654,7 @@ function requestMouse() {
   }
 }
 function start() { if (!nativeGameplay()) { dojoUnavailable('Le Dojo original doit être entièrement chargé avant de jouer.'); return; } initializeAudio(); resetGame(); requestMouse(); }
-function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen('playing'); requestMouse(); }
+function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen('playing'); activeSinceTimestampMs = performance.now(); requestMouse(); }
 function pause() { if (state.screen === 'playing') setScreen('paused'); }
 function finish(win) {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -1141,8 +1144,10 @@ function walkThroughScene(position, feet) {
   const obstacles = containersPreviewEnabled ? containersWalkSolids(state.solids, feet + 1.6) : state.solids;
   return resolveWalk(position,.34,obstacles);
 }
-function update(dt) {
-  state.runClock += dt;
+function update(dt, activeRealDt) {
+  // Web game-clock and 360ms unarmed recovery must count only actual PLAYING time.
+  // Physics/animation/world clock keep the existing capped simulation dt.
+  state.runClock += activeRealDt;
   state.waveClock += dt;
   state.stageBanner = Math.max(0, state.stageBanner - dt);
   state.lookActivity = Math.max(0, state.lookActivity - dt * 2.1);
@@ -1175,7 +1180,7 @@ function update(dt) {
     worldDt = tick.worldDelta;
     // Slow-motion must not stretch the 360 ms unarmed punch recovery to 60s.
     state.fireDelay = Math.max(0, state.fireDelay -
-      (unarmedFireDelayRealtime ? dt : worldDt));
+      (unarmedFireDelayRealtime ? activeRealDt : worldDt));
     if (state.fireDelay === 0) unarmedFireDelayRealtime = false;
     audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
     audio.advanceWorldTime(worldDt);
@@ -1995,12 +2000,14 @@ setScreen('playing');
 let last=performance.now();
 function frame(now) {
   const frameMs = Math.max(0, now - last);
-  const dt=Math.min(.05,frameMs/1000);last=now;
+  const {simulationDt:dt,activeRealDt,nextTimestampMs} =
+    sampleActiveFrameDeltas(last,now,activeSinceTimestampMs);
+  last=nextTimestampMs;
   if (visualPreviewEnabled && frameMs > 0) {
     measuredFrameMs.push(frameMs);
     if (measuredFrameMs.length > 240) measuredFrameMs.shift();
   }
-  if(state.screen==='playing') update(dt);
+  if(state.screen==='playing') update(dt,activeRealDt);
   render();
   if(state.screen==='playing') flushDojoEnemyLateShots();
   if (visualPreviewEnabled && now >= metricsNextAt && measuredFrameMs.length) {
