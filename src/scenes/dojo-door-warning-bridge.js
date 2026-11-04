@@ -174,6 +174,9 @@ function createWebWarningSweep(catalog, controller) {
     if (falseLightPosition) packet.falseLight.position = [...falseLightPosition];
     bases.set(packet.id, {
       packet, direction, right, up, falseLightPosition, spawnTarget: null,
+      // An accepted spawn's delay runs in REAL seconds, unlike the source
+      // light curve. Null means the event supplied no qualified delay.
+      arrivalRemaining: null,
       urgency: 0, focusGain: 1,
       // Web-only damped reactive steering; normal lighthouse sweep stays exact.
       reactiveYaw: 0, reactivePitch: 0,
@@ -186,6 +189,7 @@ function createWebWarningSweep(catalog, controller) {
   function restoreOne(base) {
     if (!base) return;
     base.spawnTarget = null; // No previous encounter target can survive REJOUER.
+    base.arrivalRemaining = null;
     base.focusGain = 1;
     base.reactiveYaw = base.reactivePitch = 0;
     const spotlight = base.packet.spotlight;
@@ -214,7 +218,7 @@ function createWebWarningSweep(catalog, controller) {
     for (const base of bases.values()) restoreOne(base);
   }
 
-  function setSpawnTarget(id, position) {
+  function setSpawnTarget(id, position, delaySeconds) {
     const base = bases.get(id);
     if (!base) return;
     // A source-qualified SpawnerPoint identity alone is not enough to aim:
@@ -223,9 +227,11 @@ function createWebWarningSweep(catalog, controller) {
       Number.isFinite(position.x) && Number.isFinite(position.y) &&
       Number.isFinite(position.z)
       ? [position.x, position.y, position.z] : null;
+    base.arrivalRemaining = Number.isFinite(delaySeconds) && delaySeconds > 0
+      ? delaySeconds : null;
   }
 
-  function advance(playerWorldPosition, worldDeltaSeconds) {
+  function advance(playerWorldPosition, worldDeltaSeconds, unscaledDeltaSeconds) {
     // J4 Web readability: when several real entrances warn simultaneously,
     // guide attention toward the threat closest to arrival. Preserve each
     // source clock, the three existing GPU light slots and the original
@@ -234,13 +240,24 @@ function createWebWarningSweep(catalog, controller) {
     for (const base of bases.values()) {
       if (!base.packet.active) continue;
       const phase = Math.max(0, Math.min(1, base.packet.elapsed / base.duration));
-      // A just-triggered doorway must remain visible, not disappear under
-      // another alarm. Fourth power separates nearly simultaneous arrivals.
-      base.urgency = 0.05 + phase ** 4;
+      // Do NOT rank spawn arrivals by the source warning's world-time phase:
+      // native-spawner decrements pending arrivals with unscaledDeltaTime.
+      // A fast imminent spawn must beat a slow one even while time crawls.
+      // If the integrator has not passed real delta yet, preserve the
+      // previous visual-only phase ranking rather than guess a time scale.
+      if (unscaledDeltaSeconds != null && base.arrivalRemaining != null) {
+        base.arrivalRemaining = Math.max(0, base.arrivalRemaining - unscaledDeltaSeconds);
+        base.urgency = base.arrivalRemaining > 0
+          ? 0.05 + 1 / (0.25 + base.arrivalRemaining) ** 2 : 0.05;
+      } else {
+        base.urgency = 0.05 + phase ** 4;
+      }
       totalUrgency += base.urgency;
       activeCount++;
     }
-    const focusEase = 1 - Math.exp(-7 * worldDeltaSeconds);
+    // Priority fades in REAL time when an enemy arrives during slow motion;
+    // the light sweep itself still obeys the world-time animation clock.
+    const focusEase = 1 - Math.exp(-7 * (unscaledDeltaSeconds ?? worldDeltaSeconds));
     const playerKnown = playerWorldPosition != null &&
       Number.isFinite(playerWorldPosition.x) &&
       Number.isFinite(playerWorldPosition.y) &&
@@ -462,7 +479,7 @@ export function createDojoDoorWarningBridge(scene) {
     }
     if (!controller.trigger(doorKey)) return outcome('source-controller-rejected', { spawnPathId, doorKey });
     webSweep?.restore(doorKey); // Re-trigger starts centered, without stale sweep.
-    webSweep?.setSpawnTarget(doorKey, event.point?.position);
+    webSweep?.setSpawnTarget(doorKey, event.point?.position, event.delay);
     return outcome('triggered', { spawnPathId, doorKey });
   }
 
@@ -471,17 +488,24 @@ export function createDojoDoorWarningBridge(scene) {
    * @param {{x: number, y: number, z: number} | null} [playerWorldPosition]
    *   Optional live camera/eye position in browser world coordinates. SH-05
    *   owns passing it from main; omission preserves the current visual.
+   * @param {number | null} [unscaledDeltaSeconds]
+   *   Same real-time dt used by advanceNativeEncounter's unscaledDeltaTime;
+   *   omitted for backwards-compatible visual-only threat ranking.
    * @returns {ReturnType<ReturnType<typeof createMcdDoorWarnings>['packets']>}
    */
-  function advance(worldDeltaSeconds, playerWorldPosition = null) {
+  function advance(worldDeltaSeconds, playerWorldPosition = null, unscaledDeltaSeconds = null) {
     // Preserve SH-07 world-clock semantics: DO NOT use the spawner's
     // unscaledDeltaTime for the light's animation curve.
     if (!Number.isFinite(worldDeltaSeconds) || worldDeltaSeconds < 0) {
       throw new RangeError('worldDeltaSeconds must be finite and nonnegative');
     }
+    if (unscaledDeltaSeconds != null &&
+        (!Number.isFinite(unscaledDeltaSeconds) || unscaledDeltaSeconds < 0)) {
+      throw new RangeError('unscaledDeltaSeconds must be finite and nonnegative');
+    }
     if (!controller) return [];
     const packets = controller.advance(worldDeltaSeconds);
-    webSweep.advance(playerWorldPosition, worldDeltaSeconds);
+    webSweep.advance(playerWorldPosition, worldDeltaSeconds, unscaledDeltaSeconds);
     return packets;
   }
 
