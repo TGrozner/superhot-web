@@ -450,3 +450,31 @@ test('active enemy shots carry a spatial Web-only muzzle pressure layer without 
   assert.equal(mix.emit('step').status, 'blocked'); // Existing combat-priority cap.
   mix.dispose();
 });
+
+test('each Web combat cue releases all its transient processing nodes on source completion', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  // AudioNodes must not accumulate between battles even when the voices finish.
+  // This verifies a WebAudio lifecycle invariant, not audible native behavior.
+  for (const cue of ['player-shot', 'enemy-shot', 'impact', 'shatter', 'player-hit',
+    'katana', 'katana-swing', 'punch-swing', 'punch-contact', 'step', 'landing',
+    'pickup', 'throw']) {
+    const beforeSources = nodes.length;
+    const beforeGains = gains.length;
+    const beforeFilters = filters.length;
+    assert.equal(mix.emit(cue).status, 'started');
+    const eventSources = nodes.slice(beforeSources);
+    const eventGains = gains.slice(beforeGains);
+    const eventFilters = filters.slice(beforeFilters);
+    assert.ok(eventSources.length >= 2, cue);
+    assert.ok(eventGains.length >= 3, cue);
+    assert.ok(eventFilters.length >= 1, cue);
+    assert.equal(mix.getActiveVoices(), 1);
+    for (const node of eventSources) node.onended();
+    assert.equal(mix.getActiveVoices(), 0, cue);
+    assert.ok(eventSources.every(node => node.disconnected), cue);
+    assert.ok(eventGains.every(node => node.disconnected), cue);
+    assert.ok(eventFilters.every(node => node.disconnected), cue);
+  }
+  mix.dispose();
+});
