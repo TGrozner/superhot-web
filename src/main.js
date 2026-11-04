@@ -648,11 +648,18 @@ function resetGame() {
 }
 function requestMouse() {
   canvas.focus({ preventScroll: true });
-  if (document.pointerLockElement !== canvas) {
+  if (document.pointerLockElement === canvas) return;
+  // A denied lock leaves the mouse unable to aim or shoot; running the enemy
+  // clock anyway makes the round unwinnable. Pause and allow a deliberate retry.
+  // Modern browsers reject a Promise; older implementations can throw or emit
+  // pointerlockerror. Never claim a non-lock fallback that does not exist.
+  try {
     const maybe = canvas.requestPointerLock();
     if (maybe && typeof maybe.catch === 'function') maybe.catch(() => {
-      // The game remains usable with keyboard if the browser declines pointer lock.
+      if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
     });
+  } catch {
+    if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
   }
 }
 function start() { if (!nativeGameplay()) { dojoUnavailable('Le Dojo original doit être entièrement chargé avant de jouer.'); return; } initializeAudio(); resetGame(); requestMouse(); }
@@ -708,6 +715,10 @@ $('again-button').addEventListener('click', start);
 $('restart-from-pause').addEventListener('click', start);
 canvas.addEventListener('click', () => { if (state.screen === 'paused') resume(); });
 document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
+});
+document.addEventListener('pointerlockerror', () => {
+  // Legacy pointer-lock APIs may signal refusal only through this event.
   if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
 });
 document.addEventListener('visibilitychange', () => {
