@@ -127,8 +127,10 @@ test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotl
     const expected = expectedWorld[index];
     packet.spotlight.position.forEach((value, axis) =>
       assert.ok(Math.abs(value - expected.spot[axis]) < 0.00001));
-    packet.falseLight.position.forEach((value, axis) =>
-      assert.ok(Math.abs(value - expected.falseLight[axis]) < 0.00001));
+    const fillTravel = Math.hypot(...packet.falseLight.position.map(
+      (value, axis) => value - expected.falseLight[axis]));
+    assert.ok(fillTravel > 0.35 && fillTravel < 1.8,
+      'at source midpoint the Web red fill now travels within its bounded doorway path');
     // The 1-second pose is deliberately Web-animated: verify a valid
     // live 3D cookie basis, not a frozen source direction.
     const basis = [packet.spotlight.direction, packet.spotlight.right, packet.spotlight.up];
@@ -161,6 +163,9 @@ test('Dojo three parent=0 hierarchies yield source-qualified browser-world spotl
       assert.ok(Math.abs(value - expectedWorld[index].forward[axis]) < 0.0001));
     assert.deepEqual(packet.spotlight.up, [0, 1, 0]);
     assert.equal(packet.spotlight.spotAngle, 99);
+    packet.falseLight.position.forEach((value, axis) =>
+      assert.ok(Math.abs(value - expectedWorld[index].falseLight[axis]) < 0.00001,
+        'REJOUER restores the exact authored initial false-light pose'));
   });
 });
 
@@ -378,4 +383,52 @@ test('J4 Dojo arrival crescendo intensifies only existing door lights then fully
   bridge.reset();
   assert.equal(bridge.packets(), packets);
   assert.deepEqual(packets.map(packet => packet.active), [false, false, false]);
+});
+
+test('J4 door red wash travels through the active doorway and returns without new lights', () => {
+  const input = browserScene();
+  const bridge = createDojoDoorWarningBridge(input);
+  const packets = bridge.packets();
+  const active = packets[0];
+  const fillBuffer = active.falseLight.position;
+  const sourcePosition = [...fillBuffer];
+  const otherPositions = packets.slice(1).map(p => [...p.falseLight.position]);
+  assert.equal(input.gameplay.audio.doors['level10::7089'].falseLight.position, undefined,
+    'serialized light input is not mutated by the Web presentation');
+
+  assert.equal(bridge.accept(warning(103)).status, 'triggered');
+  bridge.advance(1.5); // 75%: the single Web-authored red wash is near its maximum.
+  assert.equal(bridge.packets(), packets);
+  assert.equal(active.falseLight.position, fillBuffer,
+    'the source false-light buffer is reused, never replaced per frame');
+  assert.ok(fillBuffer[0] < sourcePosition[0] - 0.8,
+    'the existing red fill travels forward through door 103');
+  assert.equal(fillBuffer[1], sourcePosition[1],
+    'the red wash stays at the authored lamp elevation');
+  assert.deepEqual(packets.slice(1).map(p => p.falseLight.position), otherPositions,
+    'inactive door fills are never animated or enabled');
+  assert.deepEqual(packets.slice(1).map(p => p.active), [false, false]);
+
+  bridge.advance(0.5);
+  assert.equal(active.active, false);
+  assert.equal(active.falseLight.intensity, 0);
+  assert.deepEqual(fillBuffer, sourcePosition, 'source expiration restores lamp pose');
+
+  bridge.accept(warning(103));
+  bridge.advance(1.5, { x: 9, y: 1.8, z: -15 });
+  assert.equal(active.falseLight.position, fillBuffer,
+    'player-reactive targeting moves the existing fill, not another light');
+  assert.ok(Math.hypot(...fillBuffer.map((v, axis) => v - sourcePosition[axis])) > 0.8);
+  bridge.reset();
+  assert.deepEqual(fillBuffer, sourcePosition, 'REJOUER restores fill with no ghost spill');
+  assert.equal(active.falseLight.slot, -1);
+  assert.equal(input.gameplay.audio.doors['level10::7089'].falseLight.position, undefined);
+
+  // A source package with unverified bases must not invent a moving red patch.
+  const unverified = createDojoDoorWarningBridge(browserScene({
+    coordinateSpace: { browserFromUnity: 'unverified' },
+  }));
+  unverified.accept(warning(103));
+  unverified.advance(1.5);
+  assert.equal(unverified.packets()[0].falseLight.position, undefined);
 });
