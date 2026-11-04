@@ -689,12 +689,13 @@ function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
  * Rotate only the head descendants in model space, never the hips, arms or
  * weapon socket. This is NOT an Animator/IK claim or an additional draw.
  */
-function applyWebHeadLook(loaded, scratch, head, affected, yaw, pitch = 0) {
+function applyWebHeadLook(loaded, scratch, head, affected, yaw, pitch = 0, roll = 0) {
   const globals = scratch.globals;
   const pivot = head * 16;
   const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
   for (const bone of affected) {
     const offset = bone * 16;
     for (let column = 0; column < 4; column++) {
@@ -706,8 +707,9 @@ function applyWebHeadLook(loaded, scratch, head, affected, yaw, pitch = 0) {
       // Positive pitch raises the forward axis; yaw preserves its old sign.
       const pitchedY = cp * y + sp * z;
       const pitchedZ = -sp * y + cp * z;
-      globals[entry] = cy * x + sy * pitchedZ + (translation ? px : 0);
-      globals[entry + 1] = pitchedY + (translation ? py : 0);
+      const yawedX = cy * x + sy * pitchedZ;
+      globals[entry] = cr * yawedX - sr * pitchedY + (translation ? px : 0);
+      globals[entry + 1] = sr * yawedX + cr * pitchedY + (translation ? py : 0);
       globals[entry + 2] = -sy * x + cy * pitchedZ + (translation ? pz : 0);
     }
   }
@@ -1412,8 +1414,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
       if (!webHeadTrackingAvailable || !webHeadLook || typeof webHeadLook !== 'object' ||
           !Number.isFinite(webHeadLook.yaw) || Math.abs(webHeadLook.yaw) > .38 ||
           !Number.isFinite(webHeadLook.pitch ?? 0) || Math.abs(webHeadLook.pitch ?? 0) > .38 ||
+          !Number.isFinite(webHeadLook.roll ?? 0) || Math.abs(webHeadLook.roll ?? 0) > .28 ||
           solvedPose !== null) {
-        throw new RangeError('Web head gaze requires a live, independent Head bone and bounded yaw/pitch');
+        throw new RangeError('Web head movement requires a live, independent Head bone and bounded yaw/pitch/roll');
       }
     }
     if (!Number.isFinite(webHitFlash) || webHitFlash < 0 || webHitFlash > 1) {
@@ -1490,9 +1493,11 @@ export function createNativeSkinPass(gl, sourcePackage, {
       applyWebPoseLean(loaded, scratch, webLeanPivot,
         webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0);
     }
-    if (webHeadLook !== null && (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0)) {
+    if (webHeadLook !== null &&
+        (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
+         (webHeadLook.roll ?? 0) !== 0)) {
       applyWebHeadLook(loaded, scratch, webHeadIndex, webHeadBones,
-        webHeadLook.yaw, webHeadLook.pitch ?? 0);
+        webHeadLook.yaw, webHeadLook.pitch ?? 0, webHeadLook.roll ?? 0);
     }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
@@ -1538,8 +1543,10 @@ export function createNativeSkinPass(gl, sourcePackage, {
       solvedPoseApplied: solvedPose !== null,
       solvedPoseProvenance: solvedPose?.provenance ?? null,
       webHeadLookApplied: webHeadLook !== null &&
-        (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0),
-      webHeadLookDesign: webHeadLook !== null ? 'Web-only independent head gaze' : null,
+        (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
+         (webHeadLook.roll ?? 0) !== 0),
+      webHeadLookDesign: webHeadLook === null ? null :
+        (webHeadLook.design ?? 'Web-only independent head gaze'),
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       webHitFlashIntensity: webHitFlash,

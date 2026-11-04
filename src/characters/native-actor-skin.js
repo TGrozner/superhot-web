@@ -147,6 +147,27 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSo
 }
 
 /**
+ * Web-only secondary head whiplash for an already accepted hit reaction.
+ * Oppose the torso's turn and shoulder lean, after source sampling, so the
+ * enemy's crystal head visibly lags the impact. Only rigs with a separate,
+ * source-defined Head subtree may receive this; weapons/arms stay on the
+ * authoritative source pose and primary hit lean.
+ *
+ * These values are Web tuning, NOT native animation data or contact physics.
+ */
+function webHitHeadWhiplash(reaction, available) {
+  if (!available || reaction?.kind !== 'hit') return null;
+  const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
+  const yaw = clamp(-reaction.yaw * 1.35 - reaction.roll * .32, .34);
+  const pitch = clamp(-reaction.pitch * .85, .25);
+  const roll = clamp(-reaction.roll * .52, .20);
+  if (Math.abs(yaw) + Math.abs(pitch) + Math.abs(roll) < .008) return null;
+  return Object.freeze({
+    yaw, pitch, roll, design: 'Web-only secondary hit head whiplash',
+  });
+}
+
+/**
  * WEB game-feel: bank toward observed travel AND observed heading changes,
  * then ease into and out of that bank using elapsed GAME-WORLD animation
  * seconds, even when slow motion advances the Red Crystal shader on a different
@@ -466,9 +487,11 @@ export function createNativeActorSkinRuntime(skinPass) {
     // Web game-feel: a hard impact reads instantly against the red crystalline
     // silhouette. This pulse follows the live, already accepted hit state;
     // it never fabricates a hit event, clip, or ragdoll motion.
-    const webHeadLook = webHeadTracking(movementFrames, actorId, selected.identity,
-      pose, modelMatrix, cameraPosition, action, transitionDescriptor, solvedPose,
-      skinPass.webHeadTrackingAvailable === true);
+    const webHeadLook = webHitHeadWhiplash(reaction,
+      skinPass.webHeadTrackingAvailable === true)
+      ?? webHeadTracking(movementFrames, actorId, selected.identity,
+        pose, modelMatrix, cameraPosition, action, transitionDescriptor, solvedPose,
+        skinPass.webHeadTrackingAvailable === true);
     const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
       ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
     // WEB-authored warm afterglow follows an actual accepted fire action.
