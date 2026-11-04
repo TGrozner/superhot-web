@@ -188,6 +188,16 @@ function displayTimeGoal(target: number): string {
   return Number.isInteger(target * 10) ? target.toFixed(1) : String(target);
 }
 
+// Show enough detail to distinguish the actual run time from the active
+// strict '<' chrono goal. No rounded 22.0 s for a successful 21.99 s run.
+function displayRunSeconds(seconds: number, goal: number): string {
+  for (let digits = 2; digits <= 6; digits++) {
+    const shown = seconds.toFixed(digits);
+    if ((Number(shown) < goal) === (seconds < goal)) return shown;
+  }
+  return String(seconds);
+}
+
 function existingChallengePrompt(challenge: Readonly<DojoReplayChallenge>): string {
   switch (challenge.kind) {
     case 'kills':
@@ -294,8 +304,11 @@ export function createDojoReplayRecap(snapshot: unknown,
     'speed-record': 'NOUVEAU RECORD DE TEMPS !',
     'clear': 'REJOUE POUR BATTRE TES RECORDS',
   };
+  const elapsedText = priorChallenge?.kind === 'time'
+    ? displayRunSeconds(run.elapsedSeconds, priorChallenge.target)
+    : run.elapsedSeconds.toFixed(1);
   const metrics = `${run.kills}/${run.quota} ennemis · ${run.shots} tirs · ` +
-    `${run.dodges} esquives · ${run.score} pts · ${run.elapsedSeconds.toFixed(1)} s`;
+    `${run.dodges} esquives · ${run.score} pts · ${elapsedText} s`;
   const recordText = !run.victory && nextBest !== null && nextBest.victories > 0
     ? ` · record : ${nextBest.bestScore} pts / ${nextBest.fastestSeconds.toFixed(1)} s`
     : '';
