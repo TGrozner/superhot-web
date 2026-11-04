@@ -917,3 +917,46 @@ test('J4 imminent visible spawn keeps door warning pointed at the enemy route, n
   assert.deepEqual(competing.packets()[0].spotlight.direction,
     [-0.99999999982, 0, 0.00001898408], 'REJOUER restores the original door direction');
 });
+
+test('J4 frozen-world arrival moves the existing red floor wash in real time', () => {
+  // Source warning time stays at zero while a *confirmed* encounter countdown
+  // advances. Previously the small red light came on but never moved through
+  // the doorway until the player moved again. No new geometry or GPU lights.
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const event = warning(103);
+  event.delay = 2;
+  event.point.position = { x: 10, y: 1.7, z: -14 };
+  const lights = bridge.packets();
+  const beam = lights[0], fill = beam.falseLight;
+  const buffer = fill.position, original = [...buffer];
+  assert.equal(bridge.accept(event).status, 'triggered');
+  bridge.advance(0, null, 0.49);
+  assert.equal(beam.elapsed, 0);
+  assert.deepEqual(buffer, original, 'no early real-time door wash before 1.5 seconds');
+  bridge.advance(0, null, 1.15); // 360 ms until enemy arrival.
+  assert.equal(beam.elapsed, 0, 'the native world-clock envelope is unchanged');
+  assert.ok(fill.intensity > 0.7, 'the existing red light provides the warning');
+  assert.ok(Math.hypot(...buffer.map((value, axis) => value - original[axis])) > 0.65,
+    'the red wash travels through the verified door while the game world is frozen');
+  assert.equal(fill.position, buffer, 'GPU-facing position buffer is reused');
+  assert.equal(bridge.packets(), lights, 'no new light or draw packet');
+  assert.deepEqual(lights.slice(1).map(p => p.active), [false, false]);
+  bridge.advance(0, null, 0.8); // 440 ms after arrival: no phantom red threat.
+  assert.ok(Math.hypot(...buffer.map((value, axis) => value - original[axis])) < 0.05,
+    'the extra real-time floor wash releases after the enemy appears');
+  bridge.reset();
+  assert.deepEqual(buffer, original, 'REJOUER restores the serialized fill position');
+
+  const noClock = createDojoDoorWarningBridge(browserScene());
+  noClock.accept(event);
+  noClock.advance(0);
+  assert.deepEqual(noClock.packets()[0].falseLight.position, original,
+    'legacy callers without a real clock do not invent movement');
+  const unverified = createDojoDoorWarningBridge(browserScene({
+    coordinateSpace: { browserFromUnity: 'unverified' },
+  }));
+  unverified.accept(event);
+  unverified.advance(0, null, 1.64);
+  assert.equal(unverified.packets()[0].falseLight.position, undefined,
+    'unverified world bases still cannot create a fabricated floor light');
+});
