@@ -411,6 +411,7 @@ test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warning
     sourceScene, new Map([[textureId, { width: 2, height: 2 }]]));
   const near = adapter.prepareForInstance('near', packets);
   assert.equal(near.spotlights.length, 1);
+  assert.equal(near.webFalseLights.length, 1, 'nearby doorway wash remains on the authored mesh');
   for (const id of ['far', 'behind', 'outside-cone']) {
     const packet = adapter.prepareForInstance(id, packets);
     assert.equal(packet.spotlights.length, 0, id);
@@ -418,9 +419,17 @@ test('J4 mesh-sphere cull skips only genuinely out-of-range/off-cone GPU warning
     assert.strictEqual(adapter.prepareForInstance(id, packets), packet,
       'reusing the same source tick also reuses per-instance GPU packet');
     assert.equal(packet.falseLights.length, 1,
-      'bounding cull affects only spotlight projection, not false-light data');
+      'source false-light slot/data is preserved even when its Web wash is culled');
+    if (id === 'far' || id === 'outside-cone') {
+      assert.equal(packet.webFalseLights.length, 0,
+        'out-of-range 4 m Web floor wash does no fragment work on distant meshes');
+      assert.equal(packet.webBoundsCulledFalseLights, 1);
+    }
   }
   assert.equal(adapter.prepareForInstance('scaled-edge', packets).spotlights.length, 1);
+  assert.equal(adapter.prepareForInstance('scaled-edge', packets).webFalseLights.length, 0);
+  assert.equal(adapter.prepareForInstance('large-cone-edge', packets).webFalseLights.length, 1,
+    'large scale must not cull a red wash that may reach its mesh sphere');
   assert.equal(adapter.prepareForInstance('large-cone-edge', packets).spotlights.length, 1);
   assert.strictEqual(adapter.prepareForInstance('no-geometry', packets), near,
     'unknown mesh geometry fails open to avoid losing visible illumination');
