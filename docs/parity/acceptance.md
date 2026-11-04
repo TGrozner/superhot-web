@@ -328,8 +328,9 @@ dojoRun.save('dojo-full-run.json');
 
 
 For a **second complete encounter**, save the first trace *after its REJOUER*
-reset, then stop that recorder and arm a fresh v2 capture in the second
-encounter's new pre-Start preview. Each v2 trace covers **one** victory plus
+reset, then stop that recorder and arm a fresh v2 capture **before the next
+kill**, while the restarted game is fresh (zero kills). Alternatively, reload
+the page and arm in preview before START. Each v2 trace covers **one** victory plus
 its restart (including unique route markers 1–6); concatenating two traces
 or reusing the first recorder's consumed markers does **not** constitute a
 valid second full-run receipt. Verify both JSON files locally and keep them
