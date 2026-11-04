@@ -52,3 +52,25 @@ test('Dojo look-time counts opposing mouse events inside one render frame', () =
     yaw: 0, pitch: 80 * Math.PI / 180,
   }), 0, 'a mouse movement rejected by the pitch clamp adds no fictitious pulse');
 });
+
+
+test('Dojo Web look-time retains an unwrapped full-turn pointer flick', () => {
+  // A single mousemove may carry more than one half-turn (pointer lock, high
+  // polling or event batching). The final camera orientation is unchanged,
+  // but the aim traveled and must still pulse the already-wired Web clock.
+  // This is a WEB comfort regression, not a native MCD angular rule.
+  const path = accumulateWebPointerLookPath(0, {
+    previousYaw: 0, previousPitch: 0, yaw: Math.PI * 2, pitch: 0,
+  });
+  assert.equal(path, WEB_LOOK_ANGLE_CAP,
+    'the existing cap bounds full revolutions without turning them into zero input');
+
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  const tick = stepMcdGameplayClock(clock, {
+    dt: 1 / 60, yaw: Math.PI * 2, pitch: 0, lookPathDegrees: path,
+  });
+  assert.equal(tick.appliedTimeScale, 1);
+  assert.equal(tick.timeScale, Math.fround(0.3),
+    'the next game tick must respond even if the camera completes one full revolution');
+});
