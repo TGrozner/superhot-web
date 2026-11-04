@@ -718,3 +718,45 @@ function unblockedAfterReset(eye) {
   bridge.advance(1, eye);
   return bridge.packets()[0].spotlight.direction[2];
 }
+
+test('J4 incoming spawn beacon does not telegraph a target hidden behind solid cover', () => {
+  // Web-authored visibility contract; all fixture collision geometry is synthetic.
+  // This is separate from the already-tested camera/player occlusion path.
+  const wall = {
+    id: 'test-spawn-cover', center: [0, 0, 0], size: [0.8, 3, 0.8],
+    worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 13, 1.7, -16, 1],
+    layer: { index: 0 }, isTrigger: false,
+    initial: { enabled: true, activeInHierarchy: true },
+  };
+  const event = warning(103);
+  event.delay = 2;
+  event.point.position = { x: 10, y: 1.7, z: -14 };
+  const visible = createDojoDoorWarningBridge(browserScene());
+  const occluded = createDojoDoorWarningBridge(browserScene({ colliders: [wall] }));
+  const packets = occluded.packets();
+  const direction = packets[0].spotlight.direction;
+  assert.equal(visible.accept(event).status, 'triggered');
+  assert.equal(occluded.accept(event).status, 'triggered');
+  visible.advance(1, null, 0.1);
+  occluded.advance(1, null, 0.1);
+  assert.ok(visible.packets()[0].spotlight.direction[2] -
+    occluded.packets()[0].spotlight.direction[2] > 0.10,
+  'only visible accepted spawn locations bend the red warning beam');
+  assert.equal(occluded.packets(), packets, 'no additional light packets');
+  assert.equal(occluded.packets()[0].spotlight.direction, direction,
+    'the existing GPU vector is updated in place');
+  assert.deepEqual(occluded.packets().slice(1).map(p => p.active), [false, false],
+    'the hidden threat never activates unrelated doors');
+  const noSolid = createDojoDoorWarningBridge(browserScene({
+    colliders: [{ ...wall, isTrigger: true }],
+  }));
+  noSolid.accept(event);
+  noSolid.advance(1, null, 0.1);
+  assert.ok(Math.abs(noSolid.packets()[0].spotlight.direction[2] -
+    visible.packets()[0].spotlight.direction[2]) < 1e-9,
+  'a trigger volume is not opaque cover');
+  occluded.reset();
+  assert.equal(packets[0].active, false);
+  assert.deepEqual(direction, [-0.99999999982, 0, 0.00001898408],
+    'REJOUER restores original warning basis');
+});
