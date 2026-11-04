@@ -995,3 +995,50 @@ test('Web hit stagger follows the actual rendered facing and live player camera,
     'no added render passes for direction-aware impact feedback');
   pass.dispose();
 });
+
+test('Web inertial bank eases to idle, freezes on paused time and yields to source transitions', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, state, x, z, clock, transition = null) => {
+    const model = identity();
+    model[12] = x;
+    model[14] = z;
+    return actors.drawActor({
+      actorId, pose: { state, time: .4, ...(transition ? { transition } : {}) },
+      modelMatrix: model, viewProjection: identity(), shaderTime: clock,
+      color: [.8, .1, .2, 1],
+    });
+  };
+  assert.equal(draw('guard', 'run', 0, 0, 1).actorWebPoseReaction, null);
+  const moving = draw('guard', 'run', .28, .15, 1.1);
+  assert.equal(moving.actorWebPoseReaction.kind, 'locomotion');
+  assert.ok(moving.actorWebPoseReaction.roll < -.1);
+  const paused = draw('guard', 'run', .28, .15, 1.1);
+  assert.deepEqual(Array.from(paused.boneModelMatrices), Array.from(moving.boneModelMatrices),
+    'zero game-time must not snap the previously banked GPU pose to upright');
+  assert.deepEqual(Array.from(paused.weaponAttachmentMatrix),
+    Array.from(moving.weaponAttachmentMatrix),
+    'held source pose, weapon socket and hitboxes must freeze together');
+  const settling = draw('guard', 'idle', .28, .15, 1.2);
+  assert.equal(settling.actorWebPoseReaction.kind, 'turn');
+  assert.ok(Math.abs(settling.actorWebPoseReaction.roll) > .012 &&
+    Math.abs(settling.actorWebPoseReaction.roll) < Math.abs(moving.actorWebPoseReaction.roll),
+  'standing still should smoothly shed the inherited locomotion bank');
+  const settled = draw('guard', 'idle', .28, .15, 1.3);
+  assert.equal(settled.actorWebPoseReaction.kind, 'idle',
+    'ordinary breathing resumes once inertial banking has faded');
+  const transitioning = draw('guard', 'run', .48, .15, 1.4,
+    { from: { state: 'idle', time: .4 }, elapsed: .05 });
+  assert.equal(transitioning.actorWebPoseReaction, null,
+    'an accepted source locomotion transition suppresses procedural bank');
+  const resumed = draw('guard', 'run', .68, .15, 1.5);
+  assert.equal(resumed.actorWebPoseReaction.kind, 'locomotion');
+  assert.ok(Math.abs(resumed.actorWebPoseReaction.roll) < .1,
+    'source transition clears inertial history before the next run frame');
+  assert.equal(draw('other', 'run', .68, .15, 1.5).actorWebPoseReaction, null,
+    'new actors cannot inherit banking from other actor IDs');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 8,
+    'inertial pose uses the existing skin draw, not additional GPU passes');
+  pass.dispose();
+});
