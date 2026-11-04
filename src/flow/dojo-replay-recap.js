@@ -399,12 +399,12 @@ export function createDojoReplayRecap(snapshot, best = null) {
         'no-shots': 'SANS TIRER', 'dodges': '3 ESQUIVES', 'style': 'STYLE S',
         'survive': 'SURVIE', 'streak': 'SÉRIE DE VICTOIRES',
     }[completedChallenge];
-      const completedText = completedLabel === null ? '' : ` · DÉFI RÉUSSI : ${completedLabel}`;
-  // Store exactly the next displayed goal, never a guess about a native run.
+    const completedText = completedLabel === null ? '' : ` · DÉFI RÉUSSI : ${completedLabel}`;
+    // Store exactly the next displayed goal, never a guess about a native run.
     if (nextBest !== null)
         nextBest = Object.freeze({ ...nextBest, pendingChallenge: nextChallenge });
     return Object.freeze({
-    text: `${title[milestone]}${completedText}${replayTargetText}${retryDetailText} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}`,
+        text: `${title[milestone]}${completedText}${replayTargetText}${retryDetailText} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}`,
         milestone, best: nextBest,
         shouldPersist: true,
         provenance: 'WEB_ONLY',
