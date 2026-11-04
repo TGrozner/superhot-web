@@ -246,7 +246,8 @@ vec3 dojoDoorWarningSpotWebGlow(
   float radius = sqrt(distanceSquared);
   if (along / radius < cosHalfAngle) return vec3(0.0);
   float energy = sourceIntensity
-    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
+    * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle)
+    * dojoWebWarningSurfaceFacing(offset, radius);
   return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
 }
 // J4 creative Web fill: the SH-04 doorway false-light already has a live
@@ -266,7 +267,16 @@ vec3 dojoDoorFalseLightWashWeb(
   // Creative Web wall-facing response, NOT a shadow/occlusion test.
   // Keep a 20% warning floor for legibility on back-facing geometry.
   // vNormal/uHasNormals are already provided by native-world-pass.
-  float facing = dojoWebWarningSurfaceFacing(offset, radius);
+  float facing = 1.0;
+  if (uHasNormals != 0 && radius > 0.0001) {
+    // vNormal is normalized per vertex, but raster interpolation shortens it
+    // across curved/creased triangles. Match the unit-normal CPU contract.
+    float normalLength = length(vNormal);
+    if (normalLength > 0.0001) {
+      float towardLamp = dot(vNormal / normalLength, lightPosition - worldPosition) / radius;
+      facing = 0.2 + 0.8 * clamp(towardLamp, 0.0, 1.0);
+    }
+  }
   float energy = sourceIntensity * fade * fade * facing;
   return dojoWebWarningContrast(
     vec3(1.0, 0.06, 0.10), dojoWebWarningCompression(energy));
@@ -558,8 +568,17 @@ export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMa
   const distance = Math.hypot(...point.map((value, index) => value - position[index]));
   if (intensity === 0 || distance >= 4) return zeroWebWarning();
   const fade = dojoWebWarningSmooth(1 - distance / 4);
-  const delta = point.map((value, index) => value - position[index]);
-  const facing = dojoWebWarningSurfaceFacing(worldNormal, delta, distance);
+  // For flat source normals the GPU dot(vNormal, towardLamp) mirrors this
+  // normalized CPU reference; curved interpolants are only approximated.
+  let facing = 1;
+  if (worldNormal !== null) {
+    const normal = unit(sourceLightVec3(worldNormal, 'false-light worldNormal'));
+    if (distance > .0001) {
+      const cosine = normal.reduce((sum, value, index) =>
+        sum + value * (position[index] - point[index]), 0) / distance;
+      facing = .2 + .8 * clamp01(cosine);
+    }
+  }
   const energy = intensity * fade * fade * facing;
   return Object.freeze({
     rgb: webWarningContrast([1, .06, .10], energy / (3 + energy), webMaterialMode),
