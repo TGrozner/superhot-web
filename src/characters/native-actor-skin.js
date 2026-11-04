@@ -272,11 +272,24 @@ export function createNativeActorSkinRuntime(skinPass) {
     // it never fabricates a hit event, clip, or ragdoll motion.
     const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
       ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
+    // WEB-authored warm afterglow follows an actual accepted fire action.
+    // Its blend gate prevents any false warning before the firing event.
+    const fireStateSpeed = skinPass.states.fire?.speed;
+    // action.time is in sampled clip seconds; the Web glow lasts gameplay
+    // seconds regardless of the source fire state's playback speed.
+    const fireTime = action?.state === 'fire' && Number.isFinite(fireStateSpeed) &&
+      fireStateSpeed > 0 ? action.time / fireStateSpeed : null;
+    const webFireGlow = solvedPose === null && selected.identity.name !== 'hit' &&
+      Number.isFinite(fireTime) && fireTime >= 0 && fireTime < .24 &&
+      Number.isFinite(action.weight) && Number.isFinite(action.blend ?? 1)
+      ? (1 - fireTime / .24) ** 2 *
+        Math.max(0, Math.min(1, action.weight)) *
+        Math.max(0, Math.min(1, action.blend ?? 1)) : 0;
     const draw = {
       instance: selected.instance, time: selected.time,
       modelMatrix, viewProjection, color, cameraPosition,
       transition, action, solvedPose,
-      webPoseLean: reaction, webHitFlash,
+      webPoseLean: reaction, webHitFlash, webFireGlow,
     };
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
@@ -305,6 +318,7 @@ export function createNativeActorSkinRuntime(skinPass) {
       ...report, actorId, actorSourceSelection: selected.identity,
       boneModelMatrices: matrices, weaponAttachmentMatrix: socket,
       actorWebPoseReaction: reaction, actorWebHitFlash: webHitFlash,
+      actorWebFireGlow: webFireGlow,
       // A serialized controller/state name is NOT proof of active native
       // Mecanim runtime branch or of 1:1 gameplay animation behavior.
       nativeActorControllerExecutionVerified: false,
