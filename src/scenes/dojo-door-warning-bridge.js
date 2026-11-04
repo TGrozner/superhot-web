@@ -116,6 +116,11 @@ const WEB_WARNING_ARRIVAL_END = 0.96;
 const WEB_WARNING_ARRIVAL_SPOT_GAIN = 0.32;
 const WEB_WARNING_ARRIVAL_FALSE_LIGHT_GAIN = 1.7;
 const WEB_WARNING_ARRIVAL_IRIS_FOCUS = 0.12;
+// J4 Web-authored floor wash: move the already existing red false-light
+// through the real doorway as the warning approaches its peak. This reuses
+// the same GPU light/slot, never spawns a lamp or an unverified scene mesh.
+const WEB_WARNING_SPILL_FORWARD_METERS = 1.15;
+const WEB_WARNING_SPILL_LATERAL_METERS = 0.35;
 
 function smooth01(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -161,8 +166,14 @@ function createWebWarningSweep(catalog, controller) {
         spotlight.up = [...up];
       }
     }
+    // SH-07 shallow-copies the catalog light. Detach the mutable Web position
+    // first: even a source-owned frozen array must never be animated in place.
+    const fill = packet.falseLight.position;
+    const falseLightPosition = direction && finiteBasisVector(fill)
+      ? Array.from(fill) : null;
+    if (falseLightPosition) packet.falseLight.position = [...falseLightPosition];
     bases.set(packet.id, {
-      packet, direction, right, up, spawnTarget: null,
+      packet, direction, right, up, falseLightPosition, spawnTarget: null,
       intensity: door.spotlight.intensity,
       spotAngle: door.spotlight.spotAngle,
       duration: door.curve.at(-1).time,
@@ -182,6 +193,11 @@ function createWebWarningSweep(catalog, controller) {
     }
     spotlight.spotAngle = base.spotAngle;
     spotlight.intensity = base.intensity;
+    if (base.falseLightPosition) {
+      for (let axis = 0; axis < 3; axis++) {
+        base.packet.falseLight.position[axis] = base.falseLightPosition[axis];
+      }
+    }
     if (!base.packet.active) spotlight.range = 0;
   }
 
@@ -316,6 +332,13 @@ function createWebWarningSweep(catalog, controller) {
       }
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
       const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
+      // One soft, moving patch of red light travels outward through the
+      // doorway, following the live beam's yaw (which may track a player or
+      // the accepted enemy spawn). It recedes before the source warning ends.
+      // All movement is relative to the verified initial false-light pose.
+      const spill = base.falseLightPosition
+        ? smooth01((phase - 0.12) / 0.55) *
+          (1 - smooth01((phase - 0.78) / 0.18)) : 0;
       packet.spotlight.spotAngle = base.spotAngle *
         (1 - WEB_WARNING_IRIS_FOCUS * breathing -
           WEB_WARNING_ARRIVAL_IRIS_FOCUS * arrival);
@@ -328,6 +351,12 @@ function createWebWarningSweep(catalog, controller) {
           base.right[axis] * cosYaw - base.direction[axis] * sinYaw;
         packet.spotlight.up[axis] =
           base.up[axis] * cosPitch - yawedDirection * sinPitch;
+        if (base.falseLightPosition) {
+          packet.falseLight.position[axis] = base.falseLightPosition[axis] +
+            yawedDirection * WEB_WARNING_SPILL_FORWARD_METERS * spill +
+            packet.spotlight.right[axis] *
+              WEB_WARNING_SPILL_LATERAL_METERS * sweep * spill;
+        }
       }
     }
   }
