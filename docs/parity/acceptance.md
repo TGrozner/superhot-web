@@ -152,10 +152,10 @@ SH-10 owns three files:
 - `scripts/acceptance-dojo-browser.mjs`: explicitly imported browser-only sampler that serializes *only* screen, native scene identity, kill target, kills and enemy id/alive fields. No pixels, matrices, user paths, audio or original assets.
 - `tests/acceptance-dojo-playthrough.test.mjs`: synthetic positive and negative fixtures, never a browser success claim.
 
-At the user's final localhost test, open DevTools on `http://localhost:4173/` BEFORE starting the Dojo encounter:
+**Legacy v1 diagnostic (limited milestones only):** on Pages or `http://localhost:4173/`, open DevTools BEFORE Start. Prefer the stronger v2 procedure below for the complete game loop:
 
 ```js
-const { startDojoCapture } = await import('/scripts/acceptance-dojo-browser.mjs');
+const { startDojoCapture } = await import(new URL('./scripts/acceptance-dojo-browser.mjs', document.baseURI));
 window.dojoRun = startDojoCapture();
 ```
 
@@ -208,15 +208,38 @@ recorder output and fails closed unless each observable milestone is present:
   comparison, not an automatically verified door/step identity, and not
   source-derived movement tolerances.
 
-### Owner-local browser procedure (after SH-05 merges; not executed by SH-10)
+### Owner-browser procedure: public Pages or localhost (not executed by SH-10)
 
-Run the **existing** `node server.mjs` and open
-`http://localhost:4173/` with the private Dojo scene configured. In
-DevTools **before clicking Start**, arm the opt-in recorder once:
+The read-only browser recorder is included in the **standalone Pages package**
+since SH-05 PR #417 (first merged SHA `2b4c953`), but packaging alone is
+not an HTTP, browser, FPS or complete-run result. Public site:
+`https://tgrozner.github.io/superhot-web/`. The same procedure works on
+`http://localhost:4173/` when running the existing `node server.mjs`.
+
+**Optional HTTP-only site preflight** (no game launched, no private file
+uploaded, no commercial assets downloaded):
+
+```sh
+node scripts/acceptance-dojo-pages.mjs
+# Or: node scripts/acceptance-dojo-pages.mjs --site http://localhost:4173/
+```
+
+It checks the actual HTTP responses for index, Dojo/build10 manifest, browser
+recorder and FPS recorder. `WEB_QA_HTTP_READY_NOT_BROWSER_VERIFIED` (exit 0)
+means these resources were served and recognizable, not that the game loads or
+plays. HTTP 404/invalid content reports `WEB_QA_HTTP_GAP` (exit 2);
+inaccessible network is `WEB_QA_HTTP_UNKNOWN` (exit 3), **not** proof the
+site is broken. This command runs only on the machine invoking it and does
+not use the original MCD executable or a research runner.
+
+In the browser DevTools console **before clicking Start**, arm the opt-in
+recorder once. Use a URL relative to `document.baseURI`, not absolute
+`/scripts/...`: Pages lives under `/superhot-web/` while localhost is
+usually at `/`:
 
 ```js
 const { inspectDojoCaptureReadiness, startDojoCapture } =
-  await import('/scripts/acceptance-dojo-browser.mjs');
+  await import(new URL('./scripts/acceptance-dojo-browser.mjs', document.baseURI));
 inspectDojoCaptureReadiness(); // pre-Start preview is NOT a started combat
 window.dojoRun = startDojoCapture({
   intervalMs: 50, maxFrames: 30000, waitForStart: true,
@@ -302,6 +325,16 @@ overwrite earlier evidence. Save the trace to a **private local file** with:
 ```js
 dojoRun.save('dojo-full-run.json');
 ```
+
+
+For a **second complete encounter**, save the first trace *after its REJOUER*
+reset, then stop that recorder and arm a fresh v2 capture **before the next
+kill**, while the restarted game is fresh (zero kills). Alternatively, reload
+the page and arm in preview before START. Each v2 trace covers **one** victory plus
+its restart (including unique route markers 1–6); concatenating two traces
+or reusing the first recorder's consumed markers does **not** constitute a
+valid second full-run receipt. Verify both JSON files locally and keep them
+out of Git.
 
 The saved JSON contains only bounded actor IDs/states, event counters and
 player feet coordinates; **no original assets, audio buffers, object names,
@@ -795,7 +828,7 @@ You may still mark from the console while paused; samples resume only when
 Dojo gameplay is visible:
 
 ```js
-const { startDojoFpsCapture } = await import('/superhot-web/scripts/acceptance-dojo-fps.mjs');
+const { startDojoFpsCapture } = await import(new URL('./scripts/acceptance-dojo-fps.mjs', document.baseURI));
 window.sh10fps = startDojoFpsCapture();
 window.sh10fps.mark('idle');      // arm now, click Start, then stand still for >=120 frames
 // During actual gameplay, press 8 to start combat and 9 for ragdolls.
@@ -805,7 +838,7 @@ window.sh10fps.mark('idle');      // arm now, click Start, then stand still for 
 // window.sh10fps.save('dojo-fps.json');
 ```
 
-For **localhost root** use `/scripts/acceptance-dojo-fps.mjs` instead.
+The relative import works on both **Pages** (`/superhot-web/`) and localhost root; it does not require a second copy of the profiler.
 Operator labels are *claims about the local activity*, not independently
 verified combat intensity; the report also records maximum reported
 `livingEnemies` and `activeRagdolls` for context. The browser requests a
