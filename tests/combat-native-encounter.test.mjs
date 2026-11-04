@@ -1153,3 +1153,37 @@ test('J3 Web volleys: connected three-gunner chain grants only one real shot',()
   assert.ok(b.runtime.attackDelayRemaining>.8,'cooling gunner keeps its actual reload delay');
   assert.ok(c.runtime.pendingShot,'replacement gunner reaches the real Attack-Late request');
 });
+
+
+test('J3 Web moving cover: a legal pre-step shot is vetoed if a strafe moves its muzzle behind cover',()=>{
+  // Fabricated short upper wall: eye rays stay clear but the gun's swept
+  // translated muzzle acquires real world cover AFTER the enemy strafes.
+  // The scene renderer will only supply the exact posed muzzle at Late.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data,[box(4,2.65,2.35,.25,.5,.25)]);
+  const enemy=firstSpawn(runtime,target);
+  enemy.clock=1.3; // inside the existing Web strafe window
+  enemy.encounter.webTacticalSide=1;
+  enemy.muzzlePosition=p(2,3,2);
+  enemy.muzzleForward=p(1,0,0);
+  const start=p(enemy.x,enemy.y,enemy.z);
+  assert.equal(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,target.playerPosition),null,
+    'the old muzzle path is initially legal before feet move');
+  advanceNativeEncounter(runtime,input([enemy],{...target,scaledDeltaTime:.2}));
+  assert.ok(enemy.z>start.z+.1,'enemy made a real capsule/navmesh-approved strafe');
+  assert.equal(enemy.encounter.visible,true,'short upper cover does not hide the player from the eyes');
+  assert.equal(enemy.encounter.canAttack,false,
+    'the updated shot corridor crosses world cover, so no new GunAttack is authorized');
+  enemy.runtime.attackDelayRemaining=-1;
+  enemy.runtime.alertness=2;
+  advanceNativeEnemyWeapon(enemy.runtime,{...runtime.enemySettings,family:'Pistol'},.2);
+  const attack=runNativeEnemyGunAttack(enemy.runtime,{...runtime.enemySettings,family:'Pistol'},{
+    scaledDeltaTime:.2,unscaledDeltaTime:.2,targetSight:enemy.encounter.visible,
+    sightMode:'all-directions',aimTargetInSight:enemy.encounter.canAttack,
+    aimReady:true,weaponInRightPosition:enemy.encounter.canAttack,
+    allowAttacking:true,canShot:true,active:true,animationTarget:target.playerPosition,
+  },()=>0);
+  assert.equal(attack.shot,false,'no projectile is requested through cover after the move');
+});

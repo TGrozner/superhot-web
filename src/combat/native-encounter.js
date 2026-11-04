@@ -1046,7 +1046,34 @@ export function advanceNativeEncounter(runtime, input) {
     (WEB_SQUAD_VOLLEY.beatSeconds*60);
   const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime);
   const localSquads=webLocalArmedSquads(runtime,enemies);
+  // Cover and crossfire may CHANGE as bodies move. Snapshot original feet so a
+  // cached, previous-render muzzle can be translated to the new actor feet for
+  // one conservative post-movement check. The true posed muzzle is still only
+  // available in main's Late phase; this does not replace projectile collision.
+  const originalFeet=new Map(enemies.map(enemy=>[enemy,position(enemy)]));
   for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns,localSquads);
+  const anyoneMoved=enemies.some(enemy=>distance(position(enemy),originalFeet.get(enemy))>EPSILON);
+  if (anyoneMoved) for (const enemy of enemies) {
+    if (!participating(enemy) || !enemy.encounter?.canAttack || !enemy.muzzlePosition)continue;
+    const before=originalFeet.get(enemy);
+    const muzzle={
+      x:enemy.muzzlePosition.x+enemy.x-before.x,
+      y:enemy.muzzlePosition.y+enemy.y-before.y,
+      z:enemy.muzzlePosition.z+enemy.z-before.z,
+    };
+    const eye={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+    if(nativeSphereHit(runtime.sightCollision,eye,playerPosition,.2)!==null) {
+      enemy.encounter.visible=false;
+      enemy.encounter.canAttack=false;
+      continue;
+    }
+    if(nativeSegmentHit(runtime.sightCollision,muzzle,playerPosition)!==null ||
+        webAllyShieldsMuzzle(runtime,enemy,muzzle,playerPosition,enemies)) {
+      enemy.encounter.canAttack=false;
+      enemy.encounter.webAllyBlockingShot=
+        webAllyShieldsMuzzle(runtime,enemy,muzzle,playerPosition,enemies);
+    }
+  }
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
     scaledDeltaTime,unscaledDeltaTime,enabled:true,spawningAreaInitialized:true,
     currentEnemyCount:enemies.filter(participating).length+runtime.arrivals.length,
