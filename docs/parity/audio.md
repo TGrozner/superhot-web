@@ -1101,3 +1101,11 @@ This PR alone does **not** change the live bridge, so it makes no claim
 of browser audibility or deployed speaker output. A `started` receipt
 means a graph event was scheduled, not that someone heard it.
 No commercial audio or private corpus bytes are included.
+
+## SH-07 — Web-only player damage ear ring (2026-11-04)
+
+**PROUVÉ (Web wiring only):** at public `main@2b4c953538114aef4df14c3e88c0be6a909d254d`, `src/audio.js` `hit()` plays its source-qualified `playerHit` buffer request then calls `webCombatAccent('player-hit', ...)`. This module was already connected on the Dojo path; SH-05 retains ownership of the bridge. Its source-qualified original binding remains `resources.assets:1720` (`AC_Player_Hit`), separately described above. The existing private inventory and static Unity method evidence do **not** establish audible output on a speaker.
+
+**New original Web design:** `src/sound/web-impact-mix.ts` overlays a quiet, falling sine (970→570 Hz over 420 ms, peak weight 0.115 × the cue's Web volume) after damage. The hit's original WAV, onset, source identity, scene mixer routing and existing transient remain untouched. The tail adds one scheduled oscillator **inside the same priority-6 voice**, not another voice; the voice remains active until the tail ends, with existing 24-voice admission and disposal. These exact values are Web-authored, **not** recovered Unity parameters. A targeted fake-AudioContext test verifies source count, completion, voice priority and subsequent shot admission.
+
+**OBSERVÉ:** static Web call graph and test behavior only. No native paired playback, speaker measurement, perceptual listening, GitHub Pages smoke or FPS measurement is claimed. After SH-05 merges, a real browser listening check during player damage is still required. No commercial asset, extracted waveform or raw private source is added.
