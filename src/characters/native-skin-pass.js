@@ -650,12 +650,13 @@ function multiplyInto(a, aOffset, b, bOffset, output, outputOffset) {
  * this keeps the GPU skin palette, socket, hit shapes and death handoff in
  * exactly the same pose. No new keyframes, source claims or GPU draws.
  */
-function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll) {
+function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0) {
   const globals = scratch.globals;
   const pivot = pivotBone * 16;
   const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
   const cp = Math.cos(pitch), sp = Math.sin(pitch);
   const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
   for (let bone = 0; bone < loaded.jointCount; bone++) {
     const offset = bone * 16;
     for (let column = 0; column < 4; column++) {
@@ -665,9 +666,13 @@ function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll) {
       const y = globals[entry + 1] - (translation ? py : 0);
       const z = globals[entry + 2] - (translation ? pz : 0);
       const pitchedY = cp * y - sp * z;
-      globals[entry] = cr * x - sr * pitchedY + (translation ? px : 0);
-      globals[entry + 1] = sr * x + cr * pitchedY + (translation ? py : 0);
-      globals[entry + 2] = sp * y + cp * z + (translation ? pz : 0);
+      const pitchedZ = sp * y + cp * z;
+      // Compose Rz(roll) * Ry(yaw) * Rx(pitch) around sampled hips.
+      const yawedX = cy * x + sy * pitchedZ;
+      const yawedZ = -sy * x + cy * pitchedZ;
+      globals[entry] = cr * yawedX - sr * pitchedY + (translation ? px : 0);
+      globals[entry + 1] = sr * yawedX + cr * pitchedY + (translation ? py : 0);
+      globals[entry + 2] = yawedZ + (translation ? pz : 0);
     }
   }
   // A model-space bone matrix is NOT the GPU palette. Rebuild after the lean.
@@ -1340,8 +1345,10 @@ export function createNativeSkinPass(gl, sourcePackage, {
     if (webPoseLean !== null) {
       if (!webPoseLean || typeof webPoseLean !== 'object' ||
           !Number.isFinite(webPoseLean.pitch) || !Number.isFinite(webPoseLean.roll) ||
-          Math.abs(webPoseLean.pitch) > .32 || Math.abs(webPoseLean.roll) > .32) {
-        throw new RangeError('Web-only pose lean requires bounded pitch/roll radians');
+          !Number.isFinite(webPoseLean.yaw ?? 0) ||
+          Math.abs(webPoseLean.pitch) > .32 || Math.abs(webPoseLean.roll) > .32 ||
+          Math.abs(webPoseLean.yaw ?? 0) > .32) {
+        throw new RangeError('Web-only pose lean requires bounded pitch/roll/yaw radians');
       }
       if (solvedPose !== null) {
         throw new TypeError('A solved death pose cannot also receive a Web-only animation lean');
@@ -1418,7 +1425,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
         actionLayer ? actionPose : null, actionLayer?.mask, actionWeight);
     }
     if (webPoseLean !== null) {
-      applyWebPoseLean(loaded, scratch, webLeanPivot, webPoseLean.pitch, webPoseLean.roll);
+      applyWebPoseLean(loaded, scratch, webLeanPivot,
+        webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0);
     }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
