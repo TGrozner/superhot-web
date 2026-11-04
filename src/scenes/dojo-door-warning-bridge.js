@@ -126,6 +126,16 @@ const WEB_WARNING_SPILL_LATERAL_METERS = 0.35;
 // Web-only fade in unscaled seconds: the source warning envelope itself remains
 // on world time, but its extra incoming-threat glow/wash is released quickly.
 const WEB_WARNING_ARRIVAL_RELEASE_PER_SECOND = 12;
+// J4 Web gameplay safety cue: real enemy spawns use unscaled time while the
+// serialized door-light curve uses SUPERHOT world time. At a standstill the
+// source lamp can remain completely dark right up to an incoming spawn.
+// Gradually raise a SMALL floor on its existing two lights during the final
+// real-time seconds. This is intentionally authored Web behaviour, NOT Unity
+// light animation, and uses no additional draw packet or GPU light slot.
+const WEB_WARNING_REAL_NOTICE_START_SECONDS = 1.5;
+const WEB_WARNING_REAL_NOTICE_FULL_SECONDS = 0.25;
+const WEB_WARNING_REAL_NOTICE_RANGE_FLOOR = 0.34;
+const WEB_WARNING_REAL_NOTICE_FILL_FLOOR = 0.22;
 
 function smooth01(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -188,6 +198,8 @@ function createWebWarningSweep(catalog, controller, collision) {
       // Web-only damped reactive steering; normal lighthouse sweep stays exact.
       reactiveYaw: 0, reactivePitch: 0,
       intensity: door.spotlight.intensity,
+      range: door.spotlight.range,
+      falseLightIntensity: door.falseLight.intensity,
       spotAngle: door.spotlight.spotAngle,
       duration: door.curve.at(-1).time,
     });
@@ -308,15 +320,33 @@ function createWebWarningSweep(catalog, controller, collision) {
         (1 - smooth01((phase - WEB_WARNING_ARRIVAL_PEAK) /
           (WEB_WARNING_ARRIVAL_END - WEB_WARNING_ARRIVAL_PEAK))) *
         base.arrivalEmphasis;
+      // This extra *real-time* cue is restricted to a verified accepted
+      // arrival with an unscaled dt. Historical visual-only callers and
+      // warnings without real spawn timing keep their source-clock envelope.
+      // After arrival the already-established emphasis decays smoothly.
+      const realNotice = unscaledDeltaSeconds != null && base.arrivalRemaining != null
+        ? smooth01((WEB_WARNING_REAL_NOTICE_START_SECONDS - base.arrivalRemaining) /
+            (WEB_WARNING_REAL_NOTICE_START_SECONDS - WEB_WARNING_REAL_NOTICE_FULL_SECONDS)) *
+          base.arrivalEmphasis : 0;
       // SH-07 has just sampled the original range; multiplication NEVER
       // compounds from the previous frame. The source envelope still fades.
       packet.spotlight.range *= 1 + WEB_WARNING_RANGE_GAIN * breathing;
+      if (realNotice > 0 && Number.isFinite(base.range) && base.range > 0) {
+        packet.spotlight.range = Math.max(packet.spotlight.range,
+          base.range * WEB_WARNING_REAL_NOTICE_RANGE_FLOOR * realNotice);
+      }
       // SH-07 has already written this tick's source value. Never compound
       // the false light across frames, and never activate an inactive packet.
       if (Number.isFinite(packet.falseLight.intensity) &&
           packet.falseLight.intensity >= 0) {
         packet.falseLight.intensity *=
           (1 + WEB_WARNING_ARRIVAL_FALSE_LIGHT_GAIN * arrival) * base.focusGain;
+        if (realNotice > 0 && Number.isFinite(base.falseLightIntensity) &&
+            base.falseLightIntensity > 0) {
+          packet.falseLight.intensity = Math.max(packet.falseLight.intensity,
+            base.falseLightIntensity * WEB_WARNING_REAL_NOTICE_FILL_FLOOR *
+            realNotice * base.focusGain);
+        }
       }
       if (Number.isFinite(base.intensity) && base.intensity >= 0) {
         packet.spotlight.intensity = base.intensity *
