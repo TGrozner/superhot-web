@@ -156,15 +156,39 @@ test('stun pauses movement, cancels deferred shots, leaves clock to parent and r
   assert.equal(enemy.clock,0,'parent owns animation clock');
 });
 
-test('occupancy blocks crossing and overlapping spawn without scattering or teleporting',()=>{
+test('occupied chase cannot cross teammates or spawn a second actor on occupied feet',()=>{
   const runtime=setup(), enemy=firstSpawn(runtime);
   const blocker={id:'other',x:4,y:0,z:2.260869565217391,alive:true,active:true};
   advanceNativeEncounter(runtime,input([enemy,blocker],{scaledDeltaTime:1,unscaledDeltaTime:0}));
-  assert.equal(enemy.x,2);
-  assert.equal(enemy.z,2);
+  assert.ok(enemy.x<blocker.x,'blocked follower never crosses teammate in one frame');
+  assert.ok(Math.hypot(enemy.x-blocker.x,enemy.z-blocker.z)>=.8-1e-6,'swept body spacing still holds');
+  assert.ok(Math.abs(enemy.z-2)>.05,'follower tries a real navmesh-safe lateral detour');
   const events=advanceNativeEncounter(runtime,input([enemy,blocker],{scaledDeltaTime:0,unscaledDeltaTime:2}));
   assert.equal(events.some(event=>event.type==='spawn'),false);
   assert.equal(runtime.arrivals.length,1);
+});
+
+test('J3 Web squad unjamming: followers pass an ally without teleporting or crossing bodies',()=>{
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=1;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const runtime=setup(data), follower=firstSpawn(runtime,near);
+  const leader={id:'squad-leader',x:3.2,y:0,z:2,alive:true,active:true};
+  let detoured=false,passed=false;
+  for(let frame=0;frame<25;frame++) {
+    const before=p(follower.x,follower.y,follower.z);
+    advanceNativeEncounter(runtime,input([follower,leader],{...near,scaledDeltaTime:.2}));
+    const spacing=Math.hypot(follower.x-leader.x,follower.z-leader.z);
+    assert.ok(spacing>=.8-1e-6,'squad member never passes through the leader');
+    assert.ok(Math.hypot(follower.x-before.x,follower.z-before.z)<=1+1e-6,
+      'each frame is bounded by the actual movement budget');
+    detoured ||= Math.abs(follower.z-2)>.12;
+    passed ||= follower.x>leader.x+.15;
+  }
+  assert.ok(detoured,'a path blocked by a teammate produces a lateral escape');
+  assert.ok(passed,'the follower eventually advances past the teammate');
+  assert.equal(follower.reaction.dead,false,'tactic never creates damage');
+  assert.equal(follower.encounter.canAttack,false,'absent muzzle is still not firing permission');
 });
 
 test('attack permission requires actual muzzle inputs and clear cast, never fake AimTarget facts',()=>{
