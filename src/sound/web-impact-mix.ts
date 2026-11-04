@@ -1,6 +1,6 @@
 /** SH-07: original Web sound design, NOT recovered MCD audio. */
 export type WebImpactCue = 'player-shot' | 'enemy-shot' | 'impact' | 'shatter' | 'player-hit'
-  | 'katana' | 'katana-swing' | 'step' | 'landing' | 'pickup' | 'throw';
+  | 'katana' | 'katana-swing' | 'punch-swing' | 'punch-contact' | 'step' | 'landing' | 'pickup' | 'throw';
 export interface WebImpactPoint {readonly x: number; readonly y: number; readonly z: number}
 export interface WebImpactRequest {readonly position?: WebImpactPoint; readonly intensity?: number}
 export interface WebImpactResult {
@@ -95,7 +95,8 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // Creative Web mix priorities: damage feedback survives even shot bursts.
     'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
     'player-hit': 6,
-    katana: 5, 'katana-swing': 4, step: 1, landing: 2, pickup: 2, throw: 3,
+    katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
+    step: 1, landing: 2, pickup: 2, throw: 3,
   };
 
   const attackByCue: Partial<Record<WebImpactCue, readonly [number, number, number]>> = {
@@ -108,6 +109,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     'player-hit': [2600, 0.34, 0.032],
     shatter: [4800, 0.31, 0.043],
     katana: [3200, 0.32, 0.065],
+    'punch-contact': [2400, 0.44, 0.018],
     landing: [1800, 0.21, 0.022],
   };
 
@@ -160,6 +162,8 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       shatter: [0.27, 2200, 1250, 220, 0.48],
       katana: [0.20, 1180, 1480, 325, 0.43],
       'katana-swing': [0.24, 1800, 490, 210, 0.33],
+      'punch-swing': [0.16, 1200, 360, 130, 0.30],
+      'punch-contact': [0.14, -850, 165, 56, 0.48],
       step: [0.075, -360, 108, 58, 0.22],
       landing: [0.15, -650, 145, 54, 0.40],
       pickup: [0.08, 1400, 510, 880, 0.23],
@@ -213,9 +217,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
         distanceFilter.connect(panner);
       }
       out.connect(distanceFilter ?? panner);
-      panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' ? impacts : weapons);
+      panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
     } else {
-      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' ? impacts : weapons);
+      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
     }
     const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority};
     voices.add(voice);
@@ -293,6 +297,21 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
       noise.connect(sweep);
       sweep.connect(air);
+      air.connect(out);
+    }
+    // Web-original fist air sweep: intentionally separate from confirmed contact.
+    // No native MCD clip is inferred, and no extra source or voice is allocated.
+    if (cue === 'punch-swing') {
+      const airFilter = context.createBiquadFilter();
+      airFilter.type = 'bandpass';
+      airFilter.frequency.setValueAtTime(Math.min(2300, context.sampleRate * 0.43), at);
+      airFilter.frequency.exponentialRampToValueAtTime(Math.min(740, context.sampleRate * 0.23), at + duration);
+      const air = context.createGain();
+      air.gain.setValueAtTime(0.0001, at);
+      air.gain.linearRampToValueAtTime(volume * 0.48, at + 0.028);
+      air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+      noise.connect(airFilter);
+      airFilter.connect(air);
       air.connect(out);
     }
     noise.onended = ended;

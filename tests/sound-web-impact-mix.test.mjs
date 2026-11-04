@@ -395,3 +395,27 @@ test('damage adds a short Web ear-ring tail without stealing an extra voice', ()
   assert.equal(nodes.length, 5); // An ordinary shot still uses only two sources.
   mix.dispose();
 });
+
+test('Web unarmed punch distinguishes air swing from a contact crunch in one voice each', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 2);
+  const hand = {x: 0.2, y: 1.4, z: -0.4};
+  const swing = mix.emit('punch-swing', {position: hand});
+  assert.deepEqual(swing, {status: 'started', source: 'web-original-synthesis',
+    at: ctx.currentTime, spatial: true}); // Scheduling, not audible output.
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].connections.length, 2); // Existing burst + Web-only air sweep.
+  assert.ok(filters.some(filter => filter.type === 'bandpass' && filter.frequency.value === 740));
+  const contact = mix.emit('punch-contact', {position: hand});
+  assert.equal(contact.status, 'started');
+  assert.equal(nodes.length, 4); // Contact: just the existing noise + pitched body.
+  assert.ok(filters.some(filter => filter.type === 'lowpass' && filter.frequency.value === 850));
+  assert.ok(filters.some(filter => filter.type === 'highpass' && filter.frequency.value === 2400));
+  const impactBus = gains[2];
+  assert.ok(gains.some(output => output.connections.some(node =>
+    node?.connections?.includes(impactBus)))); // HRTF contact -> impacts, not footsteps.
+  assert.equal(mix.emit('step').status, 'blocked'); // Combat preserves the voice budget.
+  assert.equal(mix.getActiveVoices(), 2);
+  mix.dispose();
+  assert.equal(mix.getActiveVoices(), 0);
+});
