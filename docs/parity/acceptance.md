@@ -762,3 +762,56 @@ Owner assignments: **SH-05** native-world warning GPU cookie/layer8 hook;
 and native matching/ROI evidence; **SH-10** acceptance metrics/provenance
 and first reproducible differences. Protect the previously manually validated
 7/7 Dojo loop, including F/E, kills, victory and REJOUER.
+
+## Focused Dojo browser FPS gate (SH-10; gameplay-first, opt-in)
+
+The built-in `__superhotSceneMetrics.p95FrameMs` rolls over up to 240 recent
+rAF timestamps, **including non-gameplay states**. It cannot by itself provide
+a clean idle-versus-combat comparison: its rolling window can mix pauses,
+menus, and fights. The optional SH-10 profiler instead groups *real browser*
+`requestAnimationFrame` intervals by an **operator-marked phase**. It only
+records when the Dojo HUD is visible, combat controls are hidden, the page is
+visible and `__superhotSceneMetrics.mode` reports native-source Dojo Web
+gameplay. It reads app-reported draw counts at most once per second. No
+renderer hook, native asset, private runner, new dependency or CI browser
+claim is introduced.
+
+After loading **SHRL_Dojo2 / build10 on Pages** and clicking Start, in the
+browser console (do not leave DevTools blocking pointer lock):
+
+```js
+const { startDojoFpsCapture } = await import('/superhot-web/scripts/acceptance-dojo-fps.mjs');
+window.sh10fps = startDojoFpsCapture();
+window.sh10fps.mark('idle');      // remain still for at least 120 visible frames
+// When actual fighting starts:
+window.sh10fps.mark('combat');    // fight for at least 120 visible frames
+// Optional, while several defeated enemies are still rendered:
+window.sh10fps.mark('ragdolls');
+window.sh10fps.save('dojo-fps.json');
+```
+
+For **localhost root** use `/scripts/acceptance-dojo-fps.mjs` instead.
+Operator labels are *claims about the local activity*, not independently
+verified combat intensity; the report also records maximum reported
+`livingEnemies` and `activeRagdolls` for context. The browser requests a
+download; confirm that it actually saved locally. The file contains only
+rAF intervals, draw-count samples, Dojo identity, resolution and DPR; no
+screen captures, geometry, source strings, paths, gameplay inputs or native
+pixels. Do not commit real owner traces to Git.
+
+```bash
+node scripts/acceptance-dojo-fps-report.mjs --trace private/dojo-fps.json
+node --test tests/acceptance-dojo-fps.test.mjs
+```
+
+The CLI exits 2 on missing/corrupt/insufficient samples. It computes nearest-rank
+p50/p95/p99 **browser frame intervals**, FPS at p95 frametime, hitch counts,
+and reported WebGL draw calls for each operator-labelled segment. It requires
+at least 120 active visible rAF intervals in each of idle and combat and at
+least one draw sample in both. A positive status means **owner-supplied Web
+samples analyzed**, not GPU timestamp-query measurements, not a human FPS
+comfort verdict, not a passed full Dojo run, and not native MCD parity.
+Compare two builds only at matching browser, resolution, DPR, GPU, workload
+and capture rules; do not fabricate an FPS or assume that app-reported draw
+counts measure all GPU work. During a restart, mark a new segment after
+the next combat begins. Keep the existing SH-10 full-run recorder separate.
