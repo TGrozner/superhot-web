@@ -575,6 +575,42 @@ test('J3 Web assault pressure: one armed squadmate closes fast while wingman cov
 
 
 
+test('J3 Web local fireteams: distant gunners cannot steal a breach or turn a solo guard into an assaulter',()=>{
+  // Web-only tactical choice, with entirely synthetic actors/geometry.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data), a=firstSpawn(runtime,target);
+  runtime.actors.delete(a.id);
+  a.id='a-lead';
+  runtime.actors.set(a.id,a);
+  const teammate=(source,id,x,z,side)=>({
+    ...source,id,x,z,clock:0,
+    reaction:{...source.reaction},runtime:{...source.runtime},
+    encounter:{...source.encounter,route:null,target:null,webTacticalSide:side},
+  });
+  const aWing=teammate(a,'a-wing',2,4,-1);
+  const b=teammate(a,'b-lead',16,2,1);
+  const bWing=teammate(a,'b-wing',16,4,-1);
+  for (const actor of [aWing,b,bWing])runtime.actors.set(actor.id,actor);
+  const fireteams=[a,aWing,b,bWing];
+  advanceNativeEncounter(runtime,input(fireteams,{...target,scaledDeltaTime:.2}));
+  assert.ok(a.x>2.05,'team A sends its own point man, not the only global lowest ID');
+  assert.ok(b.x<15.95,'disconnected team B independently pressures the player');
+  assert.deepEqual(p(aWing.x,aWing.y,aWing.z),p(2,0,4),
+    'team A keeps a covering shooter at the original firing distance');
+  assert.deepEqual(p(bWing.x,bWing.y,bWing.z),p(16,0,4),
+    'team B also retains its covering shooter');
+  assert.ok(fireteams.every(actor=>actor.encounter.canAttack===false),
+    'moving tactically does not invent a muzzle or shooting permission');
+
+  const isolated=setup(data),lone=firstSpawn(isolated,target);
+  const farAway=teammate(lone,'remote-gunner',27,9,-1);
+  advanceNativeEncounter(isolated,input([lone,farAway],{...target,scaledDeltaTime:.2}));
+  assert.equal(lone.x,2,
+    'a lone gunner already inside its normal stop ring cannot charge because another gunner exists far away');
+});
+
 test('J3 Web squad baton: wingman takes breach when point man is stunned or suppressed',()=>{
   // Deliberate Web tactics, synthetic positions; no native MCD squad behavior.
   const data=scene();
