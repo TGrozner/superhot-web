@@ -147,3 +147,36 @@ test('authored torque visibly spins real shards about their swept collider cente
   assert.equal(still.modelMatrix[12],1);
   assert.equal(still.modelMatrix[13],2);
 });
+
+
+test('authored shard spin settles after a real contact, not during flight or scaled pause',()=>{
+  const physics=context();
+  physics.gravity={x:0,y:0,z:0};
+  const create=(physical)=>createGunPickupShardRuntime({
+    shards:[{id:'spin-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,
+      ...(physical?{collisionRadius:0.1}:{})}],
+    parentVelocity:{x:0,y:-30,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:1}],fadeDelays:[1.5],
+    gravity:physics.gravity,...(physical?{physics}:{})
+  });
+  const touched=create(true),split=create(true),airborne=create(false);
+  advanceGunPickupShardRuntime(touched,0.1);
+  assert.ok(touched.shards[0].contacts.some(c=>c.collider.id==='floor'));
+  assert.equal(touched.shards[0].firstStaticContactAt,0.1);
+  const atContact=Array.from(touched.shards[0].modelMatrix);
+  const angleFromFirstContact=Math.atan2(atContact[1],atContact[0]);
+  advanceGunPickupShardRuntime(touched,0);
+  assert.deepEqual(Array.from(touched.shards[0].modelMatrix),atContact,
+    'scaled pause must not change angular pose');
+  advanceGunPickupShardRuntime(touched,0.2);
+  advanceGunPickupShardRuntime(split,0.1);
+  advanceGunPickupShardRuntime(split,0.1);
+  advanceGunPickupShardRuntime(split,0.1);
+  advanceGunPickupShardRuntime(airborne,0.3);
+  const angle=shard=>Math.atan2(shard.modelMatrix[1],shard.modelMatrix[0]);
+  assert.ok(angle(touched.shards[0])>angleFromFirstContact);
+  assert.ok(angle(touched.shards[0])<angle(airborne.shards[0]),
+    'confirmed ground contact must slow visible spin');
+  assert.ok(Math.abs(angle(touched.shards[0])-angle(split.shards[0]))<1e-9,
+    'post-contact spin should be stable across frame subdivisions');
+});

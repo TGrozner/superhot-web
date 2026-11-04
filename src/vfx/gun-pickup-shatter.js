@@ -21,13 +21,25 @@ const SOURCE = Object.freeze({
 // AddTorque vector is a direction/impulse, NOT a known angular velocity:
 // translating it into one revolution/second at unit magnitude is creative.
 const WEB_SHARD_SPIN_RADIANS_PER_SECOND = 2 * Math.PI;
+// On first confirmed static-scene contact, preserve the current angular pose
+// and smoothly bleed visual spin instead of revolving forever inside the floor.
+// 12/s is Web-authored polish, NOT a recovered PhysX angular damping value.
+const WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND = 12;
+
+function webShardSpinTime(shard, elapsed) {
+  if (shard.firstStaticContactAt === undefined) return elapsed;
+  const sinceContact = Math.max(0, elapsed - shard.firstStaticContactAt);
+  return shard.firstStaticContactAt -
+    Math.expm1(-WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND * sinceContact) /
+      WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND;
+}
 
 function applyWebShardSpin(shard, elapsed, ratio, anchorCollisionCenter) {
   const {x,y,z} = shard.torque;
   const strength = Math.hypot(x,y,z);
   if (strength < 1e-9 || !shard.visible) return;
   const axisX=x/strength, axisY=y/strength, axisZ=z/strength;
-  const angle=WEB_SHARD_SPIN_RADIANS_PER_SECOND*strength*elapsed;
+  const angle=WEB_SHARD_SPIN_RADIANS_PER_SECOND*strength*webShardSpinTime(shard,elapsed);
   const c=Math.cos(angle), sn=Math.sin(angle), t=1-c;
   // Rodrigues rotation, column-major. Rotate the ORIGINAL 3x3 each frame,
   // never accumulate orientation error or depend on framerate/hitch size.
@@ -314,6 +326,11 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
         ? advanceNativeFragmentBody(shard, scaledDelta, {
           ...runtime.physicsContext, limitWebFrameWork: true,
         }) : [];
+      // Only physically confirmed source-scene contacts start the Web-only
+      // angular settling. Pure ballistic shards retain absolute-time spin.
+      if (shard.firstStaticContactAt === undefined && shard.contacts.length > 0) {
+        shard.firstStaticContactAt = elapsed;
+      }
       for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
         shard.modelMatrix[index] = shard.position[axis] - shard.centerOffset[axis] * ratio;
       }
