@@ -47,9 +47,14 @@ export function recordWebImpact(feedback,{kind,point,direction}){
   const priority=kind==='kill'?2:kind==='hit'?1:0;
   const baseSpeed=kind==='kill'?2.8:kind==='hit'?2.0:1.4;
   const burst=feedback.burst++;
+  // Tiny world-space glints currently translate but never rotate. Give each
+  // existing shard a deterministic, opposing angular drift; same draw budget.
+  // The spin rates are original Web art direction, NOT source MCD/PhysX.
+  const spinRate=kind==='kill'?12:kind==='hit'?9:6;
   const tint=kind==='wall'?'#40515c':'#c71739';
   for(let i=0;i<count;i++){
     const theta=(i*2.399963229728653+burst*.61);
+    const spin=spinRate*(i%2===0?1:-1);
     const radial=add(scale(side,Math.cos(theta)),scale(up,Math.sin(theta)));
     const speed=baseSpeed*(.48+(i%5)*.14);
     const velocity=add(scale(radial,speed),
@@ -63,6 +68,7 @@ export function recordWebImpact(feedback,{kind,point,direction}){
       vx:velocity.x,vy:velocity.y,vz:velocity.z,
       size:(enemy?.021:.012)+(i%3)*.008,
       rx:theta,ry:theta*.73,rz:theta*.41,
+      vrx:spin,vry:spin*(i%3===0?.65:-.55),vrz:spin*(i%4===0?-.45:.35),
       color:i%4===0&&enemy?'#f4dfe5':tint,
       life:duration,maxLife:duration,webPriority:priority,
     });
@@ -105,6 +111,11 @@ export function advanceWebImpactFeedback(feedback,realDelta){
     p.y+=p.vy*realDelta-0.8*realDelta*realDelta;
     p.z+=p.vz*realDelta;
     p.vy-=1.6*realDelta;
+    // Angular movement is time-analytic, so a 100ms hitch and two 50ms
+    // frames render the same orientation (until the shard expires).
+    p.rx+=p.vrx*realDelta;
+    p.ry+=p.vry*realDelta;
+    p.rz+=p.vrz*realDelta;
   }
 }
 
