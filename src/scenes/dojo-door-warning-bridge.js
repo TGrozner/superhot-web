@@ -1,4 +1,5 @@
 import { createMcdDoorWarnings } from '../sound/mcd-door-warning.js';
+import { prepareNativeCollision, nativeSegmentHit } from './native-collision.js';
 
 // Static Unity references, NOT a runtime/visibility assertion. All three
 // SpawnerPoint components point at distinct SpawnerDoors components in level10.
@@ -142,9 +143,10 @@ function finiteBasisVector(value) {
  * the private scene catalog or SH-07 source values are allowed.
  * @param {object} catalog The prepared Dojo door catalog (read-only).
  * @param {ReturnType<typeof createMcdDoorWarnings>} controller Live source controller.
+ * @param {ReturnType<typeof prepareNativeCollision> | null} collision Prepared solid Dojo blockers.
  * @returns {{advance: () => void, restore: (id?: string) => void}}
  */
-function createWebWarningSweep(catalog, controller) {
+function createWebWarningSweep(catalog, controller, collision) {
   const bases = new Map();
   for (const packet of controller.packets()) {
     const door = catalog[packet.id];
@@ -384,7 +386,19 @@ function createWebWarningSweep(catalog, controller) {
             (WEB_WARNING_TRACK_FACING_FULL - WEB_WARNING_TRACK_FACING_START));
           const weight = WEB_WARNING_TRACK_STRENGTH * near * facing *
             Math.sin(Math.PI * phase) ** 2;
-          if (weight > 0) {
+          // J4 Web cover readability: do not let the door beam deliberately
+          // follow the player's hidden position through a solid Dojo box.
+          // Reuse the exact active BoxCollider sight query already used by
+          // gunplay; never infer visibility from world mesh render bounds.
+          // Shift the ray origin 8cm along the eye vector so the lamp's own
+          // mounting surface cannot self-occlude a doorway.
+          const rayStart = weight > 0 && collision ? {
+            x: origin[0] + dx / distance * 0.08,
+            y: origin[1] + dy / distance * 0.08,
+            z: origin[2] + dz / distance * 0.08,
+          } : null;
+          const blocked = rayStart && nativeSegmentHit(collision, rayStart, playerWorldPosition);
+          if (weight > 0 && !blocked) {
             const aimYaw = Math.max(-WEB_WARNING_TRACK_MAX_YAW,
               Math.min(WEB_WARNING_TRACK_MAX_YAW, Math.atan2(across, forward)));
             const aimPitch = Math.max(-WEB_WARNING_TRACK_MAX_PITCH,
@@ -481,7 +495,12 @@ export function createDojoDoorWarningBridge(scene) {
     ? (qualifiedWorldBasis ? addSerializedInitialWorldBases(catalog) : catalog)
     : null;
   const controller = preparedCatalog ? createMcdDoorWarnings(preparedCatalog) : null;
-  const webSweep = controller ? createWebWarningSweep(preparedCatalog, controller) : null;
+  // The same source BoxColliders as the live Dojo movement/weapon systems,
+  // prepared once rather than rebuilding them each warning frame. No collider
+  // data means no invented occlusion and retains the existing sweep behavior.
+  const collision = controller && Array.isArray(scene?.colliders) && scene.colliders.length
+    ? prepareNativeCollision(scene.colliders) : null;
+  const webSweep = controller ? createWebWarningSweep(preparedCatalog, controller, collision) : null;
   const readiness = qualified ? (hasCatalog ? 'source-catalog-present' : 'missing-private-door-catalog')
     : 'not-dojo-build10-source';
 

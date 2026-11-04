@@ -658,3 +658,63 @@ test('J4 real-time doorway glow only releases for the part of a frame AFTER enem
     'moving red floor wash must also be frame-split independent');
   }
 });
+
+test('J4 cover-aware warning tracks a visible player but not a player behind solid Dojo cover', () => {
+  // Synthetic blocking BoxCollider, not a claim about native MCD geometry.
+  // The actual Dojo package supplies source BoxCollider transforms/activation.
+  const wall = {
+    id: 'test-opaque-wall', center: [0, 0, 0], size: [0.6, 3, 0.9],
+    worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 12, 1.7, -16.25, 1],
+    layer: { index: 0 }, isTrigger: false,
+    initial: { enabled: true, activeInHierarchy: true },
+  };
+  const covered = createDojoDoorWarningBridge(browserScene({ colliders: [wall] }));
+  const unblocked = createDojoDoorWarningBridge(browserScene({ colliders: [] }));
+  const packets = covered.packets();
+  const originalDirectionBuffer = packets[0].spotlight.direction;
+  const hiddenEye = { x: 9, y: 1.8, z: -15 };
+
+  assert.equal(covered.accept(warning(103)).status, 'triggered');
+  unblocked.accept(warning(103));
+  covered.advance(1, hiddenEye);
+  unblocked.advance(1, hiddenEye);
+  assert.equal(covered.packets(), packets, 'no new render packets for the collision query');
+  assert.equal(packets[0].spotlight.direction, originalDirectionBuffer,
+    'the same GPU-facing direction buffer remains live');
+  assert.ok(unblocked.packets()[0].spotlight.direction[2] -
+    packets[0].spotlight.direction[2] > 0.08,
+  'solid cover prevents the beacon from aiming at an unseen player');
+  assert.equal(packets.filter(packet => packet.active).length, 1);
+  assert.deepEqual(packets.slice(1).map(packet => packet.active), [false, false]);
+
+  covered.reset();
+  unblocked.reset();
+  covered.accept(warning(103));
+  unblocked.accept(warning(103));
+  const visibleEye = { x: 9, y: 1.8, z: -12 };
+  covered.advance(1, visibleEye);
+  unblocked.advance(1, visibleEye);
+  assert.ok(Math.abs(covered.packets()[0].spotlight.direction[2] -
+    unblocked.packets()[0].spotlight.direction[2]) < 1e-9,
+  'stepping around the wall immediately restores the readable player cue');
+
+  // Source-inactive/trigger-only boxes must never masquerade as solid cover.
+  for (const ghost of [
+    { ...wall, isTrigger: true },
+    { ...wall, initial: { enabled: false, activeInHierarchy: true } },
+  ]) {
+    const bridge = createDojoDoorWarningBridge(browserScene({ colliders: [ghost] }));
+    bridge.accept(warning(103));
+    bridge.advance(1, hiddenEye);
+    assert.ok(Math.abs(bridge.packets()[0].spotlight.direction[2] -
+      unblockedAfterReset(hiddenEye)) < 1e-9,
+    'only solid enabled source blockers may suppress the reactive warning');
+  }
+});
+
+function unblockedAfterReset(eye) {
+  const bridge = createDojoDoorWarningBridge(browserScene({ colliders: [] }));
+  bridge.accept(warning(103));
+  bridge.advance(1, eye);
+  return bridge.packets()[0].spotlight.direction[2];
+}
