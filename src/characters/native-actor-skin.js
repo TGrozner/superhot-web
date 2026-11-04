@@ -67,13 +67,13 @@ function webPoseReaction(actorId, pose, identity, solvedPose) {
 }
 
 /**
- * WEB game-feel: bank into actual lateral movement and pitch into a run.
- * The actor's two already-rendered world transforms are used, so this adds
- * no authored clip, timing guess, event or extra GPU draw. The accepted
- * gunshot's frame is intentionally excluded: its muzzle must not move before
- * the deferred shot takes its socket snapshot.
+ * WEB game-feel: bank toward observed travel AND observed heading changes.
+ * Idle enemies lean briefly into turns instead of spinning like rigid figures.
+ * The movement sample is one actor's previous successful GPU draw; first
+ * frames, teleports, abrupt yaw snaps and pauses deliberately cannot bank.
+ * Fire/actions and solved death poses always take priority over this accent.
  *
- * @param {Map<string | number, {time: number, x: number, z: number}>} frames
+ * @param {Map<string | number, {time: number, x: number, z: number, fx: number, fz: number}>} frames
  * @param {string | number} actorId
  * @param {{name: string}} identity
  * @param {number[] | Float32Array} modelMatrix
@@ -84,12 +84,12 @@ function webPoseReaction(actorId, pose, identity, solvedPose) {
  */
 function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTime,
                             solvedPose, action) {
+  const locomoting = identity.name === 'walk' || identity.name === 'run';
   if (solvedPose !== null || action !== null ||
-      (identity.name !== 'walk' && identity.name !== 'run') ||
+      (!locomoting && identity.name !== 'idle') ||
       !Number.isFinite(shaderTime) || !modelMatrix || modelMatrix.length !== 16) return null;
   const previous = frames.get(actorId);
   if (!previous) return null;
-  // A first frame, pause, teleport or replay is NOT a movement sample.
   const dt = shaderTime - previous.time;
   if (!(dt > 0 && dt <= .15)) return null;
   const dx = modelMatrix[12] - previous.x;
@@ -99,15 +99,48 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
   const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
   const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
   if (rightLength < 1e-6 || forwardLength < 1e-6) return null;
-  const strafe = (dx * modelMatrix[0] + dz * modelMatrix[2]) / (dt * rightLength);
-  const advance = (dx * modelMatrix[8] + dz * modelMatrix[10]) / (dt * forwardLength);
+  const fx = modelMatrix[8] / forwardLength;
+  const fz = modelMatrix[10] / forwardLength;
+  // Signed angle between the *observed* forward axes. Ignore teleport-like
+  // facing snaps instead of creating a fictitious multi-revolution turn.
+  const headingChange = Math.atan2(previous.fx * fz - previous.fz * fx,
+    previous.fx * fx + previous.fz * fz);
+  if (!Number.isFinite(headingChange) || Math.abs(headingChange) > .7) return null;
+  const strafe = locomoting
+    ? (dx * modelMatrix[0] + dz * modelMatrix[2]) / (dt * rightLength) : 0;
+  const advance = locomoting
+    ? (dx * modelMatrix[8] + dz * modelMatrix[10]) / (dt * forwardLength) : 0;
   const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
   const pitch = clamp(-advance * .022, .11);
-  const roll = clamp(-strafe * .05, .18);
+  // Web-authored degrees of banking, not source animation parameters.
+  // Both live strafing and target-facing turns contribute to a single capped
+  // lean, so the GPU palette, animated hit shapes and weapon socket agree.
+  const roll = clamp(-strafe * .05 - headingChange / dt * .035, .18);
   if (Math.abs(pitch) + Math.abs(roll) < .012) return null;
   return Object.freeze({
-    kind: 'locomotion', pitch, roll,
-    design: 'Web-only responsive locomotion banking',
+    kind: locomoting ? 'locomotion' : 'turn', pitch, roll,
+    design: 'Web-only responsive travel and turn anticipation',
+  });
+}
+
+/**
+ * A stationary sentry gets a small independent breath/weight-shift cycle.
+ * Uses the ACTUAL gameplay state time (not wall time), so a frozen game
+ * freezes the pose too. Fades in after entering idle and never overlays
+ * actions, transitions, fire aim, hits or ragdolls.
+ */
+function webIdleReaction(actorId, pose, identity, solvedPose, action, transition) {
+  if (solvedPose !== null || action !== null || transition !== null ||
+      identity.name !== 'idle' || !Number.isFinite(pose.time) || pose.time <= 0) return null;
+  let phase = typeof actorId === 'number' ? actorId * .618 : 0;
+  if (typeof actorId === 'string') {
+    for (let i = 0; i < actorId.length; i++) phase += actorId.charCodeAt(i) * .13;
+  }
+  const ramp = Math.min(1, pose.time / .28);
+  const pitch = Math.sin(pose.time * 2.4 + phase) * .035 * ramp;
+  const roll = Math.sin(pose.time * 1.3 + phase * 1.5) * .025 * ramp;
+  return Object.freeze({
+    kind: 'idle', pitch, roll, design: 'Web-only idle weight shifting',
   });
 }
 
@@ -231,7 +264,9 @@ export function createNativeActorSkinRuntime(skinPass) {
     }
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
-        modelMatrix, shaderTime, solvedPose, action);
+        modelMatrix, shaderTime, solvedPose, action)
+      ?? webIdleReaction(actorId, pose, selected.identity,
+        solvedPose, action, transitionDescriptor);
     // Web game-feel: a hard impact reads instantly against the red crystalline
     // silhouette. This pulse follows the live, already accepted hit state;
     // it never fabricates a hit event, clip, or ragdoll motion.
@@ -251,8 +286,10 @@ export function createNativeActorSkinRuntime(skinPass) {
     if (solvedPose !== null) {
       movementFrames.delete(actorId);
     } else if (Number.isFinite(shaderTime)) {
+      const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
       movementFrames.set(actorId, {
         time: shaderTime, x: modelMatrix[12], z: modelMatrix[14],
+        fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
       });
       if (movementFrames.size > 128) {
         for (const [id, sample] of movementFrames) {
