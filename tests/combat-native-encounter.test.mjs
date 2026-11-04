@@ -505,3 +505,40 @@ test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and 
   assert.deepEqual(squad.encounter.target,target.playerFeet,
     'an unarmed neighbor cannot force the ranged squad tactic');
 });
+
+test('J3 Web assault pressure: one armed squadmate closes fast while wingman covers, then disengages when alone',()=>{
+  // Synthetic scene and actor identities; this tactic is deliberately Web-only.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const near={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const soloRuntime=setup(data), solo=firstSpawn(soloRuntime,near);
+  advanceNativeEncounter(soloRuntime,input([solo],{...near,scaledDeltaTime:.2}));
+  assert.equal(solo.x,2,'solo enemy keeps its original armed stop distance');
+
+  const encounter=setup(data), lead=firstSpawn(encounter,near);
+  const wingman={
+    ...lead,id:'native-encounter-wingman',x:2,z:4,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+  };
+  let last=p(lead.x,lead.y,lead.z);
+  for(let frame=0;frame<4;frame++) {
+    advanceNativeEncounter(encounter,input([lead,wingman],{...near,scaledDeltaTime:.2}));
+    assert.ok(Math.hypot(lead.x-last.x,lead.z-last.z)<=1+1e-6,
+      'assault movement remains bound by the existing source running speed');
+    assert.ok(Math.hypot(lead.x-wingman.x,lead.z-wingman.z)>=.8,
+      'breacher never traverses a teammate capsule');
+    assert.equal(lead.encounter.canAttack,false,'squad pressure never fabricates a muzzle');
+    last=p(lead.x,lead.y,lead.z);
+  }
+  assert.ok(lead.x>2.8,'squad leader enters the original stop ring');
+  assert.deepEqual(p(wingman.x,wingman.y,wingman.z),p(2,0,4),
+    'covering squadmate retains the normal armed stop distance');
+
+  wingman.reaction.dead=true;
+  const before=p(lead.x,lead.y,lead.z);
+  advanceNativeEncounter(encounter,input([lead,wingman],{...near,scaledDeltaTime:.2}));
+  assert.deepEqual(p(lead.x,lead.y,lead.z),before,
+    'when the wingman dies, no solo enemy keeps an unjustified assault');
+  assert.equal(lead.encounter.canAttack,false,'death does not grant an attack');
+});
