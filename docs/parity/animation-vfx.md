@@ -542,3 +542,18 @@ Un fragment de `GunPickup` reçoit déjà le couple échantillonné et des conta
 **Politique créative Web, PAS native :** au moment de l'intégration temps-réel, après les forces et le drag source mais avant la résolution CCD, les vitesses extrêmes sont bornées à **24 m/s linéaires** et **16 rad/s angulaires**, direction conservée. Une impulsion ordinaire ne change pas, et un appel non budgété conserve l'entrée complète. Ce plafonnement ne reproduit pas PhysX et ne constitue pas un réglage extrait de MCD. Les masses, joints, impacts, scènes et horloge Kill restent inchangés ; aucun asset supplémentaire ou fichier SH-05 modifié.
 
 **Test ciblé :** `tests/animation-native-death-runtime.test.mjs` vérifie une impulsion extrême, une force soutenue extrême, une impulsion ordinaire et la simulation explicitement non budgétée. **À contrôler après merge :** le ressenti de 6–7 morts au Dojo à 30/60 FPS, des réimpulsions sur corps posés, l'absence de membres lancés à travers la pièce, les collisions sol/mur et victoire/REJOUER. La CI ne prouve pas ces sensations. Les valeurs du solveur natif effectif et la sélection live des transitions Mecanim demeurent inconnues ; les rapports `spec/animation/verification.json` et `link-verification.json` ne doivent pas être interprétés comme preuve d'exécution d'un état.
+
+
+### Web combat VFX clock after a browser hitch (SH-06, 2026-11-04)
+
+`advanceWebImpactFeedback` now consumes the *full* active real-time delta given by
+its host instead of truncating each update to 50 ms. This prevents the hit marker
+and short hit/kill/wall sparks from surviving twice as long at 10 FPS. The
+particle trajectory uses the analytic constant-gravity step (Web-authored
+1.6 units/s²), which agrees across a 100 ms frame and two 50 ms frames. No
+new particles, textures, draw calls or source claims. **SH-05 integration**:
+`src/main.js` currently passes its capped `dt` (update around line 1208);
+pass the already-computed `activeRealDt` on native Dojo gameplay updates,
+while preserving pause behavior and legacy timing. Until that shared-file
+change lands, a 10 FPS frame may still look capped. This is an intentionally
+original Web visual policy, **not** a reconstructed Unity HDR/VFX timing.
