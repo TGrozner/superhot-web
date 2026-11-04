@@ -240,11 +240,10 @@ test('Web ragdoll keeps natural 30 Hz fall without an unbounded hitch catch-up',
 
 
 test('Web corpses settle only on live grounded contact, sleep, then wake for real impacts or lost support',()=>{
-  const grounded=()=>{
+  const grounded=(scene=floor())=>{
     const def=definition();
     def.bodies=[def.bodies[0]];
     def.joints=[];
-    const scene=floor();
     const runtime=createNativeDeathRuntime({
       definition:def,collisionScene:scene,
       boneModelMatrices:new Float32Array([
@@ -281,4 +280,30 @@ test('Web corpses settle only on live grounded contact, sleep, then wake for rea
   assert.equal(displaced.runtime.resting,false,'disabled source support must wake physics');
   assert.ok(displaced.runtime.bodies[0].position.y<originalY-0.001,
     'body must fall when its support is removed');
+
+  // A later lateral hit must slide along the ACTUAL support instead of being
+  // stuck by the initial downward floor contact at sweep fraction t=0.
+  const lateral=grounded();
+  const xBefore=lateral.runtime.bodies[0].position.x;
+  applyNativeDeathForce(lateral.runtime,{
+    boneIndex:1,mode:'Impulse',vector:{x:12,y:0,z:0},
+  });
+  advanceNativeDeathRuntime(lateral.runtime,1/60,{limitWebFrameWork:true});
+  assert.ok(lateral.runtime.bodies[0].position.x>xBefore+0.002,
+    'floor t=0 contact must not cancel the horizontal impulse');
+  assert.ok(lateral.runtime.bodies[0].position.y>=0.1-1e-6,
+    'tangent slide must retain the authored floor boundary');
+
+  // A lateral impulse is NOT permission to tunnel through an adjacent wall.
+  const walled=grounded(prepareNativeCollision([
+    {id:'floor',worldMatrix:matrix(0,-0.5,0),center:[0,0,0],size:[50,1,50]},
+    {id:'wall',worldMatrix:matrix(0.65,0.5,0),center:[0,0,0],size:[0.2,1,10]},
+  ]));
+  applyNativeDeathForce(walled.runtime,{
+    boneIndex:1,mode:'Impulse',vector:{x:120,y:0,z:0},
+  });
+  for(let i=0;i<6;i++)
+    advanceNativeDeathRuntime(walled.runtime,1/60,{limitWebFrameWork:true});
+  assert.ok(walled.runtime.bodies[0].position.x<=0.45+1e-5,
+    'secondary tangent sweep must respect the real wall face');
 });

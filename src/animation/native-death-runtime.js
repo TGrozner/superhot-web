@@ -278,6 +278,7 @@ function contactsFor(runtime,body,displacement,contacts) {
   const from=body.collisionWorld,requested=body.world.slice();
   for(let i=0;i<3;i++)requested[12+i]+=displacement[axes[i]];
   let fraction=1;
+  const atStartNormals=[];
   const record=hit=>contacts.push({boneIndex:body.source.boneIndex,partId:body.source.partId,...hit});
   for(const sphere of body.spheres) {
     const start=transform(from,sphere.center),end=transform(requested,sphere.center),candidate={...start};
@@ -288,10 +289,42 @@ function contactsFor(runtime,body,displacement,contacts) {
       : [];
     const first=hits.find(hit=>!hit.penetration);
     if(first)fraction=Math.min(fraction,first.t);
-    for(const hit of hits)record(hit);
+    for(const hit of hits) {
+      if(!hit.penetration && hit.t<=1e-7)atStartNormals.push(hit.normal);
+      record(hit);
+    }
   }
   if(fraction===1)body.world=requested;
-  else {
+  else if(fraction<=1e-7 && atStartNormals.length) {
+    // A grounded body can hit the floor at t=0 while a horizontal impulse
+    // should still move it. A scalar t=0 truncated ALL axes and glued bodies
+    // to the ground. Keep rotation conservatively at the last admitted pose,
+    // but project translation onto the contact tangent(s) and sweep that
+    // motion again against EVERY source sphere (walls still block it).
+    // Web-only contact/sliding correction, not native PhysX friction or CCD.
+    let tangent=sub(point(requested),point(from));
+    for(let pass=0;pass<4;pass++)for(const normal of atStartNormals) {
+      const inward=dot(tangent,normal);
+      if(inward<0)tangent=sub(tangent,mul(normal,inward));
+    }
+    let admitted=length(tangent)>1e-9?1:0;
+    if(admitted)for(const sphere of body.spheres) {
+      const start=transform(from,sphere.center),end={
+        x:start.x+tangent.x,y:start.y+tangent.y,z:start.z+tangent.z,
+      };
+      const candidate={...start};
+      const localScene=nearbyStaticBoxes(runtime.collisionScene,start,end,sphere.radius);
+      const hits=localScene.boxes.length
+        ? moveNativeFragmentSphere(localScene,candidate,body.velocity,tangent,
+          sphere.radius,runtime.definition.material)
+        : [];
+      const first=hits.find(hit=>!hit.penetration);
+      if(first)admitted=Math.min(admitted,first.t);
+      for(const hit of hits)record(hit);
+    }
+    body.world=from.slice();
+    for(let i=0;i<3;i++)body.world[12+i]+=tangent[axes[i]]*admitted;
+  } else {
     const angular=rotationVector(multiplyMatrices(requested,inverse(from)));
     body.world=multiplyMatrices(rotation(mul(angular,fraction)),from);
     for(let i=0;i<3;i++)body.world[12+i]=from[12+i]+(requested[12+i]-from[12+i])*fraction;
