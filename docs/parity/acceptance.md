@@ -629,13 +629,15 @@ Results distinguish:
 - `WEB_RENDERED_VISUAL_HOOKS_SAMPLED_NOT_NATIVE_PARITY` — actual browser
   snapshot-shaped Web receipts were supplied, **not** an independently
   executed/verified Chromium session and **not** a native screenshot match.
-- `WEB_DOJO_WARNING_ACTIVE_WITHOUT_RENDERED_SPOTLIGHT` — a source warning
-  envelope was active while the same sampled frame reported **zero Web
-  spotlight draws**. This is a **Web integration gap** (`exit 1`), not proof of
-  a native light error. With `main@980dad6` the warning bridge is wired, but
-  `renderedSpotlights:0` is explicit pending source world TRS/cookie data and
-  the actual native-world fragment pass. An active warning must be **sampled**:
-  absent/degraded source packet or a missed 50 ms transition does not count.
+- `WEB_DOJO_WARNING_ACTIVE_NO_LIGHT_SUBMITTED_NEEDS_VIEWPORT_CHECK` —
+  the same sampled warning frame reports **zero source projector AND zero Web
+  false-light GPU draws** (`exit 1`). This is a potential missing shader
+  submission, not proof of a visible red-light bug: offscreen/per-mesh culling
+  may legitimately yield zero. Reproduce at a fixed angle near the actual
+  doorway and inspect real pixels. The creative Web red wash introduced in
+  #340/#355 uses `generatedManifest.warningWebFalseLightDrawCalls` separately
+  from `doorWarning.renderedSpotlights`: zero native spotlights is not by
+  itself a regression. Missing new counters in older traces stay UNKNOWN.
 - `WEB_RENDERED_VISUAL_HOOKS_NOT_OBSERVED` — older capture or no world GPU
   draw evidence (`exit 2`). Invalid/mislabeled source data is also rejected
   (`exit 2`). A pistol-only run with zero hands is **unexercised**, not a
