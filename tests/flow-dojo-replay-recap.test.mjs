@@ -317,3 +317,33 @@ test('unfinished Dojo replay challenge stays active across losses until a real c
   assert.match(earned.text, /DÉFI RÉUSSI : SCORE/);
   assert.equal(readDojoReplayBest(JSON.stringify(earned.best),6),null);
 });
+
+
+test('visible chrono challenge does not award success for an unshown hundredth of a second', () => {
+  const previous = {...result(6, {score:1000, elapsedSeconds:22.049}).best,
+    pendingChallenge:null};
+  const assigned = result(6, {best:previous, score:1100, elapsedSeconds:22.5});
+  assert.equal(assigned.replayTarget, 'SOUS 22.0 S POUR UN NOUVEAU RECORD');
+  assert.deepEqual(assigned.best.pendingChallenge, {kind:'time',target:22});
+
+  const miss = result(6, {best:readDojoReplayBest(JSON.stringify(assigned.best),6),
+    score:1110, elapsedSeconds:22.02});
+  assert.equal(miss.completedChallenge, null,
+    '22.02 beats the exact old PB but does not satisfy the displayed SOUS 22.0 target');
+  assert.match(miss.text, /DÉFI À RETENTER : SOUS 22.0 S POUR LE RECORD/);
+  assert.deepEqual(miss.best.pendingChallenge, {kind:'time',target:22});
+  const success = result(6, {best:miss.best, score:1120, elapsedSeconds:21.99});
+  assert.equal(success.completedChallenge, 'time');
+  assert.match(success.text, /DÉFI RÉUSSI : CHRONO/);
+
+  const historicalGoal = {...assigned.best,pendingChallenge:{kind:'time',target:22.049}};
+  const historicalRetry = result(6, {best:historicalGoal,score:1000,elapsedSeconds:25});
+  assert.match(historicalRetry.text, /DÉFI À RETENTER : SOUS 22.049 S/,
+    'a precise already-persisted v5 goal must not be rounded on display');
+
+  const extremelyFast = {...result(7,{score:900,elapsedSeconds:0.08}).best,
+    pendingChallenge:null};
+  const noZeroTarget = result(7,{best:extremelyFast,score:1000,elapsedSeconds:0.4});
+  assert.notEqual(noZeroTarget.best.pendingChallenge?.kind,'time',
+    'a target rounded down to 0.0 would be impossible');
+});
