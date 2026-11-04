@@ -13,6 +13,7 @@ interface Voice {
   readonly sources: AudioScheduledSourceNode[];
   readonly gain: GainNode;
   readonly panner: PannerNode | null;
+  readonly distanceFilter: BiquadFilterNode | null;
   readonly priority: number;
   pending: number;
 }
@@ -84,6 +85,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     }
     voice.gain.disconnect();
     voice.panner?.disconnect();
+    voice.distanceFilter?.disconnect();
   }
 
   // A stolen still-audible transient needs a short release to avoid a click.
@@ -144,6 +146,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     const out = context.createGain();
     out.gain.value = intensity;
     let panner: PannerNode | null = null;
+    let distanceFilter: BiquadFilterNode | null = null;
     if (position && typeof context.createPanner === 'function') {
       panner = context.createPanner();
       panner.panningModel = 'HRTF';
@@ -154,12 +157,28 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       panner.positionX.setValueAtTime(position.x, at);
       panner.positionY.setValueAtTime(position.y, at);
       panner.positionZ.setValueAtTime(position.z, at);
-      out.connect(panner);
+      // Original Web mix coloration, NOT a recovered Unity attenuation law.
+      // A remote emitter has a softer transient. The existing camera listener
+      // is updated by SH-05; browsers without position AudioParams fail open.
+      const lx = context.listener?.positionX?.value;
+      const ly = context.listener?.positionY?.value;
+      const lz = context.listener?.positionZ?.value;
+      if (lx !== undefined && ly !== undefined && lz !== undefined &&
+        Number.isFinite(lx) && Number.isFinite(ly) && Number.isFinite(lz)) {
+        const distance = Math.hypot(position.x - lx, position.y - ly, position.z - lz);
+        const cutoff = Math.max(1200, Math.min(context.sampleRate * 0.45,
+        18000 / (1 + distance * distance / 450)));
+        distanceFilter = context.createBiquadFilter();
+        distanceFilter.type = 'lowpass';
+        distanceFilter.frequency.setValueAtTime(cutoff, at);
+        distanceFilter.connect(panner);
+      }
+      out.connect(distanceFilter ?? panner);
       panner.connect(cue === 'step' ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
     } else {
       out.connect(cue === 'step' ? footsteps : cue === 'impact' || cue === 'shatter' ? impacts : weapons);
     }
-    const voice: Voice = {sources: [], gain: out, panner, pending: 2, priority};
+    const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: 2, priority};
     voices.add(voice);
     const ended = () => {
       voice.pending--;
