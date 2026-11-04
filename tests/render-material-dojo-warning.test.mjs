@@ -329,8 +329,8 @@ test('J4 Web doorway wash favours the lamp-facing surface without hard-killing b
     'light-center behaviour remains stable without an undefined direction');
   assert.throws(() => sampleDojoDoorFalseLightWebWash(fill, point, 2, [0, 0, 0]),
     /Zero or invalid direction/);
-  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /uHasNormals != 0 && radius > 0\\.0001/);
-  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \\* fade \\* fade \\* facing/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /uHasNormals != 0 && radius > 0\.0001/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade \* facing/);
 });
 
 test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering vectors', () => {
