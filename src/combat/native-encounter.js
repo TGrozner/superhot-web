@@ -534,12 +534,27 @@ function webSquadFireTurns(runtime, enemies, observers, target) {
     ready.push(enemy);
   }
   ready.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
-  const turn=new Set();
-  for(const enemy of ready) {
-    const nearby=ready.filter(ally=>Math.hypot(ally.x-enemy.x,ally.z-enemy.z)<=
-      runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii);
-    const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%nearby.length;
-    if(nearby[index]===enemy)turn.add(enemy);
+  // Overlapping neighbor lists can each elect a different shooter (A-B-C
+  // chain). Partition the *eligible* gunners into disjoint connected squads;
+  // all members then agree on one stable firing turn, regardless of input order.
+  const turn=new Set(), unassigned=new Set(ready);
+  const range=runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii;
+  for(const first of ready) {
+    if(!unassigned.has(first))continue;
+    const squad=[first];
+    unassigned.delete(first);
+    for(let i=0;i<squad.length;i++) {
+      const member=squad[i];
+      for(const ally of ready) {
+        if(!unassigned.has(ally) ||
+            Math.hypot(ally.x-member.x,ally.z-member.z)>range)continue;
+        unassigned.delete(ally);
+        squad.push(ally);
+      }
+    }
+    squad.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+    const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%squad.length;
+    turn.add(squad[index]);
   }
   return {clear,allyBlocked,turn,eligible:new Set(ready)};
 }
