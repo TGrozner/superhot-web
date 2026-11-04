@@ -579,3 +579,23 @@ fracture asset is inferred. Validate visually on standalone Pages after
 SH-05 merge: multiple kills and thrown items, resting vs sliding fragments,
 re-enabled/disabled collision surfaces, FPS at 30/60 Hz and replay. Node CI
 only proves the deterministic code path, not real browser frame times.
+
+
+### SH-06 / 2026-11-04 — Broadphase des fragments à scènes Dojo chargées
+
+Pour les grandes vues de BoxColliders déjà préparées (16+), les balayages des débris
+interrogent désormais un index d'intervalles X construit une seule fois, puis
+filtrent les limites AABB Y/Z avant le test géométrique exact existant. L'ordre
+initial des colliders est préservé pour les impacts ex aequo ; les collisions,
+frictions et normales finales restent calculées par le même solveur. L'index
+est reconstruit si la liste des colliders change de référence ou de taille ;
+les bascules `enabled` sont prises en compte à chaque requête. Le détachement
+des corps et les portes conservent donc leur état collision courant. C'est une
+**optimisation Web originale**, pas un ordre ni un accélérateur PhysX observé.
+
+Un test ciblé compare collision et réponse avec/sans 96 colliders éloignés,
+contrôle l'absence de parcours intégral après échauffement de l'index et la
+désactivation du plancher. Cela vise le coût CPU des premières frames de
+multiples fractures, avant le sommeil des fragments livré précédemment. Aucun
+asset, maillage, draw call, timing natif Mecanim ou événement MCD n'est ajouté.
+**Non vérifié** : FPS et rendu en navigateur sur Pages après merge SH-05.

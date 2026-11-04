@@ -9,6 +9,49 @@ export const WEB_FRAGMENT_MAX_SUBSTEPS = 4;
 // No PhysX sleep thresholds are inferred from these deliberately small values.
 const WEB_SHARD_REST_SECONDS = 0.2;
 const WEB_SHARD_REST_SPEED = 0.06;
+// Source BoxCollider AABBs are immutable within a Dojo round; only enabled
+// toggles change. Index wide source scenes once, preserving source box order
+// for equal-time contacts. The interval query is a Web broadphase, not PhysX.
+const fragmentBroadphases = new WeakMap();
+function nearbyFragmentBoxes(scene, start, end, radius) {
+  const boxes = scene.boxes;
+  if (boxes.length < 16) return scene;
+  let index = fragmentBroadphases.get(scene);
+  if (!index || index.boxes !== boxes || index.count !== boxes.length) {
+    const sorted = boxes.map((box, order) => ({ box, order, minX: box.min.x }))
+      .sort((a, b) => a.minX - b.minX || a.order - b.order);
+    const prefixMaxX = [];
+    let maxX = -Infinity;
+    for (const entry of sorted) {
+      maxX = Math.max(maxX, entry.box.max.x);
+      prefixMaxX.push(maxX);
+    }
+    index = { boxes, count: boxes.length, sorted, prefixMaxX };
+    fragmentBroadphases.set(scene, index);
+  }
+  const minX = Math.min(start.x, end.x) - radius;
+  const maxX = Math.max(start.x, end.x) + radius;
+  const minY = Math.min(start.y, end.y) - radius;
+  const maxY = Math.max(start.y, end.y) + radius;
+  const minZ = Math.min(start.z, end.z) - radius;
+  const maxZ = Math.max(start.z, end.z) + radius;
+  let low = 0, high = index.sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (index.sorted[mid].minX <= maxX) low = mid + 1;
+    else high = mid;
+  }
+  const candidates = [];
+  for (let i = low - 1; i >= 0 && index.prefixMaxX[i] >= minX; i--) {
+    const { box, order } = index.sorted[i];
+    if (box.enabled && box.max.x >= minX && box.min.y <= maxY &&
+        box.max.y >= minY && box.min.z <= maxZ && box.max.z >= minZ)
+      candidates.push({ box, order });
+  }
+  candidates.sort((a, b) => a.order - b.order);
+  return { boxes: candidates.map(candidate => candidate.box) };
+}
+
 const dot = (a, b) => a.x*b.x + a.y*b.y + a.z*b.z;
 const sub = (a,b) => ({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
 const along = (a,b,t) => ({x:a.x+b.x*t,y:a.y+b.y*t,z:a.z+b.z*t});
@@ -34,7 +77,7 @@ function closestTriangle(p,{a,b,c}) {
 function recoverPenetration(scene,position,velocity,radius,contacts) {
   for(let iteration=0;iteration<8;iteration++) {
     let changed=false;
-    for(const box of scene.boxes) {
+    for(const box of nearbyFragmentBoxes(scene, position, position, radius).boxes) {
       if(!box.enabled || axes.some(a=>position[a]<box.min[a]-radius||position[a]>box.max[a]+radius))continue;
       const relative=sub(position,box.center);
       let depth=Infinity,normal=null,inside=true;
@@ -92,7 +135,7 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
   // unchecked remainder if a corner exhausts this budget.
   for (let iteration = 0; iteration < 4; iteration++) {
     const end = { x: position.x + remaining.x, y: position.y + remaining.y, z: position.z + remaining.z };
-    const hit = nativeSphereHit(scene, position, end, radius);
+    const hit = nativeSphereHit(nearbyFragmentBoxes(scene, position, end, radius), position, end, radius);
     if (!hit) { Object.assign(position, end); break; }
     for (const axis of axes) position[axis] += remaining[axis] * hit.t;
     contacts.push(hit);
