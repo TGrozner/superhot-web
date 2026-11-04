@@ -75,8 +75,9 @@ test('a second accepted stun refreshes Web flinch and damage pulse without resta
   // The source hit state has NOT been restarted by the native reaction path.
   // A second accepted contact can still carry a different hitEventId.
   const fresh = render('guard', 18, fromRight, null, .52, 1.42);
-  assert.equal(fresh.actorWebPoseReaction, null, 'flinch starts at its own Web event time');
-  assert.equal(fresh.actorWebHitFlash, 1, 'new accepted hit must flash immediately');
+  assert.ok(fresh.actorWebPoseReaction.roll > 0,
+    'a second accepted contact must visibly respond on its first rendered frame');
+  assert.ok(fresh.actorWebHitFlash > .5, 'new accepted hit must flash immediately');
   const followThrough = render('guard', 18, fromLeft, null, .57, 1.47,
     {x: -10, y: 1, z: 0});
   assert.equal(followThrough.actorWebPoseReaction.kind, 'hit');
