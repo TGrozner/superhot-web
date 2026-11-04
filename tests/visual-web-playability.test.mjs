@@ -145,3 +145,50 @@ test('painted nowrap ink conflicts even when CSS feedback boxes do not touch',()
   assert.deepEqual(r.warnings[1].ids,['chain-banner','pickup-prompt']);
   assert.ok(r.warnings[1].overlapFraction>0.7);
 });
+
+test('Live Web QA detects pickup text covered by the later HUD hint strip, not background-only overlap',()=>{
+  const pickup={id:'pickup-prompt',left:60,top:105,width:200,height:52,
+    textBounds:{left:78,top:126,width:163,height:21}};
+  const hint={id:'hint-bar',left:0,top:132,width:320,height:48};
+  const evaluate=(box)=>assessWebVisualReadability({
+    frame:playing,metrics:{p95FrameMs:16.2},width:320,height:180,boxes:[pickup,box],
+  });
+  const overlap=evaluate(hint);
+  const warning=overlap.warnings.find(w=>w.kind==='pickup-text-in-controls');
+  assert.deepEqual(warning.ids,['pickup-prompt','hint-bar']);
+  assert.ok(warning.overlapFraction>0.6);
+  assert.equal(overlap.overlayBoxesInspected,1); // hint strip is not a transient banner
+
+  const backgroundOnly=evaluate({...hint,top:153,height:27});
+  assert.equal(backgroundOnly.warnings.some(w=>w.kind==='pickup-text-in-controls'),false);
+  const unknownInk=assessWebVisualReadability({
+    frame:playing,width:320,height:180,
+    boxes:[{...pickup,textBounds:undefined},hint],
+  });
+  assert.equal(unknownInk.warnings.some(w=>w.kind==='pickup-text-in-controls'),false);
+
+  const timers=new Map();
+  const pickupEl={hidden:false,textContent:'E RAMASSER L’ARME',
+    getBoundingClientRect:()=>({left:60,top:105,width:200,height:52})};
+  const hintEl={hidden:false,textContent:'ZQSD / WASD · BOUGER',
+    getBoundingClientRect:()=>({left:0,top:132,width:320,height:48})};
+  const documentRef={
+    body:{append(){}},createElement:()=>({style:{},setAttribute(){},remove(){}}),
+    getElementById:id=>id==='pickup-prompt'?pickupEl:id==='hint-bar'?hintEl:null,
+    createRange:()=>({selectNodeContents(el){assert.equal(el,pickupEl);},
+      getBoundingClientRect:()=>pickup.textBounds}),
+  };
+  const windowRef={
+    innerWidth:320,innerHeight:180,
+    __superhotGetRenderedFrameSnapshot:()=>playing,
+    __superhotSceneMetrics:{p95FrameMs:16.2},
+    getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
+    setInterval:(fn,ms)=>{timers.set(ms,fn);return ms;},
+    clearInterval:ms=>timers.delete(ms),
+  };
+  const qa=installWebVisualQa({windowRef,documentRef});
+  assert.equal(qa.getReport().warnings.some(w=>w.kind==='pickup-text-in-controls'),true);
+  assert.equal(qa.getReport().transientWarnings[0].kind,'pickup-text-in-controls');
+  qa.stop();
+  assert.equal(timers.size,0);
+});

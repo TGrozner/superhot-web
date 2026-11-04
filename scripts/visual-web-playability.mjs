@@ -10,6 +10,9 @@
 
 /** @typedef {{id:string,left:number,top:number,width:number,height:number,textBounds?:{left:number,top:number,width:number,height:number}}} VisibleBox */
 const BANNERS = ['stage-banner', 'chain-banner', 'dodge-banner', 'pickup-prompt'];
+// Static controls paint after #pickup-prompt inside #hud; unlike feedback
+// collisions, a geometric overlap matters only when the PROMPT TEXT is hit.
+const HUD_OCCLUDERS = ['hint-bar'];
 const INTERSECTION_FRACTION = 0.12;
 
 function boxIntersectionFraction(a, b) {
@@ -96,6 +99,23 @@ export function assessWebVisualReadability({
         detail:'Rendered feedback text extends beyond its own readable background'});
     }
   }
+  // #hint-bar is later in the DOM than #pickup-prompt and its translucent
+  // background can obscure the E instruction in short browser viewports.
+  // Test ink bounds rather than just backgrounds to avoid false alarms when
+  // only the empty edges of the two elements intersect. This is a geometric
+  // risk, NOT a screenshot/pixel occlusion measurement.
+  const pickup = visible.find(box => box.id === 'pickup-prompt');
+  const hint = boxes.find(box => box.id === 'hint-bar' &&
+    [box.left,box.top,box.width,box.height].every(Number.isFinite) &&
+    box.width > 0 && box.height > 0);
+  if (pickup?.textBounds && hint) {
+    const fraction = boxIntersectionFraction(pickup.textBounds, hint);
+    if (fraction >= INTERSECTION_FRACTION) {
+      warnings.push({kind:'pickup-text-in-controls',ids:['pickup-prompt','hint-bar'],
+        overlapFraction:Math.round(fraction*1000)/1000,
+        detail:'Pickup text intersects the later-painted control strip (geometric occlusion risk)'});
+    }
+  }
   for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) {
     const a = visible[i], b = visible[j];
     if (a.id === b.id) continue;
@@ -118,7 +138,7 @@ export function assessWebVisualReadability({
 
 function readVisibleBoxes(windowRef, documentRef) {
   const boxes=[];
-  for (const id of BANNERS) {
+  for (const id of [...BANNERS,...HUD_OCCLUDERS]) {
     const element=documentRef.getElementById(id);
     if (!element || element.hidden) continue;
     const css=windowRef.getComputedStyle(element);
@@ -126,7 +146,7 @@ function readVisibleBoxes(windowRef, documentRef) {
     const rect=element.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
       const box={id,left:rect.left,top:rect.top,width:rect.width,height:rect.height};
-      if (typeof documentRef.createRange === 'function' && element.textContent?.trim()) {
+      if (id !== 'hint-bar' && typeof documentRef.createRange === 'function' && element.textContent?.trim()) {
         const range=documentRef.createRange();
         range.selectNodeContents(element);
         const ink=range.getBoundingClientRect();
@@ -179,7 +199,7 @@ export function installWebVisualQa({
         observedSamples++;
         for(const w of current.warnings) {
           if(w.kind!=='overlapping-feedback' && w.kind!=='clipped-banner' &&
-             w.kind!=='text-outside-banner')continue;
+             w.kind!=='text-outside-banner' && w.kind!=='pickup-text-in-controls')continue;
           const key=w.kind+':'+w.ids.join('/');
           const previous=transient.get(key);
           transient.set(key,{
