@@ -737,7 +737,16 @@ document.addEventListener('mousemove', (event) => {
 document.addEventListener('contextmenu', (event) => { if (state.screen === 'playing') event.preventDefault(); });
 document.addEventListener('mousedown', (event) => {
   if ((event.button !== 0 && event.button !== 2) || state.screen !== 'playing') return;
-  if (document.pointerLockElement !== canvas) { nativeCombatStarted = true; initializeAudio(); requestMouse(); return; }
+  if (document.pointerLockElement !== canvas) {
+    if (nativeGameplay() && !nativeCombatStarted) {
+      // First click after preview is the actual round start. Re-anchor the
+      // active frame interval, so the next rAF never charges pre-click time.
+      state.runClock = 0;
+      activeSinceTimestampMs = performance.now();
+    }
+    nativeCombatStarted = true;
+    initializeAudio(); requestMouse(); return;
+  }
   if (event.button === 2) throwWeapon();
   else shoot();
 });
@@ -1147,7 +1156,10 @@ function walkThroughScene(position, feet) {
 function update(dt, activeRealDt) {
   // Web game-clock and 360ms unarmed recovery must count only actual PLAYING time.
   // Physics/animation/world clock keep the existing capped simulation dt.
-  state.runClock += activeRealDt;
+  // The standalone Dojo opens in PLAYING for visual preview, before the
+  // player has actually started combat. Never score that preview as run time.
+  // Other non-Dojo modes retain their existing timer behavior.
+  if (!nativeGameplay() || nativeCombatStarted) state.runClock += activeRealDt;
   state.waveClock += dt;
   state.stageBanner = Math.max(0, state.stageBanner - dt);
   state.lookActivity = Math.max(0, state.lookActivity - dt * 2.1);
