@@ -340,3 +340,13 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — contrôle automatisé ciblé.** `tests/flow-dojo-score-target.test.mjs` modélise victoire 1 000 → défi sans tir réussi à 800 → objectif 1 001 conservé après défaite → succès à 1 001. Le JavaScript ESM généré reste synchronisé avec le TypeScript strict. L'exécution CI et le smoke navigateur doivent être relevés distinctement sur la PR, puis sur le SHA déployé.
 
 **INCONNU — MCD natif.** Défis, médailles, score et séries sont des mécaniques de rejouabilité Web : ils n'établissent aucune donnée native Dojo. Les sources privées existantes (research #176/#177) décrivent statiquement la configuration `RunEnding` et `LevelTimeline → EndRunLevel`, sans capture de victoire. La requête `superhot-research#233` pour `SHRLManager.cs:1–180` n'avait aucun commentaire au dernier contrôle ; `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, checkpoints et destination native restent à confirmer sans duplicata.
+
+## SH-08 — séries par quota sur le Dojo Web (04/11/2026)
+
+**PROUVÉ (source Web, main 3dc2e8b).** `src/main.js::finish(win)` utilise la clé `framebreak-dojo-record-v1-${quota}`. Les champs `currentStreak` / `bestStreak` et leurs défis persistent indépendamment pour les quotas 6 et 7. Une défaite sur une manche à 7 n'interrompt donc pas la sous-série de victoires à 6 ; ce n'est pas une série globale. Le nouveau libellé `FORMAT 6/7 UNIQUEMENT` clarifie la portée dans les annonces et les défis, sans modifier les règles de combat ou la sauvegarde.
+
+**OBSERVÉ (code Web uniquement).** `createDojoReplayRecap` est appelée depuis `finish(win)`. Les tests existants `tests/flow-dojo-replay-recap.test.mjs` couvrent déjà les records par quota et la rupture d'une série du même quota. Un nouveau test de l'entrelacement 6 gagné → 7 perdu → 6 gagné reste à intégrer avant validation du comportement transversal en navigateur. Aucune CI ni visite navigateur de cette branche n'est revendiquée sans vérification.
+
+**INCONNU (MCD natif).** Les rapports privés existants research #176/#177 établissent un branchement statique `RunEnding` / `LevelTimeline` ; ils ne documentent ni les valeurs effectives des gardes de fin de run ni une capture de victoire du Dojo. Research #233 n'a toujours pas de résultat. Ne pas confondre ce défi Web avec un checkpoint MCD.
+
+**Raccord demandé à SH-05 :** pour de vraies séries globales, stocker une progression partagée sur toutes les manches et traiter `finish(win)` une seule fois après chaque victoire ou défaite (y compris quota différent), en conservant distincts records et maîtrises 6/7. Le test de référence est 6 gagné → 7 perdu → 6 gagné = série globale 1. SH-08 ne modifie ni `src/main.js` ni les inputs/horloges.
