@@ -956,3 +956,49 @@ test('J3 Web blind suppression: a real nearby bullet prompts cover-safe evasion 
   assert.deepEqual(centered,displaced,
     'changing the occluded player position cannot steer a bullet-triggered retreat');
 });
+
+test('J3 Web readable volleys: clear squad gunners alternate fire without starving a solo or committed shot',()=>{
+  // Entirely synthetic Web-only pacing. No MCD cadence or native AI claim.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data), lead=firstSpawn(runtime,target);
+  const wing={
+    ...lead,id:'web-volley-wing',z:4,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+  };
+  lead.clock=0;
+  lead.muzzlePosition=p(2,1.4,2);lead.muzzleForward=p(1,0,0);
+  wing.muzzlePosition=p(2,1.4,4);wing.muzzleForward=p(1,0,0);
+  const frame=(dt,actors=[lead,wing])=>{
+    advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:dt}));
+    return [lead.encounter.canAttack,wing.encounter.canAttack];
+  };
+  assert.deepEqual(frame(.1),[true,false],'only the first real firing lane opens');
+  assert.equal(lead.encounter.visible,true);
+  assert.equal(wing.encounter.visible,true);
+  assert.deepEqual(frame(.8),[false,true],'the covering ally takes the next window');
+  assert.deepEqual(frame(.8),[true,false],'the lead regains its turn');
+  assert.deepEqual(p(lead.x,lead.y,lead.z),p(2,0,2),'pacing never moves the gunner');
+  assert.deepEqual(p(wing.x,wing.y,wing.z),p(2,0,4),'pacing never moves the wing');
+
+  wing.muzzlePosition=null;
+  assert.deepEqual(frame(.8),[true,false],
+    'unknown teammate muzzle cannot consume the only qualified firing turn');
+  wing.muzzlePosition=p(2,1.4,4);
+  wing.reaction.stunRemaining=.4;
+  assert.deepEqual(frame(.8),[true,false],
+    'stunned squadmate cannot waste the live gunner firing window');
+  wing.reaction.stunRemaining=0;
+
+  lead.runtime.pendingShot={id:'synthetic-committed-shot'};
+  assert.deepEqual(frame(.8),[true,true],
+    'a committed shot is never revoked and the free gunner may cover it');
+  assert.deepEqual(lead.runtime.pendingShot,{id:'synthetic-committed-shot'});
+  lead.runtime.pendingShot=null;
+
+  runtime.webVolleyClock=0;
+  assert.deepEqual(frame(.1,[wing,lead]),[true,false],
+    'reordering input actors does not change which stable ID receives the volley');
+});
