@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from '../src/combat/native-encounter.js';
 import { prepareNativeCollision, nativeSegmentHit } from '../src/scenes/native-collision.js';
 import { advanceEnemyReaction } from '../src/animation/enemy-reaction.js';
+import { advanceNativeEnemyWeapon, runNativeEnemyGunAttack } from '../src/combat/native-enemy-runtime.js';
 
 // Entirely fabricated geometry/configuration; no private original assets.
 const p=(x,y=0,z=0)=>({x,y,z});
@@ -957,8 +958,9 @@ test('J3 Web blind suppression: a real nearby bullet prompts cover-safe evasion 
     'changing the occluded player position cannot steer a bullet-triggered retreat');
 });
 
-test('J3 Web readable volleys: clear squad gunners alternate fire without starving a solo or committed shot',()=>{
-  // Entirely synthetic Web-only pacing. No MCD cadence or native AI claim.
+test('J3 Web readable volleys: nearby clear gunners alternate new shots without losing aim or a committed shot',()=>{
+  // Synthetic Web-designed windows; the actual GunAttack branch remains the
+  // authority for firing. No MCD-native squad cadence is claimed.
   const data=scene();
   data.gameplay.enemy.MinimumDistanceToPlayer=20;
   const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
@@ -971,34 +973,71 @@ test('J3 Web readable volleys: clear squad gunners alternate fire without starvi
   lead.clock=0;
   lead.muzzlePosition=p(2,1.4,2);lead.muzzleForward=p(1,0,0);
   wing.muzzlePosition=p(2,1.4,4);wing.muzzleForward=p(1,0,0);
-  const frame=(dt,actors=[lead,wing])=>{
-    advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:dt}));
-    return [lead.encounter.canAttack,wing.encounter.canAttack];
+  const settings={...runtime.enemySettings,family:'Pistol'};
+  const prep=()=>{
+    for(const actor of [lead,wing]) {
+      actor.runtime.pendingShot=null;
+      actor.runtime.targetNeedsReroll=false;
+      actor.runtime.attackDelayRemaining=-1;
+      actor.runtime.alertness=2;
+    }
   };
-  assert.deepEqual(frame(.1),[true,false],'only the first real firing lane opens');
-  assert.equal(lead.encounter.visible,true);
-  assert.equal(wing.encounter.visible,true);
-  assert.deepEqual(frame(.8),[false,true],'the covering ally takes the next window');
-  assert.deepEqual(frame(.8),[true,false],'the lead regains its turn');
-  assert.deepEqual(p(lead.x,lead.y,lead.z),p(2,0,2),'pacing never moves the gunner');
-  assert.deepEqual(p(wing.x,wing.y,wing.z),p(2,0,4),'pacing never moves the wing');
+  const frame=(dt,actors=[lead,wing])=>
+    advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:dt}));
+  const attack=(actor,dt)=>{
+    advanceNativeEnemyWeapon(actor.runtime,settings,dt);
+    return runNativeEnemyGunAttack(actor.runtime,settings,{
+      scaledDeltaTime:dt,unscaledDeltaTime:dt,targetSight:actor.encounter.visible,
+      sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+      aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+      allowAttacking:true,canShot:true,active:true,
+      animationTarget:target.playerPosition,
+    },()=>0).shot;
+  };
+  prep();
+  frame(.1);
+  assert.equal(lead.encounter.canAttack,true);
+  assert.equal(wing.encounter.canAttack,true,
+    'waiting gunner stays aware and aimed instead of losing GunAttack alertness');
+  assert.deepEqual([attack(lead,.1),attack(wing,.1)],[true,false],
+    'first window permits one real projectile request, not simultaneous fire');
 
+  prep();
+  frame(.8);
+  assert.deepEqual([attack(lead,.8),attack(wing,.8)],[false,true],
+    'the actual GunAttack firing branch rotates to the covering wing');
+  prep();
+  frame(.8);
+  assert.deepEqual([attack(lead,.8),attack(wing,.8)],[true,false],
+    'the lead regains a later firing window');
+  assert.deepEqual(p(lead.x,lead.y,lead.z),p(2,0,2));
+  assert.deepEqual(p(wing.x,wing.y,wing.z),p(2,0,4),
+    'the volley mechanic never teleports or moves a gunner');
+
+  prep();
   wing.muzzlePosition=null;
-  assert.deepEqual(frame(.8),[true,false],
-    'unknown teammate muzzle cannot consume the only qualified firing turn');
+  frame(.8);
+  assert.equal(lead.runtime.attackDelayRemaining,-1,
+    'the only shooter with a real muzzle keeps its existing cooldown');
+  assert.equal(wing.encounter.canAttack,false);
   wing.muzzlePosition=p(2,1.4,4);
+  prep();
   wing.reaction.stunRemaining=.4;
-  assert.deepEqual(frame(.8),[true,false],
-    'stunned squadmate cannot waste the live gunner firing window');
+  frame(.8);
+  assert.equal(lead.runtime.attackDelayRemaining,-1,
+    'a stunned wing cannot consume the lead firing window');
   wing.reaction.stunRemaining=0;
 
-  lead.runtime.pendingShot={id:'synthetic-committed-shot'};
-  assert.deepEqual(frame(.8),[true,true],
-    'a committed shot is never revoked and the free gunner may cover it');
-  assert.deepEqual(lead.runtime.pendingShot,{id:'synthetic-committed-shot'});
-  lead.runtime.pendingShot=null;
-
+  prep();
+  lead.runtime.pendingShot={id:'already-committed'};
+  frame(.8);
+  assert.deepEqual(lead.runtime.pendingShot,{id:'already-committed'},
+    'an accepted Attack-Late shot is never cancelled or re-delayed');
+  assert.equal(wing.encounter.canAttack,true,'the free gunner can still aim');
+  prep();
   runtime.webVolleyClock=0;
-  assert.deepEqual(frame(.1,[wing,lead]),[true,false],
-    'reordering input actors does not change which stable ID receives the volley');
+  frame(.1,[wing,lead]);
+  assert.equal(lead.runtime.attackDelayRemaining,-1);
+  assert.ok(wing.runtime.attackDelayRemaining>.1,
+    'reordering input actors cannot steal the stable-ID lead firing window');
 });
