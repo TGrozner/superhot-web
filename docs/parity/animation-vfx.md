@@ -622,3 +622,10 @@ des choix de lisibilité Web **non extraits de MCD**. Aucun asset
 commercial supplémentaire ni rendu en navigateur n'est prétendu.
 Après fusion SH-05 : comparer sur Pages des tirs/throws qui tuent
 ou blessent un ennemi, puis vérifier F/E, victoire, REJOUER et FPS.
+
+
+## SH-06 — confirmed-contact visual priority (2026-11-04)
+
+The live Dojo calls `recordWebImpact` for resolved hits, kills and wall contacts. Previously, frequent wall glints could evict still-visible enemy hit/kill particles from the shared 64-particle pool; an ordinary hit could also replace an active kill-confirm marker. The Web VFX module now preserves live kill particles first, then hit particles, evicting older wall dust preferentially. Within a priority tier, older particles are removed first. A nonlethal hit does not downgrade or extend an active kill pulse. The renderer and gameplay wiring are unchanged.
+
+These priorities and timings are **original Web design**, not recovered MCD event priority or PhysX parameters. Existing private evidence (research issues #3, #11 and #12, `spec/animation/verification.json` and `link-verification.json`) verifies static animation/event inventories, but does not establish executed event dispatch for all receiver combinations or native VFX ordering. No new private query or asset is required. After SH-05 merges, the remaining proof is a Pages browser smoke under repeated wall fire and enemy hits, including FPS and the standard Dojo play/replay flow.

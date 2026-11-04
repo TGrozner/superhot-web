@@ -42,6 +42,9 @@ export function recordWebImpact(feedback,{kind,point,direction}){
   if(!side)return false;
   const up=cross(side,forward);
   const enemy=kind!=='wall',count=kind==='kill'?11:kind==='hit'?7:5;
+  // A later wall contact must not evict a still-visible confirmed kill/hit.
+  // This is Web feedback priority, not native MCD event ordering.
+  const priority=kind==='kill'?2:kind==='hit'?1:0;
   const baseSpeed=kind==='kill'?2.8:kind==='hit'?2.0:1.4;
   const burst=feedback.burst++;
   const tint=kind==='wall'?'#40515c':'#c71739';
@@ -61,14 +64,25 @@ export function recordWebImpact(feedback,{kind,point,direction}){
       size:(enemy?.021:.012)+(i%3)*.008,
       rx:theta,ry:theta*.73,rz:theta*.41,
       color:i%4===0&&enemy?'#f4dfe5':tint,
-      life:duration,maxLife:duration,
+      life:duration,maxLife:duration,webPriority:priority,
     });
   }
-  if(feedback.particles.length>MAX_PARTICLES)
-    feedback.particles.splice(0,feedback.particles.length-MAX_PARTICLES);
+  // Retain the newest glints within a priority class, but discard wall dust
+  // before accepted enemy contacts. The 64-draw budget never increases.
+  while(feedback.particles.length>MAX_PARTICLES){
+    let victim=0;
+    for(let j=1;j<feedback.particles.length;j++)
+      if(feedback.particles[j].webPriority<feedback.particles[victim].webPriority)
+        victim=j;
+    feedback.particles.splice(victim,1);
+  }
   if(enemy){
-    feedback.hitSeconds=kind==='kill'?.22:.14;
-    feedback.hitKind=kind;
+    // A nonlethal hit cannot replace an active lethal confirmation. Keep the
+    // original expiration instead of allowing incidental hits to extend it.
+    if(kind==='kill'||feedback.hitKind!=='kill'||feedback.hitSeconds<=0){
+      feedback.hitSeconds=kind==='kill'?.22:.14;
+      feedback.hitKind=kind;
+    }
   }
   feedback.impactCount++;
   return true;
