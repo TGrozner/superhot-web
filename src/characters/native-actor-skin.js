@@ -542,7 +542,10 @@ export function createNativeActorSkinRuntime(skinPass) {
       previousHit?.state === 'hit' && previousHit.hitEventId !== hitEventId &&
       Number.isFinite(shaderTime) && shaderTime >= previousHit.time &&
       pose.time >= previousHit.poseTime;
-    const hitAccentStartTime = repeatedAcceptedHit ? pose.time
+    // The repeated contact has ALREADY landed when this draw runs: start at
+    // the Web flinch's authored 45ms attack peak, not a blank zero-response
+    // frame. The source clip time is untouched and keeps progressing.
+    const hitAccentStartTime = repeatedAcceptedHit ? pose.time - .045
       : continuedHit ? (previousHit.hitAccentStartTime ?? 0) : 0;
     const hitAccentElapsed = pose.time - hitAccentStartTime;
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
