@@ -487,3 +487,32 @@ test('sleeping Dojo corpses reuse indexed source support; removed and disabled f
   assert.equal(runtime.resting,false);
   assert.ok(runtime.bodies[0].position.y<pose-0.001,'disabled source floor wakes falling body');
 });
+
+
+test('Dojo-grounded corpses lose sideways skating only after real floor contact',()=>{
+  const def=definition();def.bodies=[def.bodies[0]];def.joints=[];
+  // Isolate the Web-only resting effect from immediate source collision friction.
+  def.material={bounciness:0,dynamicFriction:0,staticFriction:0,bounceThreshold:2};
+  const make=collisionScene=>createNativeDeathRuntime({
+    definition:def,collisionScene,
+    boneModelMatrices:new Float32Array([
+      ...matrix(0,0,0),...matrix(0,0.1,0),
+      ...matrix(0,1.1,0),...matrix(0.2,1.1,0),
+    ]),
+    modelMatrix:matrix(0,0,0),initialVelocity:{x:3,y:0,z:0},
+  });
+  const grounded=make(floor()),airborne=make({boxes:[]}),sourceStudy=make(floor());
+  const result=advanceNativeDeathRuntime(grounded,1/30,{limitWebFrameWork:true});
+  advanceNativeDeathRuntime(airborne,1/30,{limitWebFrameWork:true});
+  advanceNativeDeathRuntime(sourceStudy,1/30);
+  assert.ok(result.contacts.some(c=>c.collider?.id==='floor'&&c.normal.y>0.55),
+    'Web drag must require an actual supporting source collider contact');
+  assert.ok(grounded.bodies[0].velocity.x<2.9,
+    'grounded horizontal motion should settle instead of skating indefinitely');
+  assert.ok(grounded.bodies[0].position.x>0.01,
+    'post-contact damping must not pin the body in place');
+  assert.ok(grounded.bodies[0].position.y>=0.1-1e-6,
+    'floor anti-penetration remains intact');
+  near(airborne.bodies[0].velocity.x,3);
+  near(sourceStudy.bodies[0].velocity.x,3);
+});
