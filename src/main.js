@@ -44,8 +44,6 @@ const dodgeBanner = $('dodge-banner');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
-// WEB game feel: unarmed punches recharge on real time, unlike source gun clocks.
-let unarmedFireDelayRealtime = false;
 // Active browser time, independent of capped physics dt; re-anchor START/RESUME/REJOUER.
 let activeSinceTimestampMs = performance.now();
 let webPointerPath = 0;
@@ -618,7 +616,6 @@ function loadLevel(index) {
   nativeHud.setActive(Boolean(nativeGameplay() && nativeHudReady));
   nativeHud.reset();
   state.reload = 0; state.fireDelay = 0;
-  unarmedFireDelayRealtime = false;
   webPointerPath = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
@@ -834,7 +831,6 @@ function shoot() {
     return;
   }
   state.fireDelay = state.weapon ? (nativeGameplay() ? nativePistol.attackDelay : .19) : .36;
-  unarmedFireDelayRealtime = nativeGameplay() && !state.weapon;
   if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .2);
   state.shotPulse = 1;
   state.recoil = 1;
@@ -908,7 +904,6 @@ function throwWeapon(attack = false) {
       }
     }
     state.shotPulse=1;state.recoil=1;state.fireDelay=.38;
-    unarmedFireDelayRealtime = false;
     addMcdGameplayPulse(nativeClock,.05,.5);
     audio.itemCue(attack?'attackThrow':'throw',{itemId,position:state.camera,realtimeSeconds:state.runClock});
     return;
@@ -928,7 +923,6 @@ function throwWeapon(attack = false) {
   weaponGeneration++;
   if (nativeGameplay()) addMcdGameplayPulse(nativeClock, .05, .5);
   state.recoil = 1; state.fireDelay = .38;
-  unarmedFireDelayRealtime = false;
   audio.throwWeapon();
 }
 function nearbyPickup() {
@@ -1213,7 +1207,11 @@ function update(dt, activeRealDt) {
   state.recoil = Math.max(0, state.recoil - dt * 4.8);
   advanceWebImpactFeedback(webImpactFeedback,dt);
   advanceWebDodgeFeedback(webDodgeFeedback,dt);
-  if (!nativeGameplay()) state.fireDelay = Math.max(0, state.fireDelay - dt);
+  // Web game feel: Dojo player attacks recover on ACTIVE real time, not the
+  // nearly frozen world clock. Keep nominal pistol/katana/throw/punch delays;
+  // legacy previews still use their capped simulation dt. update() is never
+  // called while PAUSED, so inactive wall time cannot advance cooldowns.
+  state.fireDelay = Math.max(0, state.fireDelay - (nativeGameplay() ? activeRealDt : dt));
   if (state.reload > 0) {
     state.reload -= dt;
     if (state.reload <= 0) { state.reload = 0; state.ammo = 6; }
@@ -1243,10 +1241,6 @@ function update(dt, activeRealDt) {
     webPointerPath = 0;
     state.speed = tick.timeScale;
     worldDt = tick.worldDelta;
-    // Slow-motion must not stretch the 360 ms unarmed punch recovery to 60s.
-    state.fireDelay = Math.max(0, state.fireDelay -
-      (unarmedFireDelayRealtime ? activeRealDt : worldDt));
-    if (state.fireDelay === 0) unarmedFireDelayRealtime = false;
     audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
     audio.advanceWorldTime(worldDt);
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
