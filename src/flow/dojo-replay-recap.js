@@ -123,7 +123,6 @@ function challengeCompleted(challenge, run) {
         return run.dodges >= 3;
     return gradeDojoStyle(run).grade === 'S';
 }
-
 function existingChallengePrompt(challenge) {
     switch (challenge.kind) {
         case 'kills':
@@ -136,7 +135,6 @@ function existingChallengePrompt(challenge) {
         case 'survive': return 'SURVIS JUSQU’À LA VICTOIRE';
     }
 }
-
 function gradeDojoStyle(run) {
     // #271 awards 100, 200, ... for consecutive kills within this 6/7 cap.
     // Dodge bonuses can exceed this COMBO-ONLY S benchmark. Web tuning, not MCD.
