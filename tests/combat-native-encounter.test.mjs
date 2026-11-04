@@ -578,3 +578,44 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   }));
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
 });
+
+test('J3 Web dodge is cancelled by stun, pending fire or deactivation rather than resumed later',()=>{
+  // Entirely synthetic positions, shot and Web timings. No real MCD source data.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const incoming={friendly:true,pos:p(15,1,2),direction:p(-1,0,0),speed:35};
+  for (const interruption of ['stun','pending-fire','inactive']) {
+    const runtime=setup(data),enemy=firstSpawn(runtime,near);
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,scaledDeltaTime:.1,playerProjectiles:[incoming],
+    }));
+    assert.ok(enemy.encounter.webDodgeRemaining>0,
+      interruption+': approaching projectile starts a live dodge');
+    const atInterruption=p(enemy.x,enemy.y,enemy.z);
+    if (interruption==='stun') enemy.reaction.stunRemaining=.8;
+    if (interruption==='pending-fire') enemy.runtime.pendingShot={target:near.playerPosition};
+    if (interruption==='inactive') enemy.active=false;
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,scaledDeltaTime:.1,playerProjectiles:[],
+    }));
+    assert.equal(enemy.encounter.webDodgeRemaining,0,
+      interruption+': interruption cancels the remaining dodge lifetime');
+    assert.equal(enemy.encounter.webDodgeSideX,0);
+    assert.equal(enemy.encounter.webDodgeSideZ,0);
+    assert.ok(enemy.encounter.webDodgeCooldown>0,
+      interruption+': recovery prevents immediate re-trigger');
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),atInterruption,
+      interruption+': no movement during the interruption');
+    enemy.reaction.stunRemaining=0;
+    enemy.reaction.stunnedThisFrame=false;
+    enemy.runtime.pendingShot=null;
+    enemy.active=true;
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,scaledDeltaTime:.1,playerProjectiles:[],
+    }));
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),atInterruption,
+      interruption+': an expired bullet does not trigger phantom sidestepping');
+    assert.equal(enemy.encounter.webDodgeRemaining,0);
+  }
+});
