@@ -93,6 +93,7 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
     contacts.push(hit);
     planes.push(hit.normal);
     const inward = dot(velocity, hit.normal);
+    let tangentRetention = 1;
     if (inward < 0) {
       const bounce = -inward >= material.bounceThreshold ? material.bounciness : 0;
       const normalImpulse = -(1 + bounce) * inward;
@@ -104,9 +105,18 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
       const friction=speed<=staticFriction*normalImpulse?1:
         speed>0?Math.min(1,material.dynamicFriction*normalImpulse/speed):0;
       for (const axis of axes) velocity[axis] -= tangent[axis] * friction;
+      tangentRetention = 1 - friction;
     }
     const into = dot(remaining, hit.normal);
-    for (const axis of axes) remaining[axis] = (remaining[axis] - hit.normal[axis]*Math.min(0, into)) * (1-hit.t);
+    // Collision friction changes velocity NOW: do not spend the rest of a
+    // long Web frame moving along the old, pre-friction tangent. Preserve
+    // motion separating from the contact normal and sweep only the surviving
+    // tangential fraction against the remaining source boxes.
+    for (const axis of axes) {
+      const tangent = remaining[axis] - hit.normal[axis] * into;
+      remaining[axis] = (tangent * tangentRetention +
+        hit.normal[axis] * Math.max(0, into)) * (1-hit.t);
+    }
     if(planes.some(normal=>dot(remaining,normal)<-1e-9))break;
     if (Math.hypot(remaining.x, remaining.y, remaining.z) < 1e-10) break;
   }
