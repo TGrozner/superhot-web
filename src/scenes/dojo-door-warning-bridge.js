@@ -324,10 +324,10 @@ function createWebWarningSweep(catalog, controller, collision) {
       // arrival with an unscaled dt. Historical visual-only callers and
       // warnings without real spawn timing keep their source-clock envelope.
       // After arrival the already-established emphasis decays smoothly.
-      const realNotice = unscaledDeltaSeconds != null && base.arrivalRemaining != null
+      const realNoticeShape = unscaledDeltaSeconds != null && base.arrivalRemaining != null
         ? smooth01((WEB_WARNING_REAL_NOTICE_START_SECONDS - base.arrivalRemaining) /
-            (WEB_WARNING_REAL_NOTICE_START_SECONDS - WEB_WARNING_REAL_NOTICE_FULL_SECONDS)) *
-          base.arrivalEmphasis : 0;
+            (WEB_WARNING_REAL_NOTICE_START_SECONDS - WEB_WARNING_REAL_NOTICE_FULL_SECONDS)) : 0;
+      const realNotice = realNoticeShape * base.arrivalEmphasis;
       // SH-07 has just sampled the original range; multiplication NEVER
       // compounds from the previous frame. The source envelope still fades.
       packet.spotlight.range *= 1 + WEB_WARNING_RANGE_GAIN * breathing;
@@ -489,9 +489,14 @@ function createWebWarningSweep(catalog, controller, collision) {
       // doorway, following the live beam's yaw (which may track a player or
       // the accepted enemy spawn). It recedes before the source warning ends.
       // All movement is relative to the verified initial false-light pose.
+      // The world-clock source curve can remain at phase zero while a real
+      // enemy spawn is seconds away. Carry the SAME verified doorway fill
+      // forward with the real-time notice instead of lighting a static dot.
+      // No new lamp/mesh: this modifies only the existing false-light position.
+      const worldSpill = smooth01((phase - 0.12) / 0.55) *
+        (1 - smooth01((phase - 0.78) / 0.18));
       const spill = base.falseLightPosition
-        ? smooth01((phase - 0.12) / 0.55) *
-          (1 - smooth01((phase - 0.78) / 0.18)) * base.arrivalEmphasis : 0;
+        ? Math.max(worldSpill, realNoticeShape) * base.arrivalEmphasis : 0;
       packet.spotlight.spotAngle = base.spotAngle *
         (1 - WEB_WARNING_IRIS_FOCUS * breathing -
           WEB_WARNING_ARRIVAL_IRIS_FOCUS * arrival);
