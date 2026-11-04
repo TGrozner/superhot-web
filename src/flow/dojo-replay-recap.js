@@ -373,7 +373,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
         replayTarget = existingChallengePrompt(priorChallenge);
     }
     const retryDetail = retainingChallenge && priorChallenge !== null
-      ? describeUnfinishedChallenge(priorChallenge, run) : null;
+        ? describeUnfinishedChallenge(priorChallenge, run) : null;
     const retryDetailText = retryDetail === null ? '' : ` · BILAN DÉFI : ${retryDetail}`;
     const replayTargetText = replayTarget === null ? '' :
         ` · ${retainingChallenge ? 'DÉFI À RETENTER' : 'DÉFI'} : ${replayTarget}`;
