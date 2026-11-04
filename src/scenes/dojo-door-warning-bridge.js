@@ -106,6 +106,16 @@ const WEB_WARNING_SPAWN_FULL_FACING = 0.85;
 const WEB_WARNING_SPAWN_MAX_YAW = 0.48;
 const WEB_WARNING_SPAWN_MAX_PITCH = 0.24;
 const WEB_WARNING_SPAWN_BLEND = 0.8;
+// J4 Web art direction: one broad, smooth red anticipation crescendo as the
+// accepted door-warning clock approaches enemy arrival. The extra radiance
+// belongs to existing source-qualified spot/false-light packets, never a new
+// lamp, a flashing overlay or native MCD behavior.
+const WEB_WARNING_ARRIVAL_START = 0.57;
+const WEB_WARNING_ARRIVAL_PEAK = 0.78;
+const WEB_WARNING_ARRIVAL_END = 0.96;
+const WEB_WARNING_ARRIVAL_SPOT_GAIN = 0.32;
+const WEB_WARNING_ARRIVAL_FALSE_LIGHT_GAIN = 1.7;
+const WEB_WARNING_ARRIVAL_IRIS_FOCUS = 0.12;
 
 function smooth01(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -210,12 +220,27 @@ function createWebWarningSweep(catalog, controller) {
         base.duration, WEB_WARNING_MIN_CYCLE_SECONDS), 1);
       const sweep = Math.sin(2 * Math.PI * phase);
       const breathing = sweep * sweep;
+      // The source curve still determines whether a light exists, its range
+      // and its final fade. This single slow Web crescendo makes the next
+      // doorway threat legible without strobing or adding GPU submissions.
+      const arrival = smooth01((phase - WEB_WARNING_ARRIVAL_START) /
+          (WEB_WARNING_ARRIVAL_PEAK - WEB_WARNING_ARRIVAL_START)) *
+        (1 - smooth01((phase - WEB_WARNING_ARRIVAL_PEAK) /
+          (WEB_WARNING_ARRIVAL_END - WEB_WARNING_ARRIVAL_PEAK)));
       // SH-07 has just sampled the original range; multiplication NEVER
       // compounds from the previous frame. The source envelope still fades.
       packet.spotlight.range *= 1 + WEB_WARNING_RANGE_GAIN * breathing;
+      // SH-07 has already written this tick's source value. Never compound
+      // the false light across frames, and never activate an inactive packet.
+      if (Number.isFinite(packet.falseLight.intensity) &&
+          packet.falseLight.intensity >= 0) {
+        packet.falseLight.intensity *=
+          1 + WEB_WARNING_ARRIVAL_FALSE_LIGHT_GAIN * arrival;
+      }
       if (Number.isFinite(base.intensity) && base.intensity >= 0) {
         packet.spotlight.intensity = base.intensity *
-          (1 + WEB_WARNING_INTENSITY_GAIN * breathing);
+          (1 + WEB_WARNING_INTENSITY_GAIN * breathing +
+            WEB_WARNING_ARRIVAL_SPOT_GAIN * arrival);
       }
       if (!base.direction) continue;
       // J4 Web-authored lighthouse: as the red beam sweeps sideways its
@@ -292,7 +317,8 @@ function createWebWarningSweep(catalog, controller) {
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
       const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
       packet.spotlight.spotAngle = base.spotAngle *
-        (1 - WEB_WARNING_IRIS_FOCUS * breathing);
+        (1 - WEB_WARNING_IRIS_FOCUS * breathing -
+          WEB_WARNING_ARRIVAL_IRIS_FOCUS * arrival);
       for (let axis = 0; axis < 3; axis++) {
         const yawedDirection = base.direction[axis] * cosYaw +
           base.right[axis] * sinYaw;
