@@ -280,3 +280,14 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — validation à vérifier :** test ciblé de la séquence 4/7 perdu → 2/7 perdu → 5/7 perdu → victoire au 4e essai et du clear en un seul essai ; contrôler CI sur SHA exact et smoke Pages après merge par SH-05. Pas de navigateur ni de FPS observé ici.
 
 **INCONNU — MCD natif :** le signal concret `RunEnding` et ses gardes (`GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`), les checkpoints et menus MCD live restent non qualifiés. Ce retour de progression est un choix **WEB_ONLY**, pas une prétention de parité native.
+
+
+## SH-08 — Follow-through des défis entre deux runs (Web-only, 2026-11-04)
+
+**PROUVÉ — contrat Web :** le récapitulatif Dojo déjà raccordé à `finish(win)` persistait un objectif de rejouabilité sans pouvoir reconnaître sa réalisation à l'essai suivant. Le schéma de sauvegarde **v5** mémorise le défi exactement affiché à la fin d'un essai (`pendingChallenge.kind/target`) et l'évalue **une fois sur le score du prochain essai**. Les objectifs d'éliminations peuvent être réussis sur une nouvelle défaite (5/7 après 4/7). Les objectifs de survie, score, temps, sans tir, 3 esquives et style S nécessitent une victoire réelle. Un objectif non atteint n'est jamais présenté comme réussi. Le contrat reste `WEB_ONLY`, indépendant de `RunEnding`, sans nouveau score, spawn, temps ni input. Il réutilise strictement les métriques existantes et le stockage par quota 6/7, sans envoyer de données externes.
+
+**PROUVÉ — migration et limites :** v1–v4 restent lisibles et migrent sans inventer de défi antérieur. v5 refuse les cibles corrompues/inconnues, retourne un nouvel historique au lieu de planter la fin de partie (les erreurs de stockage sont déjà protégées par SH-05). Une victoire après un échec au quota valide le défi de survie, non un checkpoint MCD. SH-05 conserve `src/main.js`, le merge et la validation du rendu.
+
+**OBSERVÉ — vérification technique :** tests ciblés `tests/flow-dojo-replay-recap.test.mjs` sur séquences d'échecs successifs, réussite d'un défi sans victoire, victoire sans tir, objectifs de score/chrono et séparation 6/7. CI et Pages doivent être contrôlés après émission de la PR et fusion. Aucun smoke navigateur n'est présumé.
+
+**INCONNU — MCD :** valeurs natives live de `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, activation de `RunEnding`, transitions menus et sauvegardes. Le défi persistant Web ne constitue aucune preuve de progression/sequence/checkpoint original.
