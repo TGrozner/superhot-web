@@ -760,3 +760,55 @@ test('J4 incoming spawn beacon does not telegraph a target hidden behind solid c
   assert.deepEqual(direction, [-0.99999999982, 0, 0.00001898408],
     'REJOUER restores original warning basis');
 });
+
+test('J4 real-time enemy arrivals illuminate a frozen-world door without inventing lights', () => {
+  // SH-07 source curve is sampled in world-time, while SH-03 spawn countdown
+  // runs in real time. In a frozen SUPERHOT world that curve stays at zero:
+  // previously the player received NO visible warning before the enemy.
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const incoming = warning(103);
+  incoming.delay = 2;
+  assert.equal(bridge.accept(incoming).status, 'triggered');
+  const packets = bridge.packets();
+  const active = packets[0], spot = active.spotlight, fill = active.falseLight;
+  bridge.advance(0, null, 0.5);
+  assert.equal(active.elapsed, 0, 'SH-07 source light must remain on its world clock');
+  assert.equal(spot.range, 0, 'notice floor does not start 1.5+ seconds before arrival');
+  assert.equal(fill.intensity, 0);
+
+  bridge.advance(0, null, 1.1); // 0.4 real seconds to actual enemy arrival.
+  assert.equal(active.elapsed, 0, 'no speed-up of the source clock');
+  assert.ok(spot.range > 3 && spot.range <= 3.4,
+    'the existing spotlight is now visible despite no world-time progress');
+  assert.ok(fill.intensity > 0.7 && fill.intensity <= 0.88,
+    'the existing red fill warns without spawning any new light');
+  assert.equal(bridge.packets(), packets, 'no new draw packets');
+  assert.deepEqual(packets.map(p => p.active), [true, false, false]);
+
+  bridge.advance(0, null, 0.2); // 0.2 seconds until the real spawn.
+  assert.ok(Math.abs(spot.range - 3.4) < 1e-9,
+    'the floor is bounded to 34% of the authored range, never an unbounded flash');
+  bridge.advance(0, null, 0.6); // only 0.4 seconds after arrival may fade.
+  assert.ok(spot.range < 0.1 && fill.intensity < 0.03,
+    'the additional Web warning releases as soon as the enemy has appeared');
+  assert.equal(active.active, true, 'source light remains live until its own clock ends');
+  bridge.reset();
+  assert.equal(active.active, false);
+  assert.equal(spot.range, 0);
+  assert.equal(fill.intensity, 0);
+  assert.equal(fill.slot, -1);
+
+  // No timing contract => no guess, no extra light.
+  const noRealClock = createDojoDoorWarningBridge(browserScene());
+  noRealClock.accept(incoming);
+  noRealClock.advance(0);
+  assert.equal(noRealClock.packets()[0].spotlight.range, 0);
+  assert.equal(noRealClock.packets()[0].falseLight.intensity, 0);
+  const noDelay = createDojoDoorWarningBridge(browserScene());
+  const unknownArrival = warning(103);
+  unknownArrival.delay = null;
+  noDelay.accept(unknownArrival);
+  noDelay.advance(0, null, 1);
+  assert.equal(noDelay.packets()[0].spotlight.range, 0);
+  assert.equal(noDelay.packets()[0].falseLight.intensity, 0);
+});
