@@ -411,3 +411,38 @@ test('grounded t=0 impact spends horizontal displacement according to contact fr
     assert.ok(Array.from(runtime.boneModelMatrices).every(Number.isFinite));
   }
 });
+
+
+test('extreme ragdoll impact velocity is bounded only for realtime Dojo, not ordinary hits',()=>{
+  const def=definition();def.bodies=[def.bodies[0]];def.joints=[];
+  def.gravity={x:0,y:0,z:0};def.solverIterations=1;
+  const make=()=>create({boxes:[]},def);
+  const violent=make();
+  applyNativeDeathForce(violent,{partId:'Hips',mode:'Impulse',vector:{x:12000,y:0,z:0}});
+  violent.bodies[0].angularVelocity={x:0,y:0,z:100};
+  assert.ok(violent.bodies[0].velocity.x>100);
+  const frame=advanceNativeDeathRuntime(violent,1/30,{limitWebFrameWork:true});
+  assert.ok(Math.hypot(...Object.values(violent.bodies[0].velocity))<=24+1e-8);
+  assert.ok(Math.hypot(...Object.values(violent.bodies[0].angularVelocity))<=16+1e-8);
+  assert.ok(violent.bodies[0].position.x<1,
+    'a strong impulse cannot launch an entire limb across the room in one 30Hz frame');
+  assert.ok(Array.from(frame.boneModelMatrices).every(Number.isFinite));
+
+  const ordinary=make();
+  applyNativeDeathForce(ordinary,{partId:'Hips',mode:'Impulse',vector:{x:24,y:0,z:0}});
+  advanceNativeDeathRuntime(ordinary,1/30,{limitWebFrameWork:true});
+  near(ordinary.bodies[0].velocity.x,2);
+
+  const sustained=make();
+  applyNativeDeathForce(sustained,{
+    partId:'Hips',mode:'ConstantForce',vector:{x:240000,y:0,z:0},duration:0.1,
+  });
+  advanceNativeDeathRuntime(sustained,1/30,{limitWebFrameWork:true});
+  assert.ok(Math.hypot(...Object.values(sustained.bodies[0].velocity))<=24+1e-8);
+
+  const research=make();
+  applyNativeDeathForce(research,{partId:'Hips',mode:'Impulse',vector:{x:12000,y:0,z:0}});
+  advanceNativeDeathRuntime(research,1/150);
+  assert.ok(research.bodies[0].velocity.x>100,
+    'unbudgeted physics keeps the original input for explicit research runs');
+});

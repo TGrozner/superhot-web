@@ -11,6 +11,11 @@ const WEB_GROUNDED_REST_SECONDS = 0.3;
 // Web-only angular surface friction: real static floor contacts dissipate
 // excess post-impact spin; free-flying limbs retain their sourced angular drag.
 const WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND = 7;
+// Web-only game feel: cap extreme post-impact speeds, preventing tiny-mass
+// limbs from rocketing across a room in one four-substep browser frame.
+// This is not PhysX damping or a value recovered from MCD.
+const WEB_DEATH_MAX_LINEAR_SPEED = 24;
+const WEB_DEATH_MAX_ANGULAR_SPEED = 16;
 const zero=()=>({x:0,y:0,z:0});
 const point=m=>({x:m[12],y:m[13],z:m[14]});
 const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
@@ -512,6 +517,17 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
         for(const force of body.forces)impulse+=force.vector[axis]*Math.max(0,Math.min(dt,force.until-runtime.elapsed));
         body.velocity[axis]=(body.velocity[axis]+(body.source.useGravity?runtime.gravity[axis]*dt:0)+impulse*body.inverseMass)/(1+body.source.drag*dt);
         body.angularVelocity[axis]/=1+body.source.angularDrag*dt;
+      }
+      if(limitWebFrameWork) {
+        // Preserve normal sourced impulses, joint geometry and collision
+        // physics; bound only extreme forces on real-time Dojo frames.
+        for(const [key,maximum] of [
+          ['velocity',WEB_DEATH_MAX_LINEAR_SPEED],
+          ['angularVelocity',WEB_DEATH_MAX_ANGULAR_SPEED],
+        ]) {
+          const speed=length(body[key]);
+          if(speed>maximum)body[key]=mul(body[key],maximum/speed);
+        }
       }
       rotateBody(body,mul(body.angularVelocity,dt));
       contactsFor(runtime,body,mul(body.velocity,dt),contacts);
