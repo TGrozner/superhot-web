@@ -344,3 +344,38 @@ test('J4 accepted Dojo spawn point turns the existing beacon into an incoming-ro
   assert.equal(packet.active, false);
   assert.equal(packet.spotlight.range, 0);
 });
+
+test('J4 Dojo arrival crescendo intensifies only existing door lights then fully releases', () => {
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const packets = bridge.packets();
+  const beam = packets[0];
+  const spotDirection = beam.spotlight.direction;
+  assert.equal(bridge.accept(warning(103)).status, 'triggered');
+
+  bridge.advance(1); // First half: the existing Web sweep is unchanged.
+  assert.equal(beam.spotlight.intensity, 30);
+  assert.equal(beam.falseLight.intensity, 4);
+  assert.equal(beam.spotlight.spotAngle, 99);
+
+  bridge.advance(0.5); // One broad final-approach cue, not a flashing strobe.
+  assert.equal(bridge.packets(), packets, 'no extra lights or GPU packets');
+  assert.equal(beam.spotlight.direction, spotDirection, 'reuse the live GPU basis');
+  assert.ok(beam.spotlight.intensity > 40, 'the red cone becomes more prominent');
+  assert.ok(beam.falseLight.intensity > 4.5, 'the existing fill light visibly swells');
+  assert.ok(beam.spotlight.spotAngle < 55, 'the arrival cone focuses on the door');
+  assert.deepEqual(packets.slice(1).map(packet => packet.active), [false, false],
+    'other warning doors never flash on their own');
+
+  bridge.advance(0.45); // Source envelope is nearly extinguished at 1.95/2s.
+  assert.ok(beam.falseLight.intensity < 0.1,
+    'the creative emphasis also fades before the source warning ends');
+  bridge.advance(0.05);
+  assert.equal(beam.active, false);
+  assert.equal(beam.spotlight.range, 0);
+  assert.equal(beam.falseLight.intensity, 0);
+  assert.equal(beam.spotlight.intensity, 30);
+  assert.equal(beam.spotlight.spotAngle, 99);
+  bridge.reset();
+  assert.equal(bridge.packets(), packets);
+  assert.deepEqual(packets.map(packet => packet.active), [false, false, false]);
+});
