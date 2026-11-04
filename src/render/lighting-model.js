@@ -193,11 +193,16 @@ vec3 dojoDoorWarningSpotWebPreview(
   float sourceRange, float cosHalfAngle, float tanHalfAngle,
   vec3 sourceColor, float sourceIntensity
 ) {
+  // Large Dojo walls overlap the mesh sphere while most fragments lie
+  // beyond the lamp. Reject them before sqrt or cone calculations.
   vec3 offset = worldPosition - lightPosition;
-  float radius = length(offset);
-  if (radius <= 0.0 || radius > sourceRange) return vec3(0.0);
+  float distanceSquared = dot(offset, offset);
+  if (distanceSquared <= 0.0 || distanceSquared > sourceRange * sourceRange)
+    return vec3(0.0);
   float along = dot(offset, lightDirection);
-  if (along <= 0.0 || along / radius < cosHalfAngle) return vec3(0.0);
+  if (along <= 0.0) return vec3(0.0);
+  float radius = sqrt(distanceSquared);
+  if (along / radius < cosHalfAngle) return vec3(0.0);
   float aperture = 2.0 * along * tanHalfAngle;
   if (aperture <= 0.0) return vec3(0.0);
   vec2 cookieUv = vec2(dot(offset, lightRight), dot(offset, lightUp))
@@ -218,11 +223,16 @@ vec3 dojoDoorWarningSpotWebGlow(
   vec3 worldPosition, vec3 lightPosition, vec3 lightDirection,
   float sourceRange, float cosHalfAngle, vec3 sourceColor, float sourceIntensity
 ) {
+  // Large Dojo walls overlap the mesh sphere while most fragments lie
+  // beyond the lamp. Reject them before sqrt or cone calculations.
   vec3 offset = worldPosition - lightPosition;
-  float radius = length(offset);
-  if (radius <= 0.0 || radius > sourceRange) return vec3(0.0);
+  float distanceSquared = dot(offset, offset);
+  if (distanceSquared <= 0.0 || distanceSquared > sourceRange * sourceRange)
+    return vec3(0.0);
   float along = dot(offset, lightDirection);
-  if (along <= 0.0 || along / radius < cosHalfAngle) return vec3(0.0);
+  if (along <= 0.0) return vec3(0.0);
+  float radius = sqrt(distanceSquared);
+  if (along / radius < cosHalfAngle) return vec3(0.0);
   float energy = sourceIntensity
     * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle);
   return dojoWebWarningContrast(sourceColor, dojoWebWarningCompression(max(energy, 0.0)));
@@ -233,8 +243,13 @@ vec3 dojoDoorWarningSpotWebGlow(
 vec3 dojoDoorFalseLightWashWeb(
   vec3 worldPosition, vec3 lightPosition, float sourceIntensity
 ) {
-  float radius = length(worldPosition - lightPosition);
-  if (sourceIntensity <= 0.0 || radius >= 4.0) return vec3(0.0);
+  // Broad meshes still send out-of-range fragments into this shader.
+  // The squared 4 m gate avoids a sqrt on each of those pixels.
+  if (sourceIntensity <= 0.0) return vec3(0.0);
+  vec3 offset = worldPosition - lightPosition;
+  float distanceSquared = dot(offset, offset);
+  if (distanceSquared >= 16.0) return vec3(0.0);
+  float radius = sqrt(distanceSquared);
   float fade = dojoWebWarningSmooth(1.0 - radius / 4.0);
   // Creative Web wall-facing response, NOT a shadow/occlusion test.
   // Keep a 20% warning floor for legibility on back-facing geometry.
