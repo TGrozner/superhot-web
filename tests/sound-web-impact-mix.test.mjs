@@ -310,3 +310,34 @@ test('Web player shot layers a delayed slide action without new sources or enemy
   assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
   mix.dispose();
 });
+
+test('Web-original thrown weapon has a descending air swish without extra voices', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const ramps = [];
+  const originalFilter = ctx.createBiquadFilter;
+  ctx.createBiquadFilter = () => {
+    const filter = originalFilter();
+    const originalRamp = filter.frequency.exponentialRampToValueAtTime;
+    filter.frequency.exponentialRampToValueAtTime = function(value, time) {
+      ramps.push({filter, value, time});
+      return originalRamp.call(this, value, time);
+    };
+    return filter;
+  };
+  const mix = createWebImpactMix(ctx);
+  assert.equal(mix.emit('throw', {position: {x: 2, y: 1, z: 0}}).status, 'started');
+  assert.equal(nodes.length, 2); // Existing noise/body only; no extra sources.
+  assert.equal(nodes[0].connections.length, 2); // Old burst + airy release.
+  const swish = filters.find(f => f.type === 'bandpass');
+  assert.ok(swish);
+  assert.ok(ramps.some(e => e.filter === swish && e.value === 800 &&
+    Math.abs(e.time - (ctx.currentTime + 0.17)) < 1e-12));
+  const air = gains.find(g => swish.connections.includes(g));
+  assert.ok(air);
+  assert.equal(air.connections.length, 1); // Shared output and spatial path.
+  assert.equal(mix.emit('pickup').status, 'started');
+  assert.equal(nodes.length, 4);
+  assert.equal(nodes[2].connections.length, 1); // Pickup is uncolored.
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
+  mix.dispose();
+});
