@@ -717,6 +717,15 @@ export function createAudio(options = {}) {
     return receipt;
   }
 
+  // Web-original spatial cue only for an accepted, collision-free dodge.
+  // No native MCD recording or playback parameters are asserted.
+  function dodge({position} = {}) {
+    if (!originalMode) return report('suppressed', 'dodge', {reason: 'original-mode-disabled'});
+    return webCombatAccent('dodge', report('blocked', 'dodge', {
+      reason: 'web-only-clean-dodge-no-native-clip',
+    }), position);
+  }
+
   function empty() {
     if (!originalMode) return proceduralEmpty();
     return playMcdClip('empty', 'pistolEmpty', {
@@ -1019,6 +1028,7 @@ export function createAudio(options = {}) {
     pickup,
     hit,
     punch,
+    dodge,
     empty,
     ready,
     scheduleReady,
