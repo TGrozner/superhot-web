@@ -1,6 +1,6 @@
 /** SH-07: original Web sound design, NOT recovered MCD audio. */
 export type WebImpactCue = 'player-shot' | 'enemy-shot' | 'impact' | 'shatter' | 'player-hit'
-  | 'katana' | 'katana-swing' | 'punch-swing' | 'punch-contact' | 'step' | 'landing' | 'pickup' | 'throw';
+  | 'katana' | 'katana-swing' | 'punch-swing' | 'punch-contact' | 'step' | 'landing' | 'pickup' | 'throw' | 'dodge';
 export interface WebImpactPoint {readonly x: number; readonly y: number; readonly z: number}
 export interface WebImpactRequest {readonly position?: WebImpactPoint; readonly intensity?: number}
 export interface WebImpactResult {
@@ -97,7 +97,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
     'player-hit': 6,
     katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
-    step: 1, landing: 2, pickup: 2, throw: 3,
+    step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4,
   };
 
   const attackByCue: Partial<Record<WebImpactCue, readonly [number, number, number]>> = {
@@ -172,6 +172,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       landing: [0.15, -650, 145, 54, 0.40],
       pickup: [0.08, 1400, 510, 880, 0.23],
       throw: [0.17, 890, 540, 180, 0.28],
+      dodge: [0.18, 1550, 980, 240, 0.30],
     };
     if (!Object.hasOwn(specs, cue)) throw new TypeError('unknown Web cue');
     const [duration, cutoff, startHz, endHz, volume] = specs[cue];
@@ -337,6 +338,22 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       airFilter.connect(air);
       air.connect(out);
     }
+    // WEB-ORIGINAL clean-dodge zip. Call only after a confirmed no-hit near miss;
+    // this is NOT MCD bullet audio or a recovered Unity playback parameter.
+    // Same noise source, HRTF output and existing bounded voice budget.
+    if (cue === 'dodge') {
+      const zip = track(context.createBiquadFilter());
+      zip.type = 'bandpass';
+      zip.frequency.setValueAtTime(Math.min(5200, context.sampleRate * 0.43), at);
+      zip.frequency.exponentialRampToValueAtTime(Math.min(1050, context.sampleRate * 0.23), at + duration);
+      const air = track(context.createGain());
+      air.gain.setValueAtTime(0.0001, at);
+      air.gain.linearRampToValueAtTime(volume * 0.55, at + 0.012);
+      air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+      noise.connect(zip);
+      zip.connect(air);
+      air.connect(out);
+    }
     noise.onended = ended;
     voice.sources.push(noise);
     noise.start(at, textureIndex * 0.025, duration);
@@ -405,7 +422,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       // Movement cues and pickup/throw do not lower the walking bus.
       if (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
           cue === 'impact' || cue === 'shatter' || cue === 'katana' ||
-          cue === 'punch-contact') {
+          cue === 'punch-contact' || cue === 'dodge') {
         footsteps.gain.cancelScheduledValues(at);
         footsteps.gain.setTargetAtTime(0.10, at, 0.012);
         footsteps.gain.setTargetAtTime(0.3, at + 0.14, 0.18);
