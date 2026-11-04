@@ -207,6 +207,23 @@ test('SH10 can arm once before Start, then samples only post-start rendered fram
   } finally {mock.teardown();}
 });
 
+test('SH10 preview-blocked held W never creates a phantom moving clock span after canvas Start',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.key('KeyW'); // #374 ignores this pre-start keydown in game input.
+    mock.setControlsHidden(true);mock.setFrame(2);mock.tick();
+    // Initial combat frame must stay idle: the runtime never saw W pressed.
+    mock.key('KeyW',true,{repeat:true}); // The post-start repeat *is* accepted.
+    mock.setFrame(3);mock.tick();
+    mock.key('KeyW',false);mock.setFrame(4);mock.tick();
+    const observed=recorder.stop().frames.map(f=>f.gameplay.moving);
+    assert.deepEqual(observed,[false,true,false]);
+    assert.equal(mock.listenerCount,0);
+  } finally {mock.teardown();}
+});
+
 test('SH10 armed recorder does not begin on pause/win or mid-combat resume',()=>{
   const mock=mockBrowser();
   try {
