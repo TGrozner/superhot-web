@@ -85,6 +85,29 @@ test('a saturated combat mix prioritizes shots over footsteps, not the oldest sh
 });
 
 
+test('Web shatter chain rises on rapid confirmed cues and resets after a gap', () => {
+  const {ctx, nodes} = fakeAudio();
+  const mix = createWebImpactMix(ctx);
+  for (const at of [2.25, 2.65, 3.25, 5.2]) {
+    ctx.currentTime = at;
+    assert.equal(mix.emit('shatter').status, 'started');
+  }
+  // Every shatter still has exactly two oscillator rings, plus noise + body.
+  assert.equal(nodes.length, 16);
+  const rings = nodes.filter(node => node.type === 'sine');
+  assert.equal(rings.length, 8);
+  const normalizedPitch = (index) => rings[index * 2].frequency.value /
+    (1 + (index - 3.5) * 0.012);
+  const base = 1540 * 0.985;
+  assert.ok(Math.abs(normalizedPitch(0) - base) < 1e-7);
+  assert.ok(Math.abs(normalizedPitch(1) - base * 1.085) < 1e-7);
+  assert.ok(Math.abs(normalizedPitch(2) - base * 1.17) < 1e-7);
+  assert.ok(Math.abs(normalizedPitch(3) - base) < 1e-7);
+  assert.ok(Math.abs(rings[1].startArgs[0] - 2.297) < 1e-9);
+  assert.ok(Math.abs(rings[1].stopArgs[0] - 2.527) < 1e-9);
+  mix.dispose();
+});
+
 test('Web accents can be trimmed beside original-mode buffers without scheduling muted voices', () => {
   const {ctx, nodes, gains} = fakeAudio();
   const layer = createWebImpactMix(ctx);
