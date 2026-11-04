@@ -356,13 +356,27 @@ function createWebWarningSweep(catalog, controller, collision) {
               smooth01((phase - 0.2) / 0.55) *
               smooth01((forward - WEB_WARNING_SPAWN_MIN_FACING) /
                 (WEB_WARNING_SPAWN_FULL_FACING - WEB_WARNING_SPAWN_MIN_FACING));
-            const aimYaw = Math.max(-WEB_WARNING_SPAWN_MAX_YAW,
-              Math.min(WEB_WARNING_SPAWN_MAX_YAW, Math.atan2(across, forward)));
-            const aimPitch = Math.max(-WEB_WARNING_SPAWN_MAX_PITCH,
-              Math.min(WEB_WARNING_SPAWN_MAX_PITCH,
-                Math.atan2(vertical, Math.hypot(across, forward))));
-            yaw += (aimYaw - yaw) * focus;
-            pitch += (aimPitch - pitch) * focus;
+            // A spawn behind solid Dojo cover must not turn the doorway's
+            // warning cone through that wall. Like player tracking, use the
+            // prepared active BoxColliders, never a guessed visibility mesh.
+            // Check only an eligible live target; max one extra ray per door.
+            const rayStart = focus > 0 && collision ? {
+              x: origin[0] + dx / distance * 0.08,
+              y: origin[1] + dy / distance * 0.08,
+              z: origin[2] + dz / distance * 0.08,
+            } : null;
+            const blocked = rayStart && nativeSegmentHit(collision, rayStart, {
+              x: base.spawnTarget[0], y: base.spawnTarget[1], z: base.spawnTarget[2],
+            });
+            if (focus > 0 && !blocked) {
+              const aimYaw = Math.max(-WEB_WARNING_SPAWN_MAX_YAW,
+                Math.min(WEB_WARNING_SPAWN_MAX_YAW, Math.atan2(across, forward)));
+              const aimPitch = Math.max(-WEB_WARNING_SPAWN_MAX_PITCH,
+                Math.min(WEB_WARNING_SPAWN_MAX_PITCH,
+                  Math.atan2(vertical, Math.hypot(across, forward))));
+              yaw += (aimYaw - yaw) * focus;
+              pitch += (aimPitch - pitch) * focus;
+            }
           }
         }
       }
