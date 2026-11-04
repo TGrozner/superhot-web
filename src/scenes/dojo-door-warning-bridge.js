@@ -1,5 +1,5 @@
 import { createMcdDoorWarnings } from '../sound/mcd-door-warning.js';
-import { prepareNativeCollision, nativeSegmentHit } from './native-collision.js';
+import { prepareDoorVisibility, doorSegmentOccluded } from './door-visibility.js';
 
 // Static Unity references, NOT a runtime/visibility assertion. All three
 // SpawnerPoint components point at distinct SpawnerDoors components in level10.
@@ -153,7 +153,7 @@ function finiteBasisVector(value) {
  * the private scene catalog or SH-07 source values are allowed.
  * @param {object} catalog The prepared Dojo door catalog (read-only).
  * @param {ReturnType<typeof createMcdDoorWarnings>} controller Live source controller.
- * @param {ReturnType<typeof prepareNativeCollision> | null} collision Prepared solid Dojo blockers.
+ * @param {ReturnType<typeof prepareDoorVisibility> | null} collision Compact solid Dojo sight blockers.
  * @returns {{advance: () => void, restore: (id?: string) => void}}
  */
 function createWebWarningSweep(catalog, controller, collision) {
@@ -401,7 +401,7 @@ function createWebWarningSweep(catalog, controller, collision) {
               y: origin[1] + dy / distance * 0.08,
               z: origin[2] + dz / distance * 0.08,
             } : null;
-            const blocked = rayStart && nativeSegmentHit(collision, rayStart, {
+            const blocked = rayStart && doorSegmentOccluded(collision, rayStart, {
               x: base.spawnTarget[0], y: base.spawnTarget[1], z: base.spawnTarget[2],
             });
             if (focus > 0 && !blocked) {
@@ -447,7 +447,7 @@ function createWebWarningSweep(catalog, controller, collision) {
             y: origin[1] + dy / distance * 0.08,
             z: origin[2] + dz / distance * 0.08,
           } : null;
-          const blocked = rayStart && nativeSegmentHit(collision, rayStart, playerWorldPosition);
+          const blocked = rayStart && doorSegmentOccluded(collision, rayStart, playerWorldPosition);
           if (weight > 0 && !blocked) {
             const aimYaw = Math.max(-WEB_WARNING_TRACK_MAX_YAW,
               Math.min(WEB_WARNING_TRACK_MAX_YAW, Math.atan2(across, forward)));
@@ -552,10 +552,10 @@ export function createDojoDoorWarningBridge(scene) {
     : null;
   const controller = preparedCatalog ? createMcdDoorWarnings(preparedCatalog) : null;
   // The same source BoxColliders as the live Dojo movement/weapon systems,
-  // prepared once rather than rebuilding them each warning frame. No collider
+  // prepared as compact affine slabs once, not triangle/contact meshes. No collider
   // data means no invented occlusion and retains the existing sweep behavior.
   const collision = controller && Array.isArray(scene?.colliders) && scene.colliders.length
-    ? prepareNativeCollision(scene.colliders) : null;
+    ? prepareDoorVisibility(scene.colliders) : null;
   const webSweep = controller ? createWebWarningSweep(preparedCatalog, controller, collision) : null;
   const readiness = qualified ? (hasCatalog ? 'source-catalog-present' : 'missing-private-door-catalog')
     : 'not-dojo-build10-source';
