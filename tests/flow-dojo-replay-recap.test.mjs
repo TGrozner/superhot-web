@@ -74,7 +74,7 @@ test('Dojo win streak survives reload, upgrades legacy personal bests and resets
   const legacy = readDojoReplayBest(JSON.stringify({
     schemaVersion:1, quota:6, victories:8, bestScore:1900, fastestSeconds:19.4,
   }), 6);
-  assert.equal(legacy.schemaVersion, 2);
+  assert.equal(legacy.schemaVersion, 3);
   assert.equal(legacy.currentStreak, 0, 'legacy history cannot prove a streak');
   assert.equal(legacy.bestStreak, 0);
   const one = result(6, {best:legacy, score:700, elapsedSeconds:25});
@@ -124,4 +124,37 @@ test('replay target uses the previous same-quota PB and offers a shot-free chall
   }, previous);
   assert.equal(failed.replayTarget, null, 'loss never receives a victory challenge');
   assert.equal(readDojoReplayBest(JSON.stringify(chaseScore.best), 7), null);
+});
+
+
+test('Dojo mastery medals unlock across actual victories and remain isolated per quota', () => {
+  const first = result(6, {score:2100, shots:8, dodges:0});
+  assert.equal(first.best.masteryMask, 1);
+  assert.deepEqual(first.newMedals, ['STYLE S']);
+  assert.equal(first.masteryCount, 1);
+  assert.match(first.text, /MAÎTRISE 1\/3.*MÉDAILLE : STYLE S/);
+  const second = result(6, {best:readDojoReplayBest(JSON.stringify(first.best), 6),
+    score:500, shots:0, dodges:3});
+  assert.equal(second.best.masteryMask, 7);
+  assert.equal(second.masteryCount, 3);
+  assert.deepEqual(second.newMedals, ['SANS TIRER', '3 ESQUIVES']);
+  const third = result(6, {best:second.best, score:700, shots:0, dodges:3});
+  assert.deepEqual(third.newMedals, [], 'a medal cannot be earned twice');
+  assert.equal(third.masteryCount, 3);
+  assert.equal(readDojoReplayBest(JSON.stringify(third.best), 7), null);
+  assert.equal(result(7).masteryCount, 0, '7-kill mastery starts independently');
+  const upgradedV2 = readDojoReplayBest(JSON.stringify({
+    schemaVersion:2, quota:6, victories:5, bestScore:900, fastestSeconds:18,
+    currentStreak:2, bestStreak:3,
+  }), 6);
+  assert.equal(upgradedV2.schemaVersion, 3);
+  assert.equal(upgradedV2.currentStreak, 2);
+  assert.equal(upgradedV2.masteryMask, 0, 'historical medals cannot be inferred');
+  assert.equal(readDojoReplayBest(JSON.stringify({...second.best, masteryMask:8}), 6), null);
+  const defeat = createDojoReplayRecap({
+    quota:6, victory:false, kills:4, shots:0, dodges:3, score:2100, elapsedSeconds:20,
+  }, second.best);
+  assert.equal(defeat.best.masteryMask, 7);
+  assert.deepEqual(defeat.newMedals, [], 'no medal from a loss');
+  assert.equal(defeat.masteryCount, 3);
 });
