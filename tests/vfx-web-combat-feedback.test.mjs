@@ -35,3 +35,25 @@ test('no impact can create NaN effects or an arbitrary hit confirmation',()=>{
   assert.equal(feedback.particles.length,0);
   assert.equal(feedback.hitSeconds,0);
 });
+
+test('hit sparks and marker respect active real time across a 100ms frame or two 50ms frames',()=>{
+  const once=createWebImpactFeedback(),split=createWebImpactFeedback();
+  for(const effect of [once,split])recordWebImpact(effect,{kind:'kill',...contact});
+  advanceWebImpactFeedback(once,0.1);
+  advanceWebImpactFeedback(split,0.05);
+  advanceWebImpactFeedback(split,0.05);
+  assert.ok(Math.abs(once.hitSeconds-0.12)<1e-12);
+  assert.ok(Math.abs(once.hitSeconds-split.hitSeconds)<1e-12);
+  assert.equal(once.particles.length,split.particles.length);
+  for(let i=0;i<once.particles.length;i++){
+    const a=once.particles[i],b=split.particles[i];
+    for(const key of ['x','y','z','vx','vy','vz','life'])
+      assert.ok(Math.abs(a[key]-b[key])<1e-10,`${key} must not depend on frame split`);
+  }
+  // Before this fix, the old 50ms clamp left these particles and the hit
+  // marker alive through a 300ms hitch, despite their 240-290ms lifetimes.
+  advanceWebImpactFeedback(once,0.3);
+  assert.equal(once.hitSeconds,0);
+  assert.equal(once.hitKind,null);
+  assert.equal(once.particles.length,0);
+});
