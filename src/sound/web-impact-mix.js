@@ -80,7 +80,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
     }
     const priorityByCue = {
         // Creative Web mix priorities: damage feedback survives even shot bursts.
-        'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
+        'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 2, shatter: 4,
         'player-hit': 6,
         katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
         step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4,
@@ -92,6 +92,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         'player-shot': [3700, 0.45, 0.022],
         'enemy-shot': [3900, 0.32, 0.019],
         impact: [2800, 0.48, 0.014],
+        'wall-impact': [3600, 0.26, 0.015],
         'player-hit': [2600, 0.34, 0.032],
         shatter: [4800, 0.31, 0.043],
         katana: [3200, 0.32, 0.065],
@@ -153,6 +154,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             'player-shot': [0.14, 540, 150, 52, 0.62],
             'enemy-shot': [0.11, 1050, 240, 90, 0.42],
             impact: [0.15, 1800, 580, 145, 0.45],
+            'wall-impact': [0.16, 1900, 960, 240, 0.31],
             'player-hit': [0.22, -680, 142, 44, 0.52],
             shatter: [0.27, 2200, 1250, 220, 0.48],
             katana: [0.20, 1180, 1480, 325, 0.43],
@@ -221,10 +223,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
                 distanceFilter.connect(panner);
             }
             out.connect(distanceFilter ?? panner);
-            panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
+            panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
         }
         else {
-            out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
+            out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
         }
         const voice = { sources: [], effects: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority };
         voices.add(voice);
@@ -292,6 +294,21 @@ export function createWebImpactMix(context, maxVoices = 24) {
             noise.connect(actionTone);
             actionTone.connect(action);
             action.connect(out);
+        }
+        // WEB-ORIGINAL bullet-to-wall grit: short swept bandpass on existing noise.
+        // Only for a RESOLVED wall contact; not a native MCD surface sample.
+        // No additional source, clip, voice or proprietary material.
+        if (cue === 'wall-impact') {
+            const gritBand = track(context.createBiquadFilter());
+            gritBand.type = 'bandpass';
+            gritBand.frequency.setValueAtTime(Math.min(3100, context.sampleRate * 0.43), at);
+            gritBand.frequency.exponentialRampToValueAtTime(Math.min(1050, context.sampleRate * 0.23), at + duration);
+            const grit = track(context.createGain());
+            grit.gain.setValueAtTime(volume * 0.31, at);
+            grit.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+            noise.connect(gritBand);
+            gritBand.connect(grit);
+            grit.connect(out);
         }
         // Web-original airborne weapon swish, NOT a recovered MCD throw sample.
         // A descending band of the existing noise buffer follows the release.
@@ -445,7 +462,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             // briefly duck synthetic footsteps, never source-backed scene WAVs.
             // Movement cues and pickup/throw do not lower the walking bus.
             if (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
-                cue === 'impact' || cue === 'shatter' || cue === 'katana' ||
+                cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana' ||
                 cue === 'punch-contact' || cue === 'dodge') {
                 footsteps.gain.cancelScheduledValues(at);
                 footsteps.gain.setTargetAtTime(0.10, at, 0.012);
