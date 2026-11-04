@@ -515,7 +515,7 @@ function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
  * @param {object[]} enemies Actual live actor list.
  * @param {Set<object>} observers Actors that see the player this frame.
  * @param {{x:number,y:number,z:number}} target Actual visible target point.
- * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>}}
+ * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>,eligible:Set<object>}}
  */
 function webSquadFireTurns(runtime, enemies, observers, target) {
   const clear=new Set(), allyBlocked=new Set(), ready=[];
@@ -541,7 +541,7 @@ function webSquadFireTurns(runtime, enemies, observers, target) {
     const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%nearby.length;
     if(nearby[index]===enemy)turn.add(enemy);
   }
-  return {clear,allyBlocked,turn};
+  return {clear,allyBlocked,turn,eligible:new Set(ready)};
 }
 function nearestEnemy(enemies, point) {
   let nearest=null, best=Infinity;
@@ -738,12 +738,21 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns) {
     ? state.webLastSeenFeet : playerFeet;
   const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
   const worldMuzzleClear=fireTurns.clear.has(enemy);
-  // Real eye, muzzle and unobstructed ally lane remain mandatory. The Web
-  // volley only paces NEW shot opportunities: already committed shots survive.
-  // All clearances and turns use the same pre-movement frame snapshot.
+  // Keep real eye/muzzle/ally authorization intact during a Web squad's
+  // off-turn: GunAttack uses this flag for ALERTNESS and aiming as well as
+  // firing. Dropping it on every second beat would leave both guns permanently
+  // unalert and unable to shoot. Only delay the next UNCOMMITTED shot.
   state.webAllyBlockingShot=fireTurns.allyBlocked.has(enemy);
-  state.canAttack=state.visible && worldMuzzleClear && !state.webAllyBlockingShot &&
-    (fireTurns.turn.has(enemy) || Boolean(enemy.runtime.pendingShot));
+  state.canAttack=state.visible && worldMuzzleClear && !state.webAllyBlockingShot;
+  if(state.canAttack && fireTurns.eligible.has(enemy) && !fireTurns.turn.has(enemy)) {
+    const settings=enemy.activeWeaponSettings ?? runtime.enemySettings;
+    const nextTickCost=scaledDeltaTime*settings.weaponSpeedMultiplier*
+      settings.difficultyWeaponSpeedMultiplier;
+    // main.js advances this cooldown once AFTER the encounter step. Leave a
+    // positive remainder without resetting the real aim/alertness pipeline.
+    enemy.runtime.attackDelayRemaining=Math.max(
+      enemy.runtime.attackDelayRemaining,nextTickCost+EPSILON);
+  }
   // An actual incoming player projectile may provoke a short tactical dodge
   // even while chasing. Original MCD enemy AI is not claimed here. No change
   // to existing tactics when the SH-05 projectile snapshot is absent.
