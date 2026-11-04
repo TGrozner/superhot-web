@@ -475,6 +475,68 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
 }
 
 /**
+ * The SH-07 controller intentionally reuses its live packet ARRAY and MUTATES
+ * the records every tick. Keying only on array identity would freeze door
+ * sweeps and player/spawn tracking. Compare every value consumed by the
+ * spotlight/false-light preparation before reusing a layer's GPU packet.
+ * A full native validation/freeze is then needed only once per changed layer.
+ * This is a Web CPU optimization, not a native lighting claim.
+ */
+const warningVectorSnapshot = value => Array.isArray(value) ? [...value] : value;
+const sameWarningVector = (left, right) =>
+  Array.isArray(left) && Array.isArray(right)
+    ? left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
+    : Object.is(left, right);
+
+const warningPacketSnapshot = packet => {
+  const spot = packet?.spotlight;
+  const falseLight = packet?.falseLight;
+  return {
+    id: packet?.id, active: packet?.active, elapsed: packet?.elapsed,
+    rendererId: packet?.rendererId,
+    spotEnabled: spot?.enabled, spotRange: spot?.range,
+    spotIntensity: spot?.intensity, spotAngle: spot?.spotAngle,
+    spotMask: spot?.cullingMask, spotCookie: spot?.cookieTextureId,
+    spotPosition: warningVectorSnapshot(spot?.position),
+    spotDirection: warningVectorSnapshot(spot?.direction),
+    spotRight: warningVectorSnapshot(spot?.right),
+    spotUp: warningVectorSnapshot(spot?.up),
+    spotColor: warningVectorSnapshot(spot?.color),
+    falseEnabled: falseLight?.enabled, falseIntensity: falseLight?.intensity,
+    falseSlot: falseLight?.slot,
+    falsePosition: warningVectorSnapshot(falseLight?.position),
+  };
+};
+
+const warningPacketsUnchanged = (packets, snapshot) => {
+  if (!Array.isArray(packets) || packets.length !== snapshot.length) return false;
+  for (let index = 0; index < packets.length; index++) {
+    const packet = packets[index], saved = snapshot[index];
+    const spot = packet?.spotlight, falseLight = packet?.falseLight;
+    if (!Object.is(packet?.id, saved.id) ||
+        !Object.is(packet?.active, saved.active) ||
+        !Object.is(packet?.elapsed, saved.elapsed) ||
+        !Object.is(packet?.rendererId, saved.rendererId) ||
+        !Object.is(spot?.enabled, saved.spotEnabled) ||
+        !Object.is(spot?.range, saved.spotRange) ||
+        !Object.is(spot?.intensity, saved.spotIntensity) ||
+        !Object.is(spot?.spotAngle, saved.spotAngle) ||
+        !Object.is(spot?.cullingMask, saved.spotMask) ||
+        !Object.is(spot?.cookieTextureId, saved.spotCookie) ||
+        !sameWarningVector(spot?.position, saved.spotPosition) ||
+        !sameWarningVector(spot?.direction, saved.spotDirection) ||
+        !sameWarningVector(spot?.right, saved.spotRight) ||
+        !sameWarningVector(spot?.up, saved.spotUp) ||
+        !sameWarningVector(spot?.color, saved.spotColor) ||
+        !Object.is(falseLight?.enabled, saved.falseEnabled) ||
+        !Object.is(falseLight?.intensity, saved.falseIntensity) ||
+        !Object.is(falseLight?.slot, saved.falseSlot) ||
+        !sameWarningVector(falseLight?.position, saved.falsePosition)) return false;
+  }
+  return true;
+};
+
+/**
  * SH-13 / Dojo: bind the *existing* source warning controller to the already
  * decoded scene textures and the exact layer of an authored world instance.
  * This does NOT create a texture, light, asset URL or gameplay event.
@@ -510,6 +572,7 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
   const decodedCookies = new Set();
   const cookieImages = new Map();
   const cookieStatus = [];
+  const layerPacketCache = new Map();
   for (const doorId of qualifiedDoorKeys) {
     const textureId = doors[doorId]?.spotlight?.cookieTextureId;
     const sourceTexturePresent = typeof textureId === 'string' &&
@@ -547,12 +610,22 @@ export function createDojoDoorWarningSceneAdapter(scene, images, {
           instance.layer < 0 || instance.layer > 31) {
         throw new TypeError('Authored world instance with source Unity layer required');
       }
-      return prepareDojoDoorWarningLighting(source, packets, {
+      // Typical scenes draw hundreds of meshes but use only a few Unity
+      // layers. Avoid re-normalizing and allocating the same live spotlights
+      // once per mesh; invalidate on ALL mutable controller/steering inputs.
+      const cache = layerPacketCache.get(instance.layer);
+      if (cache?.packets === packets &&
+          warningPacketsUnchanged(packets, cache.snapshot)) return cache.result;
+      const result = prepareDojoDoorWarningLighting(source, packets, {
         verifiedDoorKeys: qualifiedDoorKeys,
         decodedCookies,
         meshLayer: instance.layer,
         allowWebCookieFreeGlow,
       });
+      layerPacketCache.set(instance.layer, {
+        packets, snapshot: packets.map(warningPacketSnapshot), result,
+      });
+      return result;
     },
     /** Return only a previously decoded source scene cookie; no fallback. */
     cookieImage(textureId) {

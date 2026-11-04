@@ -283,3 +283,60 @@ test('opt-in Web-only glow retains real door joins, masks, envelopes and missing
     prepareDojoDoorWarningLighting(scene, records, options).spotlights[0], [1, 2, 8]),
   /Explicit Web procedural/);
 });
+
+
+test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering vectors', () => {
+  const key = 'level10::7089';
+  const door = {
+    ...sourceDoor, spotlight: { ...sourceDoor.spotlight, position: [1, 2, 3],
+      direction: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0] },
+    falseLight: { ...sourceDoor.falseLight, position: [2, 3, 4] },
+  };
+  const warning = createMcdDoorWarnings({ [key]: door });
+  warning.trigger(key);
+  warning.advance(.5);
+  // SH-07 returns the SAME mutated array on every call, even after a tick.
+  const packets = warning.packets();
+  const textureId = door.spotlight.cookieTextureId;
+  const adapter = createDojoDoorWarningSceneAdapter({
+    source: scene,
+    textures: new Map([[textureId, { id: textureId }]]),
+    gameplay: { audio: { doors: { [key]: door } } },
+    instanceMap: new Map([
+      ['a', { layer: 8 }], ['b', { layer: 8 }], ['c', { layer: 9 }],
+    ]),
+  }, new Map([[textureId, { width: 2, height: 2 }]]));
+  const first = adapter.prepareForInstance('a', packets);
+  assert.equal(first.spotlights.length, 1);
+  assert.strictEqual(adapter.prepareForInstance('b', packets), first,
+    'identical layer and live signal reuse the already validated GPU packet');
+  const other = adapter.prepareForInstance('c', packets);
+  assert.equal(other.spotlights.length, 0);
+  assert.notStrictEqual(other, first);
+  assert.strictEqual(adapter.prepareForInstance('c', packets), other);
+
+  // In-place world basis steering MUST invalidate despite stable array identity.
+  packets[0].spotlight.position[0] += 2;
+  const steered = adapter.prepareForInstance('a', packets);
+  assert.notStrictEqual(steered, first);
+  assert.equal(steered.spotlights[0].position[0], 3);
+  assert.equal(first.spotlights[0].position[0], 1);
+  packets[0].spotlight.direction[0] = .2;
+  const aimed = adapter.prepareForInstance('b', packets);
+  assert.notStrictEqual(aimed, steered);
+  assert.ok(aimed.spotlights[0].direction[0] > 0);
+  // False-light movement also invalidates the combined packet.
+  packets[0].falseLight.position[1] += 1;
+  const falseMoved = adapter.prepareForInstance('a', packets);
+  assert.equal(falseMoved.falseLights[0].position[1], 4);
+
+  warning.advance(.25);
+  assert.strictEqual(warning.packets(), packets);
+  const later = adapter.prepareForInstance('a', packets);
+  assert.notStrictEqual(later, falseMoved);
+  assert.notEqual(later.spotlights[0].range, falseMoved.spotlights[0].range);
+  warning.reset();
+  const inactive = adapter.prepareForInstance('a', packets);
+  assert.equal(inactive.spotlights.length, 0);
+  assert.equal(inactive.falseLights.length, 0);
+});
