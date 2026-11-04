@@ -8,6 +8,9 @@ const WEB_MAX_DEATH_SUBSTEPS = 4;
 // Web-only grounded rest threshold: skip repeated full PBD passes for a corpse
 // that has been continuously supported and truly motionless for a short time.
 const WEB_GROUNDED_REST_SECONDS = 0.3;
+// Web-only angular surface friction: real static floor contacts dissipate
+// excess post-impact spin; free-flying limbs retain their sourced angular drag.
+const WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND = 7;
 const zero=()=>({x:0,y:0,z:0});
 const point=m=>({x:m[12],y:m[13],z:m[14]});
 const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
@@ -480,11 +483,21 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       // repeated that impulse each substep: artificial energy, flying elastic
       // corpses. Preserve source gravity/forces and admitted collision
       // impulses only; never turn solver error into kinetic energy.
+      let groundedContact=false;
       for(let c=contactStart;c<contacts.length;c++) {
         const contact=contacts[c];
         if(contact.boneIndex!==body.source.boneIndex)continue;
         const inward=dot(body.velocity,contact.normal);
         if(inward<0)for(const axis of axes)body.velocity[axis]-=contact.normal[axis]*inward;
+        if(contact.collider && contact.normal.y>0.55)groundedContact=true;
+      }
+      // Actual floor contact bleeds residual spin before grounded sleep. This
+      // is a Web-only contact friction, not a recovered Unity PhysX coefficient.
+      // Exponential decay gives consistent results at 30/60 Hz; no floor
+      // contact means all original airborne angular motion survives.
+      if(groundedContact) {
+        const angularRetention=Math.exp(-WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND*dt);
+        for(const axis of axes)body.angularVelocity[axis]*=angularRetention;
       }
       // Likewise, do not create spin from a joint-correction quaternion.
     }

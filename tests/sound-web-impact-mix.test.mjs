@@ -190,3 +190,28 @@ test('Web room slapback is a shared, filtered combat send and does not echo foot
   assert.equal(master.disconnected, true);
   assert.ok(nodes.length >= 4);
 });
+
+
+test('Web combat hits add a bright attack without extra voices or coloring footsteps', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 3);
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(nodes.length, 2); // Same two Web sources: noise and pitched body.
+  assert.equal(nodes[0].connections.length, 2); // Burst plus short crack.
+  const crack = filters.find(f => f.type === 'highpass' && f.frequency.value > 2500);
+  assert.ok(crack);
+  const crackGain = gains.find(g => crack.connections.includes(g));
+  assert.ok(crackGain);
+  assert.equal(crackGain.gain.value, 0.0001); // Exponential 22ms decay programmed.
+
+  const filterCount = filters.length;
+  assert.equal(mix.emit('step').status, 'started');
+  assert.equal(nodes[2].connections.length, 1); // No brittle crack on footsteps.
+  assert.equal(filters.length, filterCount + 1); // Only its old tonal filter.
+
+  assert.equal(mix.emit('katana').status, 'started');
+  assert.equal(nodes[4].connections.length, 2);
+  assert.ok(filters.some(f => f.type === 'bandpass')); // Distinct steel attack.
+  assert.equal(mix.getActiveVoices(), 3);
+  mix.dispose();
+});
