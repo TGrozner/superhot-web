@@ -1246,9 +1246,9 @@ function update(dt, activeRealDt) {
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
     // Advance existing warning envelopes before accepting fresh commands.
     // This preserves trigger()'s first source-clock sample.
-    // Spawn timers and the encounter below both consume this capped unscaled dt.
+    // Spawn and warning countdowns use active real time even when physics dt is capped.
     // Light curve animation remains driven by worldDt.
-    nativeDoorWarningBridge?.advance(worldDt, state.camera, dt);
+    nativeDoorWarningBridge?.advance(worldDt, state.camera, activeRealDt);
     if (nativeHandsController) {
       try {
         const heldId = nativeItems?.held?.id ?? 'unarmed';
@@ -1352,7 +1352,7 @@ function update(dt, activeRealDt) {
   if(!native)state.camera.y = (containersPreviewEnabled ? previewCameraY : 1.68) + state.hop;
   if(native && nativeCombatStarted) {
     const events=advanceNativeEncounter(nativeEncounter,{
-      scaledDeltaTime:worldDt,unscaledDeltaTime:dt,playerPosition:state.camera,
+      scaledDeltaTime:worldDt,unscaledDeltaTime:activeRealDt,playerPosition:state.camera,
       playerForward:cameraAxes(state.camera.yaw,state.camera.pitch).forward,playerFeet:nativeFeet,enemies:state.enemies,
       // Only actual already-launched player bullets; never a predicted mouse click.
       playerProjectiles:state.bullets,
