@@ -515,3 +515,12 @@ Un fragment de `GunPickup` reçoit déjà le couple échantillonné et des conta
 **Correction limitée et déjà raccordée :** conserver le CCD sur les vraies boîtes du Dojo et réintégrer, dans le reste du balayage, la composante *sortante* issue de la restitution calculée sur la vitesse entrante. Une surface inélastique n'acquiert pas de rebond ; la friction tangentielle livrée par #368 reste inchangée. Le test ciblé vérifie le départ au rebond dans la même frame et le repos avec restitution nulle. Aucun nouveau collider, effet, asset ni hook `main.js` / renderer.
 
 **Provenance et limite :** `material.bounciness`, `bounceThreshold` et les colliders arrivent du pack Dojo existant ; la répartition du temps de sweep est une **politique physique Web**, PAS le scheduler PhysX/MCD. CI et tests ne prouvent ni le ressenti réel ni les FPS : contrôler après merge sur Pages les rebonds après bris d'armes à 30/60 Hz, contacts sol/plafond, les ragdolls et la boucle 7/7.
+
+
+## SH-06 — glissement des corps après contact dans une sous-étape (Web 2026-11-04)
+
+**Défaut observable ciblé :** le solveur PBD de `src/animation/native-death-runtime.js` conservait une fraction de trajet jusqu'à la première collision (sol/mur), mais abandonnait tout déplacement restant lorsqu'un hit se produisait strictement à l'intérieur d'une sous-étape. Un ragdoll pouvait ainsi s'arrêter brièvement en longeant un sol ou un mur même si la friction n'avait pas arrêté sa vitesse tangentielle.
+
+**Correction Web, pas native :** après le premier TOI balayé, l'orientation reste conservativement bornée, tandis que la translation résiduelle est projetée sur les normales de contact. La vitesse post-contact déjà modifiée par le matériau borne ce reste (friction forte = aucun glissement). Une seconde requête bornée sur les **mêmes** sphères et colliders Dojo interdit de traverser un mur voisin. Aucune pose supplémentaire, aucun objet, aucune ressource commerciale ni modification de `main.js`/`renderer.js`.
+
+**Test falsifiable :** un corps à sphère source unique, allant diagonalement au sol, doit parcourir sa tangente dans la même frame sans friction, s'arrêter plus tôt avec friction, et rester du bon côté d'un second BoxCollider. Le test ne prouve ni la cinématique PhysX native ni les FPS réels : ces deux points et le comportement interactif restent inconnus jusqu'au smoke sur GitHub Pages. Les valeurs, tolérances et la projection sont une conception de physique **Web**.
