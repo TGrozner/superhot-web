@@ -669,6 +669,9 @@ function pause() {
   setScreen('paused');
 }
 function finish(win) {
+  // A terminal round must be scored and persisted exactly once even if
+  // multiple impact producers resolve during the same Web frame.
+  if (state.screen === 'dead' || state.screen === 'win') return;
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   let stats = `${state.kills} ennemis éliminés · ${state.shots} tirs · ${state.runClock.toFixed(1)} secondes`;
   // Original Web replay goals on the *actual* Dojo scoreboard. Storage failure
@@ -1129,6 +1132,10 @@ function killEnemy(enemy,hitReceipt=null) {
   } else if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
 }
 function damagePlayer() {
+  // Never apply another hit to an already terminal/paused round. The Dojo
+  // preview uses the playing screen before the first intentional START.
+  if (state.screen !== 'playing' || state.health <= 0 ||
+      (nativeGameplay() && !nativeCombatStarted)) return;
   state.health--;
   state.damage = .48;
   state.shotPulse = 1;
