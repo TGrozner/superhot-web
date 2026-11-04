@@ -7,7 +7,7 @@ const visual=()=>({
   worldDrawCalls:360,handsDrawCalls:3,handsTriangles:2048,
   handsSourcePoseSampled:true,katanaSocketApplied:true,
   warningReadiness:'source-catalog-present',warningEventStatus:'not-loaded',
-  warningActiveEnvelopes:0,warningRenderedSpotlights:0,
+  warningActiveEnvelopes:0,warningRenderedSpotlights:0,warningWebFalseLightDrawCalls:0,
 });
 const trace=(variants=[])=>({
   schemaVersion:2,captureKind:'SH10_DOJO_OWNER_BROWSER_V2',
@@ -35,7 +35,7 @@ test('SH10 an ACTIVE source door-warning envelope without GPU spotlight is an ex
   ]));
   assert.equal(result.status,DOJO_VISIBLE_STATUS.GAP);
   assert.equal(result.observed.firstWarningGapFrameId,2);
-  assert.equal(result.observed.warningActiveWithoutSpotlightFrames,1);
+  assert.equal(result.observed.warningActiveWithoutAnyLightDrawFrames,1);
   assert.equal(result.nativeParityVerdict,'UNKNOWN');
 });
 
