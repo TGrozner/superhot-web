@@ -79,25 +79,32 @@ const WEB_SQUAD_VOLLEY = Object.freeze({
 // A distant armed actor is not a squadmate. Keep each connected local group
 // independent, including A-B-C chains, so another room cannot elect our point
 // man or force a lone gunner into a needless assault/flanking lane.
-function webLocalArmedSquad(runtime, enemy, enemies) {
-  if (!participating(enemy) || enemy.reaction?.hasWeapon!==true) return [];
+function webLocalArmedSquads(runtime, enemies) {
   const armed=enemies.filter(actor => participating(actor) &&
     actor.reaction?.hasWeapon===true && actor.encounter);
   const range=runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii;
-  const squad=[enemy], seen=new Set(squad);
-  for (let i=0;i<squad.length;i++) {
-    const member=squad[i];
-    for (const candidate of armed) {
-      if (seen.has(candidate) ||
-          Math.hypot(member.x-candidate.x,member.z-candidate.z)>range)continue;
-      seen.add(candidate);
-      squad.push(candidate);
+  const unassigned=new Set(armed), squads=new Map();
+  // Snapshot the entire partition BEFORE the movement loop. Otherwise an
+  // early-moving actor could change which teammates exist for later actors.
+  for (const first of armed) {
+    if (!unassigned.has(first))continue;
+    const squad=[first];
+    unassigned.delete(first);
+    for (let i=0;i<squad.length;i++) {
+      const member=squad[i];
+      for (const candidate of armed) {
+        if (!unassigned.has(candidate) ||
+            Math.hypot(member.x-candidate.x,member.z-candidate.z)>range)continue;
+        unassigned.delete(candidate);
+        squad.push(candidate);
+      }
     }
+    for (const member of squad)squads.set(member,squad);
   }
-  return squad;
+  return squads;
 }
-function webSquadBreacher(runtime, enemy, enemies, observingAllies) {
-  const squad=webLocalArmedSquad(runtime,enemy,enemies);
+function webSquadBreacher(enemy, localSquads, observingAllies) {
+  const squad=localSquads.get(enemy) ?? [];
   if (squad.length<2) return false;
   let readyLead=null;
   for (const candidate of squad) {
@@ -348,8 +355,8 @@ function cancelWebProjectileEvade(state) {
 // opposite, reachable positions near the player; never offset the player
 // hitbox, grant firing permission, or bypass the existing path/capsule checks.
 // This is tactical Web design, not a source MCD spawn or AI assignment.
-function webSquadApproachGoal(runtime, enemy, playerFeet, enemies) {
-  if (webLocalArmedSquad(runtime,enemy,enemies).length<2) return null;
+function webSquadApproachGoal(runtime, enemy, playerFeet, localSquads) {
+  if ((localSquads.get(enemy)?.length ?? 0)<2) return null;
   const dx=playerFeet.x-enemy.x, dz=playerFeet.z-enemy.z;
   const length=Math.hypot(dx,dz);
   const offset=Math.min(runtime.body.radius*3.5,runtime.armedStopDistance*0.7);
@@ -715,7 +722,7 @@ function applyWebWitnessedLoss(runtime,enemies) {
   }
 }
 
-function moveEnemy(runtime, enemy, input, observingAllies, fireTurns) {
+function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquads) {
   const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
@@ -888,7 +895,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns) {
   // maintain their normal firing ring. No assigned partner, blocked line of
   // sight or deferred shot means the ordinary chase/stop behavior applies.
   const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
-    (webSquadBreacher(runtime,enemy,enemies,observingAllies) ||
+    (webSquadBreacher(enemy,localSquads,observingAllies) ||
       webFinalSurvivorBreacher(runtime,enemy,enemies));
   const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stopDistance=breaching
@@ -967,7 +974,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns) {
   // An unreachable offset is never substituted for the direct source route.
   const flankGoal=armed && state.visible &&
       playerDistance>stopDistance+runtime.body.radius*2
-    ? webSquadApproachGoal(runtime,enemy,playerFeet,enemies) : null;
+    ? webSquadApproachGoal(runtime,enemy,playerFeet,localSquads) : null;
   const desiredTarget=flankGoal ?? pursuitFeet;
   if (!state.route || !state.target || distance(state.target,desiredTarget) > runtime.body.radius ||
       state.route.cursor >= state.route.points.length) {
@@ -1038,7 +1045,8 @@ export function advanceNativeEncounter(runtime, input) {
   runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
     (WEB_SQUAD_VOLLEY.beatSeconds*60);
   const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime);
-  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns);
+  const localSquads=webLocalArmedSquads(runtime,enemies);
+  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns,localSquads);
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
     scaledDeltaTime,unscaledDeltaTime,enabled:true,spawningAreaInitialized:true,
     currentEnemyCount:enemies.filter(participating).length+runtime.arrivals.length,
