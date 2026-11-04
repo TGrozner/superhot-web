@@ -66,6 +66,7 @@ const WEB_SQUAD_PUSH = Object.freeze({
   stopDistanceFraction: 0.67,
   minimumStopBodyRadii: 3.2,
   disengageFraction: 0.62,
+  relaySeconds: 4.8, // Web-only readable leapfrog: swap the assault lead every few seconds.
 });
 
 // J3 Web-original readable crossfire: nearby gunners with ACTUALLY clear
@@ -110,28 +111,38 @@ function webLocalArmedSquads(runtime, enemies) {
   }
   return squads;
 }
-function webSquadBreacher(enemy, localSquads, observingAllies) {
-  const squad=localSquads.get(enemy) ?? [];
-  if (squad.length<2) return false;
-  let readyLead=null;
-  for (const candidate of squad) {
-    // Use the SAME pre-movement sight snapshot as the firing gate. A hidden
-    // low-ID gunner must not block the push of a partner who sees the player.
-    if (!observingAllies.has(candidate)) continue;
-    // A stunned, dodging or suppressed point man cannot maintain the push.
-    // Keep his squad slot, but hand the assault to the lowest-ID available
-    // gunner. No new fire permission or target knowledge is conferred.
-    const busy=candidate.reaction.stunRemaining>0 ||
-      candidate.reaction.stunnedThisFrame ||
-      candidate.encounter.webDodgeRemaining>0 ||
-      candidate.encounter.webSuppressionRemaining>0 ||
-      candidate.encounter.webLossRemaining>0 ||
-      Boolean(candidate.runtime?.pendingShot);
-    if (busy) continue;
-    if (readyLead===null || String(candidate.id).localeCompare(String(readyLead.id),'en')<0)
-      readyLead=candidate;
+/** Snapshot the local squad's single breaching leader before ANY actor moves.
+ * A moving or recovering ally must not re-elect the leader midway through
+ * the same encounter frame. Relay the advance between eligible squadmates
+ * on a Web-authored clock so one gunner does not permanently lead every push.
+ * This only selects movement: actual sight, nav, muzzle and weapon gates stay.
+ * @param {object} runtime Current encounter clock and settings.
+ * @param {Map<object,object[]>} localSquads Full non-overlapping armed squads.
+ * @param {Set<object>} observingAllies Actual pre-movement sight witnesses.
+ * @returns {Set<object>} Leaders, at most one per connected local squad.
+ */
+function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
+  const leaders=new Set(), visited=new Set();
+  for (const squad of localSquads.values()) {
+    if (visited.has(squad)) continue;
+    visited.add(squad);
+    if (squad.length<2) continue;
+    const candidates=squad.filter(candidate => {
+      if (!observingAllies.has(candidate)) return false;
+      // An interrupted actor retains squad membership but cannot lead.
+      return !(candidate.reaction.stunRemaining>0 ||
+        candidate.reaction.stunnedThisFrame ||
+        candidate.encounter.webDodgeRemaining>0 ||
+        candidate.encounter.webSuppressionRemaining>0 ||
+        candidate.encounter.webLossRemaining>0 ||
+        candidate.runtime?.pendingShot);
+    });
+    if (!candidates.length) continue;
+    candidates.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+    const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_PUSH.relaySeconds)%candidates.length;
+    leaders.add(candidates[index]);
   }
-  return readyLead===enemy;
+  return leaders;
 }
 
 // J3 Web-only last-stand pressure: the final armed opponent must not become
@@ -726,7 +737,7 @@ function applyWebWitnessedLoss(runtime,enemies) {
   }
 }
 
-function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquads) {
+function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquads, breachingLeaders) {
   const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
@@ -899,7 +910,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // maintain their normal firing ring. No assigned partner, blocked line of
   // sight or deferred shot means the ordinary chase/stop behavior applies.
   const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
-    (webSquadBreacher(enemy,localSquads,observingAllies) ||
+    (breachingLeaders.has(enemy) ||
       webFinalSurvivorBreacher(runtime,enemy,enemies));
   const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stopDistance=breaching
@@ -1049,13 +1060,14 @@ export function advanceNativeEncounter(runtime, input) {
   runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
     (WEB_SQUAD_VOLLEY.beatSeconds*60);
   const localSquads=webLocalArmedSquads(runtime,enemies);
+  const breachingLeaders=webSquadBreachingLeaders(runtime,localSquads,observingAllies);
   const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime,localSquads);
   // Cover and crossfire may CHANGE as bodies move. Snapshot original feet so a
   // cached, previous-render muzzle can be translated to the new actor feet for
   // one conservative post-movement check. The true posed muzzle is still only
   // available in main's Late phase; this does not replace projectile collision.
   const originalFeet=new Map(enemies.map(enemy=>[enemy,position(enemy)]));
-  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns,localSquads);
+  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns,localSquads,breachingLeaders);
   const anyoneMoved=enemies.some(enemy=>distance(position(enemy),originalFeet.get(enemy))>EPSILON);
   if (anyoneMoved) for (const enemy of enemies) {
     if (!participating(enemy) || !enemy.encounter?.canAttack || !enemy.muzzlePosition)continue;
