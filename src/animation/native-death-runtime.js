@@ -243,6 +243,36 @@ function deathCollisionIndex(scene) {
   deathCollisionIndexes.set(scene,{boxes:scene.boxes,length:scene.boxes.length,root});
   return root;
 }
+// Sleeping Dojo corpses keep the original static support reference. Reuse the
+// existing per-scene collision index to find that box without N-collider
+// includes/find scans on every resting frame. Enabled changes remain live.
+// In-place replacement is checked at its original slot, so a removed floor
+// cannot keep a body suspended (the X-tree itself assumes static bounds).
+function deathSupportIndex(scene) {
+  deathCollisionIndex(scene);
+  const index=deathCollisionIndexes.get(scene);
+  if(!index.supports) {
+    const positions=new Map(),byCollider=new Map();
+    for(let i=0;i<scene.boxes.length;i++) {
+      const box=scene.boxes[i];
+      positions.set(box,i);
+      const existing=byCollider.get(box.collider);
+      if(existing)existing.push({box,index:i});
+      else byCollider.set(box.collider,[{box,index:i}]);
+    }
+    index.supports={positions,byCollider};
+  }
+  return index.supports;
+}
+function deathSupportStillEnabled(scene,box) {
+  if(!box?.enabled)return false;
+  const position=deathSupportIndex(scene).positions.get(box);
+  return position!==undefined && scene.boxes[position]===box;
+}
+function deathFindEnabledSupport(scene,collider) {
+  const matches=deathSupportIndex(scene).byCollider.get(collider);
+  return matches?.find(({box,index})=>scene.boxes[index]===box&&box.enabled)?.box??null;
+}
 function deathBoxCandidates(node,minX,maxX,entries) {
   if(!node)return;
   if(maxX<node.center) {
@@ -471,7 +501,7 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
   }
   if(limitWebFrameWork && runtime.resting) {
     const support=runtime.restSupportBox;
-    if(support?.enabled && runtime.collisionScene.boxes.includes(support)) {
+    if(deathSupportStillEnabled(runtime.collisionScene,support)) {
       // The source Kill clock still advances while the purely Web solver
       // sleeps. This does not alter cleanup timing or source-authored poses.
       runtime.elapsed=target;
@@ -578,8 +608,9 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
     // free-falling, spinning or actively forced limbs. This is a Web game-feel
     // and CPU budget policy, NOT Unity/PhysX sleeping.
     const groundContact=contacts.find(c=>c.normal?.y>0.55 && c.collider);
-    const support=groundContact && runtime.collisionScene.boxes.find(
-      box=>box.enabled && box.collider===groundContact.collider);
+    const support=groundContact
+      ? deathFindEnabledSupport(runtime.collisionScene,groundContact.collider)
+      : null;
     const steady=!!support && runtime.bodies.every((body,i)=>{
       if(body.forces.length || length(body.velocity)>0.07 ||
           length(body.angularVelocity)>0.08)return false;
