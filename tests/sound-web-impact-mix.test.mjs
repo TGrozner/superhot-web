@@ -252,3 +252,30 @@ test('Web-only player damage impact is local, punchy and survives a saturated gu
   assert.equal(nodes.length, 4); // Two sources per voice, no extra sub-bass oscillator.
   mix.dispose();
 });
+
+test('live shatter gains two glass rings without stealing more voices or leaving zombie sources', () => {
+  const {ctx, nodes} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  assert.equal(mix.emit('shatter', {position: {x: 2, y: 1, z: 0}}).status, 'started');
+  assert.equal(nodes.length, 4); // Existing noise/body + two Web-original inharmonic partials.
+  assert.equal(nodes[2].type, 'sine');
+  assert.equal(nodes[3].type, 'sine');
+  assert.notEqual(nodes[2].frequency.value, nodes[3].frequency.value);
+  assert.deepEqual(nodes.slice(2, 4).map(node => node.stopArgs), [
+    [ctx.currentTime + 0.36], [ctx.currentTime + 0.23],
+  ]);
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.equal(mix.emit('step').status, 'blocked'); // Only one voice, despite four sources.
+
+  const finished = nodes.slice(0, 4).map(node => node.onended);
+  assert.equal(mix.emit('player-hit').status, 'started'); // Damage preempts glass.
+  assert.equal(nodes.length, 6); // Damage still has just the original two sources.
+  for (const node of nodes.slice(0, 4)) {
+    assert.deepEqual(node.stopArgs, [ctx.currentTime + 0.008]);
+  }
+  for (const callback of finished) callback();
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.ok(nodes.slice(0, 4).every(node => node.disconnected));
+  mix.dispose();
+  assert.equal(mix.getActiveVoices(), 0);
+});
