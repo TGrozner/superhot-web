@@ -39,8 +39,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
     let drone = null;
     let disposed = false;
     let mixLevel = 1;
-  // Web-authored texture cycle: repeated rapid shots should not be sample-identical.
-  let transientSerial = 0;
+    // Web-authored texture cycle: repeated rapid shots should not be sample-identical.
+    let transientSerial = 0;
     /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
     function setMixLevel(level) {
         if (!Number.isFinite(level) || level < 0 || level > 1)
@@ -106,11 +106,11 @@ export function createWebImpactMix(context, maxVoices = 24) {
             }
             release(victim);
         }
-        // Each successful cue uses a fresh noise region and a subtle tonal detune.
-    // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
-    const textureIndex = transientSerial++ % 8;
-    const texturePitch = 1 + (textureIndex - 3.5) * 0.012;
-    const out = context.createGain();
+            // Each successful cue uses a fresh noise region and a subtle tonal detune.
+        // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
+        const textureIndex = transientSerial++ % 8;
+        const texturePitch = 1 + (textureIndex - 3.5) * 0.012;
+        const out = context.createGain();
         out.gain.value = intensity;
         let panner = null;
         if (position && typeof context.createPanner === 'function') {
