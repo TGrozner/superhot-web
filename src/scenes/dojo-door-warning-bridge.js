@@ -253,14 +253,18 @@ function createWebWarningSweep(catalog, controller) {
       // If the integrator has not passed real delta yet, preserve the
       // previous visual-only phase ranking rather than guess a time scale.
       if (unscaledDeltaSeconds != null && base.arrivalRemaining != null) {
+        // A frame may straddle arrival: only its portion AFTER the real
+        // countdown hits zero may fade the extra Web light. Fading the whole
+        // frame causes an early light drop at low FPS / during a long frame.
+        const afterArrivalSeconds = Math.max(0,
+          unscaledDeltaSeconds - base.arrivalRemaining);
         base.arrivalRemaining = Math.max(0, base.arrivalRemaining - unscaledDeltaSeconds);
-        // The source lamp can still be active in slowed world time after an
-        // enemy has already appeared in real time. Release only the Web
-        // crescendo, moving floor wash and incoming-route aim: no phantom
-        // second arrival. Keep the remaining source red warning intact.
-        base.arrivalEmphasis = base.arrivalRemaining === 0
-          ? base.arrivalEmphasis * Math.exp(-WEB_WARNING_ARRIVAL_RELEASE_PER_SECOND * unscaledDeltaSeconds)
-          : 1;
+        // Preserve SH-07's separate world-time source lamp; this controls
+        // only the additional Web anticipation glow and floor wash.
+        if (afterArrivalSeconds > 0) {
+          base.arrivalEmphasis *= Math.exp(
+            -WEB_WARNING_ARRIVAL_RELEASE_PER_SECOND * afterArrivalSeconds);
+        }
         base.urgency = base.arrivalRemaining > 0
           ? 0.05 + 1 / (0.25 + base.arrivalRemaining) ** 2 : 0.05;
       } else {
