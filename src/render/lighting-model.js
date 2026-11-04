@@ -241,8 +241,13 @@ vec3 dojoDoorFalseLightWashWeb(
   // vNormal/uHasNormals are already provided by native-world-pass.
   float facing = 1.0;
   if (uHasNormals != 0 && radius > 0.0001) {
-    float towardLamp = dot(vNormal, lightPosition - worldPosition) / radius;
-    facing = 0.2 + 0.8 * clamp(towardLamp, 0.0, 1.0);
+    // vNormal is normalized per vertex, but raster interpolation shortens it
+    // across curved/creased triangles. Match the unit-normal CPU contract.
+    float normalLength = length(vNormal);
+    if (normalLength > 0.0001) {
+      float towardLamp = dot(vNormal / normalLength, lightPosition - worldPosition) / radius;
+      facing = 0.2 + 0.8 * clamp(towardLamp, 0.0, 1.0);
+    }
   }
   float energy = sourceIntensity * fade * fade * facing;
   return dojoWebWarningContrast(
