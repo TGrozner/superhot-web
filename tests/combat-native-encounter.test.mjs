@@ -659,3 +659,40 @@ test('J3 Web dodge is cancelled by stun, pending fire or deactivation rather tha
     assert.equal(enemy.encounter.webDodgeRemaining,0);
   }
 });
+
+test('J3 Web fair hunt: enemies investigate last seen feet instead of tracking a hidden player through a wall',()=>{
+  // All positions and the blocking wall are synthetic Web test fixtures.
+  // This is NOT an assertion about MCD's native enemy perception.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=1;
+  const runtime=setup(data,[box(8,1,5,.4,2,5)]);
+  const seen={playerFeet:p(6,0,2),playerPosition:p(6,1.6,2)};
+  const enemy=firstSpawn(runtime,seen);
+  advanceNativeEncounter(runtime,input([enemy],{...seen,scaledDeltaTime:0}));
+  assert.equal(enemy.encounter.visible,true,'the enemy first acquires real line of sight');
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,seen.playerFeet);
+
+  const hidden={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
+  for(let frame=0;frame<24;frame++){
+    advanceNativeEncounter(runtime,input([enemy],{...hidden,scaledDeltaTime:.2}));
+    assert.equal(enemy.encounter.visible,false,'the wall keeps the player genuinely occluded');
+    assert.deepEqual(enemy.encounter.webLastSeenFeet,seen.playerFeet,
+      'live hidden coordinates never overwrite the remembered position');
+    assert.deepEqual(enemy.encounter.target,seen.playerFeet,
+      'the navigation goal is the previously seen position, not the hidden player');
+  }
+  assert.ok(enemy.x>5.5 && enemy.x<=6.001,'the hunter physically reaches the last seen location');
+  assert.ok(Math.abs(enemy.z-2)<.01,'hunter does not turn toward the unseen location');
+  const holding=p(enemy.x,enemy.y,enemy.z);
+  const relocated={playerFeet:p(13,0,7),playerPosition:p(13,1.6,7)};
+  advanceNativeEncounter(runtime,input([enemy],{...relocated,scaledDeltaTime:.2}));
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),holding,
+    'the stationary search does not acquire clairvoyant chase through cover');
+  assert.equal(enemy.encounter.canAttack,false,'no invisible target grants muzzle fire');
+
+  const reappeared={playerFeet:p(4,0,2),playerPosition:p(4,1.6,2)};
+  advanceNativeEncounter(runtime,input([enemy],{...reappeared,scaledDeltaTime:0}));
+  assert.equal(enemy.encounter.visible,true,'normal sight can reacquire the player');
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,reappeared.playerFeet,
+    'a new real sighting replaces the old search destination');
+});
