@@ -306,7 +306,7 @@ test('J4 authored moving false-light becomes a bounded Web red floor wash, not a
   const crystal = sampleDojoDoorFalseLightWebWash(fill, [2, 3, 4], 3);
   assert.ok(crystal.rgb[1] > atLamp.rgb[1] && crystal.rgb[2] > atLamp.rgb[2],
     'Web-authored Red Crystal glint shares the existing material grade');
-  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /vec3 dojoDoorFalseLightWashWeb\\(/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /vec3 dojoDoorFalseLightWashWeb\(/);
   assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade/);
   assert.throws(() => sampleDojoDoorFalseLightWebWash(
     { ...fill, shaderParity: 'native-verified' }, [2, 3, 4]),
