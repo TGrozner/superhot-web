@@ -785,3 +785,45 @@ test('J3 Web witnessed loss: visible nearby ally death prompts one swept retreat
     'a wall prevents omniscient awareness of an ally dying on its other side');
   assert.equal(concealed.killed,1,'occlusion does not erase the real kill receipt');
 });
+
+
+test('J3 Web near-miss suppression: actual passing player bullet interrupts gunfire without wallhacks',()=>{
+  // Synthetic bullets and geometry; creative Web behavior, not an MCD timing claim.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const passing={friendly:true,pos:p(7,1,3.4),direction:p(-1,0,0),speed:22};
+  const runtime=setup(data),enemy=firstSpawn(runtime,player);
+  enemy.muzzlePosition=p(2,1.4,2);enemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(runtime,input([enemy],{...player,scaledDeltaTime:.12,playerProjectiles:[passing]}));
+  assert.ok(enemy.z<1.95,'visible near miss causes a real retreat away from the flight path');
+  assert.equal(enemy.encounter.canAttack,false,'suppression withholds a shot despite a clear muzzle');
+  assert.ok(enemy.encounter.webSuppressionRemaining>0,'brief follow-through persists after bullet leaves');
+  assert.equal(enemy.encounter.webDodgeRemaining,0,'near miss does not masquerade as a direct-hit dodge');
+  for(let i=0;i<5;i++)advanceNativeEncounter(runtime,input([enemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[],
+  }));
+  assert.equal(enemy.encounter.webSuppressionRemaining,0,'finite response expires without projectile');
+  assert.ok(enemy.encounter.webSuppressionCooldown>0,'same near miss cannot cause endless retreat');
+  const after=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+  }));
+  assert.equal(enemy.encounter.webSuppressionRemaining,0,'recovery suppresses repeated alarms');
+  assert.ok(Math.hypot(enemy.x-after.x,enemy.z-after.z)<.3,'normal movement budget still applies');
+
+  const covered=setup(data,[box(4,1,3.4,.2,2,.45)]),coveredEnemy=firstSpawn(covered,player);
+  coveredEnemy.muzzlePosition=p(2,1.4,2);coveredEnemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(covered,input([coveredEnemy],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+  }));
+  assert.equal(coveredEnemy.encounter.visible,true,'world cover blocks bullet, not player sight');
+  assert.equal(coveredEnemy.encounter.webSuppressionRemaining,0,'world cover prevents omniscient suppression');
+  assert.equal(coveredEnemy.encounter.canAttack,true,'no false gunfire lockout behind cover');
+
+  const uninvolved=setup(data),idle=firstSpawn(uninvolved,player);
+  advanceNativeEncounter(uninvolved,input([idle],{
+    ...player,scaledDeltaTime:.12,playerProjectiles:[{...passing,friendly:false}],
+  }));
+  assert.equal(idle.encounter.webSuppressionRemaining,0,'enemy-fired bullets do not cause player-shot panic');
+});
