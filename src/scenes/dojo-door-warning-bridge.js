@@ -174,6 +174,7 @@ function createWebWarningSweep(catalog, controller) {
     if (falseLightPosition) packet.falseLight.position = [...falseLightPosition];
     bases.set(packet.id, {
       packet, direction, right, up, falseLightPosition, spawnTarget: null,
+      urgency: 0, focusGain: 1,
       intensity: door.spotlight.intensity,
       spotAngle: door.spotlight.spotAngle,
       duration: door.curve.at(-1).time,
@@ -183,6 +184,7 @@ function createWebWarningSweep(catalog, controller) {
   function restoreOne(base) {
     if (!base) return;
     base.spawnTarget = null; // No previous encounter target can survive REJOUER.
+    base.focusGain = 1;
     const spotlight = base.packet.spotlight;
     if (base.direction) {
       for (let axis = 0; axis < 3; axis++) {
@@ -220,7 +222,22 @@ function createWebWarningSweep(catalog, controller) {
       ? [position.x, position.y, position.z] : null;
   }
 
-  function advance(playerWorldPosition) {
+  function advance(playerWorldPosition, worldDeltaSeconds) {
+    // J4 Web readability: when several real entrances warn simultaneously,
+    // guide attention toward the threat closest to arrival. Preserve each
+    // source clock, the three existing GPU light slots and the original
+    // camera/spawn tracking. No extra meshes, lights, uniforms or draw calls.
+    let activeCount = 0, totalUrgency = 0;
+    for (const base of bases.values()) {
+      if (!base.packet.active) continue;
+      const phase = Math.max(0, Math.min(1, base.packet.elapsed / base.duration));
+      // A just-triggered doorway must remain visible, not disappear under
+      // another alarm. Fourth power separates nearly simultaneous arrivals.
+      base.urgency = 0.05 + phase ** 4;
+      totalUrgency += base.urgency;
+      activeCount++;
+    }
+    const focusEase = 1 - Math.exp(-7 * worldDeltaSeconds);
     const playerKnown = playerWorldPosition != null &&
       Number.isFinite(playerWorldPosition.x) &&
       Number.isFinite(playerWorldPosition.y) &&
@@ -236,6 +253,11 @@ function createWebWarningSweep(catalog, controller) {
         base.duration, WEB_WARNING_MIN_CYCLE_SECONDS), 1);
       const sweep = Math.sin(2 * Math.PI * phase);
       const breathing = sweep * sweep;
+      const focusTarget = activeCount > 1
+        ? 0.56 + 0.88 * base.urgency / totalUrgency : 1;
+      // Continuous transition when an alarm starts or expires: no one-frame
+      // red flash, even if two spawns overlap at different phases.
+      base.focusGain += (focusTarget - base.focusGain) * focusEase;
       // The source curve still determines whether a light exists, its range
       // and its final fade. This single slow Web crescendo makes the next
       // doorway threat legible without strobing or adding GPU submissions.
@@ -251,12 +273,12 @@ function createWebWarningSweep(catalog, controller) {
       if (Number.isFinite(packet.falseLight.intensity) &&
           packet.falseLight.intensity >= 0) {
         packet.falseLight.intensity *=
-          1 + WEB_WARNING_ARRIVAL_FALSE_LIGHT_GAIN * arrival;
+          (1 + WEB_WARNING_ARRIVAL_FALSE_LIGHT_GAIN * arrival) * base.focusGain;
       }
       if (Number.isFinite(base.intensity) && base.intensity >= 0) {
         packet.spotlight.intensity = base.intensity *
           (1 + WEB_WARNING_INTENSITY_GAIN * breathing +
-            WEB_WARNING_ARRIVAL_SPOT_GAIN * arrival);
+            WEB_WARNING_ARRIVAL_SPOT_GAIN * arrival) * base.focusGain;
       }
       if (!base.direction) continue;
       // J4 Web-authored lighthouse: as the red beam sweeps sideways its
@@ -441,7 +463,7 @@ export function createDojoDoorWarningBridge(scene) {
     }
     if (!controller) return [];
     const packets = controller.advance(worldDeltaSeconds);
-    webSweep.advance(playerWorldPosition);
+    webSweep.advance(playerWorldPosition, worldDeltaSeconds);
     return packets;
   }
 
