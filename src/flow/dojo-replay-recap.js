@@ -163,8 +163,15 @@ export function createDojoReplayRecap(snapshot, best = null) {
             masteryMask: best?.masteryMask ?? 0,
         });
     }
+    // A partial best is meaningful only before the first clear, and only when
+    // the current loss genuinely beats the previous best for this quota.
+    if (!run.victory && (best?.victories ?? 0) === 0 &&
+        run.kills > (best?.bestFailedKills ?? 0) && run.kills < run.quota) {
+        milestone = 'retry-progress';
+    }
     const title = {
         'retry': 'REJOUE POUR PRENDRE TA REVANCHE',
+        'retry-progress': 'NOUVEAU PALIER AVANT LA VICTOIRE !',
         'first-clear': 'PREMIÈRE VICTOIRE !',
         'double-record': 'DOUBLE RECORD !',
         'score-record': 'NOUVEAU RECORD DE SCORE !',
@@ -178,6 +185,11 @@ export function createDojoReplayRecap(snapshot, best = null) {
         : '';
     const attemptText = !run.victory && nextBest !== null && nextBest.victories === 0
         ? ` · MEILLEUR ESSAI ${nextBest.bestFailedKills}/${run.quota} · ${nextBest.trackedAttempts} ESSAI${nextBest.trackedAttempts > 1 ? 'S' : ''} SUIVI${nextBest.trackedAttempts > 1 ? 'S' : ''}` : '';
+    // An eventual first victory pays off the actually tracked failed attempts.
+    // No historic defeats are inferred from v1-v3 stored personal bests.
+    const clearAttemptText = run.victory && milestone === 'first-clear' &&
+        (nextBest?.trackedAttempts ?? 0) > 1
+        ? ` · ${nextBest?.trackedAttempts ?? 1} ESSAIS POUR LA PREMIÈRE VICTOIRE` : '';
     const style = run.victory ? gradeDojoStyle(run) : null;
     const stillNeeded = Math.max(0, run.quota - run.kills);
     const styleText = style === null
@@ -233,7 +245,7 @@ export function createDojoReplayRecap(snapshot, best = null) {
     }
     const replayTargetText = replayTarget === null ? '' : ` · DÉFI : ${replayTarget}`;
     return Object.freeze({
-        text: `${metrics} · ${title[milestone]}${styleText}${masteryText}${streakText}${recordText}${attemptText}${replayTargetText}`,
+        text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${replayTargetText}`,
         milestone, best: nextBest,
         shouldPersist: true,
         provenance: 'WEB_ONLY',

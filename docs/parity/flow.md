@@ -271,3 +271,12 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ — validation Web.** PR #335 sur branche SH-08, Verify #41760787685 **SUCCESS** sur SHA `ad611d3834c6b6cb5968a440c887ae0e3f82f353` (avant ce complément documentaire) : tests Node, TypeScript strict, JS compilé conforme et pack Pages vérifiés. Ce résultat n'est **pas** un smoke navigateur.
 
 **INCONNU — MCD natif.** L'activation réelle de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et la persistance/checkpoints MCD restent non qualifiés pour le Dojo exécuté. `bestFailedKills` est une simple donnée de rejouabilité **WEB_ONLY**, jamais un checkpoint natif. SH-05 conserve `main.js`, la fusion et les tests du site public ; aucun runner local ni ressource originale n'a été utilisé.
+
+
+## SH-08 / J4 — paliers visibles avant la première victoire (Web, 04/11/2026)
+
+**PROUVÉ — code Web :** sur `finish(win)` déjà raccordé par SH-05, une défaite qui établit un **nouveau meilleur essai partiel** avant le premier clear affiche désormais « NOUVEAU PALIER AVANT LA VICTOIRE ! » dès le début du résumé. Une défaite plus faible ne répète pas le palier ; mourir après quota complet ne simule pas une victoire. Le premier clear gagné après des défaites affiche le nombre **d'essais réellement suivis** avant réussite (par exemple 4), sans inventer l'historique des sauvegardes v1–v3. Les informations décisives sont placées avant les métriques dans le paragraphe de fin pour une lecture plus rapide sur mobile. Aucune variation de combat, F/E, score, spawns, temps, checkpoint, REJOUER, ni schéma v4 ; quota 6/7 et sauvegarde inchangés.
+
+**OBSERVÉ — validation à vérifier :** test ciblé de la séquence 4/7 perdu → 2/7 perdu → 5/7 perdu → victoire au 4e essai et du clear en un seul essai ; contrôler CI sur SHA exact et smoke Pages après merge par SH-05. Pas de navigateur ni de FPS observé ici.
+
+**INCONNU — MCD natif :** le signal concret `RunEnding` et ses gardes (`GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`), les checkpoints et menus MCD live restent non qualifiés. Ce retour de progression est un choix **WEB_ONLY**, pas une prétention de parité native.
