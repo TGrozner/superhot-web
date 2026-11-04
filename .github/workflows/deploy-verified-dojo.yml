@@ -42,10 +42,14 @@ jobs:
         run: npm ci --ignore-scripts && npm run check
       - name: Assemble only the static site
         run: |
-          mkdir -p _site
+          mkdir -p _site/scripts
           cp -a index.html style.css .nojekyll src local-assets _site/
+          # Only the two opt-in, read-only QA modules are shipped from scripts/.
+          cp -a scripts/visual-web-playability.mjs scripts/acceptance-dojo-fps.mjs _site/scripts/
           test -s _site/local-assets/manifest.json
           test -s _site/index.html
+          test -s _site/scripts/visual-web-playability.mjs
+          test -s _site/scripts/acceptance-dojo-fps.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
