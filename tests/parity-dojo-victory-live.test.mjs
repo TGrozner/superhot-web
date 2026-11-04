@@ -22,8 +22,8 @@ test('SH-05 main dispatches Dojo kill receipts only once and preserves other sce
 });
 test('SH-05 Dojo victory transition drains by active real time, not capped physics time',()=>{
   const update=main.slice(main.indexOf('function update(dt, activeRealDt)'),main.indexOf('function updateHud('));
-  assert.match(update,/state\\.transition-=nativeGameplay\\(\\) \\? activeRealDt : dt/);
-  assert.doesNotMatch(update,/state\\.transition-=dt;/);
+  assert.ok(update.includes('state.transition-=nativeGameplay() ? activeRealDt : dt;'));
+  assert.ok(!update.includes('state.transition-=dt;'));
 });
 
 test('Dojo valid scene receipt only authorizes provisional Web win at true combat quota',()=>{
