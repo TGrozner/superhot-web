@@ -302,17 +302,17 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // Web-original fist air sweep: intentionally separate from confirmed contact.
     // No native MCD clip is inferred, and no extra source or voice is allocated.
     if (cue === 'punch-swing') {
-        const airFilter = context.createBiquadFilter();
-        airFilter.type = 'bandpass';
-        airFilter.frequency.setValueAtTime(Math.min(2300, context.sampleRate * 0.43), at);
-        airFilter.frequency.exponentialRampToValueAtTime(Math.min(740, context.sampleRate * 0.23), at + duration);
-        const air = context.createGain();
-        air.gain.setValueAtTime(0.0001, at);
-        air.gain.linearRampToValueAtTime(volume * 0.48, at + 0.028);
-        air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-        noise.connect(airFilter);
-        airFilter.connect(air);
-        air.connect(out);
+      const airFilter = context.createBiquadFilter();
+      airFilter.type = 'bandpass';
+      airFilter.frequency.setValueAtTime(Math.min(2300, context.sampleRate * 0.43), at);
+      airFilter.frequency.exponentialRampToValueAtTime(Math.min(740, context.sampleRate * 0.23), at + duration);
+      const air = context.createGain();
+      air.gain.setValueAtTime(0.0001, at);
+      air.gain.linearRampToValueAtTime(volume * 0.48, at + 0.028);
+      air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+      noise.connect(airFilter);
+      airFilter.connect(air);
+      air.connect(out);
     }
     noise.onended = ended;
     voice.sources.push(noise);
