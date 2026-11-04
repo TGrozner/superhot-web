@@ -106,7 +106,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             }
             release(victim);
         }
-            // Each successful cue uses a fresh noise region and a subtle tonal detune.
+        // Each successful cue uses a fresh noise region and a subtle tonal detune.
         // The 0.5-second bed safely covers the longest 0.27s burst + 0.175s offset.
         const textureIndex = transientSerial++ % 8;
         const texturePitch = 1 + (textureIndex - 3.5) * 0.012;
