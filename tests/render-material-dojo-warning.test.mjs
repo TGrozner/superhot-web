@@ -315,6 +315,24 @@ test('J4 authored moving false-light becomes a bounded Web red floor wash, not a
   assert.equal(prepareDojoDoorWarningLighting(scene, controller.packets(), options).falseLights.length, 0);
 });
 
+test('J4 Web doorway wash favours the lamp-facing surface without hard-killing backface warnings', () => {
+  const fill = prepareDojoDoorWarningLighting(scene, activeWarning().packets(), options).falseLights[0];
+  const point = [4, 3, 4]; // Two meters from source false light at [2,3,4].
+  const face = sampleDojoDoorFalseLightWebWash(fill, point, 2, [-1, 0, 0]);
+  const back = sampleDojoDoorFalseLightWebWash(fill, point, 2, [1, 0, 0]);
+  const noNormals = sampleDojoDoorFalseLightWebWash(fill, point);
+  assert.equal(face.rgb[0], .25, 'front-facing red wash retains its existing 4m energy');
+  assert.equal(back.rgb[0], .0625, 'rear surface keeps a visible 20% energy floor');
+  assert.deepEqual(noNormals.rgb, face.rgb,
+    'unqualified mesh normals preserve the old Web wash rather than disappearing');
+  assert.equal(sampleDojoDoorFalseLightWebWash(fill, [2, 3, 4], 2, [1, 0, 0]).rgb[0], 4 / 7,
+    'light-center behaviour remains stable without an undefined direction');
+  assert.throws(() => sampleDojoDoorFalseLightWebWash(fill, point, 2, [0, 0, 0]),
+    /Zero or invalid direction/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /uHasNormals != 0 && radius > 0\.0001/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL, /sourceIntensity \* fade \* fade \* facing/);
+});
+
 test('per-layer warning reuse never freezes live SH-07 clock or SH-04 steering vectors', () => {
   const key = 'level10::7089';
   const door = {
