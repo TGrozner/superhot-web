@@ -1357,6 +1357,20 @@ export function createNativeSkinPass(gl, sourcePackage, {
   }
   const webFireArmKickAvailable = fireArm >= 0 && loaded.weaponAttachment != null &&
     fireArmBones.includes(loaded.weaponAttachment.bone);
+  // A shoulder-only kick moves the whole forearm like a rigid lever.
+  // The Dojo's authored elbow -> wrist chain permits a smaller counter-bend:
+  // the upper arm rises after fire while the forearm absorbs part of the kick.
+  // Never apply it when the actual weapon socket is outside that subtree.
+  const fireElbowBones = [];
+  if (webFireArmKickAvailable) {
+    for (let bone = 0; bone < loaded.jointCount; bone++) {
+      for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
+        if (ancestor === elbow) { fireElbowBones.push(bone); break; }
+      }
+    }
+  }
+  const webFireElbowCounterKickAvailable = webFireArmKickAvailable &&
+    fireElbowBones.includes(loaded.weaponAttachment.bone);
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1544,6 +1558,13 @@ export function createNativeSkinPass(gl, sourcePackage, {
         (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0)) {
       applyWebSubtreeRotation(loaded, scratch, fireArm, fireArmBones,
         webFireArmKick.yaw, webFireArmKick.pitch, webFireArmKick.roll);
+      // WEB-only follow-through: elbow bends opposite the shoulder's rise,
+      // using the actual post-action joint pivot and re-uploading the final
+      // wrist palette. At the accepted shot edge pitch=0, so no pre-shot drift.
+      if (webFireElbowCounterKickAvailable && webFireArmKick.pitch > 0) {
+        applyWebSubtreeRotation(loaded, scratch, elbow, fireElbowBones, 0,
+          -Math.min(.14, webFireArmKick.pitch * .58), 0);
+      }
     }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
@@ -1595,6 +1616,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
         (webHeadLook.design ?? 'Web-only independent head gaze'),
       webFireArmKickApplied: webFireArmKick !== null &&
         (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0),
+      webFireElbowCounterKickApplied: webFireArmKick !== null &&
+        webFireElbowCounterKickAvailable && webFireArmKick.pitch > 0,
       webPoseLeanApplied: webPoseLean !== null,
       webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
       webHitFlashIntensity: webHitFlash,
@@ -1667,6 +1690,8 @@ export function createNativeSkinPass(gl, sourcePackage, {
     webHeadTrackingAvailable,
     webFireArmKickAvailable,
     webFireArmPivotBone: webFireArmKickAvailable ? fireArm : null,
+    webFireElbowCounterKickAvailable,
+    webFireElbowPivotBone: webFireElbowCounterKickAvailable ? elbow : null,
     webHeadPivotBone: webHeadTrackingAvailable ? webHeadIndex : null,
     // Gaze height reads the authored terminal neck/head joint. The actual
     // deformation still pivots the whole source neck branch at neckBase.
