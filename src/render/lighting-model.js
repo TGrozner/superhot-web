@@ -236,7 +236,15 @@ vec3 dojoDoorFalseLightWashWeb(
   float radius = length(worldPosition - lightPosition);
   if (sourceIntensity <= 0.0 || radius >= 4.0) return vec3(0.0);
   float fade = dojoWebWarningSmooth(1.0 - radius / 4.0);
-  float energy = sourceIntensity * fade * fade;
+  // Creative Web wall-facing response, NOT a shadow/occlusion test.
+  // Keep a 20% warning floor for legibility on back-facing geometry.
+  // vNormal/uHasNormals are already provided by native-world-pass.
+  float facing = 1.0;
+  if (uHasNormals != 0 && radius > 0.0001) {
+    float towardLamp = dot(vNormal, lightPosition - worldPosition) / radius;
+    facing = 0.2 + 0.8 * clamp(towardLamp, 0.0, 1.0);
+  }
+  float energy = sourceIntensity * fade * fade * facing;
   return dojoWebWarningContrast(
     vec3(1.0, 0.06, 0.10), dojoWebWarningCompression(energy));
 }
@@ -496,13 +504,18 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
  * J4 Web-only floor/doorway fill from an EXISTING SH-07/SH-04 false-light
  * position and intensity. 4 m radius and warm red grade are Web art choices:
  * the native XulmFalseLight composition/colour/falloff remain unresolved.
- * SH-05 owns the GPU uniform wiring; no extra lamp or texture is generated.
+ * This creative Web improvement attenuates the wash on surfaces facing AWAY
+ * from the lamp, keeping 20% ambient legibility. It does NOT cast shadows or
+ * solve wall occlusion. Flat source meshes use their interpolated vNormal;
+ * surfaces with no normal retain the former omnidirectional wash.
+ * SH-05's existing world shader imports the updated GLSL automatically.
  * @param {{position: number[], intensity: number, shaderParity: string}} falseLight
  * @param {number[]} worldPosition
  * @param {number} [webMaterialMode]
+ * @param {number[] | null} [worldNormal] - optional valid world surface normal; null mirrors uHasNormals=0.
  * @returns {{rgb: readonly number[], cookieUv: null}}
  */
-export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMaterialMode = 2) {
+export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMaterialMode = 2, worldNormal = null) {
   if (falseLight?.shaderParity !== 'unverified-no-false-light-composition') {
     throw new TypeError('Source-qualified false-light packet required');
   }
@@ -512,7 +525,18 @@ export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMa
   const distance = Math.hypot(...point.map((value, index) => value - position[index]));
   if (intensity === 0 || distance >= 4) return zeroWebWarning();
   const fade = dojoWebWarningSmooth(1 - distance / 4);
-  const energy = intensity * fade * fade;
+  // For flat source normals the GPU dot(vNormal, towardLamp) mirrors this
+  // normalized CPU reference; curved interpolants are only approximated.
+  let facing = 1;
+  if (worldNormal !== null) {
+    const normal = unit(sourceLightVec3(worldNormal, 'false-light worldNormal'));
+    if (distance > .0001) {
+      const cosine = normal.reduce((sum, value, index) =>
+        sum + value * (position[index] - point[index]), 0) / distance;
+      facing = .2 + .8 * clamp01(cosine);
+    }
+  }
+  const energy = intensity * fade * fade * facing;
   return Object.freeze({
     rgb: webWarningContrast([1, .06, .10], energy / (3 + energy), webMaterialMode),
     cookieUv: null,
