@@ -281,7 +281,10 @@ function contactsFor(runtime,body,displacement,contacts) {
   const from=body.collisionWorld,requested=body.world.slice();
   for(let i=0;i<3;i++)requested[12+i]+=displacement[axes[i]];
   let fraction=1;
-  const atStartNormals=[];
+  const atStartNormals=[],sweptNormals=[];
+  // Reuse the already-admitted contact velocity when recovering the
+  // *remaining* tangent of a partial-frame impact; friction may have spent it.
+  const incomingVelocity={...body.velocity};
   const record=hit=>contacts.push({boneIndex:body.source.boneIndex,partId:body.source.partId,...hit});
   for(const sphere of body.spheres) {
     const start=transform(from,sphere.center),end=transform(requested,sphere.center),candidate={...start};
@@ -293,7 +296,10 @@ function contactsFor(runtime,body,displacement,contacts) {
     const first=hits.find(hit=>!hit.penetration);
     if(first)fraction=Math.min(fraction,first.t);
     for(const hit of hits) {
-      if(!hit.penetration && hit.t<=1e-7)atStartNormals.push(hit.normal);
+      if(!hit.penetration) {
+        sweptNormals.push({t:hit.t,normal:hit.normal});
+        if(hit.t<=1e-7)atStartNormals.push(hit.normal);
+      }
       record(hit);
     }
   }
@@ -331,6 +337,44 @@ function contactsFor(runtime,body,displacement,contacts) {
     const angular=rotationVector(multiplyMatrices(requested,inverse(from)));
     body.world=multiplyMatrices(rotation(mul(angular,fraction)),from);
     for(let i=0;i<3;i++)body.world[12+i]=from[12+i]+(requested[12+i]-from[12+i])*fraction;
+    if(fraction>1e-7 && fraction<1-1e-7) {
+      // A floor/wall hit halfway through the step previously discarded the
+      // ENTIRE remaining translation, making dead actors briefly stick to
+      // geometry even when a tangential velocity survived. Keep their
+      // conservatively clamped rotation but sweep the available tangent in
+      // the remainder of this same step. This is Web motion, not PhysX CCD.
+      let tangent=mul(sub(point(requested),point(from)),1-fraction);
+      const normals=sweptNormals.filter(hit=>Math.abs(hit.t-fraction)<=1e-6)
+        .map(hit=>hit.normal);
+      for(let pass=0;pass<4;pass++)for(const normal of normals) {
+        const inward=dot(tangent,normal);
+        if(inward<0)tangent=sub(tangent,mul(normal,inward));
+      }
+      // Recovered friction already changed body.velocity at first contact.
+      // Never move farther than the remaining pre-contact tangent, and do not
+      // slide when the authored contact material arrested that velocity.
+      const before=dot(incomingVelocity,tangent);
+      const after=dot(body.velocity,tangent);
+      const retention=before>1e-10?Math.min(1,Math.max(0,after/before)):0;
+      tangent=mul(tangent,retention);
+      if(length(tangent)>1e-9) {
+        let admitted=1;
+        for(const sphere of body.spheres) {
+          const start=transform(body.world,sphere.center);
+          const end={x:start.x+tangent.x,y:start.y+tangent.y,z:start.z+tangent.z};
+          const candidate={...start};
+          const localScene=nearbyStaticBoxes(runtime.collisionScene,start,end,sphere.radius);
+          const hits=localScene.boxes.length
+            ? moveNativeFragmentSphere(localScene,candidate,body.velocity,tangent,
+              sphere.radius,runtime.definition.material)
+            : [];
+          const first=hits.find(hit=>!hit.penetration);
+          if(first)admitted=Math.min(admitted,first.t);
+          for(const hit of hits)record(hit);
+        }
+        for(let i=0;i<3;i++)body.world[12+i]+=tangent[axes[i]]*admitted;
+      }
+    }
   }
   body.position=point(body.world);
   // Initial overlaps and rotational chord error are resolved against actual

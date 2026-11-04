@@ -331,3 +331,44 @@ test('Web floor contact damps residual ragdoll spin without damping airborne rot
   near(airborne.bodies[0].angularVelocity.z,6);
   assert.ok(Array.from(landed.boneModelMatrices).every(Number.isFinite));
 });
+
+
+test('mid-frame floor glancing contact preserves surviving corpse slide, friction, and an adjacent wall',()=>{
+  // A single authored sphere isolates swept contact from joint projection:
+  // at y=0.3, radius=0.1, (4,-4) over 0.1s hits the real floor halfway.
+  const floorBox={id:'floor',worldMatrix:matrix(0,-0.5,0),center:[0,0,0],size:[50,1,50]};
+  const wallBox={id:'wall',worldMatrix:matrix(0.55,0.5,0),center:[0,0,0],size:[0.2,1,10]};
+  const make=(boxes,friction)=>{
+    const def=definition();
+    def.bodies=[def.bodies[0]];def.joints=[];
+    def.fixedDelta=0.1;def.solverIterations=1;
+    def.gravity={x:0,y:0,z:0};
+    def.material={bounciness:0,dynamicFriction:friction,staticFriction:friction,bounceThreshold:2};
+    return createNativeDeathRuntime({
+      definition:def,collisionScene:prepareNativeCollision(boxes),
+      boneModelMatrices:new Float32Array([
+        ...matrix(0,0,0),...matrix(0,0.3,0),
+        ...matrix(0,1.3,0),...matrix(0.2,1.3,0),
+      ]),
+      modelMatrix:matrix(0,0,0),initialVelocity:{x:4,y:-4,z:0},
+    });
+  };
+  const glancing=make([floorBox],0);
+  const contacts=advanceNativeDeathRuntime(glancing,0.1).contacts;
+  assert.ok(contacts.some(c=>c.collider?.id==='floor' && c.t>0.01 && c.t<0.99),
+    'a true swept hit must occur strictly inside the frame');
+  assert.ok(glancing.bodies[0].position.x>0.35,
+    'the surviving floor tangent must move the corpse during this same step');
+  assert.ok(glancing.bodies[0].position.y>=0.1-1e-5);
+
+  const sticky=make([floorBox],2);
+  advanceNativeDeathRuntime(sticky,0.1);
+  assert.ok(sticky.bodies[0].position.x<0.3,
+    'source material friction which already stopped x must not produce fake sliding');
+
+  const corner=make([floorBox,wallBox],0);
+  advanceNativeDeathRuntime(corner,0.1);
+  assert.ok(corner.bodies[0].position.x<=0.35+1e-5,
+    'the second sweep must still stop at the next authored wall');
+  assert.ok(corner.bodies[0].position.y>=0.1-1e-5);
+});
