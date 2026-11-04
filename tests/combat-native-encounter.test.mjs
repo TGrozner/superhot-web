@@ -586,6 +586,11 @@ test('J3 Web final-survivor pressure closes the finishing gap but yields to rein
 
 test('J3 Web projectile evade: visible player bullets trigger a bounded swept side-step, not clairvoyance',()=>{
   const runtime=setup(),enemy=firstSpawn(runtime);
+  // Known, unobstructed muzzle: evade must actually gate a live ranged attack.
+  enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+  enemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(runtime,input([enemy]));
+  assert.equal(enemy.encounter.canAttack,true,'an unobstructed gunner is initially allowed to fire');
   const aimedFrom=p(15,1,2);
   const bullet={friendly:true,type:'normal',pos:aimedFrom,direction:p(-1,0,0),speed:35};
   const start=p(enemy.x,enemy.y,enemy.z);
@@ -595,13 +600,17 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.ok(Math.abs(enemy.z-start.z)>.005,'enemy sidesteps a live approaching shot');
   assert.ok(Math.hypot(enemy.x-start.x,enemy.z-start.z)<.3,'single frame is speed-bounded');
   assert.ok(enemy.encounter.webDodgeRemaining>0,'dodge persists briefly, without teleporting');
-  assert.equal(enemy.encounter.canAttack,false,'evade does not manufacture a muzzle');
+  assert.equal(enemy.encounter.canAttack,false,
+    'an active evasive sidestep suppresses a new shot even with a clear real muzzle');
   const afterFirst=p(enemy.x,enemy.y,enemy.z);
   advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
   assert.ok(Math.abs(enemy.z-afterFirst.z)>.005,'evade remains legible after bullet moves on');
   for(let i=0;i<4;i++)advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
   assert.equal(enemy.encounter.webDodgeRemaining,0,'short dodge terminates');
   assert.ok(enemy.encounter.webDodgeCooldown>0,'same projectile cannot cause endless jitter');
+  advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
+  assert.equal(enemy.encounter.canAttack,true,
+    'a recovered gunner may fire again once the projectile dodge has ended');
 
   const hiddenRuntime=setup(scene(),[box(8,1,2,.3,3,2)]);
   const hidden=firstSpawn(hiddenRuntime);
