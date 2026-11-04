@@ -300,3 +300,18 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **OBSERVÉ / À VÉRIFIER — intégration.** `src/main.js:finish(win)` consomme déjà `recap.text` et persiste `recap.best`. Aucun raccord partagé, champ de stockage supplémentaire, changement de schéma, combat, chrono, bonus, spawn, F/E, input, asset ou runner nécessaire. Test ciblé : victoire → objectif sans tir → défaite → victoire avec tir → victoire sans tir ; et quota 7 / défi de score → défaite → score dépassé. Contrôler la CI sur SHA exact puis le rendu Pages après merge par SH-05 ; aucun smoke navigateur de cette tranche n'est affirmé.
 
 **INCONNU — MCD.** Cette continuité est une décision UX `WEB_ONLY` ; elle ne renseigne ni l'activation live de `RunEnding`, ni `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, ni les checkpoints/menus natifs. Aucune nouvelle requête corpus n'est lancée.
+
+
+## SH-08 / J4 — chrono affiché et objectif réellement atteignable (Web-only, 04/11/2026)
+
+**PROUVÉ — défaut Web reproductible sur main `12c43c0b601d`.** Une meilleure marque de `22.049 s` produisait le défi affiché **« SOUS 22.0 S »**, mais persistait une cible de `22.049`. Le prochain essai à `22.02 s` pouvait donc afficher **« DÉFI RÉUSSI »** sans respecter le seuil annoncé. Ce désaccord provenait du `toFixed(1)` d'affichage et d'une comparaison au flottant non arrondi, non d'un chrono MCD.
+
+**PROUVÉ — contrat correctif Web.** Les *nouveaux* défis chrono arrondissent leur **cible vers le bas au dixième** avant de la sauvegarder : PB 22.049 → objectif strictement inférieur à 22.0. Les anciens défis v5 déjà enregistrés restent inchangés et sont affichés avec leur précision réelle à chaque tentative, sans être secrètement modifiés. Aucun objectif chrono impossible à 0.0 s. Les PB continuent à stocker la précision originale ; seule la cible explicite de rejouabilité Web est quantifiée. Le test ciblé couvre attribution → échec à 22.02 → réussite à 21.99 → ancien défi précis et PB ultra court. Ce réglage d'UX est **WEB_ONLY**.
+
+**OBSERVÉ — intégration existante, validation encore requise.** SH-05 utilise déjà le résultat `createDojoReplayRecap` dans `finish(win)` pour les quotas 6/7 ; aucune modification des fichiers partagés. Vérifier `npm run check` / CI exacte, puis Pages et un smoke chrono réel après merge. Aucune observation navigateur ou FPS n'est revendiquée.
+
+**PROUVÉ — provenance statique privée, pas une transition active.** Relu l'artifact existant du corpus privé [issue research #14](https://github.com/TGrozner/superhot-research/issues/14), run `41427032620`, artifact `13134425178`, `spec/world/README.md` : l'index pointe vers `world-runs.md`, `persistence-ui.md` et `progression-deep.md`, avec 132 classes `LevelTimeline` indexées ; présence/indexation n'implique ni activation ni preuve d'exécution.
+
+**INCONNU — MCD natif.** Activation live `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, progression, checkpoints et menus ; rien n'est extrapolé depuis l'index. Pas de nouvelle requête ni runner déclenché, aucune donnée privée publiée.
+
+**Précision d'affichage en fin de manche :** lorsqu'un défi chrono est actif, la métrique du run affiche au moins les centièmes et ajoute les décimales strictement nécessaires pour préserver la même relation `< target` que la validation. Exemple succès réel à 21.999 s ⇒ affichage 21.999 s, jamais un trompeur « 22.00 s » sous un défi « SOUS 22.0 ». Les autres temps du récapitulatif conservent le format historique ; aucune modification de calcul du temps (SH-02).
