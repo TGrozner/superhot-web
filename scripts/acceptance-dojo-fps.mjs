@@ -1,12 +1,18 @@
 /**
  * SH-10 — opt-in, owner-browser Dojo FPS/GL submission profiler.
- * Samples browser requestAnimationFrame intervals. This is neither a GPU timer
+ * Samples browser requestAnimationFrame intervals. In-game number-row 7/8/9
+ * changes the capture phase and 0 saves, without releasing pointer lock.
+ * This is neither a GPU timer
  * nor a human-playthrough success, and no original/native assets are read.
  * Segments are operator-labelled; no benchmark is inferred from mock Node tests.
  */
 const SOURCE = Object.freeze({sceneBuildIndex:10,serializedOwner:'level10'});
 const LABELS = Object.freeze(['idle','combat','ragdolls']);
 const LABEL_SET = new Set(LABELS);
+/** Physical number-row keys, intentionally separate from Dojo route markers 1–6. */
+export const DOJO_FPS_HOTKEYS = Object.freeze({
+  Digit7:'idle', Digit8:'combat', Digit9:'ragdolls', Digit0:'save',
+});
 const nonneg = n => Number.isSafeInteger(n) && n >= 0;
 const positive = n => Number.isFinite(n) && n > 0;
 const bounded = (n, cap) => nonneg(n) && n <= cap;
@@ -103,6 +109,8 @@ export function assessDojoFpsCapture(trace) {
  * Start a read-only audit on the REAL browser page, armed after the Dojo starts.
  * The only hot-path operation is recording requestAnimationFrame timestamps.
  * Scene/GL metrics are read at most once per second, not per rendered frame.
+ * The opt-in listener ignores key repeats, editable controls and inactive
+ * gameplay; stop/save removes it, so it cannot leak into later sessions.
  * @param {{maxFramesPerSegment?:number}} options
  * @returns {{mark:(label:'idle'|'combat'|'ragdolls')=>void,stop:()=>DojoFpsTrace,
  *   save:(filename?:string)=>object}}
@@ -148,34 +156,49 @@ export function startDojoFpsCapture({maxFramesPerSegment=20000}={}) {
   };
   frameHandle=window.requestAnimationFrame(loop);
   const stop=()=>{
-    if(!stopped){stopped=true;window.cancelAnimationFrame(frameHandle);}
+    if(!stopped) {
+      stopped=true;
+      window.cancelAnimationFrame(frameHandle);
+      document.removeEventListener('keydown',onCaptureHotkey,true);
+    }
     return {schemaVersion:1,captureKind:'SH10_DOJO_FPS_BROWSER_V1',
       nativeScene:{source:{sceneBuildIndex:source.sceneBuildIndex,
         scenePath:source.scenePath,serializedOwner:source.serializedOwner}},
       viewport,segments:segments.map(s=>({...s,
         frameIntervalsMs:[...s.frameIntervalsMs],drawSamples:s.drawSamples.map(d=>({...d}))}))};
   };
-  return Object.freeze({
-    mark(label){
-      if(stopped)throw new Error('Dojo FPS profiler already stopped');
-      if(!LABEL_SET.has(label))throw new RangeError('unknown FPS segment label');
-      if(segments.length>=12)throw new RangeError('maximum 12 segments');
-      // Can arm while paused/preview; rAF intervals begin only in actual Dojo gameplay.
-      active={label,frameIntervalsMs:[],drawSamples:[],skippedFrames:0};
-      segments.push(active);
-      lastTimestamp=null;lastDrawAt=-Infinity;
-    },
-    stop,
-    save(filename='dojo-fps.json') {
-      if(typeof filename!=='string'||!/^dojo-[a-z0-9_-]+\.json$/i.test(filename))
-        throw new TypeError('filename must be dojo-*.json');
-      const trace=stop();
-      const blob=new Blob([JSON.stringify(trace)],{type:'application/json'});
-      const url=URL.createObjectURL(blob),link=document.createElement('a');
-      link.href=url;link.download=filename;link.click();
-      window.setTimeout(()=>URL.revokeObjectURL(url),5000);
-      return {requestedDownload:true,segments:trace.segments.length,
-        status:assessDojoFpsCapture(trace).status};
-    },
-  });
+  const mark=label=>{
+    if(stopped)throw new Error('Dojo FPS profiler already stopped');
+    if(!LABEL_SET.has(label))throw new RangeError('unknown FPS segment label');
+    if(segments.length>=12)throw new RangeError('maximum 12 segments');
+    // A new phase never inherits an interval straddling the hotkey boundary.
+    active={label,frameIntervalsMs:[],drawSamples:[],skippedFrames:0};
+    segments.push(active);
+    lastTimestamp=null;lastDrawAt=-Infinity;
+  };
+  const save=(filename='dojo-fps.json')=>{
+    if(typeof filename!=='string'||!/^dojo-[a-z0-9_-]+\.json$/i.test(filename))
+      throw new TypeError('filename must be dojo-*.json');
+    const trace=stop();
+    const blob=new Blob([JSON.stringify(trace)],{type:'application/json'});
+    const url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download=filename;link.click();
+    window.setTimeout(()=>URL.revokeObjectURL(url),5000);
+    return {requestedDownload:true,segments:trace.segments.length,
+      status:assessDojoFpsCapture(trace).status};
+  };
+  const onCaptureHotkey=event=>{
+    if(stopped || event.repeat || event.isComposing || !playing()) return;
+    const action=DOJO_FPS_HOTKEYS[event.code];
+    if(!action || event.target?.isContentEditable ||
+        ['INPUT','SELECT','TEXTAREA'].includes(event.target?.tagName)) return;
+    // Do not turn held keys into dozens of segments or intercept game inputs.
+    // Key 0 downloads under a genuine user gesture; no network upload.
+    if(action!=='save' && segments.length>=12) return;
+    event.preventDefault();
+    if(action==='save') save();
+    else mark(action);
+  };
+  document.addEventListener('keydown',onCaptureHotkey,true);
+  return Object.freeze({mark,stop,save});
 }
