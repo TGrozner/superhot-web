@@ -474,19 +474,29 @@ export function addMcdGameplayPulse(clock, duration, amount) {
  * one RAF frame that disappear when only the final yaw/pitch are compared.
  * When omitted, the legacy frame-angle estimate remains unchanged.
  * Never combine the two (that would double-count the same rotation).
+ *
+ * `dt` is capped Web simulation time (movement/physics/worldDelta). The
+ * optional `unscaledDt` is actual active browser elapsed time for the source-
+ * shaped input shifter rates and Web look-sampling clock. At low FPS, using
+ * capped physics dt for both made a 0.5s WASD acceleration take ~1s at 10 FPS.
+ * Omission preserves the existing behavior for callers without active wall dt.
+ * This is a WEB playability fix, NOT a claim about Unity's frame scheduler.
  */
 export function stepMcdGameplayClock(clock, {
-  dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
+  dt, unscaledDt = dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
   sourceLookSample, lookPathDegrees,
 }) {
   if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
     throw new RangeError('Gameplay time input must be finite with nonnegative dt');
   }
+  if (!Number.isFinite(unscaledDt) || unscaledDt < 0) {
+    throw new RangeError('unscaledDt must be finite and nonnegative');
+  }
   if (lookPathDegrees !== undefined &&
       (!Number.isFinite(lookPathDegrees) || lookPathDegrees < 0)) {
     throw new RangeError('lookPathDegrees must be finite and nonnegative');
   }
-  clock.realTime += dt;
+  clock.realTime += unscaledDt;
   if (paused) {
     // Do not turn an interrupted/focus-lost camera jump into a look pulse.
     clock.lookPendingDegrees = 0;
@@ -505,12 +515,12 @@ export function stepMcdGameplayClock(clock, {
   movement.currentTimeModifier = advanceMcdSourceLinearShifter({
     ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.movement,
     currentTimeModifier: movement.currentTimeModifier,
-    targetTimeModifier: targets.movementTarget, unscaledDeltaTime: dt,
+    targetTimeModifier: targets.movementTarget, unscaledDeltaTime: unscaledDt,
   });
   jump.currentTimeModifier = advanceMcdSourceLinearShifter({
     ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.jump,
     currentTimeModifier: jump.currentTimeModifier,
-    targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: dt,
+    targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: unscaledDt,
   });
   let lookSourceResult = null;
   if (sourceLookSample !== undefined) {
