@@ -333,17 +333,17 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // this is NOT MCD bullet audio or a recovered Unity playback parameter.
         // Same noise source, HRTF output and existing bounded voice budget.
         if (cue === 'dodge') {
-          const zip = track(context.createBiquadFilter());
-          zip.type = 'bandpass';
-          zip.frequency.setValueAtTime(Math.min(5200, context.sampleRate * 0.43), at);
-          zip.frequency.exponentialRampToValueAtTime(Math.min(1050, context.sampleRate * 0.23), at + duration);
-          const air = track(context.createGain());
-          air.gain.setValueAtTime(0.0001, at);
-          air.gain.linearRampToValueAtTime(volume * 0.55, at + 0.012);
-          air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-          noise.connect(zip);
-          zip.connect(air);
-          air.connect(out);
+            const zip = track(context.createBiquadFilter());
+            zip.type = 'bandpass';
+            zip.frequency.setValueAtTime(Math.min(5200, context.sampleRate * 0.43), at);
+            zip.frequency.exponentialRampToValueAtTime(Math.min(1050, context.sampleRate * 0.23), at + duration);
+            const air = track(context.createGain());
+            air.gain.setValueAtTime(0.0001, at);
+            air.gain.linearRampToValueAtTime(volume * 0.55, at + 0.012);
+            air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+            noise.connect(zip);
+            zip.connect(air);
+            air.connect(out);
         }
         noise.onended = ended;
         voice.sources.push(noise);
