@@ -154,8 +154,16 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
       displacement[axis] = (body.velocity[axis]+next)*dt/2;
       body.velocity[axis] = next;
     }
-    contacts.push(...moveNativeFragmentSphere(collisionScene, body.position, body.velocity,
-      displacement, body.collisionRadius, material));
+    // The contact solver returns the swept fraction inside this substep.
+    // Initial penetration has t=0; the Web clock is only a linear-sweep
+    // estimate, NOT Unity/PhysX native event timing.
+    const stepStart = scaledDelta - remaining;
+    const stepContacts = moveNativeFragmentSphere(collisionScene, body.position, body.velocity,
+      displacement, body.collisionRadius, material);
+    for (const contact of stepContacts) {
+      contact.webImpactTimeInFrame = stepStart + dt * Math.max(0, Math.min(1, contact.t));
+    }
+    contacts.push(...stepContacts);
     remaining -= dt;
     steps++;
   }
