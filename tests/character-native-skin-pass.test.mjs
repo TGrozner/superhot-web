@@ -1377,3 +1377,72 @@ test('Web stun anchors its contact side through player movement and resets on a 
     'world-clock rewind clears the previous stun source');
   pass.dispose();
 });
+
+test('Web Dojo hip-to-spine recoil plants both legs while bending weighted torso and weapon', () => {
+  // Entirely authored six-bone fixture with the Dojo parent structure, but
+  // no recovered transforms, clips, geometry or other proprietary bytes.
+  const b = (name, parent, position) => ({
+    name, parent, position, rotation: [0, 0, 0, 1], scale: [1, 1, 1],
+  });
+  const inverse = (x, y, z) => {
+    const m = identity();
+    m[12] = -x; m[13] = -y; m[14] = -z;
+    return m;
+  };
+  const bones = [
+    b('jnt_Root', -1, [0, 0, 0]),
+    b('jnt_Hips', 0, [0, 1, 0]),
+    b('jnt_L_Leg_Hip', 1, [-.5, -.5, 0]),
+    b('jnt_R_Leg_Hip', 1, [.5, -.5, 0]),
+    b('jnt_Spine_01', 1, [0, .5, 0]),
+    b('jnt_R_Arm_Wrist', 4, [.5, .3, .2]),
+  ];
+  const pose = {
+    positions: bones.flatMap(bone => bone.position),
+    rotations: bones.flatMap(() => [0, 0, 0, 1]),
+    scales: bones.flatMap(() => [1, 1, 1]),
+  };
+  const pkg = sourcePackage({
+    bones,
+    mesh: {
+      ...sourcePackage().mesh,
+      jointIndices: [2,0,0,0, 3,0,0,0, 5,0,0,0],
+      inverseBindMatrices: [
+        ...inverse(0,0,0), ...inverse(0,1,0),
+        ...inverse(-.5,.5,0), ...inverse(.5,.5,0),
+        ...inverse(0,1.5,0), ...inverse(.5,1.8,.2),
+      ],
+    },
+    clips: {idle: {duration:1, sampleRate:1, frames:[pose,pose]}},
+    weaponAttachment: {
+      bone: 'jnt_R_Arm_Wrist', localMatrix: identity(),
+      source: 'authored-test', coordinates: 'source-neutral test',
+    },
+  });
+  const {gl, calls} = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const instance = pass.createInstance({clip:'idle',playback:'loop'});
+  const params = {instance, time:.2, modelMatrix:identity(),
+    viewProjection:identity(), color:[.8,.1,.2,1]};
+  const baseline = pass.draw(params);
+  const before = Array.from(baseline.boneModelMatrices);
+  const socketY = baseline.weaponAttachmentMatrix[13];
+  const bank = pass.draw({...params,
+    webPoseLean:{pitch:0,roll:.28,yaw:0}});
+  const after = Array.from(bank.boneModelMatrices);
+  for (const bone of [0,1,2,3]) {
+    near(after.slice(bone*16,(bone+1)*16),
+      before.slice(bone*16,(bone+1)*16));
+  }
+  assert.ok(Math.abs(after[4*16+12] - before[4*16+12]) > .1,
+    'source spine should visibly lean while hips remain planted');
+  assert.ok(bank.weaponAttachmentMatrix[13] > socketY + .1,
+    'the weapon socket follows the upper-body lean');
+  assert.equal(bank.webPoseLeanApplied,true);
+  const uploaded = calls.filter(call => call[0]==='matrix' && call[1]==='uJoints[0]');
+  assert.equal(uploaded.length,2);
+  near(uploaded[0][2].slice(0,32),uploaded[1][2].slice(0,32));
+  assert.notDeepEqual(uploaded[0][2].slice(32),uploaded[1][2].slice(32));
+  assert.equal(calls.filter(call => call[0]==='draw').length,2);
+  pass.dispose();
+});
