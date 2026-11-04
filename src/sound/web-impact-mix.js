@@ -157,8 +157,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             if (lx !== undefined && ly !== undefined && lz !== undefined &&
                 Number.isFinite(lx) && Number.isFinite(ly) && Number.isFinite(lz)) {
                 const distance = Math.hypot(position.x - lx, position.y - ly, position.z - lz);
-                const cutoff = Math.max(1200, Math.min(context.sampleRate * 0.45,
-                18000 / (1 + distance * distance / 450)));
+                const cutoff = Math.max(1200, Math.min(context.sampleRate * 0.45, 18000 / (1 + distance * distance / 450)));
                 distanceFilter = context.createBiquadFilter();
                 distanceFilter.type = 'lowpass';
                 distanceFilter.frequency.setValueAtTime(cutoff, at);
