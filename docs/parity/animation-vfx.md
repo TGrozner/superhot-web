@@ -599,3 +599,26 @@ désactivation du plancher. Cela vise le coût CPU des premières frames de
 multiples fractures, avant le sommeil des fragments livré précédemment. Aucun
 asset, maillage, draw call, timing natif Mecanim ou événement MCD n'est ajouté.
 **Non vérifié** : FPS et rendu en navigateur sur Pages après merge SH-05.
+
+### SH-06 / 2026-11-04 — rendre les éclats des impacts ennemis visibles (Web J2)
+
+**Défaut visible ciblé :** `recordWebImpact` positionne correctement les
+éclats à 2,5 cm en amont du contact, mais leur donne ensuite une vitesse
+**dans le sens de la balle** pour les hits/kills ennemis ; ils rentrent
+dans le modèle rouge et peuvent disparaître derrière sa surface au lieu
+de donner un impact lisible. Le contact est déjà confirmé par le gameplay.
+
+**Modification Web :** l'éjection normale des éclats de hits/kills est
+maintenant orientée **contre le trajet entrant** (facteur Web -0,38 de
+la vitesse de particule). La répartition radiale, les couleurs,
+les durées, le hit-marker, les impacts murs, le plafond de 64 particules
+et les appels existants de `src/main.js`/`renderer.js` ne changent pas.
+Un test ciblé contrôle le côté du contact et le mouvement des éclats
+pour un tir entrant -Z, ainsi que la branche mur non régressée.
+
+**Provenance :** uniquement la direction et le point d'un hit accepté
+par le moteur Web actuel. Ce comportement et son coefficient sont
+des choix de lisibilité Web **non extraits de MCD**. Aucun asset
+commercial supplémentaire ni rendu en navigateur n'est prétendu.
+Après fusion SH-05 : comparer sur Pages des tirs/throws qui tuent
+ou blessent un ennemi, puis vérifier F/E, victoire, REJOUER et FPS.
