@@ -1073,3 +1073,31 @@ is **not** proof that a current or future deployment serves this WAV.
 Do not republish proprietary media until redistribution rights are
 verified. Missing media must remain an explicit failure, never a
 synthetic substitute.
+
+## SH-07 — Web-only katana swing air sweep (2026-11-04)
+
+**Web source, not native reproduction.** The playable Dojo already dispatches
+`audio.itemCue('swing')` from the melee-input path in `src/main.js`; the
+SH-05-owned `itemCue` bridge currently adds Web synthesis for `slice`,
+`throw`, and `pickup`, **not** `swing`. The source-qualified Katana
+reference (`src/sound/mcd-katana-event-intent.ts`, private research
+#185/#188/#186/#189/#192-193; Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`)
+distinguishes serialized swing-clip references from qualified contact/slice
+events; it does not establish that any swing WAV is loaded or audible in Dojo.
+
+`createWebImpactMix.emit('katana-swing')` now schedules an original Web
+noise-band sweep with a 240ms descending envelope, **distinct** from the
+existing `katana` contact transient. It uses the same two source nodes,
+spatial output, priority budget and gain trim as existing Web accents.
+All numbers are creative Web values, not Unity data.
+
+**Integration boundary:** SH-05 may extend `withItemAccent` inside its owned
+`src/audio.js` to select `'katana-swing'` **only** for the existing
+`action === 'swing'` event (keep the old `slice` mapping unchanged).
+If native playback is unavailable, the already-existing `webCombatAccent`
+fallback can schedule the Web replacement without inventing a native WAV.
+This PR alone does **not** change the live bridge, so it makes no claim
+of browser audibility or deployed speaker output. A `started` receipt
+means a graph event was scheduled, not that someone heard it.
+No commercial audio or private corpus bytes are included.
