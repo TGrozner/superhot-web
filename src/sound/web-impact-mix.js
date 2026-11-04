@@ -79,7 +79,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // Creative Web mix priorities: damage feedback survives even shot bursts.
         'player-shot': 5, 'enemy-shot': 4, impact: 3, shatter: 4,
         'player-hit': 6,
-        katana: 5, step: 1, landing: 2, pickup: 2, throw: 3,
+        katana: 5, 'katana-swing': 4, step: 1, landing: 2, pickup: 2, throw: 3,
     };
     const attackByCue = {
         // Player damage: dark body + short bright contact, Web-original synthesis.
@@ -147,6 +147,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             'player-hit': [0.22, -680, 142, 44, 0.52],
             shatter: [0.27, 2200, 1250, 220, 0.48],
             katana: [0.20, 1180, 1480, 325, 0.43],
+            'katana-swing': [0.24, 1800, 490, 210, 0.33],
             step: [0.075, -360, 108, 58, 0.22],
             landing: [0.15, -650, 145, 54, 0.40],
             pickup: [0.08, 1400, 510, 880, 0.23],
@@ -268,6 +269,21 @@ export function createWebImpactMix(context, maxVoices = 24) {
             air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
             noise.connect(swish);
             swish.connect(air);
+            air.connect(out);
+        }
+        // WEB-original sword air sweep on SWING, distinct from Katana's hit/slice cue.
+        // No Unity timing, original clip, new source voice, or implied native audition.
+        if (cue === 'katana-swing') {
+            const sweep = context.createBiquadFilter();
+            sweep.type = 'bandpass';
+            sweep.frequency.setValueAtTime(Math.min(3400, context.sampleRate * 0.43), at);
+            sweep.frequency.exponentialRampToValueAtTime(Math.min(850, context.sampleRate * 0.23), at + duration);
+            const air = context.createGain();
+            air.gain.setValueAtTime(0.0001, at);
+            air.gain.linearRampToValueAtTime(volume * 0.55, at + 0.03);
+            air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+            noise.connect(sweep);
+            sweep.connect(air);
             air.connect(out);
         }
         noise.onended = ended;
