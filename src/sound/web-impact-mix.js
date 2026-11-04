@@ -343,19 +343,19 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // Uses the existing landing noise source, spatial emitter and footstep bus.
         // Timing/EQ are creative Web tuning, not Unity footsteps or native clips.
         if (cue === 'landing') {
-          const floorWeight = track(context.createBiquadFilter());
-          floorWeight.type = 'lowpass';
-          floorWeight.frequency.value = Math.min(460, context.sampleRate * 0.28);
-          const heelToe = track(context.createGain());
-          heelToe.gain.setValueAtTime(0.0001, at);
-          heelToe.gain.linearRampToValueAtTime(volume * 0.36, at + 0.013);
-          heelToe.gain.exponentialRampToValueAtTime(0.0001, at + 0.047);
-          heelToe.gain.setValueAtTime(0.0001, at + 0.053);
-          heelToe.gain.linearRampToValueAtTime(volume * 0.19, at + 0.071);
-          heelToe.gain.exponentialRampToValueAtTime(0.0001, at + 0.114);
-          noise.connect(floorWeight);
-          floorWeight.connect(heelToe);
-          heelToe.connect(out);
+            const floorWeight = track(context.createBiquadFilter());
+            floorWeight.type = 'lowpass';
+            floorWeight.frequency.value = Math.min(460, context.sampleRate * 0.28);
+            const heelToe = track(context.createGain());
+            heelToe.gain.setValueAtTime(0.0001, at);
+            heelToe.gain.linearRampToValueAtTime(volume * 0.36, at + 0.013);
+            heelToe.gain.exponentialRampToValueAtTime(0.0001, at + 0.047);
+            heelToe.gain.setValueAtTime(0.0001, at + 0.053);
+            heelToe.gain.linearRampToValueAtTime(volume * 0.19, at + 0.071);
+            heelToe.gain.exponentialRampToValueAtTime(0.0001, at + 0.114);
+            noise.connect(floorWeight);
+            floorWeight.connect(heelToe);
+            heelToe.connect(out);
         }
         // WEB-ORIGINAL clean-dodge zip. Call only after a confirmed no-hit near miss;
         // this is NOT MCD bullet audio or a recovered Unity playback parameter.
