@@ -274,11 +274,15 @@ export function createNativeActorSkinRuntime(skinPass) {
       ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
     // WEB-authored warm afterglow follows an actual accepted fire action.
     // Its blend gate prevents any false warning before the firing event.
-    const fireTime = action?.state === 'fire' ? action.time : null;
+    const fireStateSpeed = skinPass.states.fire?.speed;
+    // action.time is in sampled clip seconds; the Web glow lasts gameplay
+    // seconds regardless of the source fire state's playback speed.
+    const fireTime = action?.state === 'fire' && Number.isFinite(fireStateSpeed) &&
+      fireStateSpeed > 0 ? action.time / fireStateSpeed : null;
     const webFireGlow = solvedPose === null && selected.identity.name !== 'hit' &&
-      Number.isFinite(fireTime) && fireTime >= 0 && fireTime < .28 &&
+      Number.isFinite(fireTime) && fireTime >= 0 && fireTime < .24 &&
       Number.isFinite(action.weight) && Number.isFinite(action.blend ?? 1)
-      ? (1 - fireTime / .28) ** 2 *
+      ? (1 - fireTime / .24) ** 2 *
         Math.max(0, Math.min(1, action.weight)) *
         Math.max(0, Math.min(1, action.blend ?? 1)) : 0;
     const draw = {
