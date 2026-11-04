@@ -115,7 +115,8 @@ test('replay target uses the previous same-quota PB and offers a shot-free chall
   const challenge = result(6, {best:previous, score:1000, elapsedSeconds:18});
   assert.equal(challenge.replayTarget, 'GAGNE SANS TIRER');
   const shotFree = result(6, {best:previous, score:1000, elapsedSeconds:18, shots:0});
-  assert.equal(shotFree.replayTarget, null);
+  assert.equal(shotFree.replayTarget, 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE',
+    'after earning the no-shot medal, offer the next missing mastery badge');
   const first = result(6);
   assert.equal(first.replayTarget, null, 'no invented personal record on first clear');
   const failed = createDojoReplayRecap({
