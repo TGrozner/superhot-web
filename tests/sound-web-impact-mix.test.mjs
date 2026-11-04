@@ -235,3 +235,20 @@ test('a Web landing thud routes through footsteps, not room reflections or comba
   assert.equal(mix.emit('landing').status, 'blocked'); // Combat owns both live voices.
   mix.dispose();
 });
+
+test('Web-only player damage impact is local, punchy and survives a saturated gunfight', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  assert.equal(mix.emit('step').status, 'started');
+  const result = mix.emit('player-hit');
+  assert.deepEqual(result, {status: 'started', source: 'web-original-synthesis',
+    at: 2.25, spatial: false});
+  assert.equal(nodes[0].stopped, true); // Player damage has greater priority than steps.
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.ok(gains.some(node => node.connections.includes(gains[2]))); // Impact bus.
+  assert.ok(filters.some(filter => filter.type === 'lowpass' && filter.frequency.value === 680));
+  assert.ok(filters.some(filter => filter.type === 'highpass' && filter.frequency.value === 2600));
+  assert.equal(mix.emit('player-shot').status, 'blocked'); // Damage cannot be stolen by shots.
+  assert.equal(nodes.length, 4); // Two sources per voice, no extra sub-bass oscillator.
+  mix.dispose();
+});
