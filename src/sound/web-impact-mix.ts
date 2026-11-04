@@ -11,6 +11,7 @@ export interface WebImpactResult {
 }
 interface Voice {
   readonly sources: AudioScheduledSourceNode[];
+  readonly effects: AudioNode[];
   readonly gain: GainNode;
   readonly panner: PannerNode | null;
   readonly distanceFilter: BiquadFilterNode | null;
@@ -121,6 +122,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       try { src.stop(); } catch { /* already ended */ }
       src.disconnect();
     }
+    // Each transient owns processing nodes besides its source/output.
+    // Disconnect on completed cue and on voice stealing: no dangling WebAudio graphs.
+    for (const effect of voice.effects) effect.disconnect();
     voice.gain.disconnect();
     voice.panner?.disconnect();
     voice.distanceFilter?.disconnect();
@@ -221,18 +225,22 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     } else {
       out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
     }
-    const voice: Voice = {sources: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority};
+    const voice: Voice = {sources: [], effects: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority};
     voices.add(voice);
+    const track = <T extends AudioNode>(node: T): T => {
+      voice.effects.push(node);
+      return node;
+    };
     const ended = () => {
       voice.pending--;
       if (voice.pending === 0) release(voice);
     };
     const noise = context.createBufferSource();
     noise.buffer = noiseBed;
-    const filter = context.createBiquadFilter();
+    const filter = track(context.createBiquadFilter());
     filter.type = cutoff < 0 ? 'lowpass' : 'highpass';
     filter.frequency.value = Math.abs(cutoff);
-    const burst = context.createGain();
+    const burst = track(context.createGain());
     burst.gain.setValueAtTime(volume * 0.8, at);
     burst.gain.exponentialRampToValueAtTime(0.0001, at + duration);
     noise.connect(filter);
@@ -243,10 +251,10 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     const snap = attackByCue[cue];
     if (snap) {
       const [hz, weight, tail] = snap;
-      const bright = context.createBiquadFilter();
+      const bright = track(context.createBiquadFilter());
       bright.type = cue === 'katana' ? 'bandpass' : 'highpass';
       bright.frequency.value = Math.min(hz, context.sampleRate * 0.43);
-      const accent = context.createGain();
+      const accent = track(context.createGain());
       accent.gain.setValueAtTime(volume * weight, at);
       accent.gain.exponentialRampToValueAtTime(0.0001, at + tail);
       noise.connect(bright);
@@ -257,10 +265,10 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // weight at the firing point, not a guessed projectile flyby or native clip.
     // It shares the existing noise source, HRTF routing and voice budget.
     if (cue === 'enemy-shot') {
-      const pressureTone = context.createBiquadFilter();
+      const pressureTone = track(context.createBiquadFilter());
       pressureTone.type = 'bandpass';
       pressureTone.frequency.value = Math.min(720, context.sampleRate * 0.35);
-      const pressure = context.createGain();
+      const pressure = track(context.createGain());
       pressure.gain.setValueAtTime(0.0001, at);
       pressure.gain.linearRampToValueAtTime(volume * 0.45, at + 0.018);
       pressure.gain.exponentialRampToValueAtTime(0.0001, at + duration);
@@ -271,10 +279,10 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // WEB-ORIGINAL mechanical slide tick AFTER the gunshot crack (not Unity data).
     // Gating the existing noise source adds no voices, buffers or timers.
     if (cue === 'player-shot') {
-      const actionTone = context.createBiquadFilter();
+      const actionTone = track(context.createBiquadFilter());
       actionTone.type = 'bandpass';
       actionTone.frequency.value = Math.min(2600, context.sampleRate * 0.42);
-      const action = context.createGain();
+      const action = track(context.createGain());
       action.gain.setValueAtTime(0.0001, at);
       action.gain.setValueAtTime(0.0001, at + 0.046);
       action.gain.linearRampToValueAtTime(volume * 0.32, at + 0.054);
@@ -287,11 +295,11 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // A descending band of the existing noise buffer follows the release.
     // This adds no scheduled source, voice, timer or proprietary asset.
     if (cue === 'throw') {
-      const swish = context.createBiquadFilter();
+      const swish = track(context.createBiquadFilter());
       swish.type = 'bandpass';
       swish.frequency.setValueAtTime(Math.min(3100, context.sampleRate * 0.43), at);
       swish.frequency.exponentialRampToValueAtTime(Math.min(800, context.sampleRate * 0.23), at + duration);
-      const air = context.createGain();
+      const air = track(context.createGain());
       air.gain.setValueAtTime(0.0001, at);
       air.gain.linearRampToValueAtTime(volume * 0.38, at + 0.018);
       air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
@@ -302,11 +310,11 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // WEB-original sword air sweep on SWING, distinct from Katana's hit/slice cue.
     // No Unity timing, original clip, new source voice, or implied native audition.
     if (cue === 'katana-swing') {
-      const sweep = context.createBiquadFilter();
+      const sweep = track(context.createBiquadFilter());
       sweep.type = 'bandpass';
       sweep.frequency.setValueAtTime(Math.min(3400, context.sampleRate * 0.43), at);
       sweep.frequency.exponentialRampToValueAtTime(Math.min(850, context.sampleRate * 0.23), at + duration);
-      const air = context.createGain();
+      const air = track(context.createGain());
       air.gain.setValueAtTime(0.0001, at);
       air.gain.linearRampToValueAtTime(volume * 0.55, at + 0.03);
       air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
@@ -317,11 +325,11 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     // Web-original fist air sweep: intentionally separate from confirmed contact.
     // No native MCD clip is inferred, and no extra source or voice is allocated.
     if (cue === 'punch-swing') {
-      const airFilter = context.createBiquadFilter();
+      const airFilter = track(context.createBiquadFilter());
       airFilter.type = 'bandpass';
       airFilter.frequency.setValueAtTime(Math.min(2300, context.sampleRate * 0.43), at);
       airFilter.frequency.exponentialRampToValueAtTime(Math.min(740, context.sampleRate * 0.23), at + duration);
-      const air = context.createGain();
+      const air = track(context.createGain());
       air.gain.setValueAtTime(0.0001, at);
       air.gain.linearRampToValueAtTime(volume * 0.48, at + 0.028);
       air.gain.exponentialRampToValueAtTime(0.0001, at + duration);
@@ -336,7 +344,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     osc.type = cue === 'player-shot' || cue === 'enemy-shot' ? 'sawtooth' : 'triangle';
     osc.frequency.setValueAtTime(startHz * texturePitch, at);
     osc.frequency.exponentialRampToValueAtTime(endHz * texturePitch, at + duration);
-    const body = context.createGain();
+    const body = track(context.createGain());
     body.gain.setValueAtTime(volume * 0.48, at);
     body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
     osc.connect(body);
@@ -353,7 +361,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       ring.type = 'sine';
       ring.frequency.setValueAtTime(970 * texturePitch, at);
       ring.frequency.exponentialRampToValueAtTime(570 * texturePitch, at + 0.42);
-      const ringGain = context.createGain();
+      const ringGain = track(context.createGain());
       ringGain.gain.setValueAtTime(0.0001, at);
       ringGain.gain.linearRampToValueAtTime(volume * 0.115, at + 0.024);
       ringGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
@@ -376,7 +384,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
             ring.type = 'sine';
             ring.frequency.setValueAtTime(tone.hz * texturePitch, at);
             ring.frequency.exponentialRampToValueAtTime(tone.hz * texturePitch * 0.985, at + tone.tail);
-            const ringGain = context.createGain();
+            const ringGain = track(context.createGain());
             ringGain.gain.setValueAtTime(0.0001, at);
             ringGain.gain.linearRampToValueAtTime(volume * tone.level, at + 0.008);
             ringGain.gain.exponentialRampToValueAtTime(0.0001, at + tone.tail);
