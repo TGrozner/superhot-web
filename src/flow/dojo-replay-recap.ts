@@ -71,6 +71,8 @@ export interface DojoReplayRecap {
   readonly newMedals: readonly string[];
   /** Fulfilled previous challenge, only after the next recorded round. */
   readonly completedChallenge: DojoReplayChallengeKind | null;
+  /** Why the saved challenge was missed on THIS round, when applicable. */
+  readonly retryDetail: string | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -209,6 +211,38 @@ function existingChallengePrompt(challenge: Readonly<DojoReplayChallenge>): stri
     case 'style': return 'DÉCROCHE LE STYLE S';
     case 'survive': return 'SURVIS JUSQU’À LA VICTOIRE';
   }
+}
+
+// Meaningful feedback after a missed persistent goal, derived from the FINAL
+// score; a good partial score/time on a death is never credited as a win.
+function describeUnfinishedChallenge(challenge: Readonly<DojoReplayChallenge>, run: DojoReplayRun): string {
+  if (challenge.kind === 'kills') {
+    const missing = Math.max(0, challenge.target - run.kills);
+    return `${missing} ÉLIMINATION${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'}`;
+  }
+  if (challenge.kind === 'score') {
+    const missing = Math.max(0, challenge.target - run.score);
+    return missing > 0 ? `${missing} PTS MANQUANTS${run.victory ? '' : ' · VICTOIRE REQUISE'}`
+      : 'SCORE ATTEINT · VICTOIRE REQUISE';
+  }
+  if (challenge.kind === 'time') {
+    return run.elapsedSeconds < challenge.target ? 'CHRONO ATTEINT · VICTOIRE REQUISE'
+      : 'CHRONO À BATTRE';
+  }
+  if (challenge.kind === 'no-shots') {
+    return run.shots > 0 ? `${run.shots} TIR${run.shots === 1 ? '' : 'S'} EFFECTUÉ${run.shots === 1 ? '' : 'S'}`
+      : 'SANS TIR · VICTOIRE REQUISE';
+  }
+  if (challenge.kind === 'dodges') {
+    const missing = Math.max(0, 3 - run.dodges);
+    return missing > 0 ? `${missing} ESQUIVE${missing === 1 ? '' : 'S'} MANQUANTE${missing === 1 ? '' : 'S'}`
+      : '3 ESQUIVES ATTEINTES · VICTOIRE REQUISE';
+  }
+  if (challenge.kind === 'style') {
+    const grade = gradeDojoStyle(run).grade;
+    return grade === 'S' ? 'STYLE S ATTEINT · VICTOIRE REQUISE' : `STYLE ${grade} · S REQUIS`;
+  }
+  return 'SURVIE JUSQU’À LA VICTOIRE REQUISE';
 }
 
 function gradeDojoStyle(run: DojoReplayRun): {grade: DojoWebStyleGrade; nextTarget: number | null} {
@@ -389,6 +423,9 @@ export function createDojoReplayRecap(snapshot: unknown,
     nextChallenge = priorChallenge;
     replayTarget = existingChallengePrompt(priorChallenge);
   }
+  const retryDetail = retainingChallenge && priorChallenge !== null
+    ? describeUnfinishedChallenge(priorChallenge, run) : null;
+  const retryDetailText = retryDetail === null ? '' : ` · BILAN DÉFI : ${retryDetail}`;
   const replayTargetText = replayTarget === null ? '' :
     ` · ${retainingChallenge ? 'DÉFI À RETENTER' : 'DÉFI'} : ${replayTarget}`;
   const completedLabel = completedChallenge === null ? null : {
@@ -400,7 +437,7 @@ export function createDojoReplayRecap(snapshot: unknown,
   // Store exactly the next displayed goal, never a guess about a native run.
   if (nextBest !== null) nextBest = Object.freeze({...nextBest,pendingChallenge:nextChallenge});
   return Object.freeze({
-    text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${completedText}${replayTargetText}`,
+    text: `${title[milestone]} · ${metrics}${clearAttemptText}${styleText}${masteryText}${streakText}${recordText}${attemptText}${completedText}${replayTargetText}${retryDetailText}`,
     milestone, best: nextBest,
     shouldPersist: true,
     provenance: 'WEB_ONLY',
@@ -409,6 +446,6 @@ export function createDojoReplayRecap(snapshot: unknown,
     currentStreak: nextBest?.currentStreak ?? 0,
     bestStreak: nextBest?.bestStreak ?? 0,
     replayTarget, masteryCount, newMedals:Object.freeze(newMedals),
-    completedChallenge,
+    completedChallenge, retryDetail,
   });
 }

@@ -315,3 +315,12 @@ Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages s�
 **INCONNU — MCD natif.** Activation live `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, progression, checkpoints et menus ; rien n'est extrapolé depuis l'index. Pas de nouvelle requête ni runner déclenché, aucune donnée privée publiée.
 
 **Précision d'affichage en fin de manche :** lorsqu'un défi chrono est actif, la métrique du run affiche au moins les centièmes et ajoute les décimales strictement nécessaires pour préserver la même relation `< target` que la validation. Exemple succès réel à 21.999 s ⇒ affichage 21.999 s, jamais un trompeur « 22.00 s » sous un défi « SOUS 22.0 ». Les autres temps du récapitulatif conservent le format historique ; aucune modification de calcul du temps (SH-02).
+
+
+## SH-08 / J4 — bilan de défi après tentative non réussie (Web-only, 04/11/2026)
+
+**PROUVÉ — code Web.** Les défis conservés sur plusieurs parties (#361) annonçaient « DÉFI À RETENTER » sans dire pourquoi l'essai avait échoué. Le récapitulatif Dojo déjà raccordé à `finish(win)` expose désormais `retryDetail` et affiche un **BILAN DÉFI** calculé depuis les vrais compteurs de la manche : éliminations manquantes, déficit de points, tirs effectués, esquives manquantes, style insuffisant ou victoire/survie encore nécessaire. Si une défaite atteint numériquement le score ou le chrono, le bilan précise **VICTOIRE REQUISE** plutôt que de créditer le défi. Le défi restant garde exactement son `kind/target` en sauvegarde v5 ; il n'est jamais remplacé par une approximation de progression native. Aucun nouveau timer, input, point, spawn, arme, asset, état de combat ou fichier partagé.
+
+**OBSERVÉ — validation technique requise.** Test ciblé d'une victoire sans tir encore manquée, score cible 901 approché à 850, score 930 sur mort **non** crédité, objectif 5 éliminations raté à 2 puis réussi à 5, deux esquives manquantes. Vérifier `npm run check` et CI sur SHA PR exact puis Pages + smoke des écrans de fin après fusion par SH-05 ; CI seule n'est pas une observation navigateur.
+
+**INCONNU — MCD natif.** Les gardes vivantes de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et les checkpoints restent non qualifiés. Cette explication de défi est une création `WEB_ONLY`, jamais un résultat d'analyse native.
