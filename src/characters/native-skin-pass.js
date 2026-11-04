@@ -1308,9 +1308,23 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const hip = loaded.bones.findIndex(bone => /hip|pelvis/i.test(bone.name));
   const spine = loaded.bones.findIndex(bone => /spine/i.test(bone.name));
   const webLeanPivot = hip >= 0 ? hip : spine >= 0 ? spine : 0;
-  // Named Head is the sole allowed pivot: never invent bone identities.
-  const webHeadIndex = loaded.bones.findIndex(bone =>
+  // The published Dojo EnemyMerged rig has NO Head-named bone. Its
+  // source-named jnt_Neck_01 -> jnt_Neck_Top branch carries the upper-neck
+  // and head surface (both joints have positive source skin weights). Using
+  // only a literal Head match silently disabled every Web head animation
+  // on the REAL Dojo. Resolve that exact authored chain, not a generic
+  // "last spine bone" or fabricated humanoid joint. Other rigs still use
+  // their explicit Head, or fail closed when neither identity is present.
+  const namedHeadIndex = loaded.bones.findIndex(bone =>
     /(?:^|[^a-zA-Z])head$/i.test(bone.name));
+  const neckBase = loaded.bones.findIndex(bone => bone.name === 'jnt_Neck_01');
+  const neckTip = loaded.bones.findIndex(bone => bone.name === 'jnt_Neck_Top');
+  const sourceNeckChain = neckBase >= 0 && neckTip >= 0 &&
+    loaded.bones[neckTip].parent === neckBase;
+  const webHeadIndex = namedHeadIndex >= 0 ? namedHeadIndex
+    : sourceNeckChain ? neckBase : -1;
+  const webHeadPivotIdentity = namedHeadIndex >= 0 ? 'named Head'
+    : sourceNeckChain ? 'source jnt_Neck_01 -> jnt_Neck_Top' : null;
   const webHeadBones = [];
   if (webHeadIndex >= 0) {
     for (let bone = 0; bone < loaded.jointCount; bone++) {
@@ -1617,6 +1631,12 @@ export function createNativeSkinPass(gl, sourcePackage, {
     availableActions: loaded.availableActions,
     availableTransitions: loaded.availableTransitions,
     webHeadTrackingAvailable,
+    webHeadPivotBone: webHeadTrackingAvailable ? webHeadIndex : null,
+    // Gaze height reads the authored terminal neck/head joint. The actual
+    // deformation still pivots the whole source neck branch at neckBase.
+    webHeadSampleBone: webHeadTrackingAvailable
+      ? (namedHeadIndex >= 0 ? namedHeadIndex : neckTip) : null,
+    webHeadPivotIdentity: webHeadTrackingAvailable ? webHeadPivotIdentity : null,
     rig,
     createInstance, createStateInstance, loadInstance, draw, dispose,
   });
