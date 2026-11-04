@@ -248,16 +248,16 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // weight at the firing point, not a guessed projectile flyby or native clip.
         // It shares the existing noise source, HRTF routing and voice budget.
         if (cue === 'enemy-shot') {
-          const pressureTone = context.createBiquadFilter();
-          pressureTone.type = 'bandpass';
-          pressureTone.frequency.value = Math.min(720, context.sampleRate * 0.35);
-          const pressure = context.createGain();
-          pressure.gain.setValueAtTime(0.0001, at);
-          pressure.gain.linearRampToValueAtTime(volume * 0.45, at + 0.018);
-          pressure.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-          noise.connect(pressureTone);
-          pressureTone.connect(pressure);
-          pressure.connect(out);
+            const pressureTone = context.createBiquadFilter();
+            pressureTone.type = 'bandpass';
+            pressureTone.frequency.value = Math.min(720, context.sampleRate * 0.35);
+            const pressure = context.createGain();
+            pressure.gain.setValueAtTime(0.0001, at);
+            pressure.gain.linearRampToValueAtTime(volume * 0.45, at + 0.018);
+            pressure.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+            noise.connect(pressureTone);
+            pressureTone.connect(pressure);
+            pressure.connect(out);
         }
         // WEB-ORIGINAL mechanical slide tick AFTER the gunshot crack (not Unity data).
         // Gating the existing noise source adds no voices, buffers or timers.
