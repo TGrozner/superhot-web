@@ -27,9 +27,10 @@ const WEB_SHARD_SPIN_RADIANS_PER_SECOND = 2 * Math.PI;
 const WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND = 12;
 
 function webShardSpinTime(shard, elapsed) {
-  if (shard.firstStaticContactAt === undefined) return elapsed;
-  const sinceContact = Math.max(0, elapsed - shard.firstStaticContactAt);
-  return shard.firstStaticContactAt -
+  const contactAt = shard.firstWebImpactAt ?? shard.firstStaticContactAt;
+  if (contactAt === undefined) return elapsed;
+  const sinceContact = Math.max(0, elapsed - contactAt);
+  return contactAt -
     Math.expm1(-WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND * sinceContact) /
       WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND;
 }
@@ -330,6 +331,11 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
       // angular settling. Pure ballistic shards retain absolute-time spin.
       if (shard.firstStaticContactAt === undefined && shard.contacts.length > 0) {
         shard.firstStaticContactAt = elapsed;
+        // Keep the observed frame boundary for existing diagnostics, but
+        // drive visible spin from the first real swept collider contact.
+        const inFrame=shard.contacts.reduce((first,contact)=>
+          Math.min(first,contact.webImpactTimeInFrame ?? scaledDelta),scaledDelta);
+        shard.firstWebImpactAt=runtime.elapsed+inFrame;
       }
       for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
         shard.modelMatrix[index] = shard.position[axis] - shard.centerOffset[axis] * ratio;
