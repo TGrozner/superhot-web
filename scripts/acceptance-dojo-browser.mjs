@@ -222,6 +222,9 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
           warningEventStatus: enumerated(g.doorWarning?.lastEventStatus, WARNING_EVENT_STATUS),
           warningActiveEnvelopes: nonnegativeInt(g.doorWarning?.activeEnvelopes),
           warningRenderedSpotlights: nonnegativeInt(g.doorWarning?.renderedSpotlights),
+          // #340/#355: actual WebGL world draws carrying doorway red-wash uniforms.
+          // No shader pixels or native projector source are captured.
+          warningWebFalseLightDrawCalls: nonnegativeInt(snapshot.generatedManifest?.warningWebFalseLightDrawCalls),
         },
       },
     });

@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 
 export const DOJO_VISIBLE_STATUS=Object.freeze({
   OBSERVED:'WEB_RENDERED_VISUAL_HOOKS_SAMPLED_NOT_NATIVE_PARITY',
-  GAP:'WEB_DOJO_WARNING_ACTIVE_WITHOUT_RENDERED_SPOTLIGHT',
+  GAP:'WEB_DOJO_WARNING_ACTIVE_NO_LIGHT_SUBMITTED_NEEDS_VIEWPORT_CHECK',
   INCOMPLETE:'WEB_RENDERED_VISUAL_HOOKS_NOT_OBSERVED',
   INVALID:'WEB_RENDERED_VISUAL_HOOKS_INVALID',
 });
@@ -19,7 +19,7 @@ const dojo=f=>f?.nativeScene?.source?.sceneBuildIndex===10 &&
   f.nativeScene.source.serializedOwner==='level10' &&
   /(?:^|[\\/])SHRL_Dojo2\.unity$/i.test(f.nativeScene.source.scenePath??'');
 const visualFields=['worldDrawCalls','handsDrawCalls','handsTriangles',
-  'warningActiveEnvelopes','warningRenderedSpotlights'];
+  'warningActiveEnvelopes','warningRenderedSpotlights','warningWebFalseLightDrawCalls'];
 const boolFields=['handsSourcePoseSampled','katanaSocketApplied'];
 const warningValues=new Set([
   'not-loaded','source-warning-catalog-rejected','triggered',
@@ -39,8 +39,9 @@ export function assessDojoVisibleIntegrations(trace) {
     sampledPlayingFrames:0,worldMeshDrawFrames:0,
     handsDrawnFrames:0,handsSourcePoseFrames:0,katanaSocketFrames:0,
     warningCatalogReadyFrames:0,warningTriggeredStatusFrames:0,
-    warningActiveFrames:0,warningSpotlightFrames:0,
-    warningActiveWithoutSpotlightFrames:0,
+    warningActiveFrames:0,warningSpotlightFrames:0,warningFalseLightDrawFrames:0,
+    warningAnyLightDrawFrames:0,warningUnknownLightTelemetryFrames:0,
+    warningActiveWithoutAnyLightDrawFrames:0,
     firstWarningGapFrameId:null,maxHandsTriangles:0,
   };
   const report=status=>({
@@ -83,22 +84,34 @@ export function assessDojoVisibleIntegrations(trace) {
       observed.maxHandsTriangles,v.handsTriangles);
     if(v.warningReadiness==='source-catalog-present') observed.warningCatalogReadyFrames++;
     if(v.warningEventStatus==='triggered') observed.warningTriggeredStatusFrames++;
+    if(v.warningRenderedSpotlights>0) observed.warningSpotlightFrames++;
+    if(v.warningWebFalseLightDrawCalls>0) observed.warningFalseLightDrawFrames++;
     if(v.warningActiveEnvelopes>0) {
       observed.warningActiveFrames++;
-      if(v.warningRenderedSpotlights===0) {
-        observed.warningActiveWithoutSpotlightFrames++;
+      // 0 source-projector spotlights is NOT proof that Web red wash did not
+      // reach the GPU: the #340 false-light path uses different uniforms.
+      if(v.warningRenderedSpotlights>0 || v.warningWebFalseLightDrawCalls>0)
+        observed.warningAnyLightDrawFrames++;
+      else if(v.warningRenderedSpotlights==null || v.warningWebFalseLightDrawCalls==null)
+        observed.warningUnknownLightTelemetryFrames++;
+      else {
+        // Both explicitly zero. Culling/off-camera remains an alternative
+        // explanation: this is an acceptance candidate, not pixel proof.
+        observed.warningActiveWithoutAnyLightDrawFrames++;
         observed.firstWarningGapFrameId??=frame.frameId;
       }
     }
-    if(v.warningRenderedSpotlights>0) observed.warningSpotlightFrames++;
   }
   if(!hasVisual||!observed.worldMeshDrawFrames) {
     issues.push('no playing frame with Dojo native-world GPU draw receipt');
     return report(DOJO_VISIBLE_STATUS.INCOMPLETE);
   }
-  if(observed.warningActiveWithoutSpotlightFrames) {
-    issues.push('source warning envelope active while Web reports zero spotlight draws; source cookie/world transform may still be missing');
+  if(observed.warningActiveWithoutAnyLightDrawFrames) {
+    issues.push('source warning envelope active with zero projector AND false-light GPU submissions; verify source door in view before treating it as a renderer bug');
     return report(DOJO_VISIBLE_STATUS.GAP);
+  }
+  if(observed.warningUnknownLightTelemetryFrames) {
+    issues.push('older capture lacks one light-counter channel; zero spotlight count does not refute Web false-light rendering');
   }
   if(!observed.handsDrawnFrames) {
     issues.push('hands/katana draw not witnessed; the captured run may have used only a pistol');

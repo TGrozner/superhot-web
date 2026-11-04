@@ -7,7 +7,7 @@ const visual=()=>({
   worldDrawCalls:360,handsDrawCalls:3,handsTriangles:2048,
   handsSourcePoseSampled:true,katanaSocketApplied:true,
   warningReadiness:'source-catalog-present',warningEventStatus:'not-loaded',
-  warningActiveEnvelopes:0,warningRenderedSpotlights:0,
+  warningActiveEnvelopes:0,warningRenderedSpotlights:0,warningWebFalseLightDrawCalls:0,
 });
 const trace=(variants=[])=>({
   schemaVersion:2,captureKind:'SH10_DOJO_OWNER_BROWSER_V2',
@@ -35,8 +35,27 @@ test('SH10 an ACTIVE source door-warning envelope without GPU spotlight is an ex
   ]));
   assert.equal(result.status,DOJO_VISIBLE_STATUS.GAP);
   assert.equal(result.observed.firstWarningGapFrameId,2);
-  assert.equal(result.observed.warningActiveWithoutSpotlightFrames,1);
+  assert.equal(result.observed.warningActiveWithoutAnyLightDrawFrames,1);
   assert.equal(result.nativeParityVerdict,'UNKNOWN');
+});
+
+test('SH10 a Web red-wash draw counts even without source spotlights',()=>{
+  const result=assessDojoVisibleIntegrations(trace([
+    {},{warningActiveEnvelopes:1,warningRenderedSpotlights:0,warningWebFalseLightDrawCalls:12},
+  ]));
+  assert.equal(result.status,DOJO_VISIBLE_STATUS.OBSERVED);
+  assert.equal(result.observed.warningFalseLightDrawFrames,1);
+  assert.equal(result.observed.warningAnyLightDrawFrames,1);
+  assert.equal(result.pixelComparisonPerformed,false);
+});
+
+test('SH10 missing newer light channel is unknown, not zero',()=>{
+  const result=assessDojoVisibleIntegrations(trace([
+    {},{warningActiveEnvelopes:1,warningRenderedSpotlights:0,warningWebFalseLightDrawCalls:null},
+  ]));
+  assert.equal(result.status,DOJO_VISIBLE_STATUS.OBSERVED);
+  assert.equal(result.observed.warningUnknownLightTelemetryFrames,1);
+  assert.match(result.issues.join(' '),/older capture lacks/);
 });
 
 test('SH10 source door-warning with nonzero rendered lights is OBSERVED, not native light parity',()=>{
