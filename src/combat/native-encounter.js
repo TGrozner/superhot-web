@@ -76,13 +76,34 @@ const WEB_SQUAD_VOLLEY = Object.freeze({
   beatSeconds: 0.75,
   rangeBodyRadii: 18,
 });
-function webSquadBreacher(enemy, enemies) {
-  if (!enemy.reaction?.hasWeapon) return false;
-  let readyLead=null, armedCount=0;
-  for (const candidate of enemies) {
-    if (!participating(candidate) || candidate.reaction?.hasWeapon !== true ||
-        !candidate.encounter) continue;
-    armedCount++;
+// A distant armed actor is not a squadmate. Keep each connected local group
+// independent, including A-B-C chains, so another room cannot elect our point
+// man or force a lone gunner into a needless assault/flanking lane.
+function webLocalArmedSquad(runtime, enemy, enemies) {
+  if (!participating(enemy) || enemy.reaction?.hasWeapon!==true) return [];
+  const armed=enemies.filter(actor => participating(actor) &&
+    actor.reaction?.hasWeapon===true && actor.encounter);
+  const range=runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii;
+  const squad=[enemy], seen=new Set(squad);
+  for (let i=0;i<squad.length;i++) {
+    const member=squad[i];
+    for (const candidate of armed) {
+      if (seen.has(candidate) ||
+          Math.hypot(member.x-candidate.x,member.z-candidate.z)>range)continue;
+      seen.add(candidate);
+      squad.push(candidate);
+    }
+  }
+  return squad;
+}
+function webSquadBreacher(runtime, enemy, enemies, observingAllies) {
+  const squad=webLocalArmedSquad(runtime,enemy,enemies);
+  if (squad.length<2) return false;
+  let readyLead=null;
+  for (const candidate of squad) {
+    // Use the SAME pre-movement sight snapshot as the firing gate. A hidden
+    // low-ID gunner must not block the push of a partner who sees the player.
+    if (!observingAllies.has(candidate)) continue;
     // A stunned, dodging or suppressed point man cannot maintain the push.
     // Keep his squad slot, but hand the assault to the lowest-ID available
     // gunner. No new fire permission or target knowledge is conferred.
@@ -93,10 +114,10 @@ function webSquadBreacher(enemy, enemies) {
       candidate.encounter.webLossRemaining>0 ||
       Boolean(candidate.runtime?.pendingShot);
     if (busy) continue;
-    if (readyLead===null || String(candidate.id)<String(readyLead.id))
+    if (readyLead===null || String(candidate.id).localeCompare(String(readyLead.id),'en')<0)
       readyLead=candidate;
   }
-  return armedCount>1 && readyLead===enemy;
+  return readyLead===enemy;
 }
 
 // J3 Web-only last-stand pressure: the final armed opponent must not become
@@ -328,8 +349,7 @@ function cancelWebProjectileEvade(state) {
 // hitbox, grant firing permission, or bypass the existing path/capsule checks.
 // This is tactical Web design, not a source MCD spawn or AI assignment.
 function webSquadApproachGoal(runtime, enemy, playerFeet, enemies) {
-  if (!enemy.reaction?.hasWeapon || !enemies.some(other =>
-    other !== enemy && participating(other) && other.reaction?.hasWeapon === true)) return null;
+  if (webLocalArmedSquad(runtime,enemy,enemies).length<2) return null;
   const dx=playerFeet.x-enemy.x, dz=playerFeet.z-enemy.z;
   const length=Math.hypot(dx,dz);
   const offset=Math.min(runtime.body.radius*3.5,runtime.armedStopDistance*0.7);
@@ -868,7 +888,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns) {
   // maintain their normal firing ring. No assigned partner, blocked line of
   // sight or deferred shot means the ordinary chase/stop behavior applies.
   const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
-    (webSquadBreacher(enemy,enemies) || webFinalSurvivorBreacher(runtime,enemy,enemies));
+    (webSquadBreacher(runtime,enemy,enemies,observingAllies) ||
+      webFinalSurvivorBreacher(runtime,enemy,enemies));
   const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(
