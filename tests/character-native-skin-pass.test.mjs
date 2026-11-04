@@ -782,7 +782,7 @@ test('Web locomotion bank follows live per-actor strafing while sparing shots, t
     matrix[12] = x;
     matrix[14] = z;
     return actors.drawActor({
-      actorId, pose: { state: 'run', time: .15, ...extra },
+      actorId, pose: { state: 'run', time: Math.max(0, clock - .85), ...extra },
       modelMatrix: matrix, viewProjection: identity(),
       shaderTime: clock, color: [.8, .1, .2, 1],
     });
@@ -1010,7 +1010,7 @@ test('Web inertial bank eases to idle, freezes on paused time and yields to sour
     model[12] = x;
     model[14] = z;
     return actors.drawActor({
-      actorId, pose: { state, time: .4, ...(transition ? { transition } : {}) },
+      actorId, pose: { state, time: Math.max(0, clock - .6), ...(transition ? { transition } : {}) },
       modelMatrix: model, viewProjection: identity(), shaderTime: clock,
       color: [.8, .1, .2, 1],
     });
@@ -1045,5 +1045,42 @@ test('Web inertial bank eases to idle, freezes on paused time and yields to sour
     'new actors cannot inherit banking from other actor IDs');
   assert.equal(calls.filter(call => call[0] === 'draw').length, 8,
     'inertial pose uses the existing skin draw, not additional GPU passes');
+  pass.dispose();
+});
+
+test('Web J4 slow-motion locomotion banks on world time, not unrelated crystal shader time', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, x, poseTime, shaderTime) => {
+    const model = identity();
+    model[12] = x;
+    return actors.drawActor({
+      actorId, pose: { state: 'run', time: poseTime },
+      modelMatrix: model, viewProjection: identity(),
+      shaderTime, color: [.8, .1, .2, 1],
+    });
+  };
+  assert.equal(draw('slow-guard', 0, .4, 1).actorWebPoseReaction, null);
+  const slow = draw('slow-guard', .125, .45, 1.5);
+  assert.equal(slow.actorWebPoseReaction?.kind, 'locomotion',
+    '10x shader-clock advance must not discard real pose-world movement');
+  assert.ok(slow.actorWebPoseReaction.roll < -.04,
+    'actor visibly banks with world velocity despite 10x slowed world time');
+  const paused = draw('slow-guard', .125, .45, 2);
+  assert.equal(paused.actorWebPoseReaction.roll, slow.actorWebPoseReaction.roll,
+    'shader-only time advances cannot settle or unfreeze a game-time pose');
+  assert.deepEqual(Array.from(paused.boneModelMatrices), Array.from(slow.boneModelMatrices),
+    'the GPU pose and collision bones remain frozen together');
+
+  assert.equal(draw('normal-guard', 0, .4, 1).actorWebPoseReaction, null);
+  const normal = draw('normal-guard', .125, .45, 1.05);
+  assert.ok(Math.abs(normal.actorWebPoseReaction.roll - slow.actorWebPoseReaction.roll) < 1e-9,
+    'identical world motion has identical banking regardless of real/shader seconds');
+  const replay = draw('slow-guard', .126, .01, .1);
+  assert.equal(replay.actorWebPoseReaction, null,
+    'replayed actor ID must not inherit movement through either clock rewind');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 6,
+    'the slow-motion fix adds no extra indexed GPU draws');
   pass.dispose();
 });
