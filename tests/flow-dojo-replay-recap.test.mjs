@@ -118,12 +118,12 @@ test('replay target uses the previous same-quota PB and offers a shot-free chall
   assert.equal(shotFree.replayTarget, 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE',
     'after earning the no-shot medal, offer the next missing mastery badge');
   const first = result(6);
-  assert.equal(first.replayTarget, null, 'no invented personal record on first clear');
+  assert.equal(first.replayTarget, 'GAGNE SANS TIRER', 'first clear offers an attainable skill goal, not an invented PB');
   const failed = createDojoReplayRecap({
     quota:6, victory:false, kills:4, shots:4, dodges:0,
     score:300, elapsedSeconds:25,
   }, previous);
-  assert.equal(failed.replayTarget, null, 'loss never receives a victory challenge');
+  assert.equal(failed.replayTarget, 'VISE 5 ÉLIMINATIONS AU PROCHAIN ESSAI', 'defeat has a practical retry goal');
   assert.equal(readDojoReplayBest(JSON.stringify(chaseScore.best), 7), null);
 });
 
@@ -158,4 +158,22 @@ test('Dojo mastery medals unlock across actual victories and remain isolated per
   assert.equal(defeat.best.masteryMask, 7);
   assert.deepEqual(defeat.newMedals, [], 'no medal from a loss');
   assert.equal(defeat.masteryCount, 3);
+});
+
+test('Dojo retry coaching never invents a PB or re-awards completed medals', () => {
+  const newClear = result(6, {shots:0, dodges:0, score:500});
+  assert.equal(newClear.replayTarget, 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE');
+  const nearMaster = result(6, {shots:0, dodges:3, score:900});
+  assert.equal(nearMaster.replayTarget, 'DÉCROCHE LE STYLE S');
+  const mastered = result(6, {shots:0, dodges:3, score:2100});
+  assert.equal(mastered.replayTarget, null, 'three earned medals need no artificial challenge');
+  const lostEarly = createDojoReplayRecap({
+    quota:7, victory:false, kills:0, shots:3, dodges:0, score:0, elapsedSeconds:5,
+  });
+  assert.equal(lostEarly.replayTarget, 'VISE 1 ÉLIMINATION AU PROCHAIN ESSAI');
+  const lostAfterQuota = createDojoReplayRecap({
+    quota:7, victory:false, kills:7, shots:8, dodges:0, score:2000, elapsedSeconds:25,
+  });
+  assert.equal(lostAfterQuota.replayTarget, 'SURVIS JUSQU’À LA VICTOIRE');
+  assert.equal(lostAfterQuota.shouldPersist, false);
 });
