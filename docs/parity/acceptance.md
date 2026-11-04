@@ -432,26 +432,30 @@ same-scene/angle original visual reference remain **UNKNOWN**.
 
 ### SH-10: trusted in-browser Start and victory Replay receipts (3 November 2026)
 
-The public runtime has concrete buttons: `start-button` / `play-original`
-call `start()`, and `again-button` calls `start()` on the win overlay.
-Counter/scene snapshots alone cannot distinguish a genuine replay click from
-some other reset or a synthetic sequence. The owner-local read-only browser
-recorder now attaches a **capture-phase click listener** when armed before Start.
-It serializes only bounded button IDs, rendered frame IDs, and screen names,
-**only for events with `isTrusted === true`**; JS-dispatched `.click()`
-events are not accepted. It does not intercept or alter the game event and
-removes its listener at stop. The full-run gate requires a Start click before
-the first sampled combat frame and an `again-button` click on the win overlay
-between sampled win and restart frames. Missing receipts yield **INCOMPLETE**,
-not a native failure; invalid receipt schema yields INVALID.
+The public runtime can start by `start-button` / `play-original` calling
+`start()`, **or by the first primary mousedown on the actual `#scene` canvas**
+while the Dojo/build10 preview is rendered and `#scene-controls` is visible.
+The latter path in `src/main.js` sets `nativeCombatStarted` and requests
+pointer lock, but does **not** fire the pistol. A button-only recorder wrongly
+classified this legitimate owner-started 6/7-kill run as INCOMPLETE.
+
+The read-only recorder now records a canvas-start receipt as
+`{type:'start', buttonId:'scene', ...}` only on a *trusted primary gesture*
+targeting the canvas, with validated Dojo source identity, active preview and
+pre-start controls. It does not count control-panel/scene-mode events, synthetic
+mouse events, right clicks or the first pointer-lock press as a gunshot. Normal
+button Start receipts remain accepted. On victory, `again-button` must still
+produce a separate trusted click before the sampled restart; counters alone
+cannot prove Replay. Missing receipts are **INCOMPLETE**, invalid receipt schemas
+are INVALID, and user-supplied traces remain unauthenticated.
 
 **Operator requirement:** arm `startDojoCapture({waitForStart:true})` *before*
-pressing Start, and after victory press the actual **REJOUER** button; do not
-reset through DevTools or a different control. Older browser JSON recordings
-without `uiActions` remain inspectable but cannot satisfy this stronger full
-run gate. Even a browser-trusted click is not a cryptographic signature, and
-authored Node tests still only test the validator; a genuine completed Dojo
-Chromium trace and an executed matched native MCD capture remain **UNKNOWN**.
+the intended button or canvas Start; after victory press actual **REJOUER**.
+An unrelated pre-start click on a visible UI control currently may also trigger
+combat in the runtime (SH-01 has already escalated this to SH-05), but the
+acceptance harness never credits that as an intentional canvas Start.
+Browser-trusted clicks are not cryptographic proof. Node fixtures do not certify
+a Chromium 6/7-kill run or native MCD parity: both remain **UNKNOWN**.
 
 
 ### SH-10: browser input attempts must accompany the Dojo actions (3 November 2026)
