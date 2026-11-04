@@ -1126,6 +1126,13 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   const pass = createNativeSkinPass(gl, pkg);
   assert.equal(pass.webHeadTrackingAvailable, true);
   const actors = createNativeActorSkinRuntime(pass);
+  const controlActors = createNativeActorSkinRuntime(pass);
+  const control = time => controlActors.drawActor({
+    actorId:'watchman', pose:{state:'idle', time},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:null, shaderTime:time * 10,
+    color:[.8,.1,.2,1],
+  });
   const draw = (time, x, z, extra = {}) => actors.drawActor({
     actorId: 'watchman', pose: {state:'idle', time, ...extra},
     modelMatrix: identity(), viewProjection: identity(),
@@ -1133,7 +1140,7 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     color: [.8,.1,.2,1],
   });
   const first = draw(0, 5, 5);
-  const firstSocket = Array.from(first.weaponAttachmentMatrix);
+  const sourceAtRight = control(.1);
   assert.equal(first.actorWebHeadLook, null, 'first pose does not invent a snap');
   const lookingRight = draw(.1, 5, 5);
   assert.equal(lookingRight.webHeadLookApplied, true);
@@ -1141,10 +1148,11 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   assert.ok(lookingRight.boneModelMatrices[2*16 + 8] > .1,
     'the real head bone rotates toward the right');
   near(Array.from(lookingRight.boneModelMatrices.slice(0, 16)),
-    Array.from(first.boneModelMatrices.slice(0,16)));
+    Array.from(sourceAtRight.boneModelMatrices.slice(0,16)));
   near(Array.from(lookingRight.boneModelMatrices.slice(3*16,4*16)),
-    Array.from(first.boneModelMatrices.slice(3*16,4*16)));
-  near(Array.from(lookingRight.weaponAttachmentMatrix), firstSocket);
+    Array.from(sourceAtRight.boneModelMatrices.slice(3*16,4*16)));
+  near(Array.from(lookingRight.weaponAttachmentMatrix),
+    Array.from(sourceAtRight.weaponAttachmentMatrix));
   const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
   assert.ok(palette[8] > .1, 'GPU palette receives the same head turn');
 
@@ -1154,7 +1162,8 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   near(Array.from(paused.boneModelMatrices), Array.from(lookingRight.boneModelMatrices));
   const lookingLeft = draw(.21, -5, 5);
   assert.ok(lookingLeft.actorWebHeadLook.yaw < 0, 'head glances to the opposite side');
-  near(Array.from(lookingLeft.weaponAttachmentMatrix), firstSocket);
+  near(Array.from(lookingLeft.weaponAttachmentMatrix),
+    Array.from(control(.21).weaponAttachmentMatrix));
 
   const dead = draw(.25, 5, 5, {solvedPose:{
     rig:pass.rig, provenance:'authored solved pose',
