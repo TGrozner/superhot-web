@@ -187,7 +187,6 @@ function describeUnfinishedChallenge(challenge, run) {
     }
     return 'SURVIE JUSQU’À LA VICTOIRE REQUISE';
 }
-
 function gradeDojoStyle(run) {
     // #271 awards 100, 200, ... for consecutive kills within this 6/7 cap.
     // Dodge bonuses can exceed this COMBO-ONLY S benchmark. Web tuning, not MCD.
