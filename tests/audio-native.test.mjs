@@ -143,6 +143,21 @@ test('demo mode keeps explicit procedural feedback while original mode fails clo
   assert.equal(audio.getMetrics().originalMode, true);
 });
 
+test('Dojo unarmed Web punch exposes an explicitly non-native playback receipt', async () => {
+  const {audio}=makeAudio();
+  await audio.init();
+  assert.throws(() => audio.punch({hit:1}), /hit must be boolean/);
+  const miss=audio.punch({hit:false,position:{x:0,y:1.6,z:0}});
+  assert.equal(miss.status,'blocked');
+  assert.equal(miss.reason,'native-punch-clip-unverified');
+  assert.equal(miss.event,'punch');
+  const contact=audio.punch({hit:true});
+  assert.equal(contact.status,'blocked');
+  assert.equal(contact.reason,'native-punch-clip-unverified');
+  audio.setOriginalMode(false);
+  assert.equal(audio.punch({hit:true}).status,'suppressed');
+});
+
 test('recovered events stay silent until their native buffers are loaded', async () => {
   const {audio} = makeAudio();
   const beforeInit = audio.shoot({variant: 'primary'});
