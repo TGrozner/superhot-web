@@ -662,3 +662,30 @@ After source-grounded rest, the Web ragdoll previously checked its support with 
 ## SH-06 — Grounded corpse skid damping (Dojo, Web-only)
 
 **Gameplay correction:** with source mass, joint constraints and collision already active, a body could retain noticeable lateral velocity after landing and appear to skate across the Dojo. For budgeted **real-time Dojo ragdolls only**, each *actual upward floor contact* now applies an additional exponential horizontal-velocity retention (`exp(-4 × dt)`) after the ordinary source-material contact response. Angular friction, impulses, collisions, authored rig/joints, cleanup and off-ground movement remain unchanged. The exponential is evaluated once per substep for all bodies. A focused test compares a real source floor, the same freely falling body without a floor and an unbudgeted source-study run; only grounded Dojo velocity decays, and the body still slides briefly rather than being pinned. This is **original Web game-feel tuning**, *not* a recovered MCD/PhysX damping constant or a claim of native parity. The effects on actual skating, FPS and 7/7 Dojo play-through remain to be checked visually on Pages after CI and SH-05 integration.
+
+
+## SH-06 — mort/ragdoll à 10 FPS soutenus (réglage Web, 04/11/2026)
+
+**Défaut dans le Dojo Web :** l'ancien budget de quatre sous-pas acceptait
+au maximum 33,3 ms de simulation même pendant une frame active de 100 ms à
+10 FPS. Les corps pouvaient donc tomber environ trois fois trop lentement,
+tandis que l'horloge de disparition continuait d'avancer normalement.
+
+**Correction :** le PBD existant accepte jusqu'à 100 ms de temps actif par
+frame, avec toujours au maximum quatre sous-pas de collisions balayées
+(25 ms chacun à 10 FPS). Les frames usuelles 30/60 FPS conservent leur pas
+antérieur. Une interruption de 300 ms laisse encore 200 ms de simulation
+non rattrapée afin de limiter le coût CPU, sans retarder le cleanup.
+Aucune modification du renderer, de main.js, des assets, des données
+rigidbodies/joints, des impulsions ou des contacts source.
+
+**Vérification :** test ciblé de chute 100 ms vs six frames 60 FPS,
+franchissement des boîtes de sol source, garde de hitch 300 ms et
+finitude du rig. CI exacte, collisions en vrai navigateur, p95/p99 FPS et
+ressenti 6–7 cadavres restent à vérifier après intégration SH-05.
+
+**Provenance :** régression et budget du code Web existant, paramètres
+créatifs Web ; **aucun timing fixe PhysX/Unity n'est prétendu**. Les
+artifacts privés d'animation de research #11/#12 fournissent un inventaire
+statique, pas l'exécution des 404 liaisons événement/receveur, ni les
+valeurs de scheduling PhysX natives. Aucune requête privée ajoutée.
