@@ -1041,3 +1041,47 @@ test('J3 Web readable volleys: nearby clear gunners alternate new shots without 
   assert.ok(wing.runtime.attackDelayRemaining>.1,
     'reordering input actors cannot steal the stable-ID lead firing window');
 });
+
+test('J3 Web volleys: connected three-gunner chain grants only one real shot',()=>{
+  // Synthetic Web tactic, not a recovered MCD squad cadence. A-B and B-C are
+  // in range, A-C are not: overlapping local lists used to elect TWO shooters.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),a=firstSpawn(runtime,target);
+  a.muzzlePosition=p(2,1.4,2);
+  a.muzzleForward=p(1,0,0);
+  const clone=(id,z)=>({
+    ...a,id,z,clock:0,
+    reaction:{...a.reaction},
+    runtime:{...a.runtime},
+    encounter:{...a.encounter,route:null,target:null},
+    muzzlePosition:p(2,1.4,z),
+    muzzleForward:p(1,0,0),
+  });
+  const b=clone('web-triad-b',6),c=clone('web-triad-c',10);
+  const actors=[c,a,b]; // deliberately not sorted by ID
+  for(const actor of actors) {
+    actor.runtime.attackDelayRemaining=-1;
+    actor.runtime.alertness=2;
+    actor.runtime.pendingShot=null;
+  }
+  const settings={...runtime.enemySettings,family:'Pistol'};
+  runtime.webVolleyClock=.8; // second beat: old local-list bug elected B AND C
+  advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.1}));
+  const fired=actors.filter(actor=>{
+    assert.equal(actor.encounter.canAttack,true,'off-turn retains real aiming permission');
+    advanceNativeEnemyWeapon(actor.runtime,settings,.1);
+    return runNativeEnemyGunAttack(actor.runtime,settings,{
+      scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+      sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+      aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+      allowAttacking:true,canShot:true,active:true,
+      animationTarget:target.playerPosition,
+    },()=>0).shot;
+  });
+  assert.deepEqual(fired,[b],'one connected squad must elect one shooter, not two');
+  assert.ok(a.runtime.attackDelayRemaining>0 && c.runtime.attackDelayRemaining>0,
+    'both overlapping neighbors retain the safe cooldown floor');
+  assert.ok(b.runtime.pendingShot,'selected gunner reached the actual Attack-Late pipeline');
+});
