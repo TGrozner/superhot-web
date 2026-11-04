@@ -160,7 +160,7 @@ export function startDojoFpsCapture({maxFramesPerSegment=20000}={}) {
       if(stopped)throw new Error('Dojo FPS profiler already stopped');
       if(!LABEL_SET.has(label))throw new RangeError('unknown FPS segment label');
       if(segments.length>=12)throw new RangeError('maximum 12 segments');
-      if(!playing())throw new Error('start Dojo gameplay before FPS phase mark');
+      // Can arm while paused/preview; rAF intervals begin only in actual Dojo gameplay.
       active={label,frameIntervalsMs:[],drawSamples:[],skippedFrames:0};
       segments.push(active);
       lastTimestamp=null;lastDrawAt=-Infinity;
