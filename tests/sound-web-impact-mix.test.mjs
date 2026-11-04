@@ -197,7 +197,7 @@ test('Web combat hits add a bright attack without extra voices or coloring foots
   const mix = createWebImpactMix(ctx, 3);
   assert.equal(mix.emit('player-shot').status, 'started');
   assert.equal(nodes.length, 2); // Same two Web sources: noise and pitched body.
-  assert.equal(nodes[0].connections.length, 2); // Burst plus short crack.
+  assert.equal(nodes[0].connections.length, 3); // Burst, short crack and delayed Web action.
   const crack = filters.find(f => f.type === 'highpass' && f.frequency.value > 2500);
   assert.ok(crack);
   const crackGain = gains.find(g => crack.connections.includes(g));
