@@ -905,8 +905,14 @@ test('Web J4 gunshot glow uses accepted fire actions and never tints a solved de
   assert.equal(glowing.webFireGlowIntensity, glowing.actorWebFireGlow);
   assert.equal(glowing.webFireGlowDesign, 'Web-only warm discharge afterglow');
   assert.equal(glowing.actorWebHitFlash, 0, 'fire never masquerades as damage');
-  assert.equal(fire(.3).actorWebFireGlow, 0, 'fire color must settle quickly');
+  assert.ok(fire(.3).actorWebFireGlow > 0,
+    'source fire speed must not compress 240ms of Web glow to just a few frames');
   assert.equal(fire(.08, 0).actorWebFireGlow, 0, 'no action blend = no fire glow');
+  const settled = actors.drawActor({
+    actorId: 'source-fire-guard', pose: { state: 'idle', time: .6 },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+  assert.equal(settled.actorWebFireGlow, 0, 'flare stops once the accepted fire action ends');
   const dead = actors.drawActor({
     actorId: 'source-fire-guard',
     pose: { state: 'idle', time: .4, solvedPose: {
@@ -917,8 +923,9 @@ test('Web J4 gunshot glow uses accepted fire actions and never tints a solved de
   });
   assert.equal(dead.actorWebFireGlow, 0, 'solved ragdoll receives no glow');
   const uniforms = calls.filter(call => call[0] === 'hitFlash' && call[1] === 'uWebHitFlash');
-  assert.deepEqual(uniforms.map(call => call[3]), [0, glowing.actorWebFireGlow, 0, 0, 0]);
-  assert.equal(calls.filter(call => call[0] === 'draw').length, 5,
+  assert.deepEqual(uniforms.map(call => call[3]),
+    [0, glowing.actorWebFireGlow, uniforms[2][3], 0, 0, 0]);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 6,
     'afterglow uses existing single GPU skin draw');
   assert.throws(() => pass.draw({
     instance: pass.createStateInstance('idle'), time: .1,
