@@ -1182,7 +1182,7 @@ function update(dt, activeRealDt) {
   let worldDt;
   if (native) {
     const tick = stepMcdGameplayClock(nativeClock, {
-      dt, x: horizontal, y: fwd, grounded: nativeGrounded,
+      dt, unscaledDt: activeRealDt, x: horizontal, y: fwd, grounded: nativeGrounded,
       yaw: state.camera.yaw, pitch: state.camera.pitch,
       lookPathDegrees: webPointerPath,
     });
