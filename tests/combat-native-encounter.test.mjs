@@ -542,3 +542,80 @@ test('J3 Web assault pressure: one armed squadmate closes fast while wingman cov
     'when the wingman dies, no solo enemy keeps an unjustified assault');
   assert.equal(lead.encounter.canAttack,false,'death does not grant an attack');
 });
+
+
+test('J3 Web projectile evade: visible player bullets trigger a bounded swept side-step, not clairvoyance',()=>{
+  const runtime=setup(),enemy=firstSpawn(runtime);
+  const aimedFrom=p(15,1,2);
+  const bullet={friendly:true,type:'normal',pos:aimedFrom,direction:p(-1,0,0),speed:35};
+  const start=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{
+    scaledDeltaTime:.12,playerProjectiles:[bullet],
+  }));
+  assert.ok(Math.abs(enemy.z-start.z)>.005,'enemy sidesteps a live approaching shot');
+  assert.ok(Math.hypot(enemy.x-start.x,enemy.z-start.z)<.3,'single frame is speed-bounded');
+  assert.ok(enemy.encounter.webDodgeRemaining>0,'dodge persists briefly, without teleporting');
+  assert.equal(enemy.encounter.canAttack,false,'evade does not manufacture a muzzle');
+  const afterFirst=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
+  assert.ok(Math.abs(enemy.z-afterFirst.z)>.005,'evade remains legible after bullet moves on');
+  for(let i=0;i<4;i++)advanceNativeEncounter(runtime,input([enemy],{scaledDeltaTime:.12,playerProjectiles:[]}));
+  assert.equal(enemy.encounter.webDodgeRemaining,0,'short dodge terminates');
+  assert.ok(enemy.encounter.webDodgeCooldown>0,'same projectile cannot cause endless jitter');
+
+  const hiddenRuntime=setup(scene(),[box(8,1,2,.3,3,2)]);
+  const hidden=firstSpawn(hiddenRuntime);
+  advanceNativeEncounter(hiddenRuntime,input([hidden],{
+    scaledDeltaTime:.12,playerProjectiles:[bullet],
+  }));
+  assert.equal(hidden.encounter.webDodgeRemaining,0,'real wall blocks projectile awareness');
+  const invalidRuntime=setup();
+  // Ignore malformed/projectile-free input without relying on the caller.
+  const invalidEnemy=firstSpawn(invalidRuntime);
+  advanceNativeEncounter(invalidRuntime,input([invalidEnemy],{
+    scaledDeltaTime:.12,playerProjectiles:[{friendly:false,pos:aimedFrom,direction:p(-1,0,0),speed:35},
+      {friendly:true,pos:aimedFrom,direction:p(NaN,0,0),speed:35}],
+  }));
+  assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
+});
+
+test('J3 Web dodge is cancelled by stun, pending fire or deactivation rather than resumed later',()=>{
+  // Entirely synthetic positions, shot and Web timings. No real MCD source data.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const incoming={friendly:true,pos:p(15,1,2),direction:p(-1,0,0),speed:35};
+  for (const interruption of ['stun','pending-fire','inactive']) {
+    const runtime=setup(data),enemy=firstSpawn(runtime,near);
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,scaledDeltaTime:.1,playerProjectiles:[incoming],
+    }));
+    assert.ok(enemy.encounter.webDodgeRemaining>0,
+      interruption+': approaching projectile starts a live dodge');
+    const atInterruption=p(enemy.x,enemy.y,enemy.z);
+    if (interruption==='stun') enemy.reaction.stunRemaining=.8;
+    if (interruption==='pending-fire') enemy.runtime.pendingShot={target:near.playerPosition};
+    if (interruption==='inactive') enemy.active=false;
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,scaledDeltaTime:.1,playerProjectiles:[],
+    }));
+    assert.equal(enemy.encounter.webDodgeRemaining,0,
+      interruption+': interruption cancels the remaining dodge lifetime');
+    assert.equal(enemy.encounter.webDodgeSideX,0);
+    assert.equal(enemy.encounter.webDodgeSideZ,0);
+    assert.ok(enemy.encounter.webDodgeCooldown>0,
+      interruption+': recovery prevents immediate re-trigger');
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),atInterruption,
+      interruption+': no movement during the interruption');
+    enemy.reaction.stunRemaining=0;
+    enemy.reaction.stunnedThisFrame=false;
+    enemy.runtime.pendingShot=null;
+    enemy.active=true;
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,scaledDeltaTime:.1,playerProjectiles:[],
+    }));
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),atInterruption,
+      interruption+': an expired bullet does not trigger phantom sidestepping');
+    assert.equal(enemy.encounter.webDodgeRemaining,0);
+  }
+});

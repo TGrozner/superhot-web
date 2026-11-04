@@ -120,6 +120,92 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
   return false;
 }
 
+// J3 Web-only active projectile awareness: an enemy may sidestep a real,
+// visible PLAYER projectile already in flight. This is not MCD AI parity and
+// never predicts a click or grants invulnerability. Only the existing swept
+// character mover decides whether the dodge can actually happen.
+const WEB_PROJECTILE_EVADE = Object.freeze({
+  lookaheadSeconds: 0.55,
+  warningBodyRadii: 2.3,
+  dodgeSeconds: 0.38,
+  recoverySeconds: 1.15,
+  speedFraction: 1.12,
+});
+
+/** Find the earliest observable player bullet that will pass near the body.
+ * @param {object} runtime Source collision/navmesh adapter.
+ * @param {object} enemy Current live enemy.
+ * @param {object[]} projectiles Live projectile snapshots from SH-05.
+ * @returns {{sideX:number,sideZ:number}|null} A safe-direction hint, not a hit.
+ */
+function webIncomingProjectile(runtime, enemy, projectiles) {
+  if (!Array.isArray(projectiles) || projectiles.length===0) return null;
+  let bestTime=Infinity, threat=null;
+  for (const projectile of projectiles) {
+    if (projectile?.friendly!==true || !projectile.pos) continue;
+    const origin=projectile.pos;
+    const v=projectile.velocity ?? {
+      x:projectile.direction?.x*projectile.speed,
+      y:projectile.direction?.y*projectile.speed,
+      z:projectile.direction?.z*projectile.speed,
+    };
+    if (![origin.x,origin.y,origin.z,v.x,v.y,v.z].every(Number.isFinite))continue;
+    const planarSpeedSquared=v.x*v.x+v.z*v.z;
+    if(planarSpeedSquared<=EPSILON)continue;
+    const dx=enemy.x-origin.x,dz=enemy.z-origin.z;
+    const until=(dx*v.x+dz*v.z)/planarSpeedSquared;
+    if(until<=0 || until>WEB_PROJECTILE_EVADE.lookaheadSeconds || until>=bestTime)continue;
+    const closest={x:origin.x+v.x*until,y:origin.y+v.y*until,z:origin.z+v.z*until};
+    if(closest.y<enemy.y || closest.y>enemy.y+runtime.body.height)continue;
+    const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
+    if(separation>runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii)continue;
+    // A projectile hidden behind actual world cover should not trigger an
+    // omniscient sidestep. The trace is checked only for plausible threats.
+    if(nativeSegmentHit(runtime.sightCollision,origin,closest)!==null)continue;
+    const speed=Math.sqrt(planarSpeedSquared);
+    const cross=v.x*dz-v.z*dx;
+    const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
+    bestTime=until;
+    threat={sideX:-v.z/speed*side,sideZ:v.x/speed*side};
+  }
+  return threat;
+}
+
+/** Shift feet laterally without tunneling, teleportation or fake shooting.
+ * @returns {boolean} Whether a real nav/capsule-approved step occurred.
+ */
+function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
+  const start=position(enemy),state=enemy.encounter;
+  const travel=enemy.runtime.speed*scaledDeltaTime*WEB_PROJECTILE_EVADE.speedFraction;
+  if(!Number.isFinite(travel) || travel<=EPSILON)return false;
+  const moved=moveNativeCharacter(runtime.collision,start,{
+    x:state.webDodgeSideX*travel,y:0,z:state.webDodgeSideZ*travel,
+  },runtime.body).position;
+  if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)return false;
+  const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+  if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+      occupied(runtime,start,moved,enemies,enemy) ||
+      occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))return false;
+  enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+  enemy.walking=true;
+  state.route=null;
+  return true;
+}
+
+/** Interrupt a live Web dodge instead of pausing its remaining time across a
+ * stun, despawn or committed shot. The recovery blocks repeated reactions to
+ * the same in-flight bullet after the interrupt ends.
+ * @param {object} state Live encounter state for an enemy.
+ * @returns {void}
+ */
+function cancelWebProjectileEvade(state) {
+  if (!(state.webDodgeRemaining>0)) return;
+  state.webDodgeRemaining=0;
+  state.webDodgeSideX=0;
+  state.webDodgeSideZ=0;
+  state.webDodgeCooldown=Math.max(state.webDodgeCooldown,WEB_PROJECTILE_EVADE.recoverySeconds);
+}
+
 // J3 Web-authored approach lanes: two armed enemies should not both march
 // directly toward the same point before they reach firing range. Route to
 // opposite, reachable positions near the player; never offset the player
@@ -381,7 +467,8 @@ function spawnEnemy(runtime, point, order, population) {
         family:activation.family,archetype:activation.archetype,prefabId:activation.prefabId})
       : Object.freeze({status:'web-pistol-fallback',reason:activation.reason}),
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
-      webTacticalSide:runtime.nextId%2===0 ? 1 : -1},
+      webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
+      webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
@@ -389,19 +476,21 @@ function spawnEnemy(runtime, point, order, population) {
 }
 
 function moveEnemy(runtime, enemy, input) {
-  const { scaledDeltaTime, playerFeet, playerPosition, enemies } = input;
+  const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
   state.canAttack=false;
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
+    cancelWebProjectileEvade(state);
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
   }
   const armed=enemy.reaction.hasWeapon;
   if (!armed) enemy.runtime.pendingShot=null;
+  if (enemy.runtime.pendingShot) cancelWebProjectileEvade(state);
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
   // native eye/AimTarget bone, and cannot authorize firing.
@@ -415,6 +504,30 @@ function moveEnemy(runtime, enemy, input) {
   state.webAllyBlockingShot=worldMuzzleClear &&
     webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,playerPosition,enemies);
   state.canAttack=worldMuzzleClear && !state.webAllyBlockingShot;
+  // An actual incoming player projectile may provoke a short tactical dodge
+  // even while chasing. Original MCD enemy AI is not claimed here. No change
+  // to existing tactics when the SH-05 projectile snapshot is absent.
+  state.webDodgeCooldown=Math.max(0,state.webDodgeCooldown-scaledDeltaTime);
+  if(state.visible && !enemy.runtime.pendingShot &&
+      state.webDodgeRemaining<=0 && state.webDodgeCooldown<=EPSILON) {
+    const threat=webIncomingProjectile(runtime,enemy,playerProjectiles);
+    if(threat) {
+      state.webDodgeRemaining=WEB_PROJECTILE_EVADE.dodgeSeconds;
+      state.webDodgeSideX=threat.sideX;
+      state.webDodgeSideZ=threat.sideZ;
+    }
+  }
+  if(state.webDodgeRemaining>0 && !enemy.runtime.pendingShot && scaledDeltaTime>0) {
+    advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+      'running',scaledDeltaTime);
+    const moved=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime);
+    state.webDodgeRemaining=Math.max(0,state.webDodgeRemaining-scaledDeltaTime);
+    if(!moved || state.webDodgeRemaining===0) {
+      state.webDodgeCooldown=WEB_PROJECTILE_EVADE.recoverySeconds;
+      if(!moved)state.webDodgeRemaining=0;
+    }
+    if(moved)return;
+  }
   // A single, stable armed squadmate pressures the player while its allies
   // maintain their normal firing ring. No assigned partner, blocked line of
   // sight or deferred shot means the ordinary chase/stop behavior applies.
