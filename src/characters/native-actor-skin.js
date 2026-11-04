@@ -118,7 +118,8 @@ function webHitSource(hitOrigin, cameraPosition, hitIncomingDirection = null) {
  * animation, attack event or fire decision is synthesized.
  * Clock and actor identity come from the live Dojo gameplay caller.
  */
-function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSource) {
+function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSource,
+                         hitAccentElapsed = pose.time) {
   if (solvedPose !== null) return null;
   const hit = identity.name === 'hit';
   const melee = identity.name === 'punch';
@@ -143,9 +144,9 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSo
   } else if (hit) {
     // An immediate readable flinch, then a longer diminishing recovery.
     // Pure Web tuning: no claim about MCD's impact kinetics.
-    if (pose.time <= 0 || pose.time >= .36) return null;
-    envelope = Math.min(1, pose.time / .045) *
-      Math.min(1, (.36 - pose.time) / .30);
+    if (hitAccentElapsed <= 0 || hitAccentElapsed >= .36) return null;
+    envelope = Math.min(1, hitAccentElapsed / .045) *
+      Math.min(1, (.36 - hitAccentElapsed) / .30);
   } else {
     if (pose.time <= 0 || pose.time >= .36) return null;
     envelope = Math.sin(Math.PI * pose.time / .36);
@@ -533,8 +534,19 @@ export function createNativeActorSkinRuntime(skinPass) {
       ? (continuedHit ? previousHit.hitSource
         : webHitSource(pose.hitOrigin, cameraPosition, pose.hitIncomingDirection))
       : null;
+    // Source enemy-reaction emits restartAnimation:false for an already-stunned
+    // actor. Respect that native clip clock, but give every NEW accepted Web
+    // stun its own brief directional accent/flash, even within one hit state.
+    const repeatedAcceptedHit = selected.identity.name === 'hit' &&
+      solvedPose === null && hitEventId !== null &&
+      previousHit?.state === 'hit' && previousHit.hitEventId !== hitEventId &&
+      Number.isFinite(shaderTime) && shaderTime >= previousHit.time &&
+      pose.time >= previousHit.poseTime;
+    const hitAccentStartTime = repeatedAcceptedHit ? pose.time
+      : continuedHit ? (previousHit.hitAccentStartTime ?? 0) : 0;
+    const hitAccentElapsed = pose.time - hitAccentStartTime;
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
-      modelMatrix, hitSource)
+      modelMatrix, hitSource, hitAccentElapsed)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
         modelMatrix, shaderTime, pose.time, solvedPose, action, transitionDescriptor)
       ?? webIdleReaction(actorId, pose, selected.identity,
@@ -550,7 +562,7 @@ export function createNativeActorSkinRuntime(skinPass) {
     const webFireArmKick = webFireRightArmKick(reaction,
       skinPass.webFireArmKickAvailable === true);
     const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
-      ? Math.max(0, 1 - pose.time / .22) ** 2 : 0;
+      ? Math.max(0, 1 - hitAccentElapsed / .22) ** 2 : 0;
     // WEB-authored warm afterglow follows an actual accepted fire action.
     // Its blend gate prevents any false warning before the firing event.
     const fireStateSpeed = skinPass.states.fire?.speed;
@@ -588,7 +600,7 @@ export function createNativeActorSkinRuntime(skinPass) {
         bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
         gazeYaw: webHeadLook?.yaw ?? 0, gazePitch: webHeadLook?.pitch ?? 0,
         hitEventId: selected.identity.name === 'hit' ? hitEventId : null,
-        hitSource,
+        hitAccentStartTime, hitSource,
         headLocal: webHeadIndex < 0 ? null : [
           report.boneModelMatrices[webHeadIndex*16 + 12],
           report.boneModelMatrices[webHeadIndex*16 + 13],
