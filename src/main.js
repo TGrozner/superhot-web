@@ -655,7 +655,17 @@ function requestMouse() {
 }
 function start() { if (!nativeGameplay()) { dojoUnavailable('Le Dojo original doit être entièrement chargé avant de jouer.'); return; } initializeAudio(); resetGame(); requestMouse(); }
 function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen('playing'); activeSinceTimestampMs = performance.now(); requestMouse(); }
-function pause() { if (state.screen === 'playing') setScreen('paused'); }
+function pause() {
+  if (state.screen !== 'playing') return;
+  if (nativeGameplay() && nativeCombatStarted) {
+    // Clear interrupted Web look impulses without advancing world/physics.
+    stepMcdGameplayClock(nativeClock, {
+      dt: 0, unscaledDt: 0, paused: true,
+      yaw: state.camera.yaw, pitch: state.camera.pitch,
+    });
+  }
+  setScreen('paused');
+}
 function finish(win) {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   let stats = `${state.kills} ennemis éliminés · ${state.shots} tirs · ${state.runClock.toFixed(1)} secondes`;
@@ -1199,7 +1209,9 @@ function update(dt, activeRealDt) {
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
     // Advance existing warning envelopes before accepting fresh commands.
     // This preserves trigger()'s first source-clock sample.
-    nativeDoorWarningBridge?.advance(worldDt, state.camera);
+    // Spawn timers and the encounter below both consume this capped unscaled dt.
+    // Light curve animation remains driven by worldDt.
+    nativeDoorWarningBridge?.advance(worldDt, state.camera, dt);
     if (nativeHandsController) {
       try {
         const heldId = nativeItems?.held?.id ?? 'unarmed';
@@ -1299,6 +1311,8 @@ function update(dt, activeRealDt) {
     const events=advanceNativeEncounter(nativeEncounter,{
       scaledDeltaTime:worldDt,unscaledDeltaTime:dt,playerPosition:state.camera,
       playerForward:cameraAxes(state.camera.yaw,state.camera.pitch).forward,playerFeet:nativeFeet,enemies:state.enemies,
+      // Only actual already-launched player bullets; never a predicted mouse click.
+      playerProjectiles:state.bullets,
     });
     for(const event of events) {
       if(event.type==='door-warning') {
