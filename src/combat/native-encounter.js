@@ -695,9 +695,13 @@ function moveEnemy(runtime, enemy, input, observingAllies) {
     nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
   // Both a world obstacle and an ally can occlude a shot, but only a real
   // muzzle receipt authorizes repositioning. Existing strafing seeks a lane.
-  state.webAllyBlockingShot=worldMuzzleClear &&
+  // Web fair-play: a clear elevated muzzle alone is not player awareness.
+  // A remembered or squad-reported location may drive pursuit, but cannot
+  // authorize a NEW shot while the enemy's own eye ray is obstructed.
+  // Committed pending shots retain their established resolution path.
+  state.webAllyBlockingShot=state.visible && worldMuzzleClear &&
     webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,playerPosition,enemies);
-  state.canAttack=worldMuzzleClear && !state.webAllyBlockingShot;
+  state.canAttack=state.visible && worldMuzzleClear && !state.webAllyBlockingShot;
   // An actual incoming player projectile may provoke a short tactical dodge
   // even while chasing. Original MCD enemy AI is not claimed here. No change
   // to existing tactics when the SH-05 projectile snapshot is absent.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from '../src/combat/native-encounter.js';
-import { prepareNativeCollision } from '../src/scenes/native-collision.js';
+import { prepareNativeCollision, nativeSegmentHit } from '../src/scenes/native-collision.js';
 import { advanceEnemyReaction } from '../src/animation/enemy-reaction.js';
 
 // Entirely fabricated geometry/configuration; no private original assets.
@@ -202,6 +202,35 @@ test('attack permission requires actual muzzle inputs and clear cast, never fake
   advanceNativeEncounter(runtime,input([enemy]));
   assert.equal(enemy.encounter.canAttack,false);
   assert.equal(enemy.runtime.pendingShot,null);
+});
+
+test('J3 Web fair fire: a clear high muzzle cannot shoot at a player hidden from enemy eyes',()=>{
+  // Fabricated low cover: eye->player is blocked, muzzle->player is clear.
+  // Neither an afterglow nor an ally callout is a license for wallhack shots.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),enemy=firstSpawn(runtime,near);
+  enemy.muzzlePosition=p(2,3.6,2);
+  enemy.muzzleForward=p(1,0,0);
+  advanceNativeEncounter(runtime,input([enemy],{...near}));
+  assert.equal(enemy.encounter.visible,true);
+  assert.equal(enemy.encounter.canAttack,true,'actual eye and muzzle sight permits a shot');
+
+  runtime.sightCollision=prepareNativeCollision([box(5,1.5,2,.2,1.8,3)]);
+  assert.equal(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,near.playerPosition),null,
+    'the fabricated elevated muzzle still has an unobstructed flight path');
+  advanceNativeEncounter(runtime,input([enemy],{...near}));
+  assert.equal(enemy.encounter.visible,false,'the actual enemy eye is screened by low cover');
+  assert.equal(enemy.encounter.canAttack,false,
+    'remembered player coordinates plus a clear muzzle must not grant new fire permission');
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,near.playerFeet,
+    'the actor retains its last witnessed feet for investigation');
+
+  runtime.sightCollision=prepareNativeCollision([]);
+  advanceNativeEncounter(runtime,input([enemy],{...near}));
+  assert.equal(enemy.encounter.visible,true);
+  assert.equal(enemy.encounter.canAttack,true,'real reacquisition restores permission to shoot');
 });
 
 test('source sight uses browser coordinates once and reattempts when camera forward changes',()=>{
