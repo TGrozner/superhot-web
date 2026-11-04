@@ -352,3 +352,48 @@ test('visible chrono challenge does not award success for an unshown hundredth o
   assert.notEqual(noZeroTarget.best.pendingChallenge?.kind,'time',
     'a target rounded down to 0.0 would be impossible');
 });
+
+
+test('a persistent Dojo challenge now explains real partial progress without crediting a loss', () => {
+  const scoreRecord = result(6, {score:900,shots:8});
+  const failedNoShot = createDojoReplayRecap({
+    quota:6,victory:false,kills:3,shots:2,dodges:0,score:350,elapsedSeconds:20,
+  }, scoreRecord.best);
+  assert.equal(failedNoShot.retryDetail, '2 TIRS EFFECTUÉS');
+  assert.match(failedNoShot.text, /BILAN DÉFI : 2 TIRS EFFECTUÉS/);
+  assert.deepEqual(failedNoShot.best.pendingChallenge, {kind:'no-shots',target:0});
+
+  const scoreGoal = result(6,{best:scoreRecord.best,shots:0,score:850});
+  assert.deepEqual(scoreGoal.best.pendingChallenge,{kind:'score',target:901});
+  const near = createDojoReplayRecap({
+    quota:6,victory:false,kills:5,shots:7,dodges:0,score:850,elapsedSeconds:28,
+  }, scoreGoal.best);
+  assert.equal(near.retryDetail,'51 PTS MANQUANTS · VICTOIRE REQUISE');
+  const deceptive = createDojoReplayRecap({
+    quota:6,victory:false,kills:5,shots:7,dodges:0,score:930,elapsedSeconds:28,
+  }, scoreGoal.best);
+  assert.equal(deceptive.retryDetail,'SCORE ATTEINT · VICTOIRE REQUISE');
+  assert.equal(deceptive.completedChallenge,null);
+  assert.deepEqual(deceptive.best.pendingChallenge,{kind:'score',target:901});
+
+  const lost = createDojoReplayRecap({
+    quota:7,victory:false,kills:4,shots:4,dodges:0,score:400,elapsedSeconds:17,
+  });
+  const missedKills = createDojoReplayRecap({
+    quota:7,victory:false,kills:2,shots:3,dodges:0,score:200,elapsedSeconds:18,
+  },lost.best);
+  assert.equal(missedKills.retryDetail,'3 ÉLIMINATIONS MANQUANTES');
+  assert.deepEqual(missedKills.best.pendingChallenge,{kind:'kills',target:5});
+  const completed = createDojoReplayRecap({
+    quota:7,victory:false,kills:5,shots:3,dodges:0,score:500,elapsedSeconds:19,
+  },missedKills.best);
+  assert.equal(completed.retryDetail,null,'completed goal must not report a deficit');
+  assert.equal(completed.completedChallenge,'kills');
+
+  const dodgeGoal = result(6,{shots:0,dodges:0}).best;
+  const missedDodge = createDojoReplayRecap({
+    quota:6,victory:false,kills:2,shots:3,dodges:1,score:200,elapsedSeconds:10,
+  },dodgeGoal);
+  assert.equal(missedDodge.retryDetail,'2 ESQUIVES MANQUANTES');
+  assert.equal(readDojoReplayBest(JSON.stringify(missedDodge.best),7),null);
+});
