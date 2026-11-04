@@ -568,3 +568,39 @@ test('clean dodge schedules a spatial Web-only descending zip and ducks footstep
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
 });
+
+test('a confirmed Web landing has two weighted floor contacts without adding sources', () => {
+  const {ctx, nodes, gains, filters} = fakeAudio();
+  const pulses = [];
+  const originalGain = ctx.createGain;
+  ctx.createGain = () => {
+    const node = originalGain();
+    const ramp = node.gain.linearRampToValueAtTime;
+    node.gain.linearRampToValueAtTime = function(level, at) {
+      pulses.push({node, level, at});
+      return ramp.call(this, level, at);
+    };
+    return node;
+  };
+  const mix = createWebImpactMix(ctx);
+  assert.equal(mix.emit('landing', {position: {x: 0, y: 0, z: 0}}).status, 'started');
+  assert.equal(nodes.length, 2); // Noise and oscillator as before; same one voice.
+  const weightFilter = filters.find(filter => filter.type === 'lowpass' &&
+    filter.frequency.value === 460);
+  assert.ok(weightFilter);
+  const heelToe = gains.find(gain => weightFilter.connections.includes(gain));
+  assert.ok(heelToe);
+  assert.ok(heelToe.connections.includes(gains[7])); // Same spatial output.
+  assert.deepEqual(pulses.filter(pulse => pulse.node === heelToe).map(pulse =>
+    [pulse.level, pulse.at]), [
+      [0.4 * 0.36, ctx.currentTime + 0.013],
+      [0.4 * 0.19, ctx.currentTime + 0.071],
+    ]);
+  assert.equal(mix.emit('step').status, 'started');
+  assert.equal(nodes.length, 4); // Ordinary walking is not layered.
+  assert.equal(filters.filter(filter => filter.type === 'lowpass' &&
+    filter.frequency.value === 460).length, 1);
+  mix.dispose();
+  assert.equal(weightFilter.disconnected, true);
+  assert.equal(heelToe.disconnected, true);
+});
