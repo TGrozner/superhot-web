@@ -537,6 +537,8 @@ function resetContainersTarget() {
 }
 
 function loadLevel(index) {
+  // REJOUER/scene changes may not inherit a half-finished stride.
+  audio.resetFootsteps();
   state.levelIndex = index;
   state.level = LEVELS[index];
   state.objects = buildStaticGeometry(state.level);
@@ -1286,6 +1288,12 @@ function update(dt, activeRealDt) {
     const support=nativeGroundAt(nativePlayerCollision,nativeFeet,{...player,maxDrop:30,maxRise:0});
     state.hop=nativeGrounded?0:Math.max(.001,nativeFeet.y-(support?.y??nativeFeet.y));
     state.walkCycle += worldDt * Math.hypot(nativeVelocity.x, nativeVelocity.z) * 1.4;
+    // Resolve collisions and ground contact BEFORE scheduling a footstep.
+    // No preview footsteps before START; no movement inferred from mouse look.
+    if (nativeCombatStarted) audio.advanceFootsteps({
+      position: {x: state.camera.x, y: state.camera.y, z: state.camera.z},
+      grounded: nativeGrounded,
+    });
   } else {
     if (moving) {
       const yaw = state.camera.yaw;

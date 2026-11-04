@@ -6,6 +6,7 @@ import {planMcdAudioPrefabPlay} from './sound/mcd-prefab-sound-intent.js';
 import {planMcdStunAudioFromCommands} from './sound/mcd-enemy-stun-prefab.js';
 import {sampleMcdCurve} from './sound/mcd-curve.js';
 import {createWebImpactMix} from './sound/web-impact-mix.js';
+import {createWebFootstepMotion} from './sound/web-footstep-motion.js';
 
 /**
  * Browser playback for locally served, owner/path_id-verified MCD clips.
@@ -125,6 +126,8 @@ export function createAudio(options = {}) {
 
   let ctx = null;
   let webMix = null;
+  let footstepMotion = null;
+  let webStepCount = 0;
   let webMixError = null;
   let lastWebAccent = null;
   let webAccentCount = 0;
@@ -214,6 +217,8 @@ export function createAudio(options = {}) {
       try {
         webMix = createWebImpactMix(ctx);
         webMix.setMixLevel(0.45);
+        // One shared user-gesture AudioContext: no separate footstep audio graph.
+        footstepMotion = createWebFootstepMotion((cue, request) => webMix.emit(cue, request));
         webMixError = null;
       } catch (error) { webMix = null; webMixError = errorMessage(error); }
     }
@@ -916,6 +921,30 @@ export function createAudio(options = {}) {
     }, 'native-binding-not-recovered');
   }
 
+  // Actual grounded travel after collision resolution. The planner uses a
+  // copied position (the camera itself is mutable), and an unscaled audio
+  // clock. This is a Web-authored walking accent, not an MCD animation cue.
+  function advanceFootsteps({position, grounded}) {
+    if (!originalMode || !footstepMotion || ctx?.state !== 'running') {
+      footstepMotion?.reset();
+      return null;
+    }
+    try {
+      const result = footstepMotion.advance({
+        position: vector3(position, 'footstepPosition'),
+        grounded, timeSeconds: ctx.currentTime,
+      });
+      if (result?.status === 'started') webStepCount++;
+      return result;
+    } catch (error) {
+      // Never interrupt combat for optional Web sound design.
+      footstepMotion.reset();
+      return {status: 'blocked', reason: errorMessage(error)};
+    }
+  }
+
+  function resetFootsteps() { footstepMotion?.reset(); }
+
   function getMetrics() {
     if (!assetsSnapshot) {
       const assets = {};
@@ -945,6 +974,7 @@ export function createAudio(options = {}) {
       playbackCount,
       originalMode,
       webAccentCount,
+      webStepCount,
       lastWebAccent,
       webMixLevel: webMix?.getMixLevel() ?? null,
       webMixError,
@@ -980,6 +1010,8 @@ export function createAudio(options = {}) {
     advanceWorldTime,
     updateWorldAudio,
     setListener,
+    advanceFootsteps,
+    resetFootsteps,
     win,
     getMetrics,
   });
