@@ -175,7 +175,6 @@ function challengeCompleted(challenge: Readonly<DojoReplayChallenge> | null, run
   return gradeDojoStyle(run).grade === 'S';
 }
 
-
 function existingChallengePrompt(challenge: Readonly<DojoReplayChallenge>): string {
   switch (challenge.kind) {
     case 'kills':
