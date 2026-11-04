@@ -596,7 +596,8 @@ test('J4 live door arrival releases false future-threat glow when spawn clock ou
   // future enemy. Release only SH-04's authored Web emphasis in REAL time.
   const packets = bridge.packets();
   const fillBuffer = active.falseLight.position;
-  bridge.advance(0, null, 0.35);
+  bridge.advance(0, null, 0.35); // First frame crosses arrival by only 50 ms.
+  bridge.advance(0, null, 0.3); // Complete the real-time release after arrival.
   assert.equal(active.active, true, 'never cancel SH-07 source warning clock');
   assert.equal(bridge.packets(), packets, 'no additional lighting packets');
   assert.equal(active.falseLight.position, fillBuffer, 'reuse existing GPU fill vector');
@@ -624,4 +625,36 @@ test('J4 live door arrival releases false future-threat glow when spawn clock ou
   legacy.advance(1.5);
   legacy.advance(0);
   assert.ok(legacy.packets()[0].spotlight.intensity > 35);
+});
+
+test('J4 real-time doorway glow only releases for the part of a frame AFTER enemy arrival', () => {
+  // Same accepted enemy spawn, same world clock and same 120 ms of real time.
+  // The large-frame path crosses arrival in one step; the split-frame path
+  // crosses it in two. Both must leave identical warning light on screen.
+  const large = createDojoDoorWarningBridge(browserScene());
+  const split = createDojoDoorWarningBridge(browserScene());
+  const event = warning(103);
+  event.delay = 0.6;
+  assert.equal(large.accept(event).status, 'triggered');
+  assert.equal(split.accept(event).status, 'triggered');
+  large.advance(1.5, null, 0.5);
+  split.advance(1.5, null, 0.5); // 100 ms still before the actual spawn.
+
+  const expected = large.packets()[0];
+  const stepped = split.packets()[0];
+  large.advance(0, null, 0.12); // 100 ms pre-arrival, only 20 ms post-arrival.
+  split.advance(0, null, 0.08);
+  split.advance(0, null, 0.04);
+  assert.equal(expected.active, true, 'source world-clock warning remains active');
+  assert.equal(stepped.active, true);
+  assert.ok(expected.falseLight.intensity > 4, 'door still glows just after arrival');
+  assert.ok(Math.abs(expected.falseLight.intensity - stepped.falseLight.intensity) < 1e-8,
+    'false-light must not fade early in a single low-FPS crossing frame');
+  assert.ok(Math.abs(expected.spotlight.intensity - stepped.spotlight.intensity) < 1e-8,
+    'arrival spot crescendo uses only post-arrival real time');
+  for (let axis = 0; axis < 3; axis++) {
+    assert.ok(Math.abs(expected.falseLight.position[axis] -
+      stepped.falseLight.position[axis]) < 1e-8,
+    'moving red floor wash must also be frame-split independent');
+  }
 });
