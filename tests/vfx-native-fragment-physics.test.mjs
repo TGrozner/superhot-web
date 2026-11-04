@@ -177,5 +177,6 @@ test('authored shard spin settles after a real contact, not during flight or sca
   assert.ok(angle(touched.shards[0])>angleFromFirstContact);
   assert.ok(angle(touched.shards[0])<angle(airborne.shards[0]),
     'confirmed ground contact must slow visible spin');
-  near(angle(touched.shards[0]),angle(split.shards[0]));
+  assert.ok(Math.abs(angle(touched.shards[0])-angle(split.shards[0]))<1e-9,
+    'post-contact spin should be stable across frame subdivisions');
 });
