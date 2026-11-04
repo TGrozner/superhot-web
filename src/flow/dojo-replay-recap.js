@@ -123,12 +123,23 @@ function challengeCompleted(challenge, run) {
         return run.dodges >= 3;
     return gradeDojoStyle(run).grade === 'S';
 }
+// Web UX: the on-screen target uses tenths of a second. Quantize DOWN so
+// completing the shown goal always beats the exact stored personal best.
+function visibleTimeGoal(bestSeconds) {
+    const target = Math.floor(bestSeconds * 10) / 10;
+    return target > 0 ? target : null;
+}
+// Old v5 challenges may hold precise targets. Never round those when retrying:
+// a displayed 22.0 must not silently credit 22.02 against an old 22.049 goal.
+function displayTimeGoal(target) {
+    return Number.isInteger(target * 10) ? target.toFixed(1) : String(target);
+}
 function existingChallengePrompt(challenge) {
     switch (challenge.kind) {
         case 'kills':
             return `VISE ${challenge.target} ÉLIMINATION${challenge.target === 1 ? '' : 'S'} AU PROCHAIN ESSAI`;
         case 'score': return `ATTEINS ${challenge.target} PTS POUR LE RECORD`;
-        case 'time': return `SOUS ${challenge.target} S POUR LE RECORD`;
+        case 'time': return `SOUS ${displayTimeGoal(challenge.target)} S POUR LE RECORD`;
         case 'no-shots': return 'GAGNE SANS TIRER';
         case 'dodges': return 'RÉUSSIS 3 ESQUIVES EN UNE VICTOIRE';
         case 'style': return 'DÉCROCHE LE STYLE S';
@@ -284,9 +295,12 @@ export function createDojoReplayRecap(snapshot, best = null) {
             replayTarget = `+${best.bestScore - run.score + 1} PTS POUR UN NOUVEAU RECORD`;
             nextChallenge = Object.freeze({ kind: 'score', target: best.bestScore + 1 });
         }
-        else if (run.elapsedSeconds >= best.fastestSeconds && best.fastestSeconds > 0) {
-            replayTarget = `SOUS ${best.fastestSeconds.toFixed(1)} S POUR UN NOUVEAU RECORD`;
-            nextChallenge = Object.freeze({ kind: 'time', target: best.fastestSeconds });
+        else if (run.elapsedSeconds >= best.fastestSeconds) {
+            const timeGoal = visibleTimeGoal(best.fastestSeconds);
+            if (timeGoal !== null) {
+                replayTarget = `SOUS ${displayTimeGoal(timeGoal)} S POUR UN NOUVEAU RECORD`;
+                nextChallenge = Object.freeze({ kind: 'time', target: timeGoal });
+            }
         }
     }
     if (run.victory && replayTarget === null) {
