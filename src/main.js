@@ -1013,6 +1013,14 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
   for(const action of result.actions) {
     if(action.type==='drop-weapon')dropNativeEnemyWeapon(enemy);
     if(action.type==='stun') {
+      // Only a confirmed nonlethal contact can steer this Web hit reaction.
+      // hit.point is on the victim, NOT the attacker position.
+      if(!result.actions.some(other=>other.type==='kill')) {
+        const speed=Math.hypot(velocity.x,velocity.y,velocity.z);
+        enemy.hitIncomingDirection=Number.isFinite(speed) && speed>1e-6
+          ? {x:velocity.x/speed,y:velocity.y/speed,z:velocity.z/speed} : null;
+        enemy.hitEventId=(enemy.hitEventId??0)+1;
+      }
       enemy.stunnedAt=state.worldClock;enemy.runtime.pendingShot=null;enemy.attackIntentAt=null;
       audio.stun({bodyId:enemy.id,position:enemy,realtimeSeconds:state.runClock});
     }
@@ -1714,10 +1722,13 @@ function drawEnemy(enemy) {
     const time = animationClock - animation.startedAt;
     enemy.fireAction=enemyFireAction(enemy,animationClock);
     const solvedPose=dying ? enemy.deathSolvedPose??null : null;
+    const activeHit=!dying && animation.state==='hit' && enemy.reaction?.stunRemaining>0;
     nativeEnemyStats = renderer.drawNativeActorSkin(enemy.id, actorMatrix, animation.state, time, {
       statePlayback, transition:solvedPose?null:transition,
       action:solvedPose?null:enemy.fireAction, solvedPose,
       shaderTime: state.runClock, cameraPosition: state.camera,
+      hitIncomingDirection: activeHit ? (enemy.hitIncomingDirection??null) : null,
+      hitEventId: activeHit ? (enemy.hitEventId??null) : null,
     })
       ?? renderer.drawNativeSkin(actorMatrix, animation.state, time, {
         statePlayback, transition:solvedPose?null:transition,
