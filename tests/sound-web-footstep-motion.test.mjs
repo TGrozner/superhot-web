@@ -98,3 +98,33 @@ test('ground contact emits a single Web-only landing thud, not a stride or a spu
   assert.equal(tick(0, 3.5, true), null); // Suspended tab / long frame gap.
   assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
 });
+
+test('low-FPS grounded strides and a landing schedule cues while teleports remain silent', () => {
+  const cues = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, ...request});
+    return {status:'started', source:'web-original-synthesis', at:1, spatial:true};
+  });
+  const tick = (x, timeSeconds, grounded = true) =>
+    gait.advance({position:p(x), grounded, timeSeconds});
+  // 6.6 m/s over 200ms moves 1.32m: legitimate gameplay at slow frame cadence.
+  assert.equal(tick(0, 0), null);
+  assert.equal(tick(1.32, 0.2)?.status, 'started');
+  assert.equal(tick(2.64, 0.4)?.status, 'started');
+  assert.equal(tick(9, 0.6), null); // 6.36m teleport in 200ms is still rejected.
+  assert.deepEqual(cues.map(cue => cue.cue), ['step', 'step']);
+  // Existing bridge provides the eye position (y=1.6 in this test), not feet.
+  assert.ok(Math.abs(cues[0].position.y - 0.35) < 1e-10);
+  assert.ok(Math.abs(cues[1].position.y - 0.35) < 1e-10);
+  assert.ok(Math.abs(cues[0].position.z + 0.22) < 1e-10);
+  assert.ok(Math.abs(cues[1].position.z - 0.22) < 1e-10);
+
+  gait.reset();
+  assert.equal(tick(0, 1), null);
+  assert.equal(tick(0.9, 1.2, false), null);
+  assert.equal(tick(1.3, 1.4, false), null);
+  assert.equal(tick(2.6, 1.6, true)?.status, 'started');
+  assert.deepEqual(cues.map(cue => cue.cue), ['step', 'step', 'landing']);
+  assert.ok(Math.abs(cues[2].position.y - 0.35) < 1e-10);
+  assert.equal(tick(2.6, 1.8), null);
+});
