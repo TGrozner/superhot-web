@@ -7,11 +7,11 @@ function fakeAudio(state = 'running') {
   const gains = [];
   const filters = [];
   const delays = [];
-  const param = (value = 0) => ({value,
+  const param = (value = 0) => ({value, targets: [],
     setValueAtTime(v) { this.value = v; },
     exponentialRampToValueAtTime(v) { this.value = v; },
     linearRampToValueAtTime(v) { this.value = v; },
-    cancelScheduledValues() {}, setTargetAtTime(v) { this.value = v; }});
+    cancelScheduledValues() {}, setTargetAtTime(v, at, constant) { this.value = v; this.targets.push([v, at, constant]); }});
   const base = () => ({connections: [], connect(dst) { this.connections.push(dst); return dst; },
     disconnect() { this.disconnected = true; }});
   const source = () => {
@@ -903,5 +903,31 @@ test('Web audio keeps located gunfire on legacy PannerNode.setPosition browsers'
   assert.equal(receipt.spatial, true);
   assert.equal(nodes.length, 2);
   assert.equal(mix.getActiveVoices(), 1);
+  mix.dispose();
+});
+
+test('sustained Web gunfire dries shared Dojo room return without muting isolated events', () => {
+  const {ctx, gains, delays, nodes} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 8);
+  const send = gains[5];
+  const target = () => send.gain.targets.at(-2);
+  const before = nodes.length;
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.deepEqual(target(), [0.34, 2.25, 0.008]);
+  ctx.currentTime = 2.37;
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.deepEqual(target(), [0.29500000000000004, 2.37, 0.008]);
+  ctx.currentTime = 2.48;
+  assert.equal(mix.emit('impact').status, 'started');
+  assert.ok(Math.abs(target()[0] - 0.25) < 1e-12);
+  assert.deepEqual(send.gain.targets.at(-1), [0.34, 2.72, 0.11]);
+  const targetCount = send.gain.targets.length;
+  assert.equal(mix.emit('step').status, 'started');
+  assert.equal(send.gain.targets.length, targetCount); // Steps stay dry.
+  ctx.currentTime = 3.2;
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.deepEqual(target(), [0.34, 3.2, 0.008]); // Burst budget rearms.
+  assert.equal(delays.length, 2);
+  assert.equal(nodes.length, before + 10); // Five cues, same two sources each.
   mix.dispose();
 });
