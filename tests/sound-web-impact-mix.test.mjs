@@ -164,7 +164,7 @@ test('stolen Web voice fades for 8ms rather than hard-cutting, and cleans up', (
   assert.equal(mix.emit('step').status, 'started');
   const priorNoise = nodes[0];
   const priorTone = nodes[1];
-  const priorGain = gains.at(-3); // voice output, before burst and oscillator body
+  const priorGain = gains.find(gain => gain.connections.includes(gains[3])); // Shared step output
   assert.equal(mix.emit('player-shot').status, 'started');
   assert.equal(mix.getActiveVoices(), 1);
   assert.deepEqual(priorNoise.stopArgs, [ctx.currentTime + 0.008]);
@@ -247,8 +247,9 @@ test('Web combat hits add a bright attack without extra voices or coloring foots
 
   const filterCount = filters.length;
   assert.equal(mix.emit('step').status, 'started');
-  assert.equal(nodes[2].connections.length, 1); // No brittle crack on footsteps.
-  assert.equal(filters.length, filterCount + 1); // Only its old tonal filter.
+  assert.equal(nodes[2].connections.length, 2); // Old muted thud + new dry shoe snap.
+  assert.equal(filters.length, filterCount + 2); // Tonal filter plus the new 1650Hz scuff.
+  assert.ok(filters.some(filter => filter.type === 'highpass' && filter.frequency.value === 1650));
 
   assert.equal(mix.emit('katana').status, 'started');
   assert.equal(nodes[4].connections.length, 2);
