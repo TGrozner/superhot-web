@@ -668,3 +668,28 @@ test('Web dry-fire has two brief mechanical ticks on one source voice, never a g
   assert.equal(mix.getActiveVoices(), 1);
   mix.dispose();
 });
+
+test('empty-gun click remains available under enemy fire and steps without masking player damage', () => {
+  // Web-only mix policy: the already-wired empty-pistol action is actionable
+  // feedback, even when the synthetic voice budget is saturated by gunfire.
+  // These receipts do not establish real browser audibility.
+  const {ctx, nodes, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  const footBus = gains[3].gain;
+  const ducks = [];
+  footBus.setTargetAtTime = (value, at) => ducks.push({value, at});
+
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  const before = ducks.length;
+  assert.equal(mix.emit('dry-fire').status, 'started');
+  assert.equal(nodes[0].stopped, true, 'empty gun should preempt enemy muzzle accent');
+  assert.deepEqual(ducks.slice(before).map(entry => entry.value), [0.10, 0.3],
+    'short Web footstep duck keeps the click distinct while moving');
+  assert.equal(mix.getActiveVoices(), 1);
+  assert.equal(mix.emit('enemy-shot').status, 'blocked',
+    'distant or repeated enemy shots should not steal empty-gun feedback');
+
+  assert.equal(mix.emit('player-hit').status, 'started');
+  assert.equal(nodes[2].stopped, true, 'player damage must still outrank dry-fire');
+  mix.dispose();
+});
