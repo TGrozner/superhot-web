@@ -646,6 +646,13 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime,
       const settings=candidate.activeWeaponSettings ?? runtime.enemySettings;
       const nextTickCost=scaledDeltaTime*settings.weaponSpeedMultiplier*
         settings.difficultyWeaponSpeedMultiplier;
+      // A newly alerted or re-aiming squadmate cannot fire on this actual
+      // GunAttack tick even with an expired reload. Do not waste the whole
+      // team's beat: let a genuinely ready partner use it. This tests the
+      // existing weapon runtime gates, not an invented native squad rule.
+      if (!(candidate.runtime.alertness>settings.alertDelay*1.05) ||
+          candidate.runtime.targetNeedsReroll ||
+          (settings.family==='SniperRifle' && !candidate.runtime.sniperCanShot))continue;
       if (candidate.runtime.attackDelayRemaining<nextTickCost) {
         turn.add(candidate);
         break;
