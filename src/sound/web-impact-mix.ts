@@ -100,10 +100,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 4, shatter: 4,
     'player-hit': 6,
     katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
-        // Web-only F/E priority: player-initiated pickup/throw can displace an
-    // older enemy shot, but cannot steal player fire or player damage.
-    // These levels are not recovered Unity mixer priorities.
-    step: 1, landing: 2, pickup: 4, throw: 4, dodge: 4, 'dry-fire': 5,
+        step: 1, landing: 2, pickup: 4, throw: 4, dodge: 4, 'dry-fire': 5,
   };
 
   const attackByCue: Partial<Record<WebImpactCue, readonly [number, number, number]>> = {
