@@ -2189,7 +2189,7 @@ test('J3 Web gunner reload selects real side cover without inventing a shot or b
     enemy.muzzlePosition=p(2,1.4,5);
     enemy.muzzleForward=p(1,0,0);
     enemy.runtime.haveBeenSeen=true; // only after a real GunAttack receipt
-    enemy.runtime.attackDelayRemaining=.48;
+    enemy.runtime.attackDelayRemaining=.55; // above this frame's existing squad fire-turn cost
     return {runtime,enemy};
   };
   const step=({runtime,enemy})=>advanceNativeEncounter(runtime,input([enemy],{
@@ -2206,7 +2206,7 @@ test('J3 Web gunner reload selects real side cover without inventing a shot or b
     'the existing animated movement receives actual collision-checked feet');
   assert.equal(covered.enemy.encounter.canAttack,false,
     'post-movement real eye occlusion removes permission to fire');
-  assert.equal(covered.enemy.runtime.attackDelayRemaining,.48,
+  assert.equal(covered.enemy.runtime.attackDelayRemaining,.55,
     'taking cover cannot invent or advance the weapon cooldown');
 
   const open=prepare();
