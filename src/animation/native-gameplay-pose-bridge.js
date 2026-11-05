@@ -2,6 +2,42 @@ import { advanceDojoPunchContactGate } from './dojo-punch-contact-gate.js';
 import { advanceNativeDeathRuntime } from './native-death-runtime.js';
 
 /**
+ * Restore the ACTIVE Dojo frame duration for corpse PBD without undoing the
+ * applied MCD/Web time scale. The host's worldDelta is calculated from a
+ * capped simulationDt (50ms at 10 FPS), but death motion and its cleanup
+ * clock must not lose the unspent active time.
+ *
+ * The rAF owner provides both deltas from sampleActiveFrameDeltas. It must
+ * pass the worldDelta from that SAME tick; a stale/other-actor receipt cannot
+ * establish the source clock. Full active elapsed time is forwarded to the
+ * solver, which separately caps expensive PBD catch-up on long hitches.
+ * Original Web clock policy; NOT native Unity/PhysX scheduling.
+ *
+ * @param {number} scaledDelta World-time delta from this frame's capped tick.
+ * @param {{simulationDelta:number,activeRealDelta:number}|null} frameTiming
+ * @returns {number} World-time delta covering the full active rAF frame.
+ */
+export function resolveDojoDeathScaledFrameDelta(scaledDelta,frameTiming=null) {
+  if(!Number.isFinite(scaledDelta)||scaledDelta<0)
+    throw new RangeError('Nonnegative finite world delta required');
+  if(frameTiming===null)return scaledDelta; // Existing callers stay compatible.
+  if(!frameTiming||typeof frameTiming!=='object' ||
+      !Number.isFinite(frameTiming.simulationDelta) ||
+      !Number.isFinite(frameTiming.activeRealDelta) ||
+      frameTiming.simulationDelta<0 || frameTiming.activeRealDelta<0 ||
+      frameTiming.activeRealDelta+1e-12<frameTiming.simulationDelta)
+    throw new TypeError('Same-frame capped and active real deltas required');
+  if(frameTiming.simulationDelta===0) {
+    if(scaledDelta!==0)throw new RangeError('World time without a simulation tick');
+    return 0; // Paused/resume boundary: do not invent an applied time scale.
+  }
+  const appliedScale=scaledDelta/frameTiming.simulationDelta;
+  const elapsed=frameTiming.activeRealDelta*appliedScale;
+  if(!Number.isFinite(elapsed))throw new RangeError('Restored Dojo death time overflow');
+  return elapsed;
+}
+
+/**
  * Use the exact source-clip seconds sampled by SH-14's GPU pass, NOT the
  * elapsed Web state timer or the 0.5s punch visualization timeout.
  *
@@ -89,7 +125,7 @@ export function advanceRenderedDojoPunchGate(state, {
  */
 export function advanceDojoDeathSkinFrame({
   runtime = null, rig = null, sourceBoneOrder = null,
-  scaledDelta = 0, provenance = null,
+  scaledDelta = 0, provenance = null, frameTiming = null,
 } = {}) {
   if (runtime === null) {
     return {
@@ -120,7 +156,8 @@ export function advanceDojoDeathSkinFrame({
   // Web budget: preserve authored substeps on normal frames, allow four
   // slightly larger swept steps at 30 Hz, and discard long-stall catch-up.
   // This is responsive Web physics, not the original PhysX scheduler.
-  const step = advanceNativeDeathRuntime(runtime, scaledDelta, {limitWebFrameWork:true});
+  const activeScaledDelta=resolveDojoDeathScaledFrameDelta(scaledDelta,frameTiming);
+  const step = advanceNativeDeathRuntime(runtime, activeScaledDelta, {limitWebFrameWork:true});
   return {
     status: 'source-parameterized-web-solver-not-physx',
     solvedPose: {
