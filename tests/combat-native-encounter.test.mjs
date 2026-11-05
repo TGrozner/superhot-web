@@ -1625,3 +1625,53 @@ test('J3 Web sustained player aim provokes one visible, nav-safe gunner sidestep
   assert.equal(blind.encounter.webAimRemaining,0,
     'zero camera direction fails closed rather than inventing aim pressure');
 });
+
+test('J3 Web finale: last two armed survivors close together only after real kill receipts',()=>{
+  // Web-designed finale; synthetic geometry. Real encounter death receipts
+  // permit the pair to push, without granting free shots through a wall.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),lead=firstSpawn(runtime,target);
+  const wing={
+    ...lead,id:'web-finale-wing',z:4,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+  };
+  lead.clock=0;
+  runtime.actors.set(wing.id,wing);
+  const dead=Array.from({length:runtime.killTarget-2},(_,index)=>({
+    ...lead,id:'web-finale-defeated-'+index,alive:false,
+    reaction:{...lead.reaction,dead:true},
+  }));
+  for(const fallen of dead) {
+    runtime.actors.set(fallen.id,fallen);
+    runtime.webObservedDeaths.add(fallen.id); // Past deaths, not fresh shock beats.
+  }
+  assert.equal(readyForVictory(runtime,[lead,wing,...dead]),false);
+  assert.equal(runtime.killed,runtime.killTarget-2,'the rush requires recorded kills');
+  const start=[p(lead.x,lead.y,lead.z),p(wing.x,wing.y,wing.z)];
+  advanceNativeEncounter(runtime,input([lead,wing],{...target,scaledDeltaTime:.2}));
+  assert.ok(lead.x>start[0].x+.05 && wing.x>start[1].x+.05,
+    'both surviving gunners now push inside the old stationary firing ring');
+  assert.equal(lead.encounter.canAttack,false);
+  assert.equal(wing.encounter.canAttack,false,
+    'moving aggressively does not fabricate muzzle and firing permission');
+  assert.ok(Math.hypot(lead.x-wing.x,lead.z-wing.z)>runtime.body.radius*2,
+    'final push still respects real actor occupancy');
+
+  // A newly present third gunner cancels the special two-person rush; only
+  // the ordinary squad leader is allowed to close the ring again.
+  const newcomer={
+    ...lead,id:'web-finale-arrival',x:2,z:6,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime,speed:0},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:1},
+  };
+  runtime.actors.set(newcomer.id,newcomer);
+  const before=[p(lead.x,lead.y,lead.z),p(wing.x,wing.y,wing.z),p(newcomer.x,newcomer.y,newcomer.z)];
+  advanceNativeEncounter(runtime,input([lead,wing,newcomer],{...target,scaledDeltaTime:.2}));
+  const moved=[lead,wing,newcomer].filter((enemy,i)=>
+    Math.hypot(enemy.x-before[i].x,enemy.z-before[i].z)>.01);
+  assert.ok(moved.length<=1,
+    'an arriving third gunner restores the single squad-breacher policy');
+});
