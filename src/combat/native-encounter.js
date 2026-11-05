@@ -99,6 +99,22 @@ function webWeaponRole(enemy) {
 // actual gun permission remain authoritative; no view-cone wallhack or speed
 // bonus. This is a design choice, not an MCD perception or distance rule.
 const WEB_UNWATCHED_APPROACH=Object.freeze({stopFraction:0.72,backDot:-0.45});
+// J3 Web-original anti-kiting: a gunner that has PERSONALLY seen the player
+// retreat between two active world ticks closes a little farther than its
+// normal firing ring. This requires consecutive true sightings and actual
+// increasing range, not camera orientation, an ally's callout or hidden-player
+// velocity. No new shots, aim, speed bonus or native MCD behavior is implied.
+const WEB_RETREAT_PRESSURE=Object.freeze({
+  minimumRetreatSpeed:1.6,stopFraction:0.78,minimumStopBodyRadii:3.2,
+});
+function webVisiblePlayerRetreats(previous,current,enemyFeet,scaledDeltaTime) {
+  if(!previous || !(scaledDeltaTime>EPSILON))return false;
+  if(![previous.x,previous.z,current.x,current.z,enemyFeet.x,enemyFeet.z]
+    .every(Number.isFinite))return false;
+  const before=Math.hypot(previous.x-enemyFeet.x,previous.z-enemyFeet.z);
+  const after=Math.hypot(current.x-enemyFeet.x,current.z-enemyFeet.z);
+  return (after-before)/scaledDeltaTime>WEB_RETREAT_PRESSURE.minimumRetreatSpeed;
+}
 function webPlayerLookingAway(playerPosition,playerForward,enemyFeet) {
   if(!playerPosition || !playerForward ||
       ![playerPosition.x,playerPosition.z,playerForward.x,playerForward.z,
@@ -898,6 +914,7 @@ function spawnEnemy(runtime, point, order, population) {
       : Object.freeze({status:'web-pistol-fallback',reason:activation.reason}),
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
+      webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
       webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
       webSearchRemaining:null, webSearchComplete:false,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
@@ -990,6 +1007,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     // Being stunned again cancels the counterattack, rather than preserving
     // aggression through an unrelated hit or a death.
     state.webCounterPushRemaining=0;
+    state.webObservedPlayerFeet=null;
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
@@ -1037,6 +1055,12 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // Measured once for the whole squad at the start of the frame; otherwise
   // update order would change who has legitimately spotted the player.
   state.visible=observingAllies.has(enemy);
+  // Per-actor consecutive REAL sightings: losing sight or suffering a stun
+  // discards the velocity baseline. Paused frames may refresh the observed
+  // feet but cannot accrue a movement impulse or trigger a pursuit push.
+  const playerRetreating=state.visible &&
+    webVisiblePlayerRetreats(state.webObservedPlayerFeet,playerFeet,start,scaledDeltaTime);
+  state.webObservedPlayerFeet=state.visible ? {...playerFeet} : null;
   // Web-authored fairness: once an enemy has REALLY observed the player,
   // losing body sight freezes its last known feet instead of letting it track
   // live coordinates through walls. Actors that have never seen the player
@@ -1225,6 +1249,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const counterPush=armed && state.visible && !enemy.runtime.pendingShot &&
     state.webLossRemaining<=EPSILON &&
     state.webCounterPushRemaining>EPSILON && !weaponRole?.holdRange;
+  const retreatPressure=armed && state.visible && playerRetreating &&
+    !enemy.runtime.pendingShot && !weaponRole?.holdRange;
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(
         runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
@@ -1232,7 +1258,10 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     : counterPush ? Math.min(normalStopDistance,
         Math.max(runtime.body.radius*3.2,normalStopDistance*WEB_WITNESSED_LOSS.counterPushStopFraction))
     : unwatchedAdvance ? normalStopDistance*WEB_UNWATCHED_APPROACH.stopFraction
-      : normalStopDistance;
+    : retreatPressure ? Math.min(normalStopDistance,Math.max(
+        runtime.body.radius*WEB_RETREAT_PRESSURE.minimumStopBodyRadii,
+        normalStopDistance*WEB_RETREAT_PRESSURE.stopFraction))
+    : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
   const stop=state.visible && playerDistance <= stopDistance;
   // Search starts only after genuinely reaching previously seen feet. Once
