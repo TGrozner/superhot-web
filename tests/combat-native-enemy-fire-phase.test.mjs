@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNativeEnemyState, runNativeEnemyGunAttack } from '../src/combat/native-enemy-runtime.js';
+import { createNativeEnemyState, advanceNativeEnemyWeapon, runNativeEnemyGunAttack } from '../src/combat/native-enemy-runtime.js';
 import { nativeEnemyFireAttackRequests, nativeEnemyFireLateRequests }
   from '../src/combat/native-enemy-fire-phase.js';
 import { firstImpact } from '../src/combat/trace.js';
@@ -84,4 +84,48 @@ test('unaccepted attack has no fire cue; unsupported family and missing native p
   }), { status: 'awaiting-late-pose', requests: [] });
   assert.ok(state.pendingShot);
   assert.throws(() => nativeEnemyFireLateRequests({}, settings, null), /pendingShot/);
+});
+
+test('pending pistol/shotgun volley survives late-pose loss without phantom follow-up fire cues', () => {
+  for (const family of ['Pistol', 'Shotgun']) {
+    const settings = config(family);
+    const { state } = acceptedShot(settings);
+    const originalTarget = { ...state.pendingShot.target };
+    const missing = nativeEnemyFireLateRequests(state, settings, null);
+    assert.equal(missing.status, 'awaiting-late-pose');
+
+    // The animation/rig pose is unavailable for longer than a weapon reload.
+    // This is a synthetic browser delivery delay, NOT native MCD timing.
+    advanceNativeEnemyWeapon(state, settings, 0.4);
+    const attackAt = target => runNativeEnemyGunAttack(state, settings, {
+      scaledDeltaTime: 0, unscaledDeltaTime: 0,
+      targetSight: true, sightMode: 'all-directions',
+      aimTargetInSight: true, aimReady: true, weaponInRightPosition: true,
+      allowAttacking: true, canShot: true, active: true,
+      animationTarget: target,
+    }, () => 0.5);
+    const reroll = runNativeEnemyGunAttack(state, settings, {
+      scaledDeltaTime: 0.1, unscaledDeltaTime: 0.1,
+      targetSight: true, sightMode: 'all-directions',
+      aimTargetInSight: true, aimReady: true, weaponInRightPosition: true,
+      allowAttacking: true, canShot: true, active: true,
+      animationTarget: p(99),
+    }, () => 0.5);
+    assert.equal(reroll.shot, false);
+    const duplicate = attackAt(p(99));
+    assert.equal(duplicate.shot, false, family + ' must not fire twice without a Late pose');
+    assert.equal(duplicate.reloadWarning, false);
+    assert.deepEqual(nativeEnemyFireAttackRequests(duplicate, family, p()), []);
+    assert.deepEqual(state.pendingShot.target, originalTarget,
+      family + ' must preserve the first accepted target instead of overwriting it');
+
+    const emitted = nativeEnemyFireLateRequests(state, settings, {
+      muzzlePosition: p(), weaponForward: p(1),
+    }, () => 0.5);
+    assert.equal(emitted.status, 'spawn-requests');
+    assert.equal(emitted.requests.length, family === 'Shotgun' ? 6 : 1);
+    assert.equal(state.pendingShot, null);
+    assert.equal(attackAt(p(99)).shot, true,
+      family + ' should resume normal firing once the pending volley is delivered');
+  }
 });
