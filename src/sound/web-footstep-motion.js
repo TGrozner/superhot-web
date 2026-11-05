@@ -90,8 +90,7 @@ export function createWebFootstepMotion(emit) {
                 Math.hypot(current.x - lastAirPosition.x, current.z - lastAirPosition.z);
             const finalVerticalTravel = lastAirPosition === null ? Infinity :
                 Math.abs(current.y - lastAirPosition.y);
-            const maxVerticalTravel = Math.min(maxFrameTravel,
-                Math.max(0.05, (timeSeconds - previousTime) * maxLandingVerticalMetresPerSecond));
+            const maxVerticalTravel = Math.min(maxFrameTravel, Math.max(0.05, (timeSeconds - previousTime) * maxLandingVerticalMetresPerSecond));
             const dropHeight = Math.max(0, (highestAirY ?? current.y) - current.y);
             const validLanding = airborneFrames >= 2 && airtime >= 0.08 &&
                 finalTravel <= maxAllowedTravel(timeSeconds - previousTime) &&
