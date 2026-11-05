@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNativeEnemyState, advanceNativeEnemySpeed, advanceNativeEnemyWeapon,
-  runNativeEnemyGunAttack, consumeNativeEnemyShot, advanceNativeAimTarget } from '../src/combat/native-enemy-runtime.js';
+  runNativeEnemyGunAttack, consumeNativeEnemyShot, consumeNativeEnemyVolley,
+  advanceNativeAimTarget } from '../src/combat/native-enemy-runtime.js';
 const settings={attackDelay:.5,alertDelay:.5,projectileSpeed:28,weaponSpeedMultiplier:1,
   difficultyWeaponSpeedMultiplier:1,walkingSpeed:2,runningSpeed:5,acceleration:10,
   afterglowDuration:.7,stopAimingTime:.05,alwaysAlert:false};
@@ -106,4 +107,43 @@ test('unknown source settings and clock domains fail explicitly',()=>{
   assert.throws(()=>createNativeEnemyState({...settings,difficultyWeaponSpeedMultiplier:undefined}),/difficultyWeaponSpeedMultiplier/);
   assert.throws(()=>run(ready(),{unscaledDeltaTime:undefined}),/unscaledDeltaTime/);
   assert.throws(()=>run(ready(),{aimReady:undefined}),/aimReady/);
+});
+
+test('J2 Web gunfeel: moving pistol shots get bounded sampled yaw, still shots retain exact aim',()=>{
+  const pistol={...settings,family:'Pistol'};
+  const standing=ready(),moving=ready();
+  moving.speed=pistol.runningSpeed;
+  const attack=state=>runNativeEnemyGunAttack(state,pistol,input(),()=>.5);
+  assert.equal(attack(standing).shot,true);
+  assert.equal(attack(moving).shot,true);
+  assert.equal(standing.pendingShot.webMovingYawRange,0);
+  assert.equal(moving.pendingShot.webMovingYawRange,.075);
+  // The moving shooter stops before LateUpdate. The accepted shot must still
+  // represent the actual ATTACK-time motion, not stale/current draw poses.
+  moving.speed=0;
+  let stationaryDraws=0,movingDraws=0;
+  const straight=consumeNativeEnemyVolley(standing,pistol,p(),null,
+    ()=>{stationaryDraws++;return .75;})[0];
+  const scattered=consumeNativeEnemyVolley(moving,pistol,p(),null,
+    ()=>{movingDraws++;return .75;})[0];
+  assert.equal(stationaryDraws,0,'no jitter RNG for standing shooter');
+  assert.equal(movingDraws,1,'one deterministic sample per moving pistol shot');
+  assert.deepEqual(straight.direction,p(1));
+  assert.ok(scattered.direction.z>.03 && scattered.direction.z<.075);
+  assert.ok(scattered.direction.x>0.99 && scattered.direction.x<1);
+  assert.ok(Math.abs(Math.hypot(scattered.velocity.x,scattered.velocity.y,
+    scattered.velocity.z)-pistol.projectileSpeed)<1e-12);
+  assert.deepEqual(scattered.target,p(10),'original accepted target is preserved');
+  assert.equal(moving.pendingShot,null);
+});
+
+test('J2 Web gunfeel: failed moving-shot RNG does not erase deferred attack',()=>{
+  const pistol={...settings,family:'Pistol'};
+  const state=ready();state.speed=3;
+  assert.equal(runNativeEnemyGunAttack(state,pistol,input(),()=>.5).shot,true);
+  assert.throws(()=>consumeNativeEnemyVolley(state,pistol,p(),null,()=>NaN),/random/);
+  assert.ok(state.pendingShot,'failed spawn preparation keeps committed shot');
+  const [shot]=consumeNativeEnemyVolley(state,pistol,p(),null,()=>.5);
+  assert.deepEqual(shot.direction,p(1));
+  assert.equal(state.pendingShot,null);
 });
