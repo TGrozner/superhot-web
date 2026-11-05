@@ -83,7 +83,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 2, shatter: 4,
         'player-hit': 6,
         katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
-        step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4, 'dry-fire': 3,
+        step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4, 'dry-fire': 5,
     };
     const attackByCue = {
         // Player damage: dark body + short bright contact, Web-original synthesis.
@@ -503,7 +503,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             if ((cue !== 'enemy-shot' || enemyShotDistanceMetres === null || enemyShotDistanceMetres <= 14) &&
                 (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
                     cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana' ||
-                    cue === 'punch-contact' || cue === 'dodge')) {
+                    cue === 'punch-contact' || cue === 'dodge' || cue === 'dry-fire')) {
                 footsteps.gain.cancelScheduledValues(at);
                 footsteps.gain.setTargetAtTime(0.10, at, 0.012);
                 footsteps.gain.setTargetAtTime(0.3, at + 0.14, 0.18);
