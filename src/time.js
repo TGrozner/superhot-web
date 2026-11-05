@@ -890,6 +890,13 @@ export function splitWebActiveWorldFrame({
   if (activeRealDt < simulationDt) {
     throw new RangeError('activeRealDt must cover the simulation step');
   }
+  // Forced zero world-time: do not dispatch phantom collision/world steps.
+  // Even a zero-dt callback can repeat input edges, ground snaps or events.
+  // The caller handles active wall time separately; this helper only
+  // schedules actual world-time advances. WEB integration safety only.
+  if (worldDelta === 0) {
+    return {worldSteps: [], chargedActiveDt: 0, discardedActiveDt: activeRealDt};
+  }
   const chargedActiveDt = Math.min(activeRealDt, simulationDt * maximumSteps);
   const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
   const worldSteps = [];
