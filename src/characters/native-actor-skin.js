@@ -350,11 +350,23 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
   if (!available || solvedPose !== null || action !== null || transition !== null ||
       !['idle', 'walk', 'run'].includes(identity.name) ||
       !Number.isFinite(pose.time) || !modelMatrix || modelMatrix.length !== 16 ||
-      !cameraPosition) return null;
+      (!cameraPosition && pose.targetSight !== false)) return null;
   const previous = frames.get(actorId);
   if (!previous || previous.state !== identity.name || pose.time < previous.poseTime) return null;
   const dt = pose.time - previous.poseTime;
   if (!Number.isFinite(dt) || dt > .15) return null;
+  // The gameplay AI knows whether the player is actually visible. When an
+  // occluder breaks sight, the Web head must ease back to its source pose,
+  // NOT keep looking through walls at the live camera's changing position.
+  // No new Unity IK or source controller behavior is claimed.
+  if (pose.targetSight === false) {
+    const decay = dt === 0 ? 1 : Math.exp(-12 * dt);
+    const yaw = (previous.gazeYaw ?? 0) * decay;
+    const pitch = (previous.gazePitch ?? 0) * decay;
+    return Math.abs(yaw) + Math.abs(pitch) >= .008
+      ? Object.freeze({yaw, pitch, design: 'Web-only occluded-target gaze recovery'})
+      : null;
+  }
   const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
   const cx = indexed ? cameraPosition[0] : cameraPosition.x;
   const cz = indexed ? cameraPosition[2] : cameraPosition.z;
@@ -502,6 +514,9 @@ export function createNativeActorSkinRuntime(skinPass) {
       throw new TypeError('Drawn actor requires stable nonempty string or nonnegative integer ID');
     }
     const selected = choosePose(pose, 'actor pose');
+    if (pose.targetSight !== undefined && typeof pose.targetSight !== 'boolean') {
+      throw new TypeError('Web targetSight must be the actual boolean AI sight verdict');
+    }
     const solvedPose = pose.solvedPose ?? null;
     const action = pose.action ?? null;
     const transitionDescriptor = pose.transition ?? null;
