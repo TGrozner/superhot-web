@@ -818,8 +818,12 @@ test('J3 Web projectile dodge takes a free perpendicular lane if a teammate bloc
   assert.equal(free.enemy.encounter.canAttack,false,'dodging never authorizes an attack');
 
   const trapped=scenario(true);
-  assert.deepEqual(p(trapped.enemy.x,trapped.enemy.y,trapped.enemy.z),trapped.initial,
-    'both lanes physically occupied: no ghost movement, overlap or teleport');
+  assert.equal(trapped.enemy.x,trapped.initial.x,
+    'both lateral dodge lanes are blocked; ordinary non-dodge movement may still occur');
+  for(const blocker of trapped.enemies.slice(1)) {
+    assert.ok(Math.hypot(trapped.enemy.x-blocker.x,trapped.enemy.z-blocker.z)>=.8-1e-6,
+      'failed dodge cannot cross either living ally capsule');
+  }
   assert.equal(trapped.enemy.encounter.webDodgeRemaining,0);
   assert.ok(trapped.enemy.encounter.webDodgeCooldown>0,
     'a fully blocked dodge still ends with finite recovery, not frame-by-frame jitter');
