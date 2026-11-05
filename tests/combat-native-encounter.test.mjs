@@ -542,6 +542,46 @@ test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and 
     'an unarmed neighbor cannot force the ranged squad tactic');
 });
 
+test('J3 Web three-gunner fanout: left, center and right use stable independent routes',()=>{
+  // Web-only tactical layout on fabricated navmesh; no MCD AI parameters.
+  const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
+  const run=(reverse=false)=>{
+    const runtime=setup(),lead=firstSpawn(runtime,target);
+    lead.id='a'; runtime.actors.clear(); runtime.actors.set('a',lead);
+    const copy=(id,z)=>({
+      ...lead,id,x:2,y:0,z,clock:0,
+      reaction:{...lead.reaction},runtime:{...lead.runtime},
+      encounter:{...lead.encounter,route:null,target:null,webTacticalSide:1},
+    });
+    const middle=copy('b',4),right=copy('c',6);
+    runtime.actors.set('b',middle);runtime.actors.set('c',right);
+    const actors=reverse?[right,middle,lead]:[lead,middle,right];
+    for(let frame=0;frame<3;frame++) {
+      advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.2}));
+      for(let i=0;i<actors.length;i++) for(let j=i+1;j<actors.length;j++)
+        assert.ok(Math.hypot(actors[i].x-actors[j].x,actors[i].z-actors[j].z)>=.8-1e-6,
+          'fanout movement cannot cross a living ally capsule');
+    }
+    return [lead,middle,right].map(actor=>({
+      goal:actor.encounter.target,canAttack:actor.encounter.canAttack,
+      feet:p(actor.x,actor.y,actor.z),
+    }));
+  };
+  const forward=run(),reverse=run(true);
+  assert.ok(forward[0].goal.z<target.playerFeet.z-.8,
+    'first gunner takes a real left flank rather than sharing another lane');
+  assert.deepEqual(forward[1].goal,target.playerFeet,
+    'the central gunner keeps the ordinary direct source-navmesh route');
+  assert.ok(forward[2].goal.z>target.playerFeet.z+.8,
+    'third gunner takes the distinct right flank');
+  assert.deepEqual(forward.map(actor=>actor.goal),reverse.map(actor=>actor.goal),
+    'reversing iteration order cannot reshuffle squad flank assignments');
+  assert.ok(forward.every(actor=>actor.canAttack===false),
+    'a tactical slot never grants permission to shoot without a real muzzle');
+  assert.ok(forward.every(actor=>actor.feet.x>2),
+    'all three actors actually advance along their navmesh-approved routes');
+});
+
 test('J3 Web assault pressure: one armed squadmate closes fast while wingman covers, then disengages when alone',()=>{
   // Synthetic scene and actor identities; this tactic is deliberately Web-only.
   const data=scene();
