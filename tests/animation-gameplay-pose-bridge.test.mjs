@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { composeLocalMatrix } from '../src/scenes/graph.js';
 import { createDojoPunchContactGate } from '../src/animation/dojo-punch-contact-gate.js';
 import { createNativeDeathRuntime } from '../src/animation/native-death-runtime.js';
-import { advanceRenderedDojoPunchGate, advanceDojoDeathSkinFrame } from '../src/animation/native-gameplay-pose-bridge.js';
+import { advanceRenderedDojoPunchGate, advanceDojoDeathSkinFrame, resolveDojoDeathScaledFrameDelta } from '../src/animation/native-gameplay-pose-bridge.js';
+import { sampleActiveFrameDeltas } from '../src/time.js';
 
 const binding = Object.freeze({
   drawClip: 'punch', clipOwner: 'sharedassets0.assets',
@@ -93,9 +94,12 @@ test('source-verified death solver hands SH-14 a copied per-actor pose; absent p
   });
   const rig = Object.freeze({ boneOrder: ['root', 'leg'], parents: [-1, 0] });
   const first = advanceDojoDeathSkinFrame({
-    runtime, rig, sourceBoneOrder: ['root', 'leg'], scaledDelta: 0.1,
+    runtime, rig, sourceBoneOrder: ['root', 'leg'], scaledDelta: 0.05,
+    frameTiming: {simulationDelta: 0.05, activeRealDelta: 0.1},
     provenance: 'synthetic-verified-rig-for-test',
   });
+  assert.equal(runtime.elapsed, 0.1,
+    'the actual GPU bridge must advance all active time at 10 FPS');
   assert.equal(first.solvedPose.rig, rig);
   assert.ok(first.solvedPose.boneModelMatrices[29] < 1);
   const saved = first.solvedPose.boneModelMatrices[29];
@@ -151,4 +155,35 @@ test('per-actor source punch action uses its own clip clock, never idle sample o
   });
   assert.equal(baseClock.poseQualified, false,
     'the base clip must not borrow a composed punch action timestamp');
+});
+
+test('death pose bridge restores active 10 FPS time without erasing slow motion or paused time', () => {
+  const {simulationDt, activeRealDt} = sampleActiveFrameDeltas(0,100,0);
+  assert.equal(simulationDt,0.05,'the shared Web frame deliberately caps simulation at 50ms');
+  assert.equal(activeRealDt,0.1,'the same 10 FPS frame lasts 100 active milliseconds');
+  const frameTiming={simulationDelta:simulationDt,activeRealDelta:activeRealDt};
+  assert.equal(resolveDojoDeathScaledFrameDelta(0.05,frameTiming),0.1,
+    'the live 1x world tick must not make ragdolls fall in half-speed');
+  assert.ok(Math.abs(resolveDojoDeathScaledFrameDelta(0.01,frameTiming)-0.02)<1e-12,
+    'the applied 0.2x world-time scale must still slow corpse motion');
+  const normal=sampleActiveFrameDeltas(0,1000/60,0);
+  assert.ok(Math.abs(resolveDojoDeathScaledFrameDelta(normal.simulationDt,{
+    simulationDelta:normal.simulationDt,activeRealDelta:normal.activeRealDt,
+  })-normal.activeRealDt)<1e-12,'normal 60 FPS frames must remain unchanged');
+  assert.equal(resolveDojoDeathScaledFrameDelta(0.05),0.05,
+    'bridge users without the new timing receipt remain compatible');
+  assert.equal(resolveDojoDeathScaledFrameDelta(0,{
+    simulationDelta:0,activeRealDelta:0,
+  }),0,'paused/resumed zero step must not fabricate death time');
+  // The solver itself caps long-hitch physics while its scaled cleanup
+  // clock advances. Do not truncate the elapsed active duration here.
+  assert.equal(resolveDojoDeathScaledFrameDelta(0.05,{
+    simulationDelta:0.05,activeRealDelta:0.3,
+  }),0.3);
+  assert.throws(()=>resolveDojoDeathScaledFrameDelta(0.05,{
+    simulationDelta:0,activeRealDelta:0.1,
+  }),/World time without a simulation tick/);
+  assert.throws(()=>resolveDojoDeathScaledFrameDelta(0.05,{
+    simulationDelta:0.05,activeRealDelta:0.01,
+  }),/Same-frame/);
 });
