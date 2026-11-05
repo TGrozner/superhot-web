@@ -79,8 +79,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         master.gain.setTargetAtTime(0.76 * level, at, 0.025);
     }
     const priorityByCue = {
-        // Creative Web priorities: resolved wall ricochets tie nearby muzzle shots
-    // when saturated; player shots and damage still outrank them. NOT Unity data.
+        // Creative Web mix priorities: damage feedback survives even shot bursts.
         'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 4, shatter: 4,
         'player-hit': 6,
         katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
