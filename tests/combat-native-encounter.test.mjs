@@ -1759,3 +1759,69 @@ test('J3 Web disarmed rush zigzags toward visible player with swept feet, while 
   assert.equal(hidden.encounter.visible,false,'world occlusion prohibits the visible-player weave');
   assert.equal(hidden.encounter.canAttack,false,'the wall never grants attack permission');
 });
+
+
+test('J3 Web verified weapon roles: shotgun closes, sniper holds and retreats, fallback keeps pistol distance',()=>{
+  // Synthetic actors and navigation only. These ranges are deliberately Web
+  // tuning, not serialized MCD difficulty or native AI proof.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=6;
+  const close={playerFeet:p(7.2,0,2),playerPosition:p(7.2,1.6,2)};
+  const far={playerFeet:p(10,0,2),playerPosition:p(10,1.6,2)};
+  const rushed={playerFeet:p(5,0,2),playerPosition:p(5,1.6,2)};
+  const equip=(world,enemy,family,status='qualified')=>{
+    enemy.weaponFamily=family;
+    enemy.activeWeaponSettings={...world.enemySettings,family};
+    enemy.sourceActivation={status,family};
+  };
+  const tick=(world,enemies,player,delta=.25)=>advanceNativeEncounter(world,input(enemies,{
+    ...player,scaledDeltaTime:delta,unscaledDeltaTime:delta,
+  }));
+
+  const baseline=setup(data),pistol=firstSpawn(baseline,close);
+  tick(baseline,[pistol],close);
+  assert.equal(pistol.x,2,'baseline pistol holds the ordinary six-metre ring');
+
+  const shotgunWorld=setup(data),shotgun=firstSpawn(shotgunWorld,close);
+  equip(shotgunWorld,shotgun,'Shotgun');
+  tick(shotgunWorld,[shotgun],close);
+  assert.ok(shotgun.x>2.1,'qualified shotgun actually closes when the pistol would hold');
+  assert.equal(shotgun.encounter.canAttack,false,
+    'movement does not invent a clear animated muzzle or authorize a shot');
+
+  const fallbackWorld=setup(data),fallback=firstSpawn(fallbackWorld,close);
+  equip(fallbackWorld,fallback,'Shotgun','web-pistol-fallback');
+  tick(fallbackWorld,[fallback],close);
+  assert.equal(fallback.x,2,'unverified family must not silently change Web pistol behavior');
+
+  const sniperWorld=setup(data),sniper=firstSpawn(sniperWorld,far);
+  equip(sniperWorld,sniper,'SniperRifle');
+  tick(sniperWorld,[sniper],far);
+  assert.equal(sniper.x,2,'qualified sniper holds a longer line instead of rushing to pistol range');
+  const baselineFar=setup(data),plainFar=firstSpawn(baselineFar,far);
+  tick(baselineFar,[plainFar],far);
+  assert.ok(plainFar.x>2,'pistol still advances at the same distance');
+
+  const pressured=setup(data),retreater=firstSpawn(pressured,rushed);
+  equip(pressured,retreater,'SniperRifle');
+  tick(pressured,[retreater],rushed);
+  assert.ok(retreater.x<2,'rushed sniper actually backs away on a navmesh-safe step');
+  assert.equal(retreater.encounter.canAttack,false,
+    'retreat cannot create a shot or bypass the muzzle gates');
+
+  const covered=setup(data,[box(4.5,1,2,.1,2,3)]),blocked=firstSpawn(covered,close);
+  equip(covered,blocked,'Shotgun');
+  tick(covered,[blocked],close,1);
+  assert.ok(blocked.x<=4.05,'closer-ranged shotguns still cannot pass through world cover');
+  assert.equal(blocked.encounter.canAttack,false,'cover never grants an attack');
+
+  const duo=setup(data),point=firstSpawn(duo,close);
+  equip(duo,point,'Shotgun');
+  const wing=firstSpawn(setup(data),close);
+  wing.id='synthetic-wingman';wing.z=3.5;
+  wing.muzzlePosition=p(wing.x,1.4,wing.z);wing.muzzleForward=p(1,0,0);
+  point.muzzlePosition=p(point.x,1.4,point.z);point.muzzleForward=p(1,0,0);
+  tick(duo,[wing,point],close);
+  assert.ok(point.x>2,'the shotgun takes the assault lead in a local mixed fireteam');
+  assert.equal(wing.x,2,'pistol wingman maintains the covering ring');
+});
