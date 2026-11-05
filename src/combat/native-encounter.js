@@ -84,6 +84,22 @@ function webWeaponRole(enemy) {
     ? WEB_WEAPON_ROLE[family] ?? null : null;
 }
 
+// J3 Web fallback also gains a visible behavior: a lone gunner that really
+// sees the player's back can creep inside its usual firing ring. Turning to
+// face it immediately restores the normal spacing. Cover, navigation and
+// actual gun permission remain authoritative; no view-cone wallhack or speed
+// bonus. This is a design choice, not an MCD perception or distance rule.
+const WEB_UNWATCHED_APPROACH=Object.freeze({stopFraction:0.72,backDot:-0.45});
+function webPlayerLookingAway(playerPosition,playerForward,enemyFeet) {
+  if(!playerPosition || !playerForward ||
+      ![playerPosition.x,playerPosition.z,playerForward.x,playerForward.z,
+        enemyFeet.x,enemyFeet.z].every(Number.isFinite))return false;
+  const x=enemyFeet.x-playerPosition.x,z=enemyFeet.z-playerPosition.z;
+  const length=Math.hypot(x,z)*Math.hypot(playerForward.x,playerForward.z);
+  return length>EPSILON &&
+    (x*playerForward.x+z*playerForward.z)/length<WEB_UNWATCHED_APPROACH.backDot;
+}
+
 // J3 Web-original readable crossfire: nearby gunners with ACTUALLY clear
 // muzzles take alternating windows for new shots, rather than opening fire
 // simultaneously. Solo combat and already committed shots are unchanged.
@@ -1104,11 +1120,15 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const normalStopDistance=armed
     ? runtime.armedStopDistance*(weaponRole?.stopFraction ?? 1)
     : runtime.unarmedStopDistance;
+  const unwatchedAdvance=armed && state.visible && !enemy.runtime.pendingShot &&
+    !weaponRole?.holdRange && (localSquads.get(enemy)?.length ?? 1)===1 &&
+    webPlayerLookingAway(playerPosition,playerForward,start);
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(
         runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
         normalStopDistance*WEB_SQUAD_PUSH.stopDistanceFraction))
-    : normalStopDistance;
+    : unwatchedAdvance ? normalStopDistance*WEB_UNWATCHED_APPROACH.stopFraction
+      : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
   const stop=state.visible && playerDistance <= stopDistance;
   // Search starts only after genuinely reaching previously seen feet. Once
