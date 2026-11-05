@@ -331,6 +331,22 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       bright.connect(accent);
       accent.connect(out);
     }
+    // WEB-ORIGINAL player muzzle pressure: a brief low-band punch under
+    // the native pistol WAV and the existing bright mechanical Web crack.
+    // It shares the current noise source, gain trim, spatial route and voice.
+    // Not a recovered Unity clip, source envelope or verified audible result.
+    if (cue === 'player-shot') {
+      const muzzleLow = track(context.createBiquadFilter());
+      muzzleLow.type = 'lowpass';
+      muzzleLow.frequency.value = Math.min(430, context.sampleRate * 0.28);
+      const muzzle = track(context.createGain());
+      muzzle.gain.setValueAtTime(0.0001, at);
+      muzzle.gain.linearRampToValueAtTime(volume * 0.35, at + 0.009);
+      muzzle.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+      noise.connect(muzzleLow);
+      muzzleLow.connect(muzzle);
+      muzzle.connect(out);
+    }
     // Web-original enemy muzzle pressure: the delayed low-band burst adds
     // weight at the firing point, not a guessed projectile flyby or native clip.
     // It shares the existing noise source, HRTF routing and voice budget.
