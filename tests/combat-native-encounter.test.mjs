@@ -1218,6 +1218,46 @@ test('J3 Web rear near-miss: suppression breaks laterally instead of charging th
     'the same finite Web reaction remains active after a successful side-step');
 });
 
+test('J3 Web blind dodge: real incoming bullet is observable without exposing a hidden shooter',()=>{
+  // Synthetic scene: the shooter is behind a genuine wall, while an already
+  // launched player bullet approaches through a separate open corridor.
+  // Web bullet awareness must use geometry, never reveal hidden player feet.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const incoming={friendly:true,type:'normal',pos:p(-3,1,2),
+    direction:p(1,0,0),speed:22,ttl:.5};
+  function simulate(hiddenZ,{blockedBullet=false}={}) {
+    const player={playerFeet:p(9,0,hiddenZ),playerPosition:p(9,1.6,hiddenZ)};
+    const obstacles=[box(5,1,2,.2,2,2)];
+    if(blockedBullet) obstacles.push(box(0,1,2,.2,2,1.4));
+    const runtime=setup(data,obstacles),enemy=firstSpawn(runtime,player);
+    enemy.muzzlePosition=p(2,1.4,2);enemy.muzzleForward=p(1,0,0);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...player,scaledDeltaTime:.12,playerProjectiles:[incoming],
+    }));
+    assert.equal(enemy.encounter.visible,false,'world cover still hides the shooter');
+    assert.equal(enemy.encounter.webLastSeenFeet,null,
+      'physical bullet awareness must never reveal occluded player coordinates');
+    assert.equal(enemy.encounter.canAttack,false,'a blind dodge never grants a shot');
+    if(blockedBullet) {
+      assert.equal(enemy.encounter.webDodgeRemaining,0,
+        'a real wall between bullet and enemy blocks predictive awareness');
+      assert.equal(enemy.encounter.webSuppressionRemaining,0,
+        'a direct bullet blocked by cover is not misclassified as near-miss');
+    } else {
+      assert.ok(Math.abs(enemy.z-start.z)>.005,
+        'unblocked incoming projectile triggers a real swept lateral step');
+      assert.ok(enemy.encounter.webDodgeRemaining>0,
+        'a hidden shooter does not suppress legitimate bullet evasion');
+    }
+    return p(enemy.x,enemy.y,enemy.z);
+  }
+  assert.deepEqual(simulate(2),simulate(2.6),
+    'moving the unseen shooter cannot steer an observed-bullet dodge');
+  simulate(2,{blockedBullet:true});
+});
+
 test('J3 Web blind suppression: a real nearby bullet prompts cover-safe evasion without hidden-player tracking',()=>{
   // Synthetic geometry and projectiles: original Web tactical behavior, NOT MCD.
   // Wall blocks the gunner's eyes; the separate bullet corridor stays clear.

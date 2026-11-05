@@ -918,7 +918,12 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // even while chasing. Original MCD enemy AI is not claimed here. No change
   // to existing tactics when the SH-05 projectile snapshot is absent.
   state.webDodgeCooldown=Math.max(0,state.webDodgeCooldown-scaledDeltaTime);
-  if(state.visible && !enemy.runtime.pendingShot &&
+  // A real projectile already travelling through a clear corridor is
+  // observable even when the shooter is behind cover. Unlike an aim or
+  // squad sighting, bullet geometry never reveals the player's position.
+  // Let the projectile's own swept line (including intervening cover and
+  // living allies) authorize only this Web evasive movement, never a shot.
+  if(!enemy.runtime.pendingShot &&
       state.webDodgeRemaining<=0 && state.webDodgeCooldown<=EPSILON) {
     const threat=webIncomingProjectile(runtime,enemy,playerProjectiles,enemies);
     if(threat) {
