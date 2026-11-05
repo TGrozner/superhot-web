@@ -46,7 +46,19 @@ export function nativeEnemyFireLateRequests(state, settings, pose, random = Math
     throw new TypeError('active weapon family required');
   }
   if (!validPoint(pose?.muzzlePosition) ||
-      (settings.family === 'Shotgun' && !validPoint(pose?.weaponForward))) {
+      (settings.family === 'Shotgun' && (!validPoint(pose?.weaponForward) ||
+        Math.hypot(pose.weaponForward.x, pose.weaponForward.y, pose.weaponForward.z) === 0)) ||
+      (settings.family !== 'Shotgun' && validPoint(state.pendingShot.target) &&
+        Math.hypot(
+          state.pendingShot.target.x - pose.muzzlePosition.x,
+          state.pendingShot.target.y - pose.muzzlePosition.y,
+          state.pendingShot.target.z - pose.muzzlePosition.z,
+        ) === 0)) {
+    // Web gameplay guard, not a native MCD rule: a collapsed animated
+    // socket/aim vector must never consume the one accepted Attack. A zero
+    // shotgun forward otherwise makes jitter alone choose the entire volley;
+    // a coincident pistol target otherwise emits a stationary projectile.
+    // Keep the accepted target and reload gate until an actual aim pose exists.
     return { status: 'awaiting-late-pose', requests: [] };
   }
   const shots = consumeNativeEnemyVolley(
