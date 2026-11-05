@@ -14,6 +14,13 @@ const EPSILON = 1e-6;
 
 // J3 Web gameplay tuning, NOT MCD timing: staggered short lateral moves make
 // armed enemies less static without changing the source navmesh or gun gates.
+// J3 Web-only shoot-and-scoot: a gunner that has actually fired moves
+// laterally during the early reload window, then settles to aim again.
+// This does not change weapon timing, bullet damage, native AI or attack gates.
+const WEB_RELOAD_SCOOT = Object.freeze({
+  beginDelayFraction: 0.45,
+  endDelayFraction: 1.2,
+});
 const WEB_STRAFE = Object.freeze({
   warmupSeconds: 1.2,
   cycleSeconds: 3.4,
@@ -1181,13 +1188,28 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const needsFiringLane=stop && armed && state.visible &&
     Boolean(enemy.muzzlePosition && enemy.muzzleForward) &&
     (!worldMuzzleClear || state.webAllyBlockingShot) && !enemy.runtime.pendingShot;
+  // A pistol/machine-gunner who has already fired should not become a
+  // stationary target for the entire reload. Use the REAL weapon cooldown
+  // from GunAttack, not a second Web timer or fabricated reload event.
+  // Near the next shot it holds position again for a readable firing window;
+  // shot-locked, blind, blocked-muzzle and other weapon families are unchanged.
+  const weaponSettings=enemy.activeWeaponSettings ?? runtime.enemySettings;
+  // The explicit Web fallback owns weaponFamily='Pistol' but does not supply
+  // a source-qualified `settings.family`; never silently disable its tactics.
+  const activeFamily=enemy.activeWeaponSettings?.family ?? enemy.weaponFamily;
+  const reloadScoot=stop && armed && state.canAttack && !enemy.runtime.pendingShot &&
+    enemy.runtime.haveBeenSeen===true &&
+    (activeFamily==='Pistol' || activeFamily==='MachineGun') &&
+    Number.isFinite(weaponSettings.attackDelay) && weaponSettings.attackDelay>0 &&
+    enemy.runtime.attackDelayRemaining>weaponSettings.attackDelay*WEB_RELOAD_SCOOT.beginDelayFraction &&
+    enemy.runtime.attackDelayRemaining<=weaponSettings.attackDelay*WEB_RELOAD_SCOOT.endDelayFraction;
   const tacticalTime=enemy.clock-WEB_STRAFE.warmupSeconds;
   const tactical=stop && armed && (state.canAttack || needsFiringLane) &&
     !enemy.runtime.pendingShot && Number.isFinite(tacticalTime) && tacticalTime>=0 &&
     tacticalTime%WEB_STRAFE.cycleSeconds<
       (needsFiringLane ? WEB_STRAFE.peekSeconds : WEB_STRAFE.activeSeconds);
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
-    (disengaging || tactical) ? 'walking' : stop ? 'standing'
+    (disengaging || tactical || reloadScoot) ? 'walking' : stop ? 'standing'
       : armed && !breaching ? 'walking' : 'running',scaledDeltaTime);
   const facing=state.visible || !state.webLastSeenFeet ? playerPosition : pursuitFeet;
   const dx=facing.x-start.x, dz=facing.z-start.z;
@@ -1195,7 +1217,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   if (stop) {
     if(disengaging && scaledDeltaTime>0) {
       if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
-    } else if(tactical && scaledDeltaTime>0 &&
+    } else if((reloadScoot || tactical) && scaledDeltaTime>0 &&
         !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
     return;
   }
