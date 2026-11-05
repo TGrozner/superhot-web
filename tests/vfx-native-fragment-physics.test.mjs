@@ -391,3 +391,31 @@ test('shattering preserves each authored mesh scale from first draw through HDR 
     assert.equal(shard.sourceMatrix[0],originalScale,'source transforms are immutable');
   }
 });
+
+test('authored fading weapon fragments shrink swept floor contacts instead of hovering on a full-size sphere',()=>{
+  const physics=context();
+  physics.material={...physics.material,bounciness:0,staticFriction:2};
+  const runtime=createGunPickupShardRuntime({
+    shards:[{id:'fading-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,collisionRadius:0.2}],
+    parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[0],
+    gravity:physics.gravity,physics,
+  });
+  const shard=runtime.shards[0];
+  // Simulate a legitimate old-radius support that would otherwise keep the
+  // visibly shrinking shard asleep above the ground for the rest of its fade.
+  shard.webShardResting=true;
+  shard.webShardRestPosition={...shard.position};
+  shard.webShardSupport=physics.collisionScene.boxes.find(b=>b.collider?.id==='floor')?.collider;
+  const [fading]=advanceGunPickupShardRuntime(runtime,0.15);
+  assert.ok(Math.abs(fading.localScale-0.75)<1e-10);
+  assert.ok(Math.abs(fading.collisionRadius-0.15)<1e-10,
+    'source shape proxy must follow the visible HDR shrink ratio');
+  assert.equal(fading.webShardResting,false,'old-radius sleep must be revoked');
+  assert.ok(fading.position.y<0.19,
+    'gravity must bring the shrinking shard down toward its new floor contact');
+  assert.ok(fading.position.y>=fading.collisionRadius-1e-5,
+    'the new collider must still keep the visible shard above the source floor');
+  assert.ok(fading.contacts.some(c=>c.collider?.id==='floor'),
+    'the newly sized collider must remain on the source collision path');
+});
