@@ -1151,6 +1151,64 @@ test('J3 Web witnessed loss: visible nearby ally death prompts one swept retreat
 });
 
 
+test('J3 Web witnessed-loss counterpush: armed survivors advance after retreat only with live sight',()=>{
+  // Web-authored pressure, synthetic scene; this is NOT an MCD AI contract.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const player={playerFeet:p(12,0,2),playerPosition:p(12,1.6,2),playerForward:p(0,0,1)};
+  const runtime=setup(data),witness=firstSpawn(runtime,player);
+  witness.x=5;witness.z=2;
+  witness.muzzlePosition=p(5,1.4,2);witness.muzzleForward=p(1,0,0);
+  const fallen=firstSpawn(setup(data),player);
+  fallen.id='counterpush-fallen';fallen.x=5.8;fallen.z=2;
+  fallen.alive=false;fallen.reaction.dead=true;
+  runtime.actors.set(fallen.id,fallen);
+  const squad=[witness,fallen];
+
+  advanceNativeEncounter(runtime,input(squad,{...player,scaledDeltaTime:.2}));
+  assert.ok(witness.x<5,'the confirmed witness first retreats, rather than instantly charging');
+  assert.ok(witness.encounter.webCounterPushRemaining>0);
+  assert.equal(witness.encounter.canAttack,false,'retreat does not grant a shot');
+
+  for(let i=0;i<4;i++)
+    advanceNativeEncounter(runtime,input(squad,{...player,scaledDeltaTime:.2}));
+  assert.equal(witness.encounter.webLossRemaining,0,'retreat ends before the push');
+  assert.ok(witness.encounter.webCounterPushRemaining>0,'the response survives the brief retreat');
+
+  // Put the witness exactly on its NORMAL pistol ring. Only the sourced
+  // local death receipt can authorize its temporary shorter Web approach.
+  witness.x=4;witness.z=2;witness.encounter.route=null;witness.encounter.target=null;
+  witness.muzzlePosition=null;witness.muzzleForward=null;
+  advanceNativeEncounter(runtime,input(squad,{...player,scaledDeltaTime:.2}));
+  assert.ok(witness.x>4,'counter-pressure crosses the original firing ring');
+  assert.equal(witness.encounter.canAttack,false,'a missing muzzle still cannot shoot');
+
+  const paused=witness.encounter.webCounterPushRemaining;
+  const frozen=p(witness.x,witness.y,witness.z);
+  advanceNativeEncounter(runtime,input(squad,{...player,scaledDeltaTime:0}));
+  assert.equal(witness.encounter.webCounterPushRemaining,paused,'world pause freezes pressure');
+  assert.deepEqual(p(witness.x,witness.y,witness.z),frozen);
+
+  // The death is observed once. After the finite window expires, the normal
+  // stop ring applies, instead of perpetually chasing the same player.
+  witness.x=4;witness.z=2;witness.encounter.route=null;
+  advanceNativeEncounter(runtime,input(squad,{...player,scaledDeltaTime:3}));
+  assert.equal(witness.encounter.webCounterPushRemaining,0);
+  assert.equal(witness.x,4,'expired counter-pressure never forces another advance');
+  assert.equal(runtime.killed,1,'one actual death is still counted exactly once');
+
+  const occluded=setup(data,[box(6,1,2,.5,2,2)]);
+  const hiddenWitness=firstSpawn(occluded,player);
+  hiddenWitness.x=4;
+  const hiddenCorpse=firstSpawn(setup(data),player);
+  hiddenCorpse.id='hidden-counterpush';hiddenCorpse.x=8;
+  hiddenCorpse.alive=false;hiddenCorpse.reaction.dead=true;
+  occluded.actors.set(hiddenCorpse.id,hiddenCorpse);
+  advanceNativeEncounter(occluded,input([hiddenWitness,hiddenCorpse],{...player,scaledDeltaTime:.2}));
+  assert.equal(hiddenWitness.encounter.webCounterPushRemaining,0,
+    'a wall-blocked death cannot create an omniscient counterattack');
+});
+
 test('J3 Web near-miss suppression: actual passing player bullet interrupts gunfire without wallhacks',()=>{
   // Synthetic bullets and geometry; creative Web behavior, not an MCD timing claim.
   const data=scene();
