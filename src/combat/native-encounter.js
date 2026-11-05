@@ -44,6 +44,8 @@ const WEB_DISENGAGE = Object.freeze({
 // This is Web AI design, NOT a recovered MCD timing or perception contract.
 const WEB_LAST_SEEN_SWEEP = Object.freeze({
   seconds:1.8,
+  pauseSeconds:0.9,
+  passes:2, // Web-only: check the opposite side once before accepting lost contact.
   maxBodyRadii:3.5,
   speedFraction:0.75,
 });
@@ -946,6 +948,7 @@ function spawnEnemy(runtime, point, order, population) {
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
       webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
       webSearchRemaining:null, webSearchComplete:false,
+       webSearchPass:0, webSearchPause:0,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
       webHitRevision:0,webHitPending:false,webHitRemaining:0,webHitSideX:0,webHitSideZ:0,
       webLossRemaining:0,webLossFeet:null,webCounterPushRemaining:0,
@@ -1098,6 +1101,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webLastSeenFeet={...playerFeet};
     state.webSearchRemaining=null;
     state.webSearchComplete=false;
+    state.webSearchPass=0;
+    state.webSearchPause=0;
   } else {
     // A nearby observer may call out a CURRENTLY witnessed location. Neither
     // stale ally memories nor the player's hidden position can refresh it.
@@ -1118,6 +1123,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       state.webLastSeenFeet={...playerFeet};
       state.webSearchRemaining=null;
       state.webSearchComplete=false;
+      state.webSearchPass=0;
+      state.webSearchPause=0;
       state.route=null;
     }
   }
@@ -1301,6 +1308,19 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
         distance(start,pursuitFeet)<=runtime.body.radius*0.8)) {
     if(state.webSearchRemaining===null && !state.webSearchComplete)
       state.webSearchRemaining=WEB_LAST_SEEN_SWEEP.seconds;
+    // Search a genuinely remembered location, not the hidden player. One
+    // opposite-side second pass gives the hunter a chance to check the other
+    // edge of cover; after two passes it stops instead of oscillating forever.
+    // The short pause and every step consume only world-scaled time.
+    if(state.webSearchComplete && state.webSearchPass<WEB_LAST_SEEN_SWEEP.passes-1 &&
+        scaledDeltaTime>0) {
+      state.webSearchPause=Math.max(0,state.webSearchPause-scaledDeltaTime);
+      if(state.webSearchPause<=EPSILON) {
+        state.webSearchPass++;
+        state.webSearchRemaining=WEB_LAST_SEEN_SWEEP.seconds;
+        state.webSearchComplete=false;
+      }
+    }
     state.route=null;
     state.target={...pursuitFeet};
     const sx=pursuitFeet.x-start.x, sz=pursuitFeet.z-start.z;
@@ -1310,15 +1330,20 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
         'walking',scaledDeltaTime);
       const elapsed=WEB_LAST_SEEN_SWEEP.seconds-state.webSearchRemaining;
-      const side=elapsed<WEB_LAST_SEEN_SWEEP.seconds/2
+      const preferredSide=state.webSearchPass%2===0
         ? state.webTacticalSide : -state.webTacticalSide;
+      const side=elapsed<WEB_LAST_SEEN_SWEEP.seconds/2
+        ? preferredSide : -preferredSide;
       const moved=tryWebStrafe(runtime,enemy,pursuitFeet,enemies,
         scaledDeltaTime*WEB_LAST_SEEN_SWEEP.speedFraction,{
           sideOverride:side,maxDistance:runtime.body.radius*WEB_LAST_SEEN_SWEEP.maxBodyRadii,
         });
       if(!moved)enemy.runtime.speed=0;
       state.webSearchRemaining=Math.max(0,state.webSearchRemaining-scaledDeltaTime);
-      if(state.webSearchRemaining<=EPSILON)state.webSearchComplete=true;
+      if(state.webSearchRemaining<=EPSILON) {
+        state.webSearchComplete=true;
+        state.webSearchPause=WEB_LAST_SEEN_SWEEP.pauseSeconds;
+      }
     }
     return;
   }

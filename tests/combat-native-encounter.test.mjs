@@ -1047,7 +1047,7 @@ test('J3 Web dodge is cancelled by stun, pending fire or deactivation rather tha
   }
 });
 
-test('J3 Web fair hunt: enemies sweep near last seen feet without tracking hidden player',()=>{
+test('J3 Web fair hunt: a second opposite-side search ends without tracking the hidden player',()=>{
   // All positions and the blocking wall are synthetic Web test fixtures.
   // This is NOT an assertion about MCD's native enemy perception.
   const data=scene();
@@ -1061,22 +1061,28 @@ test('J3 Web fair hunt: enemies sweep near last seen feet without tracking hidde
 
   const hidden={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
   const sweepPositions=[];
-  for(let frame=0;frame<30;frame++){
+  const searchPasses=new Set();
+  for(let frame=0;frame<52;frame++){
     advanceNativeEncounter(runtime,input([enemy],{...hidden,scaledDeltaTime:.2}));
     assert.equal(enemy.encounter.visible,false,'the wall keeps the player genuinely occluded');
     assert.deepEqual(enemy.encounter.webLastSeenFeet,seen.playerFeet,
       'hidden coordinates never overwrite the remembered location');
     assert.deepEqual(enemy.encounter.target,seen.playerFeet,
       'navigation and search use remembered feet, not the hidden player');
-    if(enemy.encounter.webSearchRemaining!==null && !enemy.encounter.webSearchComplete)
+    if(enemy.encounter.webSearchRemaining!==null && !enemy.encounter.webSearchComplete) {
       sweepPositions.push(p(enemy.x,enemy.y,enemy.z));
+      searchPasses.add(enemy.encounter.webSearchPass);
+    }
   }
   assert.ok(sweepPositions.length>2,'hunter arrives and actually searches near last-seen feet');
   assert.ok(sweepPositions.some(feet=>Math.abs(feet.z-2)>.08),
     'hunter changes lane to investigate rather than standing still');
   assert.ok(sweepPositions.every(feet=>Math.hypot(feet.x-6,feet.z-2)<=runtime.body.radius*3.5+1e-5),
     'investigation stays close to last-known feet and uses bounded real movement');
-  assert.equal(enemy.encounter.webSearchComplete,true,'search ends in finite time');
+  assert.deepEqual([...searchPasses].sort(),[0,1],
+    'after real concealment the enemy searches both opposite sides of remembered cover');
+  assert.equal(enemy.encounter.webSearchPass,1,'only two bounded search passes, never perpetual oscillation');
+  assert.equal(enemy.encounter.webSearchComplete,true,'both searches end in finite simulated time');
   assert.ok(enemy.x<8,'search never tracks the hidden player through cover');
   const holding=p(enemy.x,enemy.y,enemy.z);
   const relocated={playerFeet:p(13,0,7),playerPosition:p(13,1.6,7)};
@@ -1090,6 +1096,7 @@ test('J3 Web fair hunt: enemies sweep near last seen feet without tracking hidde
   assert.equal(enemy.encounter.visible,true,'normal sight can reacquire the player');
   assert.deepEqual(enemy.encounter.webLastSeenFeet,reappeared.playerFeet,
     'a new real sighting replaces the old search destination');
+  assert.equal(enemy.encounter.webSearchPass,0,'new verified sighting resets the finite search budget');
 });
 
 test('J3 Web squad sighting: nearby real observers share only witnessed feet, independent of actor order',()=>{
