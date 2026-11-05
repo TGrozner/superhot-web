@@ -128,3 +128,72 @@ test('low-FPS grounded strides and a landing schedule cues while teleports remai
   assert.ok(Math.abs(cues[2].position.y - 0.35) < 1e-10);
   assert.equal(tick(2.6, 1.8), null);
 });
+
+// A pure Web-height accent. Source WebAudio routing is unchanged and a receipt
+// still proves scheduling only, not that a person heard the resulting sound.
+test('higher genuine falls increase landing weight, while a vertical respawn stays silent', () => {
+  const recorded = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    recorded.push({cue, ...request});
+    return {status:'started', source:'web-original-synthesis', at:1, spatial:true};
+  });
+  const run = heights => {
+    gait.reset();
+    [0, 0.05, 0.1, 0.15, 0.2].forEach((timeSeconds, i) => {
+      gait.advance({position:p(0, heights[i]), grounded:i === 0 || i === 4, timeSeconds});
+    });
+    return recorded.at(-1).intensity;
+  };
+  const hop = run([1.6, 1.8, 1.9, 1.8, 1.6]);
+  const drop = run([4.6, 4.3, 3.2, 2.0, 1.6]);
+  assert.deepEqual(recorded.map(entry => entry.cue), ['landing', 'landing']);
+  assert.ok(drop > hop + 0.35, 'falling from higher up should sound heavier');
+  assert.ok(drop <= 1.4, 'Web landing boost is limited');
+  assert.ok(recorded.every(entry => Math.abs(entry.position.y - 0.35) < 1e-9));
+
+  gait.reset();
+  gait.advance({position:p(0, 1.6), grounded:true, timeSeconds:1});
+  gait.advance({position:p(0, 1.7), grounded:false, timeSeconds:1.05});
+  gait.advance({position:p(0, 1.8), grounded:false, timeSeconds:1.1});
+  assert.equal(gait.advance({position:p(0, -12), grounded:true,
+    timeSeconds:1.15}), null, 'one-frame vertical teleport is not a landing');
+  assert.equal(recorded.length, 2);
+});
+
+test('midair teleports never turn into a fake landing thud after normal-looking final contact', () => {
+  const cues = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, ...request});
+    return {status: 'started', source: 'web-original-synthesis', at: 1, spatial: true};
+  });
+  const tick = (x, y, timeSeconds, grounded) =>
+    gait.advance({position: p(x, y), timeSeconds, grounded});
+
+  // The old check looked only at the final air -> ground displacement:
+  // a mid-flight horizontal snap followed by two quiet frames was audible.
+  tick(0, 1.6, 0, true);
+  tick(0, 1.8, 0.05, false);
+  tick(7, 1.8, 0.1, false); // 7 metres in one 50ms sample: a reset/teleport.
+  tick(7, 1.7, 0.15, false);
+  assert.equal(tick(7, 1.6, 0.2, true), null);
+  assert.equal(cues.length, 0);
+
+  // Vertical snaps can fake a dramatic fall even if each later sample is
+  // physically plausible and the final landing passes its existing gate.
+  gait.reset();
+  tick(0, 1.6, 1, true);
+  tick(0, 1.7, 1.05, false);
+  tick(0, 7, 1.1, false); // Sudden 5.3 metre rise.
+  tick(0, 6, 1.15, false);
+  tick(0, 4.5, 1.2, false);
+  tick(0, 3, 1.25, false);
+  assert.equal(tick(0, 1.6, 1.3, true), null);
+  assert.equal(cues.length, 0);
+
+  // A subsequent legitimate jump is not suppressed after landing/rebaseline.
+  tick(0, 1.6, 2, true);
+  tick(0, 1.8, 2.05, false);
+  tick(0, 1.9, 2.1, false);
+  assert.equal(tick(0, 1.6, 2.2, true)?.status, 'started');
+  assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
+});

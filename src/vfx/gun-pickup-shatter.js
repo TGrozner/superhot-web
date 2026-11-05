@@ -257,7 +257,7 @@ export function createGunPickupShardRuntime({
       const collisionRadius = finiteNumber(shard.collisionRadius, 'collisionRadius');
       if (collisionRadius <= 0) throw new RangeError('Geometry-derived collision radius required');
       const center = finiteVector(shard.collisionCenter ?? {x:m[12],y:m[13],z:m[14]}, 'collisionCenter');
-      Object.assign(result, { collisionRadius, position:center,
+      Object.assign(result, { collisionRadius, authoredCollisionRadius:collisionRadius, position:center,
         centerOffset:{x:center.x-m[12],y:center.y-m[13],z:center.z-m[14]} });
     }
     return result;
@@ -309,7 +309,12 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
     const value = Math.min(1, Math.max(0, elapsed - shard.delay));
     const sourceScale = 1 - Math.min(1, (value * 10 / 3) ** 2);
     shard.hdrPhase = value > 0.05 ? Math.min(1, (value * 5 - 0.05) ** 2) : 0;
-    if (sourceScale < shard.originalScale) shard.localScale = sourceScale;
+    // Web visual continuity: sourceMatrix ALREADY contains each authored
+    // shard's initial scale. HDR shrink is a normalized fade multiplier,
+    // not a replacement absolute scale (which made >1 shards visibly pop
+    // smaller at the first draw and <1 shards refuse to fade initially).
+    // This normalization is a Web presentation choice, not Unity's scale law.
+    shard.localScale = shard.originalScale * sourceScale;
     shard.fadeSaturated = sourceScale <= 0 && shard.hdrPhase >= 1;
     shard.visible = shard.localScale > 0;
     const ratio = shard.localScale / shard.originalScale;
@@ -320,6 +325,19 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
       }
     }
     if (runtime.physicsContext) {
+      // The authored mesh is shrinking in HDR; keep the proxy contact sphere
+      // matched to the VISIBLE mesh instead of leaving a full-size invisible
+      // collider holding the fading shard above the Dojo floor. Web behavior,
+      // not a recovered Unity collider-disable or PhysX scaling contract.
+      const newRadius = shard.authoredCollisionRadius * ratio;
+      if (newRadius !== shard.collisionRadius) {
+        shard.collisionRadius = newRadius;
+        // A previously sleeping contact was solved for the OLD sphere.
+        // Wake it so gravity and the real swept floor can support the new one.
+        shard.webShardResting = false;
+        shard.webShardRestSeconds = 0;
+        shard.webShardSupport = null;
+      }
       // An already invisible HDR shard requires no further collision work.
       // Frame-budgeting preserves swept contact without stalling the Dojo on
       // long frames or after a browser tab resumes (creative Web policy).

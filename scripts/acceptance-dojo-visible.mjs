@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 export const DOJO_VISIBLE_STATUS=Object.freeze({
   OBSERVED:'WEB_RENDERED_VISUAL_HOOKS_SAMPLED_NOT_NATIVE_PARITY',
   GAP:'WEB_DOJO_WARNING_ACTIVE_NO_LIGHT_SUBMITTED_NEEDS_VIEWPORT_CHECK',
+  RAGDOLL_GAP:'WEB_DOJO_RAGDOLL_STEP_REJECTED_IN_CAPTURE',
   INCOMPLETE:'WEB_RENDERED_VISUAL_HOOKS_NOT_OBSERVED',
   INVALID:'WEB_RENDERED_VISUAL_HOOKS_INVALID',
 });
@@ -43,6 +44,8 @@ export function assessDojoVisibleIntegrations(trace) {
     warningAnyLightDrawFrames:0,warningUnknownLightTelemetryFrames:0,
     warningActiveWithoutAnyLightDrawFrames:0,
     firstWarningGapFrameId:null,maxHandsTriangles:0,
+    ragdollStatusFrames:0,ragdollActiveFrames:0,
+    ragdollStepRejectedFrames:0,firstRagdollStepRejectedFrameId:null,
   };
   const report=status=>({
     status,source:'OWNER_SUPPLIED_WEB_FRAME_METADATA_UNAUTHENTICATED',
@@ -74,6 +77,19 @@ export function assessDojoVisibleIntegrations(trace) {
       return report(DOJO_VISIBLE_STATUS.INVALID);
     }
     if(frame.activeScreen!=='playing') continue;
+    // Existing main.js rendered-frame hook includes a Web PBD status per enemy.
+    // Older recorder versions omit it: absence is UNKNOWN, never a pass.
+    const enemies=frame.gameplay?.encounter?.enemies;
+    if(Array.isArray(enemies)) {
+      const dead=enemies.filter(e=>e?.alive===false);
+      if(dead.some(e=>typeof e.deathPhysics==='string')) observed.ragdollStatusFrames++;
+      if(dead.some(e=>e.deathPhysics==='source-parameters-web-pbd-active'))
+        observed.ragdollActiveFrames++;
+      if(dead.some(e=>e.deathPhysics==='web-pbd-step-rejected')) {
+        observed.ragdollStepRejectedFrames++;
+        observed.firstRagdollStepRejectedFrameId??=frame.frameId;
+      }
+    }
     hasVisual=true;
     observed.sampledPlayingFrames++;
     if(v.worldDrawCalls>0) observed.worldMeshDrawFrames++;
@@ -106,6 +122,12 @@ export function assessDojoVisibleIntegrations(trace) {
     issues.push('no playing frame with Dojo native-world GPU draw receipt');
     return report(DOJO_VISIBLE_STATUS.INCOMPLETE);
   }
+  if(observed.ragdollStepRejectedFrames) {
+    issues.push('observed Dojo Web corpse with web-pbd-step-rejected: step error disables the runtime; SH-05 must inspect the host binding before claiming ragdoll motion');
+    return report(DOJO_VISIBLE_STATUS.RAGDOLL_GAP);
+  }
+  if(observed.ragdollStatusFrames===0)
+    issues.push('no dead-enemy PBD status sampled; ragdoll runtime remains UNKNOWN');
   if(observed.warningActiveWithoutAnyLightDrawFrames) {
     issues.push('source warning envelope active with zero projector AND false-light GPU submissions; verify source door in view before treating it as a renderer bug');
     return report(DOJO_VISIBLE_STATUS.GAP);
@@ -130,7 +152,8 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   } else try {
     const report=assessDojoVisibleIntegrations(JSON.parse(readFileSync(process.argv[index+1],'utf8')));
     process.stdout.write(JSON.stringify(report,null,2)+'\n');
-    if(report.status===DOJO_VISIBLE_STATUS.GAP) process.exitCode=1;
+    if(report.status===DOJO_VISIBLE_STATUS.GAP ||
+       report.status===DOJO_VISIBLE_STATUS.RAGDOLL_GAP) process.exitCode=1;
     else if(report.status!==DOJO_VISIBLE_STATUS.OBSERVED) process.exitCode=2;
   } catch(error) {
     process.stderr.write('Dojo visible integration report unavailable: '+error.message+'\n');

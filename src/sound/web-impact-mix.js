@@ -83,7 +83,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 2, shatter: 4,
         'player-hit': 6,
         katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
-        step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4,
+        step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4, 'dry-fire': 3,
     };
     const attackByCue = {
         // Player damage: dark body + short bright contact, Web-original synthesis.
@@ -165,6 +165,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             landing: [0.15, -650, 145, 54, 0.40],
             pickup: [0.08, 1400, 510, 880, 0.23],
             throw: [0.17, 890, 540, 180, 0.28],
+            'dry-fire': [0.105, 2150, 1250, 470, 0.20],
             dodge: [0.18, 1550, 980, 240, 0.30],
         };
         if (!Object.hasOwn(specs, cue))
@@ -197,6 +198,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         out.gain.value = intensity;
         let panner = null;
         let distanceFilter = null;
+        let enemyShotDistanceMetres = null;
         if (position && typeof context.createPanner === 'function') {
             panner = context.createPanner();
             panner.panningModel = 'HRTF';
@@ -216,6 +218,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             if (lx !== undefined && ly !== undefined && lz !== undefined &&
                 Number.isFinite(lx) && Number.isFinite(ly) && Number.isFinite(lz)) {
                 const distance = Math.hypot(position.x - lx, position.y - ly, position.z - lz);
+                enemyShotDistanceMetres = distance;
                 const cutoff = Math.max(1200, Math.min(context.sampleRate * 0.45, 18000 / (1 + distance * distance / 450)));
                 distanceFilter = context.createBiquadFilter();
                 distanceFilter.type = 'lowpass';
@@ -309,6 +312,24 @@ export function createWebImpactMix(context, maxVoices = 24) {
             noise.connect(gritBand);
             gritBand.connect(grit);
             grit.connect(out);
+        }
+        // WEB-ORIGINAL dry-fire: the short two-click action uses the current noise
+        // source and voice, not a guessed MCD clip or extra WebAudio source.
+        // SH-05's empty() bridge may overlay this on the identified native WAV.
+        if (cue === 'dry-fire') {
+            const actionBand = track(context.createBiquadFilter());
+            actionBand.type = 'bandpass';
+            actionBand.frequency.value = Math.min(2800, context.sampleRate * 0.42);
+            const click = track(context.createGain());
+            click.gain.setValueAtTime(0.0001, at);
+            click.gain.linearRampToValueAtTime(volume * 0.58, at + 0.003);
+            click.gain.exponentialRampToValueAtTime(0.0001, at + 0.020);
+            click.gain.setValueAtTime(0.0001, at + 0.054);
+            click.gain.linearRampToValueAtTime(volume * 0.30, at + 0.060);
+            click.gain.exponentialRampToValueAtTime(0.0001, at + 0.092);
+            noise.connect(actionBand);
+            actionBand.connect(click);
+            click.connect(out);
         }
         // Web-original airborne weapon swish, NOT a recovered MCD throw sample.
         // A descending band of the existing noise buffer follows the release.
@@ -476,9 +497,13 @@ export function createWebImpactMix(context, maxVoices = 24) {
             // WEB-ORIGINAL combat clarity: transient shots and confirmed contacts
             // briefly duck synthetic footsteps, never source-backed scene WAVs.
             // Movement cues and pickup/throw do not lower the walking bus.
-            if (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
-                cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana' ||
-                cue === 'punch-contact' || cue === 'dodge') {
+            // WEB-ORIGINAL near-field sidechain: far-away enemy fire is already HRTF/
+            // distance-attenuated; it must not repeatedly mask local movement.
+            // 14 metres is a creative Web threshold, NOT a Unity audio value.
+            if ((cue !== 'enemy-shot' || enemyShotDistanceMetres === null || enemyShotDistanceMetres <= 14) &&
+                (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
+                    cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana' ||
+                    cue === 'punch-contact' || cue === 'dodge')) {
                 footsteps.gain.cancelScheduledValues(at);
                 footsteps.gain.setTargetAtTime(0.10, at, 0.012);
                 footsteps.gain.setTargetAtTime(0.3, at + 0.14, 0.18);

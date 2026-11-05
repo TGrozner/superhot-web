@@ -1051,19 +1051,57 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
       // killEnemy creates the corpse runtime. Apply the SAME contact's source
       // force only afterwards; do not replay it on nonlethal stuns or other kills.
       if(sourcedThrownForce) {
+        let sourceApplied=false;
         try {
           const routed=applyNativeThrownDeathReaction(enemy.deathRuntime??null,result,{
             impactBoneIndex:Number.isInteger(hit.boneIndex)?hit.boneIndex:null,
           });
           enemy.deathThrownForceStatus=routed.status;
+          sourceApplied=routed.applied===1;
         } catch {
-          // Unqualified rig/force cannot break gameplay or fabricate a PhysX impulse.
           enemy.deathThrownForceStatus='source-thrown-force-rejected';
+        }
+        if(!sourceApplied) {
+          // The source command can identify an absent Rigidbody/partId.
+          // Restore the previous Web-only kick ONLY when the source route failed;
+          // successful source routing must never get a second impulse.
+          try {
+            const webApplied=applyWebDeathKick(enemy,{
+              boneIndex:hit.boneIndex,point:hit.point,
+              direction:normalize3(velocity),kind:'throw',
+            },enemy.deathRuntime?.definition);
+            if(webApplied) enemy.deathThrownForceStatus+='-with-web-kick-fallback';
+          } catch {
+            enemy.deathThrownForceStatus='source-and-web-thrown-force-rejected';
+          }
         }
       }
     }
   }
   return result;
+}
+// Web-only impact fallback shared by ordinary kills and failed sourced throws.
+// Called at most once per corpse: source success suppresses this whole path.
+function applyWebDeathKick(enemy,hitReceipt,definition) {
+  if(!enemy.deathRuntime || !Array.isArray(definition?.boneParents) ||
+      !hitReceipt || !Number.isInteger(hitReceipt.boneIndex) ||
+      hitReceipt.boneIndex<0 || hitReceipt.boneIndex>=definition.boneParents.length ||
+      !hitReceipt.point || !hitReceipt.direction ||
+      !['x','y','z'].every(axis=>Number.isFinite(hitReceipt.point[axis]) &&
+        Number.isFinite(hitReceipt.direction[axis])))return false;
+  let bone=hitReceipt.boneIndex;
+  while(bone>=0 && !enemy.deathRuntime.byBone.has(bone))
+    bone=definition.boneParents[bone];
+  const body=enemy.deathRuntime.byBone.get(bone);
+  if(!body)return false;
+  const direction=normalize3(hitReceipt.direction);
+  const strength=hitReceipt.kind==='throw'?1.5:1.1; // m/s; authored Web tuning
+  applyNativeDeathForce(enemy.deathRuntime,{
+    boneIndex:bone,mode:'Impulse',
+    vector:multiply3(direction,body.source.mass*strength),
+    point:hitReceipt.point,
+  });
+  return true;
 }
 // Normal source Kill toggles the authored rigidbodies; directional/head forces
 // are separate native routes. We only start an explicitly source-bound Web PBD
@@ -1106,29 +1144,10 @@ function prepareDojoDeathPhysics(enemy,hitReceipt=null) {
       previousModelMatrix:sampledMotionReady?enemy.previousActorModel:null,
       poseDeltaSeconds:sampledMotionReady?poseDeltaSeconds:null,
     });
-    // Deliberately tuned Web-only impact response. A sampled limb collider
-    // names the hit bone; walk its authored parents to the nearest Rigidbody
-    // for fingers, hands or other bones without their own rigidbody.
-    if(hitReceipt && !hitReceipt.sourcedThrownForce &&
-        Number.isInteger(hitReceipt.boneIndex) &&
-        hitReceipt.boneIndex>=0 && hitReceipt.boneIndex<definition.boneParents.length &&
-        hitReceipt.point && hitReceipt.direction &&
-        ['x','y','z'].every(axis=>Number.isFinite(hitReceipt.point[axis]) &&
-          Number.isFinite(hitReceipt.direction[axis]))) {
-      let bone=hitReceipt.boneIndex;
-      while(bone>=0 && !enemy.deathRuntime.byBone.has(bone))
-        bone=definition.boneParents[bone];
-      const body=enemy.deathRuntime.byBone.get(bone);
-      if(body) {
-        const direction=normalize3(hitReceipt.direction);
-        const strength=hitReceipt.kind==='throw'?1.5:1.1; // m/s; authored Web tuning
-        applyNativeDeathForce(enemy.deathRuntime,{
-          boneIndex:bone,mode:'Impulse',
-          vector:multiply3(direction,body.source.mass*strength),
-          point:hitReceipt.point,
-        });
-      }
-    }
+    // The one Web kick is delayed for lethal source throws; the caller will
+    // restore it only when the source force cannot be routed to a body.
+    if(hitReceipt && !hitReceipt.sourcedThrownForce)
+      applyWebDeathKick(enemy,hitReceipt,definition);
     enemy.deathRig=rig;
     enemy.deathBoneOrder=rig.boneOrder;
     enemy.deathPhysicsProvenance='source-prefab-plus-observed-web-velocity-not-physx';
@@ -1620,7 +1639,7 @@ function update(dt, activeRealDt) {
       const frame=advanceDojoDeathSkinFrame({
         runtime:enemy.deathRuntime, rig:enemy.deathRig,
         sourceBoneOrder:enemy.deathBoneOrder, scaledDelta:worldDt,
-        frameTiming:{simulationDelta:dt,activeRealDelta},
+        frameTiming:{simulationDelta:dt,activeRealDelta:activeRealDt},
         provenance:enemy.deathPhysicsProvenance,
       });
       enemy.deathSolvedPose=frame.solvedPose;

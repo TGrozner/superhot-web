@@ -737,9 +737,11 @@ export function createAudio(options = {}) {
 
   function empty() {
     if (!originalMode) return proceduralEmpty();
-    return playMcdClip('empty', 'pistolEmpty', {
+    // Web-original mechanical clicks complement, but never replace, the native
+    // empty-pistol receipt. The shared combat mix keeps its own voice budget.
+    return webCombatAccent('dry-fire', playMcdClip('empty', 'pistolEmpty', {
       gain: 0.4, mixerGroup: 'Env SFX', priority: 128,
-    });
+    }));
   }
 
   function ready({weaponThrownAtCallback} = {}) {

@@ -544,6 +544,32 @@ Un fragment de `GunPickup` reçoit déjà le couple échantillonné et des conta
 **Test ciblé :** `tests/animation-native-death-runtime.test.mjs` vérifie une impulsion extrême, une force soutenue extrême, une impulsion ordinaire et la simulation explicitement non budgétée. **À contrôler après merge :** le ressenti de 6–7 morts au Dojo à 30/60 FPS, des réimpulsions sur corps posés, l'absence de membres lancés à travers la pièce, les collisions sol/mur et victoire/REJOUER. La CI ne prouve pas ces sensations. Les valeurs du solveur natif effectif et la sélection live des transitions Mecanim demeurent inconnues ; les rapports `spec/animation/verification.json` et `link-verification.json` ne doivent pas être interprétés comme preuve d'exécution d'un état.
 
 
+### SH-06 — pas de catapultage de fragments après un hitch navigateur (Web, 05/11/2026)
+
+**Défaut du Dojo Web :** avec `limitWebFrameWork:true`, le budget historique
+limitait le **nombre** de sous-pas CCD à 4 mais leur attribuait tout le
+`scaledDelta`. Une interruption de 300 ms faisait ainsi avancer chaque éclat
+sur 300 ms en quatre grands sauts de 75 ms, au risque d'une projection visuelle
+excessive, contrairement au solveur ragdoll déjà borné à 100 ms.
+
+**Correction directement utilisée :** `advanceNativeFragmentBody` garde au
+maximum les **100 premières millisecondes** d'un hitch pour la physique Web
+(mouvement, gravité, friction, CCD et temps de contact). Une frame normale de
+100 ms à 10 FPS est intégralement simulée ; 30/60 FPS et les appels
+explicitement non budgétés conservent leur comportement. Le runtime externe
+`advanceGunPickupShardRuntime` continue de consommer le temps complet pour
+le fondu HDR et la destruction, sans dette de rattrapage physique. Aucun
+fichier SH-05 ni renderer à raccorder, aucun nouvel asset/draw call.
+
+**Test ciblé :** `tests/vfx-native-fragment-physics.test.mjs` compare
+une interruption de 300 ms (1 m à 10 m/s, contre 3 m avant correction),
+une frame normale de 100 ms (1 m), le chemin d'étude non budgété (3 m)
+et l'arrêt des balayages CCD pour les éclats invisibles. C'est une politique
+**originale Web**, pas une durée ou trajectoire PhysX/MCD prouvée ; les
+transitions Mecanim réelles et le paquet natif complet restent inconnus.
+La CI valide uniquement les calculs : SH-05 doit encore vérifier les éclats
+après alt-tab/hitch, 6–7 kills, F/E, REJOUER et p95/p99 sur Pages.
+
 ### Web combat VFX clock after a browser hitch (SH-06, 2026-11-04)
 
 `advanceWebImpactFeedback` now consumes the *full* active real-time delta given by
@@ -730,41 +756,12 @@ mais ne prouve toujours pas les 404 liaisons de destinataires d'événements
 ni la cadence d'exécution Unity/PhysX. Aucun PhysX 1:1 revendiqué.
 
 
-### SH-06 — source thrown-kill body force adapter (05/11/2026, intégration SH-05 requise)
+### SH-06 — continuité de taille des éclats déjà sourcés (Web, 05/11/2026)
 
-**Défaut observé dans le code Web (pas dans une capture navigateur) :**
-`applyThrownEnemyContact` émet un `body-force` après une vraie action `kill`
-(pour un projectile objet lancé, mode `Impulse` ou `ConstantForce`).
-`src/main.js::applyNativeEnemyContact` ne consomme actuellement que
-`drop-weapon`, `stun` et `kill` ; la commande `body-force` est ignorée.
-`prepareDojoDeathPhysics` injecte à sa place un élan créatif Web de
-1,5 m/s, y compris lorsque la réaction source a calculé sa propre force.
-Cela empêche le vrai feedback de lancer d'atteindre le ragdoll.
+**Défaut dans le chemin Dojo actif :** `native-items → createGunPickupShardRuntime → advanceGunPickupShardRuntime` charge chaque fragment avec un `modelMatrix` qui contient déjà son échelle d'origine. L'ancien effacement HDR interprétait cependant un facteur de disparition normalisé `[0,1]` comme une échelle absolue. Pour `originalScale>1`, le mesh rétrécissait immédiatement au premier dessin (`dt=0`); pour `originalScale<1`, il gardait sa taille trop longtemps avant de disparaître. **Correction Web :** appliquer le facteur de disparition à `originalScale`, puis calculer la matrice depuis `sourceMatrix` comme avant. Les fragments avec `originalScale=1`, la trajectoire physique, les colliders, la durée HDR, la rotation et les IDs de meshes ne changent pas. Aucun nouveau rendu/asset ni raccord `main.js`.
 
-**Livraison SH-06 :** `applyNativeThrownDeathReaction(runtime,reaction,{impactBoneIndex})`
-route uniquement le `body-force` d'une réaction déjà résolue comme létale
-vers `applyNativeDeathForce` et le runtime réellement construit. Une
-correspondance exacte `partId` est privilégiée ; le `boneIndex` du **même**
-contact permet de remonter uniquement l'arbre rig source jusqu'à un Rigidbody.
-Sans source, runtime ou os identifié : aucune force inventée ; fallback
-inchangé. Les deux modes source sont testés avec de **vrais résultats de
-`applyThrownEnemyContact`**, pas des intentions ad hoc.
+**Preuve :** comportement et invariant de `src/vfx/gun-pickup-shatter.js`, testé avec deux échelles d'origine non unitaires dans `tests/vfx-native-fragment-physics.test.mjs` (taille initiale et atténuation à 150 ms, sans modification de la matrice native fournie). La normalisation est un **choix visuel Web**, non un profil de `Transform.localScale` Unity prouvé par le corpus privé `GunPickup` (#76). La présence de fragments non unitaires dans le pack Dojo servi, leur perceptibilité réelle et les FPS doivent être vérifiés en navigateur après intégration ; le test Node ne constitue pas un smoke Pages.
 
-**Raccord requis par SH-05 uniquement, dans ses fichiers réservés :** après
-`killEnemy` et la création de `enemy.deathRuntime`, consommer exactement
-une fois la commande `body-force` de la réaction du **même contact** en
-appelant cet adaptateur avec `hit.boneIndex`. Supprimer le coup de pouce
-créatif `kind:'throw'` dans `prepareDojoDeathPhysics` **pour ces seuls
-kills dotés de cette commande**, sinon l'ennemi recevrait deux impulsions.
-Ne rien faire si le runtime source n'a pas été construit ; conserver les
-autres voies de kill, leurs VFX et la baseline F/E. L'issue #5 coordonne ce
-raccord, la fusion et le smoke Pages.
+## SH-06 — rétrécissement des collisions d'éclats (05/11/2026)
 
-**Provenance et limites :** `src/animation/enemy-reaction.js` réutilise les
-branches bornées GunPickup/PejAiController et la provenance privée existante ;
-aucune nouvelle extraction, aucun byte propriétaire, aucun runner. Le choix
-de projeter ces commandes vers un PBD Web est une approximation du jeu
-navigateur, **pas** une preuve d'exécution native Unity ni de parité PhysX.
-Tant que SH-05 n'a pas effectué ce raccord, la PR seule ne change pas la
-partie publiée. Tests requis ensuite : lancer létal blunt et sticky, trajectoire
-et contacts, impacts multiples, FPS, puis Dojo 7/7 et REJOUER.
+**Correctif Web de présentation, non natif.** Le chemin actif `GunPickup → advanceGunPickupShardRuntime → advanceNativeFragmentBody` rétrécit déjà les matrices des fragments pendant le fondu HDR. Leur sphère de contact restait pourtant à la taille initiale : un petit éclat pouvait sembler suspendu au-dessus du sol après sa réduction visuelle, surtout si le sommeil physique avait commencé. Le runtime conserve maintenant le rayon autorisé de l'asset d'origine et applique le même ratio de réduction à la sphère proxy ; une réduction réveille le fragment endormi afin de retrouver les contacts balayés du vrai décor. Aucune nouvelle géométrie, texture, collision inventée ou requête réseau. **Inconnue :** aucune preuve que Unity/PhysX réduise ses colliders selon cette même loi HDR. Les preuves natives de timings/fractures restent celles référencées ci-dessus ; le résultat esthétique sur Pages doit être observé après fusion, notamment au sol et après REJOUER.

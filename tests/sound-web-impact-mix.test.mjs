@@ -625,3 +625,46 @@ test('confirmed bullet wall contacts have a short spatial Web grit, not a shatte
   assert.ok(filters.every(f => f.disconnected || f.frequency.value === 2450));
   mix.dispose();
 });
+
+test('distant spatial enemy shots keep local footsteps audible but close fire still ducks', () => {
+  const {ctx, gains} = fakeAudio();
+  ctx.listener = {positionX: {value: 0}, positionY: {value: 0}, positionZ: {value: 0}};
+  const mix = createWebImpactMix(ctx);
+  const footsteps = gains[3].gain;
+  const duckTargets = [];
+  const apply = footsteps.setTargetAtTime;
+  footsteps.setTargetAtTime = function(value, at, duration) {
+    duckTargets.push(value);
+    return apply.call(this, value, at, duration);
+  };
+
+  assert.equal(mix.emit('enemy-shot', {position: {x: 30, y: 0, z: 0}}).status, 'started');
+  assert.deepEqual(duckTargets, []); // Distant gunfire still plays; local steps are not masked.
+  assert.equal(mix.emit('enemy-shot', {position: {x: 5, y: 0, z: 0}}).status, 'started');
+  assert.deepEqual(duckTargets, [0.10, 0.3]); // Actual nearby fire retains the sidechain.
+
+  duckTargets.length = 0;
+  assert.equal(mix.emit('player-shot', {position: {x: 30, y: 0, z: 0}}).status, 'started');
+  assert.deepEqual(duckTargets, [0.10, 0.3]); // Player action retains combat priority.
+  duckTargets.length = 0;
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.deepEqual(duckTargets, [0.10, 0.3]); // Unknown distance retains existing fallback.
+  mix.dispose();
+});
+
+test('Web dry-fire has two brief mechanical ticks on one source voice, never a gunshot', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  const receipt = mix.emit('dry-fire');
+  assert.deepEqual(receipt, {status:'started', source:'web-original-synthesis',
+    at:2.25, spatial:false});
+  assert.equal(nodes.length, 2, 'a Web click reuses noise and oscillator only');
+  const actionBand = filters.find(filter =>
+    filter.type === 'bandpass' && filter.frequency.value === 2800);
+  assert.ok(actionBand, 'a dry mechanical click has its own band-limited path');
+  assert.ok(gains.find(gain => actionBand.connections.includes(gain)));
+  assert.equal(nodes[0].connections.length, 2, 'base transient + staggered mechanical ticks');
+  assert.equal(mix.emit('step').status, 'blocked', 'an accepted empty trigger outranks footsteps');
+  assert.equal(mix.getActiveVoices(), 1);
+  mix.dispose();
+});

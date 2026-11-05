@@ -542,6 +542,46 @@ test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and 
     'an unarmed neighbor cannot force the ranged squad tactic');
 });
 
+test('J3 Web three-gunner fanout: left, center and right use stable independent routes',()=>{
+  // Web-only tactical layout on fabricated navmesh; no MCD AI parameters.
+  const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
+  const run=(reverse=false)=>{
+    const runtime=setup(),lead=firstSpawn(runtime,target);
+    lead.id='a'; runtime.actors.clear(); runtime.actors.set('a',lead);
+    const copy=(id,z)=>({
+      ...lead,id,x:2,y:0,z,clock:0,
+      reaction:{...lead.reaction},runtime:{...lead.runtime},
+      encounter:{...lead.encounter,route:null,target:null,webTacticalSide:1},
+    });
+    const middle=copy('b',4),right=copy('c',6);
+    runtime.actors.set('b',middle);runtime.actors.set('c',right);
+    const actors=reverse?[right,middle,lead]:[lead,middle,right];
+    for(let frame=0;frame<3;frame++) {
+      advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.2}));
+      for(let i=0;i<actors.length;i++) for(let j=i+1;j<actors.length;j++)
+        assert.ok(Math.hypot(actors[i].x-actors[j].x,actors[i].z-actors[j].z)>=.8-1e-6,
+          'fanout movement cannot cross a living ally capsule');
+    }
+    return [lead,middle,right].map(actor=>({
+      goal:actor.encounter.target,canAttack:actor.encounter.canAttack,
+      feet:p(actor.x,actor.y,actor.z),
+    }));
+  };
+  const forward=run(),reverse=run(true);
+  assert.ok(forward[0].goal.z<target.playerFeet.z-.8,
+    'first gunner takes a real left flank rather than sharing another lane');
+  assert.deepEqual(forward[1].goal,target.playerFeet,
+    'the central gunner keeps the ordinary direct source-navmesh route');
+  assert.ok(forward[2].goal.z>target.playerFeet.z+.8,
+    'third gunner takes the distinct right flank');
+  assert.deepEqual(forward.map(actor=>actor.goal),reverse.map(actor=>actor.goal),
+    'reversing iteration order cannot reshuffle squad flank assignments');
+  assert.ok(forward.every(actor=>actor.canAttack===false),
+    'a tactical slot never grants permission to shoot without a real muzzle');
+  assert.ok(forward.every(actor=>actor.feet.x>2),
+    'all three actors actually advance along their navmesh-approved routes');
+});
+
 test('J3 Web assault pressure: one armed squadmate closes fast while wingman covers, then disengages when alone',()=>{
   // Synthetic scene and actor identities; this tactic is deliberately Web-only.
   const data=scene();
@@ -782,6 +822,49 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
       {friendly:true,pos:aimedFrom,direction:p(NaN,0,0),speed:35}],
   }));
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
+});
+
+test('J3 active projectile horizon: enemies react only when a shot survives until its closest pass',()=>{
+  // Web-only flight-time fairness using the real Dojo projectile.ttl field.
+  // No native MCD prediction or asset is used. The encounter is fully synthetic.
+  const dodge=(ttl)=>{
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const approaching={friendly:true,type:'normal',pos:p(15,1,2),
+      direction:p(-1,0,0),speed:35,ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:[approaching],
+    }));
+    return enemy.encounter;
+  };
+  assert.equal(dodge(.05).webDodgeRemaining,0,
+    'shot expires before reaching the enemy, so no false sidestep');
+  assert.equal(dodge(0).webDodgeRemaining,0,
+    'already expired bullet cannot cause another dodge');
+  assert.equal(dodge(NaN).webDodgeRemaining,0,
+    'invalid lifetime cannot authorize predictive awareness');
+  assert.ok(dodge(.5).webDodgeRemaining>0,
+    'a real live bullet that can reach the enemy still triggers the dodge');
+
+  const nearMiss=(ttl)=>{
+    const data=scene();
+    data.gameplay.enemy.MinimumDistanceToPlayer=8;
+    const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+    const runtime=setup(data),enemy=firstSpawn(runtime,player);
+    enemy.muzzlePosition=p(2,1.4,2);
+    enemy.muzzleForward=p(1,0,0);
+    const passing={friendly:true,type:'normal',pos:p(7,1,3.4),
+      direction:p(-1,0,0),speed:22,ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+    }));
+    return enemy.encounter;
+  };
+  assert.equal(nearMiss(.05).webSuppressionRemaining,0,
+    'an expiring bullet cannot cause suppression before it passes');
+  assert.ok(nearMiss(.3).webSuppressionRemaining>0,
+    'an unexpired passage still produces cover-constrained suppression');
 });
 
 test('J3 Web projectile dodge takes a free perpendicular lane if a teammate blocks the first one',()=>{
@@ -1362,4 +1445,112 @@ test('J3 Web fireteams: solid cover separates nearby squads without silencing ei
     'one open-room fireteam continues alternating rather than double-firing');
   assert.equal(simulate(true),2,
     'two wall-separated fireteams independently shoot in the same window');
+});
+
+test('J3 Web fireteams skip unalerted and re-aiming gunners without wasting a live volley',()=>{
+  // A newly spawned gunner can be clear and reload-ready without being allowed
+  // to shoot yet. The other gunner must not lose the team's real Attack tick.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),lead=firstSpawn(runtime,target);
+  const wing={
+    ...lead,id:'z-newly-arrived',z:4,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+  };
+  lead.muzzlePosition=p(2,1.4,2);lead.muzzleForward=p(1,0,0);
+  wing.muzzlePosition=p(2,1.4,4);wing.muzzleForward=p(1,0,0);
+  const settings={...runtime.enemySettings,family:'Pistol'};
+  const fire=(wingAlertness,wingReroll,actors=[lead,wing])=>{
+    for(const actor of [lead,wing]) {
+      actor.runtime.pendingShot=null;
+      actor.runtime.targetNeedsReroll=false;
+      actor.runtime.targetRerollWait=0;
+      actor.runtime.attackDelayRemaining=-1;
+      actor.runtime.alertness=2;
+      actor.runtime.reloaded=false;
+    }
+    wing.runtime.alertness=wingAlertness;
+    wing.runtime.targetNeedsReroll=wingReroll;
+    wing.runtime.targetRerollWait=.2;
+    runtime.webVolleyClock=.7; // next window prefers z-newly-arrived.
+    advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.1}));
+    return actors.filter(actor=>{
+      assert.equal(actor.encounter.canAttack,true,
+        'the off-turn gunner remains able to see, aim and build alertness');
+      advanceNativeEnemyWeapon(actor.runtime,settings,.1);
+      return runNativeEnemyGunAttack(actor.runtime,settings,{
+        scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+        sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+        aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+        allowAttacking:true,canShot:true,active:true,
+        animationTarget:target.playerPosition,
+      },()=>0).shot;
+    }).map(actor=>actor.id);
+  };
+  assert.deepEqual(fire(-.5,false),[lead.id],
+    'a still-unalerted newcomer cannot steal the ready partner\'s live shot');
+  assert.deepEqual(fire(2,true),[lead.id],
+    'an outstanding AimTarget reroll cannot waste the shared firing beat');
+  assert.deepEqual(fire(2,false,[wing,lead]),[wing.id],
+    'once both are really ready, the scheduled wing can fire regardless of actor iteration');
+});
+
+test('J3 Web sustained player aim provokes one visible, nav-safe gunner sidestep without wallhacks',()=>{
+  // Web-authored aim pressure; synthetic Dojo/nav mesh, not a recovered
+  // MCD perception or timing rule. This exercises the live encounter loop.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const runtime=setup(data), enemy=firstSpawn(runtime,near);
+  enemy.clock=0; // outside ordinary warmup strafing
+  const aimed=p(-1,0,0), away=p(0,0,-1);
+  const tick=(fwd,world=.1,real=.1)=>
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,playerForward:fwd,scaledDeltaTime:world,unscaledDeltaTime:real,
+    }));
+  const first=p(enemy.x,enemy.y,enemy.z);
+  tick(aimed);tick(aimed);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),first,
+    'a fleeting camera glance does not trigger a supernatural dodge');
+  tick(away);tick(aimed);tick(aimed);
+  assert.equal(enemy.encounter.webAimRemaining,0,
+    'looking away resets the consecutive active-time aiming requirement');
+  tick(aimed);
+  assert.ok(Math.abs(enemy.z-first.z)>.04,
+    'a sustained, visible aim triggers a swept sidestep before the first shot');
+  assert.equal(enemy.encounter.canAttack,false,
+    'movement interrupts this enemy firing stance but creates no invulnerability');
+  const side=Math.sign(enemy.z-first.z);
+  const moved=enemy.z;
+  tick(aimed);
+  assert.ok((enemy.z-moved)*side>0,
+    'the same short avoidance beat continues without jitter or teleportation');
+  for(let i=0;i<8;i++)tick(away);
+  assert.equal(enemy.encounter.webAimRemaining,0,
+    'the move ends even while this actor remains armed and alive');
+  const resting=enemy.z;
+  tick(aimed);tick(aimed);tick(aimed);
+  assert.equal(enemy.z,resting,
+    'cooldown prevents an immediate repetitive evasive dance');
+
+  const hidden=setup(data,[box(5,1,2,.3,2.2,3)]);
+  const behind=firstSpawn(hidden,near);
+  behind.clock=0;
+  for(let i=0;i<6;i++)advanceNativeEncounter(hidden,input([behind],{
+    ...near,playerForward:aimed,scaledDeltaTime:.1,unscaledDeltaTime:.1,
+  }));
+  assert.equal(behind.encounter.webAimRemaining,0,
+    'a wall that blocks actual enemy sight never authorizes aim-based evasion');
+  assert.equal(behind.encounter.webAimLock,0,
+    'the player camera cannot reveal itself to a hidden enemy through world cover');
+
+  const invalid=setup(data), blind=firstSpawn(invalid,near);
+  blind.clock=0;
+  for(let i=0;i<5;i++)advanceNativeEncounter(invalid,input([blind],{
+    ...near,playerForward:p(0,0,0),scaledDeltaTime:.1,unscaledDeltaTime:.1,
+  }));
+  assert.equal(blind.encounter.webAimRemaining,0,
+    'zero camera direction fails closed rather than inventing aim pressure');
 });

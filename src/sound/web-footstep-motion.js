@@ -14,6 +14,10 @@ export function createWebFootstepMotion(emit) {
     const maxGroundMetresPerSecond = 10;
     const maxAllowedTravel = (elapsedSeconds) => Math.min(maxFrameTravel, Math.max(0.05, elapsedSeconds * maxGroundMetresPerSecond));
     const maxFrameGap = 0.3;
+    // Web-only landing weight: use the peak eye height to distinguish balcony
+    // drops from short hops, while rejecting one-frame vertical snap/respawn.
+    const maxLandingVerticalMetresPerSecond = 30;
+    const maxLandingDropBoost = 0.45;
     // Web-authored shoe locations: gameplay passes the camera/ear position.
     // Put ground contacts below the ears, and alternate modest lateral feet.
     const footDownFromCamera = 1.25;
@@ -26,6 +30,7 @@ export function createWebFootstepMotion(emit) {
     let airborneSince = null;
     let airborneFrames = 0;
     let lastAirPosition = null;
+    let highestAirY = null;
     function reset() {
         previous = null;
         previousTime = null;
@@ -34,6 +39,7 @@ export function createWebFootstepMotion(emit) {
         airborneSince = null;
         airborneFrames = 0;
         lastAirPosition = null;
+        highestAirY = null;
         footSide = -1;
     }
     function advance({ position, grounded, timeSeconds }) {
@@ -57,15 +63,32 @@ export function createWebFootstepMotion(emit) {
             airborneSince = null;
             airborneFrames = 0;
             lastAirPosition = null;
+            highestAirY = null;
             return null;
         }
         if (timeSeconds === previousTime)
             return null;
         if (!grounded) {
-            if (groundedBaseline && airborneSince === null)
+            // Web-only continuity gate: respawns can relocate the camera mid-air.
+            // Check every airborne sample, not just the last frame of a landing.
+            // An interrupted flight cannot re-arm until a new grounded baseline.
+            const lastPosition = lastAirPosition ?? previous;
+            const elapsed = timeSeconds - previousTime;
+            const discontinuity = lastPosition !== null && (Math.hypot(current.x - lastPosition.x, current.z - lastPosition.z) > maxAllowedTravel(elapsed) ||
+                Math.abs(current.y - lastPosition.y) > Math.min(maxFrameTravel, Math.max(0.05, elapsed * maxLandingVerticalMetresPerSecond)));
+            if (discontinuity) {
+                airborneSince = null;
+                airborneFrames = 0;
+                highestAirY = null;
+            }
+            if (!discontinuity && groundedBaseline && airborneSince === null) {
                 airborneSince = timeSeconds;
-            if (airborneSince !== null)
+                highestAirY = previous?.y ?? current.y;
+            }
+            if (!discontinuity && airborneSince !== null) {
                 airborneFrames++;
+                highestAirY = Math.max(highestAirY ?? current.y, current.y);
+            }
             lastAirPosition = current;
             groundedBaseline = false;
             previous = null;
@@ -77,18 +100,27 @@ export function createWebFootstepMotion(emit) {
             const airtime = timeSeconds - airborneSince;
             const finalTravel = lastAirPosition === null ? Infinity :
                 Math.hypot(current.x - lastAirPosition.x, current.z - lastAirPosition.z);
+            const finalVerticalTravel = lastAirPosition === null ? Infinity :
+                Math.abs(current.y - lastAirPosition.y);
+            const maxVerticalTravel = Math.min(maxFrameTravel, Math.max(0.05, (timeSeconds - previousTime) * maxLandingVerticalMetresPerSecond));
+            const dropHeight = Math.max(0, (highestAirY ?? current.y) - current.y);
             const validLanding = airborneFrames >= 2 && airtime >= 0.08 &&
-                finalTravel <= maxAllowedTravel(timeSeconds - previousTime);
+                finalTravel <= maxAllowedTravel(timeSeconds - previousTime) &&
+                finalVerticalTravel <= maxVerticalTravel;
             airborneSince = null;
             airborneFrames = 0;
             lastAirPosition = null;
+            highestAirY = null;
             groundedBaseline = true;
             previous = current;
             previousTime = timeSeconds;
             pendingMetres = 0;
-            // Creative Web-only contact thud, not a Unity animation/event marker.
+            // Creative Web-only contact thud. Height adds weight without making
+            // ordinary hops deafening; never infer native fall velocity/clip mapping.
+            const intensity = Math.min(1.4, 0.55 + airtime * 0.35 +
+                Math.min(maxLandingDropBoost, dropHeight * 0.18));
             return validLanding ? emit('landing', { position: { ...current, y: current.y - footDownFromCamera },
-                intensity: Math.min(1.1, 0.55 + airtime * 0.35) }) : null;
+                intensity }) : null;
         }
         groundedBaseline = true;
         if (previous === null) {

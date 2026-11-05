@@ -147,9 +147,9 @@ test('disabled source colliders remain disabled for fragment contacts',()=>{
   assert.ok(shard.position.y<0);
 });
 
-test('Web hitch budget keeps moving authored shards while limiting scene sweeps and skipping invisible HDR debris',()=>{
-  // Count scene reads, not wall-clock microbenchmarks. The uncapped baseline
-  // does ~45 native-sized steps here; the live Dojo must remain <=4.
+test('Web hitch budget limits shard travel to 100ms while HDR debris expires on full elapsed time',()=>{
+  // Count sweeps, not wall-clock microbenchmarks. An interrupted 300ms Web
+  // frame must not throw fragments through all 300ms of ballistic travel.
   let scans=0;
   const emptyScene={get boxes(){scans++;return [];}};
   const physics={...context(),collisionScene:emptyScene,gravity:{x:0,y:0,z:0}};
@@ -157,12 +157,18 @@ test('Web hitch budget keeps moving authored shards while limiting scene sweeps 
   const contacts=advanceNativeFragmentBody(bounded,0.3,{...physics,limitWebFrameWork:true});
   const boundedReads=scans;
   assert.deepEqual(contacts,[]);
-  assert.ok(Math.abs(bounded.position.x-3)<1e-8,'no dropped displacement after a hitch');
+  assert.ok(Math.abs(bounded.position.x-1)<1e-8,
+    'budgeted Web shards must simulate only 100ms of a 300ms hitch');
   scans=0;
   const uncapped=body();uncapped.velocity={x:10,y:0,z:0};
   advanceNativeFragmentBody(uncapped,0.3,physics);
   assert.ok(scans>boundedReads*5,'a long frame must not perform all 150Hz collision queries');
-  assert.ok(Math.abs(uncapped.position.x-bounded.position.x)<1e-8);
+  assert.ok(Math.abs(uncapped.position.x-3)<1e-8,
+    'explicit unbudgeted native-study calls still consume the full elapsed time');
+  const at10fps=body();at10fps.velocity={x:10,y:0,z:0};
+  advanceNativeFragmentBody(at10fps,0.1,{...physics,limitWebFrameWork:true});
+  assert.ok(Math.abs(at10fps.position.x-bounded.position.x)<1e-8,
+    'a normal 10 FPS frame remains fully simulated');
   assert.throws(()=>advanceNativeFragmentBody(body(),0.1,{...physics,limitWebFrameWork:'yes'}),/required/);
 
   const group=createGunPickupShardRuntime({
@@ -360,4 +366,58 @@ test('many distant Dojo boxes are pruned from shard sweeps without changing exac
   assert.ok(boxReads<16,'a warm fragmented Dojo scene must not enumerate every distant collider');
   scene.setEnabled('floor',false);
   assert.deepEqual(run(scene).hits,[],'a cached index must respect a disabled source support');
+});
+
+test('shattering preserves each authored mesh scale from first draw through HDR fading',()=>{
+  for (const originalScale of [0.25, 2]) {
+    // The fragment source matrix already carries the visible authored scale.
+    // Native HDR easing is not asserted; the Web visual must not pop at t=0.
+    const modelMatrix=matrix(0,0,0);
+    for (const index of [0,5,10]) modelMatrix[index]=originalScale;
+    const runtime=createGunPickupShardRuntime({
+      shards:[{id:'authored-scale-'+originalScale,modelMatrix,originalScale}],
+      parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+      torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[0],
+      gravity:{x:0,y:0,z:0},
+    });
+    const [shard]=advanceGunPickupShardRuntime(runtime,0);
+    assert.equal(shard.localScale,originalScale);
+    assert.equal(shard.modelMatrix[0],originalScale,
+      'the very first rendered frame must retain the authored scale');
+    advanceGunPickupShardRuntime(runtime,0.15);
+    assert.ok(Math.abs(shard.localScale-originalScale*0.75)<1e-10);
+    assert.ok(Math.abs(shard.modelMatrix[0]-originalScale*0.75)<1e-10,
+      'HDR shrink must apply consistently to small and large source shards');
+    assert.equal(shard.sourceMatrix[0],originalScale,'source transforms are immutable');
+  }
+});
+
+test('authored fading weapon fragments shrink swept floor contacts instead of hovering on a full-size sphere',()=>{
+  const physics=context();
+  physics.material={...physics.material,bounciness:0,staticFriction:2};
+  const runtime=createGunPickupShardRuntime({
+    shards:[{id:'fading-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,collisionRadius:0.2}],
+    parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[0],
+    gravity:physics.gravity,physics,
+  });
+  const shard=runtime.shards[0];
+  // Simulate a legitimate old-radius support that would otherwise keep the
+  // visibly shrinking shard asleep above the ground for the rest of its fade.
+  shard.webShardResting=true;
+  shard.webShardRestPosition={...shard.position};
+  shard.webShardSupport=physics.collisionScene.boxes.find(b=>b.collider?.id==='floor')?.collider;
+  const [fading]=advanceGunPickupShardRuntime(runtime,0.15);
+  assert.ok(Math.abs(fading.localScale-0.75)<1e-10);
+  assert.ok(Math.abs(fading.collisionRadius-0.15)<1e-10,
+    'source shape proxy must follow the visible HDR shrink ratio');
+  assert.equal(fading.webShardResting,false,'old-radius sleep must be revoked');
+  assert.ok(fading.position.y<0.19,
+    'gravity must bring the shrinking shard down toward its new floor contact');
+  assert.ok(fading.position.y>=fading.collisionRadius-1e-5,
+    'the new collider must still keep the visible shard above the source floor');
+  // An exact-touch boundary may not produce an impact *event* in this frame:
+  // the source sphere sweep only reports actual crossings, not proximity.
+  assert.ok(fading.position.y-fading.collisionRadius<0.05,
+    'reduced proxy and visible shard must stay near the real floor surface');
 });
