@@ -544,6 +544,32 @@ Un fragment de `GunPickup` reçoit déjà le couple échantillonné et des conta
 **Test ciblé :** `tests/animation-native-death-runtime.test.mjs` vérifie une impulsion extrême, une force soutenue extrême, une impulsion ordinaire et la simulation explicitement non budgétée. **À contrôler après merge :** le ressenti de 6–7 morts au Dojo à 30/60 FPS, des réimpulsions sur corps posés, l'absence de membres lancés à travers la pièce, les collisions sol/mur et victoire/REJOUER. La CI ne prouve pas ces sensations. Les valeurs du solveur natif effectif et la sélection live des transitions Mecanim demeurent inconnues ; les rapports `spec/animation/verification.json` et `link-verification.json` ne doivent pas être interprétés comme preuve d'exécution d'un état.
 
 
+### SH-06 — pas de catapultage de fragments après un hitch navigateur (Web, 05/11/2026)
+
+**Défaut du Dojo Web :** avec `limitWebFrameWork:true`, le budget historique
+limitait le **nombre** de sous-pas CCD à 4 mais leur attribuait tout le
+`scaledDelta`. Une interruption de 300 ms faisait ainsi avancer chaque éclat
+sur 300 ms en quatre grands sauts de 75 ms, au risque d'une projection visuelle
+excessive, contrairement au solveur ragdoll déjà borné à 100 ms.
+
+**Correction directement utilisée :** `advanceNativeFragmentBody` garde au
+maximum les **100 premières millisecondes** d'un hitch pour la physique Web
+(mouvement, gravité, friction, CCD et temps de contact). Une frame normale de
+100 ms à 10 FPS est intégralement simulée ; 30/60 FPS et les appels
+explicitement non budgétés conservent leur comportement. Le runtime externe
+`advanceGunPickupShardRuntime` continue de consommer le temps complet pour
+le fondu HDR et la destruction, sans dette de rattrapage physique. Aucun
+fichier SH-05 ni renderer à raccorder, aucun nouvel asset/draw call.
+
+**Test ciblé :** `tests/vfx-native-fragment-physics.test.mjs` compare
+une interruption de 300 ms (1 m à 10 m/s, contre 3 m avant correction),
+une frame normale de 100 ms (1 m), le chemin d'étude non budgété (3 m)
+et l'arrêt des balayages CCD pour les éclats invisibles. C'est une politique
+**originale Web**, pas une durée ou trajectoire PhysX/MCD prouvée ; les
+transitions Mecanim réelles et le paquet natif complet restent inconnus.
+La CI valide uniquement les calculs : SH-05 doit encore vérifier les éclats
+après alt-tab/hitch, 6–7 kills, F/E, REJOUER et p95/p99 sur Pages.
+
 ### Web combat VFX clock after a browser hitch (SH-06, 2026-11-04)
 
 `advanceWebImpactFeedback` now consumes the *full* active real-time delta given by
