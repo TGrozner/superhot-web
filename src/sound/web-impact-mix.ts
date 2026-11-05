@@ -48,7 +48,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   for (const bus of [weapons, impacts, footsteps, ambient]) bus.connect(dynamics);
   // Synthetic Web room slapback, not a recovered Unity reflection or impulse response.
   // Post-spatialization send colors weapon/item and impact cues, not footsteps.
-  // One shared delay/filter pair keeps node count constant during burst combat.
+  // Two shared delay/filter stages keep node count constant during burst combat.
   const roomReflections: AudioNode[] = [];
   if (typeof context.createDelay === 'function') {
     const send = context.createGain();
@@ -65,8 +65,19 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     send.connect(delay);
     delay.connect(tone);
     tone.connect(returnGain);
+    // WEB-ORIGINAL second, darker Dojo reflection (90ms + 75ms).
+    // A shared serial branch: no extra cue voice, playback source or owned WAV.
+    // Timing and EQ are creative Web room design, not Unity scene acoustics.
+    const lateDelay = context.createDelay(0.25);
+    const lateTone = context.createBiquadFilter();
+    lateDelay.delayTime.value = 0.075;
+    lateTone.type = 'bandpass';
+    lateTone.frequency.value = 1350;
+    tone.connect(lateDelay);
+    lateDelay.connect(lateTone);
+    lateTone.connect(returnGain);
     returnGain.connect(dynamics);
-    roomReflections.push(send, delay, tone, returnGain);
+    roomReflections.push(send, delay, tone, lateDelay, lateTone, returnGain);
   }
   const noiseBed = context.createBuffer(1, Math.ceil(context.sampleRate * 0.5), context.sampleRate);
   const samples = noiseBed.getChannelData(0);

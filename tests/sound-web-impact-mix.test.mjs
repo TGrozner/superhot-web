@@ -202,11 +202,12 @@ test('Web HRTF emitters soften with distance and follow the active listener', ()
   oldMix.dispose();
 });
 
-test('Web room slapback is a shared, filtered combat send and does not echo footsteps', () => {
+test('Web Dojo room sends two filtered early reflections without echoing footsteps', () => {
   const {ctx, nodes, gains, filters, delays} = fakeAudio();
   const mix = createWebImpactMix(ctx, 2);
-  assert.equal(delays.length, 1);
+  assert.equal(delays.length, 2);
   assert.equal(delays[0].delayTime.value, 0.09);
+  assert.equal(delays[1].delayTime.value, 0.075);
   const roomTone = filters.find(n => n.type === 'lowpass' && n.frequency.value === 2450);
   assert.ok(roomTone);
   const [master, weapons, impacts, steps, ambience, send, wet] = gains;
@@ -219,13 +220,20 @@ test('Web room slapback is a shared, filtered combat send and does not echo foot
   assert.ok(send.connections.includes(delays[0]));
   assert.ok(delays[0].connections.includes(roomTone));
   assert.ok(roomTone.connections.includes(wet));
+  const lateTone = filters.find(n => n.type === 'bandpass' && n.frequency.value === 1350);
+  assert.ok(lateTone);
+  assert.ok(roomTone.connections.includes(delays[1]));
+  assert.ok(delays[1].connections.includes(lateTone));
+  assert.ok(lateTone.connections.includes(wet));
   assert.equal(mix.emit('player-shot').status, 'started');
   assert.equal(mix.emit('shatter').status, 'started');
   assert.equal(mix.emit('step').status, 'blocked'); // Priority cap unchanged.
-  assert.equal(delays.length, 1); // No per-event delay allocations.
+  assert.equal(delays.length, 2); // No per-event delay allocations.
   assert.equal(mix.getActiveVoices(), 2);
   mix.dispose();
   assert.equal(delays[0].disconnected, true);
+  assert.equal(delays[1].disconnected, true);
+  assert.equal(lateTone.disconnected, true);
   assert.equal(send.disconnected, true);
   assert.equal(wet.disconnected, true);
   assert.equal(master.disconnected, true);
@@ -349,7 +357,7 @@ test('Web player shot layers a delayed slide action independently of enemy muzzl
   assert.equal(mix.emit('enemy-shot').status, 'started');
   assert.equal(nodes.length, 4);
   assert.equal(nodes[2].connections.length, 3); // Enemy burst, crack and its own pressure layer.
-  assert.equal(filters.filter(f => f.type === 'bandpass').length, 2); // Player slide + enemy pressure.
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 3); // Shared room return + player slide + enemy pressure.
   mix.dispose();
 });
 
@@ -370,7 +378,8 @@ test('Web-original thrown weapon has a descending air swish without extra voices
   assert.equal(mix.emit('throw', {position: {x: 2, y: 1, z: 0}}).status, 'started');
   assert.equal(nodes.length, 2); // Existing noise/body only; no extra sources.
   assert.equal(nodes[0].connections.length, 2); // Old burst + airy release.
-  const swish = filters.find(f => f.type === 'bandpass');
+  const swish = filters.find(f => f.type === 'bandpass' &&
+    ramps.some(e => e.filter === f && e.value === 800));
   assert.ok(swish);
   assert.ok(ramps.some(e => e.filter === swish && e.value === 800 &&
     Math.abs(e.time - (ctx.currentTime + 0.17)) < 1e-12));
@@ -380,7 +389,7 @@ test('Web-original thrown weapon has a descending air swish without extra voices
   assert.equal(mix.emit('pickup').status, 'started');
   assert.equal(nodes.length, 4);
   assert.equal(nodes[2].connections.length, 2); // Base burst plus new pickup latch.
-  assert.equal(filters.filter(f => f.type === 'bandpass').length, 2); // Throw swish + pickup latch.
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 3); // Shared room return + throw swish + pickup latch.
   mix.dispose();
 });
 
@@ -671,7 +680,7 @@ test('confirmed bullet wall contacts have a short spatial Web grit, not a shatte
   assert.equal(mix.emit('step').status, 'blocked'); // Wall hit outranks a footstep.
   for (const source of nodes) source.onended();
   assert.equal(mix.getActiveVoices(), 0);
-  assert.ok(filters.every(f => f.disconnected || f.frequency.value === 2450));
+  assert.ok(filters.every(f => f.disconnected || f.frequency.value === 2450 || f.frequency.value === 1350));
   mix.dispose();
 });
 
