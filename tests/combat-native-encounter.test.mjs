@@ -2176,3 +2176,47 @@ test('J3 Web visible retreat pressure: gunners pursue actual fleeing feet withou
   assert.equal(sniper.enemy.x,2,
     'a qualified sniper retains its long-range hold instead of pistol anti-kiting');
 });
+
+
+test('J3 Web gunner reload selects real side cover without inventing a shot or bypassing body nav',()=>{
+  // Fabricated eye-height wall. First tactical side is +Z, but only -Z
+  // produces an occluded post-step eye ray. No original MCD timing/asset claim.
+  const data=scene(); data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,5),playerPosition:p(8,1.6,5)};
+  const prepare=(colliders=[])=>{
+    const runtime=setup(data,colliders),enemy=firstSpawn(runtime,target);
+    enemy.z=5; enemy.clock=0; // no periodic sidestep: reload is the sole trigger
+    enemy.muzzlePosition=p(2,1.4,5);
+    enemy.muzzleForward=p(1,0,0);
+    enemy.runtime.haveBeenSeen=true; // only after a real GunAttack receipt
+    enemy.runtime.attackDelayRemaining=.55; // above this frame's existing squad fire-turn cost
+    return {runtime,enemy};
+  };
+  const step=({runtime,enemy})=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,scaledDeltaTime:.5,unscaledDeltaTime:.5,
+  }));
+  const covered=prepare([box(5,1.2,4.6,.15,2.4,.2)]);
+  assert.equal(nativeSegmentHit(covered.runtime.sightCollision,
+    p(2,1.4,5),target.playerPosition),null,
+    'gunner starts with a clear real muzzle rather than a fabricated cover state');
+  step(covered);
+  assert.ok(covered.enemy.z<4.95,
+    'reload sidestep chooses the reachable -Z cover instead of its exposed +Z default');
+  assert.equal(covered.enemy.walking,true,
+    'the existing animated movement receives actual collision-checked feet');
+  assert.equal(covered.enemy.encounter.canAttack,false,
+    'post-movement real eye occlusion removes permission to fire');
+  assert.equal(covered.enemy.runtime.attackDelayRemaining,.55,
+    'taking cover cannot invent or advance the weapon cooldown');
+
+  const open=prepare();
+  step(open);
+  assert.ok(open.enemy.z>5.05,
+    'without real nearby cover, the original preferred strafe side is unchanged');
+
+  const committed=prepare([box(5,1.2,4.6,.15,2.4,.2)]);
+  committed.enemy.runtime.pendingShot={target:{...target.playerPosition},speed:28};
+  step(committed);
+  assert.equal(committed.enemy.z,5,
+    'a committed shot awaiting its animated muzzle is never dragged into cover');
+});

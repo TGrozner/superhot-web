@@ -235,7 +235,8 @@ function webFinalSurvivorBreacher(runtime, enemy, enemies) {
 // only ranks two legal moves; it NEVER authorizes a shot (next frame's real
 // posed muzzle, line of sight and ally clearance must pass again).
 function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
-  {sideOverride=null, maxDistance=Infinity, preferClearMuzzle=false, firingTarget=null}={}) {
+  {sideOverride=null, maxDistance=Infinity, preferClearMuzzle=false,
+    preferCover=false, firingTarget=null}={}) {
   const start=position(enemy), state=enemy.encounter;
   const dx=playerFeet.x-start.x, dz=playerFeet.z-start.z, d=Math.hypot(dx,dz);
   if (!Number.isFinite(d) || (d<=EPSILON && sideOverride===null)) return false;
@@ -265,6 +266,16 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
         !webLivingAllyIntersectsSegment(runtime,enemy,muzzle,firingTarget,enemies);
       if (!clear) {
         fallback ??= candidate; // Preserve the original safe-side choice if both remain blocked.
+        continue;
+      }
+    }
+    // Web-only reload footwork: if one legal short step moves the eye behind
+    // genuine world cover, prefer it over an equally safe exposed step.
+    // Real cover is checked for THIS candidate; no sight/attack gate is granted.
+    if (preferCover && firingTarget) {
+      const eye={x:moved.x,y:moved.y+runtime.aimHeight,z:moved.z};
+      if (nativeSphereHit(runtime.sightCollision,eye,firingTarget,.2)===null) {
+        fallback ??= candidate; // Open arena: preserve normal strafe preference.
         continue;
       }
     }
@@ -1360,7 +1371,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
     } else if((reloadScoot || tactical) && scaledDeltaTime>0 &&
         !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
-          needsFiringLane ? {preferClearMuzzle:true,firingTarget:playerPosition} : {}))
+          needsFiringLane ? {preferClearMuzzle:true,firingTarget:playerPosition}
+             : reloadScoot ? {preferCover:true,firingTarget:playerPosition} : {}))
       enemy.runtime.speed=0;
     return;
   }
