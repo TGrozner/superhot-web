@@ -202,11 +202,12 @@ test('Web HRTF emitters soften with distance and follow the active listener', ()
   oldMix.dispose();
 });
 
-test('Web room slapback is a shared, filtered combat send and does not echo footsteps', () => {
+test('Web Dojo room sends two filtered early reflections without echoing footsteps', () => {
   const {ctx, nodes, gains, filters, delays} = fakeAudio();
   const mix = createWebImpactMix(ctx, 2);
-  assert.equal(delays.length, 1);
+  assert.equal(delays.length, 2);
   assert.equal(delays[0].delayTime.value, 0.09);
+  assert.equal(delays[1].delayTime.value, 0.075);
   const roomTone = filters.find(n => n.type === 'lowpass' && n.frequency.value === 2450);
   assert.ok(roomTone);
   const [master, weapons, impacts, steps, ambience, send, wet] = gains;
@@ -219,13 +220,20 @@ test('Web room slapback is a shared, filtered combat send and does not echo foot
   assert.ok(send.connections.includes(delays[0]));
   assert.ok(delays[0].connections.includes(roomTone));
   assert.ok(roomTone.connections.includes(wet));
+  const lateTone = filters.find(n => n.type === 'bandpass' && n.frequency.value === 1350);
+  assert.ok(lateTone);
+  assert.ok(roomTone.connections.includes(delays[1]));
+  assert.ok(delays[1].connections.includes(lateTone));
+  assert.ok(lateTone.connections.includes(wet));
   assert.equal(mix.emit('player-shot').status, 'started');
   assert.equal(mix.emit('shatter').status, 'started');
   assert.equal(mix.emit('step').status, 'blocked'); // Priority cap unchanged.
-  assert.equal(delays.length, 1); // No per-event delay allocations.
+  assert.equal(delays.length, 2); // No per-event delay allocations.
   assert.equal(mix.getActiveVoices(), 2);
   mix.dispose();
   assert.equal(delays[0].disconnected, true);
+  assert.equal(delays[1].disconnected, true);
+  assert.equal(lateTone.disconnected, true);
   assert.equal(send.disconnected, true);
   assert.equal(wet.disconnected, true);
   assert.equal(master.disconnected, true);
