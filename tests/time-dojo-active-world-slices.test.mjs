@@ -71,7 +71,9 @@ test('Dojo Web active motion slices conserve 10/30/60 FPS travel without an over
   const stoppedWorld = splitWebActiveWorldFrame({
     simulationDt: 0.05, activeRealDt: 0.1, worldDelta: 0, maximumSteps: 4,
   });
-  assert.deepEqual(stoppedWorld.worldSteps, [0, 0]);
+  assert.deepEqual(stoppedWorld, {
+    worldSteps: [], chargedActiveDt: 0, discardedActiveDt: 0.1,
+  }, 'forced zero-scale world must not dispatch repeated zero-dt callbacks');
   assert.throws(() => splitWebActiveWorldFrame({
     simulationDt: 0.05, activeRealDt: 0.1, worldDelta: 0.05, maximumSteps: 0,
   }), RangeError);
