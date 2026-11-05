@@ -29,6 +29,30 @@ test('SH10 reads actual Web GPU frame receipts without calling them source-pixel
   assert.equal(result.nativeParityVerdict,'UNKNOWN');
 });
 
+test('SH10 real-frame PBD failure status is a Web regression candidate, not native refutation',()=>{
+  const t=trace();
+  t.frames[0].gameplay.encounter={enemies:[{id:'native-encounter-0',alive:false,
+    deathPhysics:'source-parameters-web-pbd-active'}]};
+  t.frames[1].gameplay.encounter={enemies:[{id:'native-encounter-0',alive:false,
+    deathPhysics:'web-pbd-step-rejected'}]};
+  const result=assessDojoVisibleIntegrations(t);
+  assert.equal(result.status,DOJO_VISIBLE_STATUS.RAGDOLL_GAP);
+  assert.equal(result.observed.ragdollStatusFrames,2);
+  assert.equal(result.observed.ragdollActiveFrames,1);
+  assert.equal(result.observed.ragdollStepRejectedFrames,1);
+  assert.equal(result.observed.firstRagdollStepRejectedFrameId,2);
+  assert.equal(result.nativeParityVerdict,'UNKNOWN');
+  assert.equal(result.pixelComparisonPerformed,false);
+  assert.match(result.issues.join(' '),/host binding/);
+});
+
+test('SH10 older traces with no death status do not certify working ragdolls',()=>{
+  const result=assessDojoVisibleIntegrations(trace());
+  assert.equal(result.status,DOJO_VISIBLE_STATUS.OBSERVED);
+  assert.equal(result.observed.ragdollStatusFrames,0);
+  assert.match(result.issues.join(' '),/ragdoll runtime remains UNKNOWN/);
+});
+
 test('SH10 an ACTIVE source door-warning envelope without GPU spotlight is an explicit Web rendering gap',()=>{
   const result=assessDojoVisibleIntegrations(trace([
     {},{warningEventStatus:'triggered',warningActiveEnvelopes:1,warningRenderedSpotlights:0},
