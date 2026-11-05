@@ -1825,3 +1825,44 @@ test('J3 Web verified weapon roles: shotgun closes, sniper holds and retreats, f
   assert.ok(point.x>2,'the shotgun takes the assault lead in a local mixed fireteam');
   assert.equal(wing.x,2,'pistol wingman maintains the covering ring');
 });
+
+
+test('J3 Web solo pistol closes only when genuinely visible behind player, never through cover',()=>{
+  // Existing fully playable Web fallback is deliberately covered: the native
+  // factory selector is not wired in shared main on this HEAD.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=6;
+  const player={playerFeet:p(7.2,0,2),playerPosition:p(7.2,1.6,2)};
+  const facing={...player,playerForward:p(-1,0,0)};
+  const lookingAway={...player,playerForward:p(1,0,0)};
+  const oneFrame=(world,actor,view)=>advanceNativeEncounter(world,input([actor],{
+    ...view,scaledDeltaTime:.25,unscaledDeltaTime:.25,
+  }));
+
+  const ordinary=setup(data),guard=firstSpawn(ordinary,facing);
+  oneFrame(ordinary,guard,facing);
+  assert.equal(guard.x,2,'facing the gunner keeps the normal pistol ring');
+
+  const hunting=setup(data),approacher=firstSpawn(hunting,lookingAway);
+  assert.equal(approacher.sourceActivation.status,'web-pistol-fallback');
+  oneFrame(hunting,approacher,lookingAway);
+  assert.ok(approacher.x>2.1,'a real visible Web pistol closes from behind');
+  assert.equal(approacher.encounter.canAttack,false,
+    'turning away is never substitute permission for a missing muzzle');
+  const advanced=approacher.x;
+  oneFrame(hunting,approacher,facing);
+  assert.equal(approacher.x,advanced,'turning back immediately restores pistol spacing');
+
+  const committed=setup(data),firing=firstSpawn(committed,lookingAway);
+  firing.runtime.pendingShot={target:p(7.2,1.6,2),speed:28};
+  oneFrame(committed,firing,lookingAway);
+  assert.equal(firing.x,2,'an accepted shot is never displaced by an ambush approach');
+
+  const covered=setup(data,[box(4.5,1,2,.1,2,3)]),hidden=firstSpawn(covered,lookingAway);
+  const control=setup(data,[box(4.5,1,2,.1,2,3)]),hiddenControl=firstSpawn(control,facing);
+  oneFrame(covered,hidden,lookingAway);
+  oneFrame(control,hiddenControl,facing);
+  assert.equal(hidden.encounter.visible,false);
+  assert.equal(hidden.x,hiddenControl.x,'no hidden-player camera tracking through real cover');
+  assert.ok(hidden.x<=4.05,'cover collision continues to block pursuit');
+});
