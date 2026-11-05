@@ -35,6 +35,42 @@ test('readiness uses strict source timer and alert thresholds',()=>{
   assert.equal(run(ready()).shot,true);
 });
 
+test('J2 Web world freeze blocks new gunshots, reload cues and rerolls without erasing committed shots',()=>{
+  const frozen=ready();
+  const originalDelay=frozen.attackDelayRemaining;
+  let samples=0;
+  for(let i=0;i<4;i++) {
+    advanceNativeEnemyWeapon(frozen,settings,0);
+    const action=runNativeEnemyGunAttack(frozen,settings,{
+      ...input(),scaledDeltaTime:0,unscaledDeltaTime:.2,
+    },()=>{samples++;return .5;});
+    assert.equal(action.shot,false);
+    assert.equal(action.reloadWarning,false);
+    assert.equal(frozen.pendingShot,null);
+    assert.equal(frozen.attackDelayRemaining,originalDelay);
+  }
+  assert.equal(samples,0,'frozen world does not sample a new attack');
+  assert.equal(run(frozen).shot,true,'the existing ready shot resumes on the next world tick');
+  const committed=frozen.pendingShot;
+  assert.ok(committed);
+  assert.equal(run(frozen,{scaledDeltaTime:0,unscaledDeltaTime:.1}).shot,false);
+  assert.strictEqual(frozen.pendingShot,committed,'an already accepted Attack remains locked');
+  assert.equal(consumeNativeEnemyShot(frozen,p(0)).speed,settings.projectileSpeed);
+
+  const reroll=ready();
+  reroll.targetNeedsReroll=true;
+  reroll.targetRerollWait=-.01;
+  assert.equal(run(reroll,{scaledDeltaTime:0}).rerollAimTarget,false);
+  assert.equal(reroll.targetNeedsReroll,true);
+  assert.equal(run(reroll,{scaledDeltaTime:.01}).rerollAimTarget,true);
+
+  const reload=createNativeEnemyState(settings);
+  reload.attackDelayRemaining=.09;
+  assert.equal(run(reload,{scaledDeltaTime:0}).reloadWarning,false);
+  assert.equal(reload.reloaded,false);
+  assert.equal(run(reload,{scaledDeltaTime:.01}).reloadWarning,true);
+});
+
 test('nearer wall, unavailable sight, unready arm and muzzle obstruction block firing',()=>{
   for (const overrides of [{targetSight:false},{targetSight:null},{aimTargetInSight:false},
     {aimReady:false},{aimReady:null},{weaponInRightPosition:false},{weaponInRightPosition:null},
