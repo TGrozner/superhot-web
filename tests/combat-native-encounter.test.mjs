@@ -2090,3 +2090,66 @@ test('J3 Web hit recovery: confirmed nonlethal stun triggers one swept lateral r
   assert.deepEqual(p(dead.enemy.x,dead.enemy.y,dead.enemy.z),p(2,0,2),
     'lethal hits do not create recovering living actors');
 });
+
+test('J3 Web visible retreat pressure: gunners pursue actual fleeing feet without seeing through cover',()=>{
+  // Fabricated geometry and a Web-authored spacing rule, never MCD data.
+  // The player faces the gunner throughout: this is NOT the existing
+  // camera-back-turned approach feature.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=7;
+  const view=x=>({
+    playerFeet:p(x,0,2),playerPosition:p(x,1.6,2),playerForward:p(-1,0,0),
+  });
+  const spawn=(colliders=[])=>{
+    const runtime=setup(data,colliders),enemy=firstSpawn(runtime,view(8));
+    enemy.clock=0; // exclude unrelated cyclical Web strafe
+    return {runtime,enemy};
+  };
+  const tick=({runtime,enemy},x,dt=.1)=>advanceNativeEncounter(runtime,input([enemy],{
+    ...view(x),scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  }));
+
+  const fleeing=spawn();
+  tick(fleeing,8);
+  assert.equal(fleeing.enemy.x,2,'normal pistol range holds when player stands still');
+  tick(fleeing,8.4);
+  assert.ok(fleeing.enemy.x>2.02,
+    'an actually observed retreat makes the gunner close its Web firing ring');
+  assert.equal(fleeing.enemy.walking,true,'feet movement drives the existing locomotion flag');
+  assert.equal(fleeing.enemy.encounter.canAttack,false,
+    'an absent animated muzzle still cannot authorize a shot');
+  const forward=fleeing.enemy.x;
+  tick(fleeing,8.4);
+  assert.equal(fleeing.enemy.x,forward,
+    'the pressure stops immediately when observed retreat stops');
+
+  const frozen=spawn();
+  tick(frozen,8);
+  tick(frozen,8.4,0);
+  tick(frozen,8.4);
+  assert.equal(frozen.enemy.x,2,
+    'a player displacement sampled during stopped world time is not banked as a retreat');
+
+  const committed=spawn();
+  tick(committed,8);
+  committed.enemy.runtime.pendingShot={target:p(8,1.6,2),speed:28};
+  tick(committed,8.4);
+  assert.equal(committed.enemy.x,2,
+    'an already accepted shot cannot be displaced by this Web tactic');
+
+  const hidden=spawn([box(4.5,1,2,.1,2,3)]);
+  tick(hidden,8);
+  tick(hidden,8.4);
+  assert.equal(hidden.enemy.encounter.visible,false);
+  assert.equal(hidden.enemy.encounter.webObservedPlayerFeet,null,
+    'a wall clears the personal-motion baseline; hidden movement grants no pressure');
+
+  const sniper=spawn();
+  sniper.enemy.weaponFamily='SniperRifle';
+  sniper.enemy.activeWeaponSettings={...sniper.runtime.enemySettings,family:'SniperRifle'};
+  sniper.enemy.sourceActivation={status:'qualified',family:'SniperRifle'};
+  tick(sniper,8);
+  tick(sniper,8.4);
+  assert.equal(sniper.enemy.x,2,
+    'a qualified sniper retains its long-range hold instead of pistol anti-kiting');
+});
