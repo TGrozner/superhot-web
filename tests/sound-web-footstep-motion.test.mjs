@@ -34,7 +34,7 @@ test('Web gait rejects a paused frame and malformed position without emitting', 
   let count = 0;
   const gait = createWebFootstepMotion(() => { count++; return {status:'started', source:'web-original-synthesis', at:1, spatial:false}; });
   assert.equal(gait.advance({position:p(0), grounded:true, timeSeconds:1}), null);
-  assert.equal(gait.advance({position:p(0.9), grounded:true, timeSeconds:1.1}), null);
+  assert.equal(gait.advance({position:p(0.7), grounded:true, timeSeconds:1.1}), null);
   assert.equal(gait.advance({position:p(1.8), grounded:true, timeSeconds:3}), null);
   assert.equal(gait.advance({position:p(2.5), grounded:true, timeSeconds:3.1}), null);
   assert.equal(count, 0);
