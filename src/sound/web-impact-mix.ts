@@ -96,9 +96,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     master.gain.setTargetAtTime(0.76 * level, at, 0.025);
   }
   const priorityByCue: Record<WebImpactCue, number> = {
-    // Creative Web priorities: resolved wall ricochets stay audible under gunfire;
-    // damage feedback still outranks all other cues. NOT recovered MCD mixer data.
-    'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 5, shatter: 4,
+    // Creative Web priorities: resolved wall ricochets tie nearby muzzle shots
+    // when saturated; player shots and damage still outrank them. NOT Unity data.
+    'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 4, shatter: 4,
     'player-hit': 6,
     katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
     step: 1, landing: 2, pickup: 2, throw: 3, dodge: 4, 'dry-fire': 5,
