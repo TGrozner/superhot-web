@@ -89,6 +89,11 @@ export function runNativeEnemyGunAttack(state,settings,{
 },random=Math.random) {
   nonnegative(unscaledDeltaTime,'unscaledDeltaTime');
   nonnegative(scaledDeltaTime,'scaledDeltaTime');
+  // Active real-time frames may have a frozen world clock. Keep the existing
+  // zero/zero instant source-evaluation contract (used by pure fire-phase
+  // callers), but never advance NEW gun events while real time elapses and
+  // world time is exactly zero. The preaccepted pendingShot remains intact.
+  const webFrozenActiveFrame=scaledDeltaTime===0 && unscaledDeltaTime>0;
   for (const [name,value] of Object.entries({allowAttacking,canShot,active})) flag(value,name);
   for (const [name,value] of Object.entries({aimTargetInSight,aimReady,weaponInRightPosition})) {
     if (value!==null) flag(value,name);
@@ -105,7 +110,7 @@ export function runNativeEnemyGunAttack(state,settings,{
     if (aimTargetInSight!==true) actions.refreshAimTarget=true;
     else if (state.targetNeedsReroll) {
       state.targetRerollWait-=scaledDeltaTime;
-      if (state.targetRerollWait<0) { state.targetNeedsReroll=false; actions.rerollAimTarget=true; actions.refreshAimTarget=true; }
+      if (!webFrozenActiveFrame && state.targetRerollWait<0) { state.targetNeedsReroll=false; actions.rerollAimTarget=true; actions.refreshAimTarget=true; }
       // Source returns false on the reroll-completion tick too.
     } else {
       actions.aim=true;
@@ -115,7 +120,8 @@ export function runNativeEnemyGunAttack(state,settings,{
       // before the animated muzzle pose is available. Preserve its pending
       // target and avoid additional audio-only Attack intents until LateUpdate
       // has actually emitted the original shot.
-      const ready=!state.pendingShot && state.attackDelayRemaining<0 &&
+      // J2 Web-only: no NEW attack/SFX during an active frozen-world frame.
+      const ready=!webFrozenActiveFrame && !state.pendingShot && state.attackDelayRemaining<0 &&
         state.alertness>settings.alertDelay*1.05 && allowAttacking && canShot &&
         (settings.family!=='SniperRifle' || state.sniperCanShot);
       if (ready && weaponInRightPosition===true) {
@@ -142,7 +148,7 @@ export function runNativeEnemyGunAttack(state,settings,{
           state.targetNeedsReroll=true; state.targetRerollWait=.05;
           actions.shot=true;
         }
-      } else if (!state.pendingShot && state.attackDelayRemaining<.1 && !state.reloaded) {
+      } else if (!webFrozenActiveFrame && !state.pendingShot && state.attackDelayRemaining<.1 && !state.reloaded) {
         state.reloaded=true;
         if (!state.firstShotWarningSoundPlayed) { state.firstShotWarningSoundPlayed=true; actions.reloadWarning=true; }
       }
