@@ -229,21 +229,23 @@ function webFinalSurvivorBreacher(runtime, enemy, enemies) {
  * tactics. Never teleport an actor or cross a blocking actor/player.
  * Blocked lanes reverse once, then the enemy simply holds its position.
  */
+// J3 Web-original cover peeking: when the gunner's REAL muzzle is occluded,
+// prefer a swept/NavMesh-approved side-step whose projected muzzle would clear
+// the known firing lane. Both choices still use actual collisions. Projection
+// only ranks two legal moves; it NEVER authorizes a shot (next frame's real
+// posed muzzle, line of sight and ally clearance must pass again).
 function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
-  {sideOverride=null, maxDistance=Infinity}={}) {
+  {sideOverride=null, maxDistance=Infinity, preferClearMuzzle=false, firingTarget=null}={}) {
   const start=position(enemy), state=enemy.encounter;
   const dx=playerFeet.x-start.x, dz=playerFeet.z-start.z, d=Math.hypot(dx,dz);
   if (!Number.isFinite(d) || (d<=EPSILON && sideOverride===null)) return false;
-  // If feet exactly match the last sighting, use actor facing for the search
-  // tangent. Never infer a direction from the currently hidden player.
   const forwardX=d>EPSILON ? dx/d : Math.sin(enemy.face);
   const forwardZ=d>EPSILON ? dz/d : -Math.cos(enemy.face);
   const cycle=Math.floor((enemy.clock-WEB_STRAFE.warmupSeconds)/WEB_STRAFE.cycleSeconds);
   const direction=sideOverride ?? state.webTacticalSide*(cycle%2===0 ? 1 : -1);
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_STRAFE.speedFraction;
   if (travel<=EPSILON) return false;
-  // Face stays toward the player while the feet move sideways. All movement
-  // is done by the existing capsule mover and checked against baked nav data.
+  let fallback=null, chosen=null;
   for (const side of [direction,-direction]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:-forwardZ*travel*side,y:0,z:forwardX*travel*side,
@@ -254,14 +256,30 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
         occupied(runtime,start,moved,enemies,enemy) ||
         occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
-    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
-    enemy.walking=true;
-    state.route=null; // A later chase must route from the actual new feet.
-    if(side!==direction && sideOverride===null)state.webTacticalSide=-state.webTacticalSide;
-    return true;
+    const candidate={moved,side};
+    if (preferClearMuzzle && enemy.muzzlePosition && firingTarget) {
+      const muzzle={x:enemy.muzzlePosition.x+moved.x-start.x,
+        y:enemy.muzzlePosition.y+moved.y-start.y,
+        z:enemy.muzzlePosition.z+moved.z-start.z};
+      const clear=nativeSegmentHit(runtime.sightCollision,muzzle,firingTarget)===null &&
+        !webLivingAllyIntersectsSegment(runtime,enemy,muzzle,firingTarget,enemies);
+      if (!clear) {
+        fallback ??= candidate; // Preserve the original safe-side choice if both remain blocked.
+        continue;
+      }
+    }
+    chosen=candidate;
+    break;
   }
-  return false;
+  chosen ??= fallback;
+  if (!chosen)return false;
+  enemy.x=chosen.moved.x;enemy.y=chosen.moved.y;enemy.z=chosen.moved.z;
+  enemy.walking=true;
+  state.route=null;
+  if(chosen.side!==direction && sideOverride===null)state.webTacticalSide=-state.webTacticalSide;
+  return true;
 }
+
 /** Retreat using the existing world capsule, navmesh and body-occupancy
  * constraints. Fail closed near a wall or teammate; never teleport, bypass a
  * collision or create permission to shoot. Returns true only when feet moved.
@@ -1341,7 +1359,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     if(disengaging && scaledDeltaTime>0) {
       if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
     } else if((reloadScoot || tactical) && scaledDeltaTime>0 &&
-        !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
+        !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+          needsFiringLane ? {preferClearMuzzle:true,firingTarget:playerPosition} : {}))
+      enemy.runtime.speed=0;
     return;
   }
   if (scaledDeltaTime === 0) return;
