@@ -383,12 +383,25 @@ function cancelWebProjectileEvade(state) {
 // hitbox, grant firing permission, or bypass the existing path/capsule checks.
 // This is tactical Web design, not a source MCD spawn or AI assignment.
 function webSquadApproachGoal(runtime, enemy, playerFeet, localSquads) {
-  if ((localSquads.get(enemy)?.length ?? 0)<2) return null;
+  const squad=localSquads.get(enemy);
+  if (!squad || squad.length<2) return null;
   const dx=playerFeet.x-enemy.x, dz=playerFeet.z-enemy.z;
   const length=Math.hypot(dx,dz);
   const offset=Math.min(runtime.body.radius*3.5,runtime.armedStopDistance*0.7);
   if(!Number.isFinite(length) || length<=EPSILON || offset<=EPSILON)return null;
-  const side=enemy.encounter.webTacticalSide;
+  // J3 Web-only fanout: with 3+ gunners, a binary left/right choice sends
+  // multiple allies into the SAME lane. Assign unique, stable lateral slots
+  // around the observed target instead. Keep the existing two-gunner behavior.
+  // This local squad is already snapshotted before movement, so list ordering
+  // cannot switch a route halfway through the encounter frame.
+  let side=enemy.encounter.webTacticalSide;
+  if(squad.length>2) {
+    const sorted=[...squad].sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+    side=Math.max(-2,Math.min(2,sorted.indexOf(enemy)-(sorted.length-1)/2));
+  }
+  // The central actor in an odd-numbered fireteam takes the ordinary direct
+  // route. No fake navigation point or extra movement is introduced.
+  if(side===0)return null;
   const goal={x:playerFeet.x-dz/length*side*offset,
     y:playerFeet.y,z:playerFeet.z+dx/length*side*offset};
   const sample=sampleNativeNavigation(runtime.nav,goal,runtime.body.stepOffset+EPSILON);
