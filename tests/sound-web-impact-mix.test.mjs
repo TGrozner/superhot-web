@@ -762,3 +762,25 @@ test('resolved Web wall hits have a distinct falling ricochet body without extra
   assert.equal(mix.getActiveVoices(), 2);
   mix.dispose();
 });
+
+test('resolved Web wall ricochet survives close-range enemy fire at the voice cap', () => {
+  const {ctx, nodes} = fakeAudio();
+  ctx.listener = {positionX: {value: 0}, positionY: {value: 0}, positionZ: {value: 0}};
+  const mix = createWebImpactMix(ctx, 2);
+  assert.equal(mix.emit('enemy-shot', {position: {x: 2, y: 0, z: 0}}).status, 'started');
+  assert.equal(mix.emit('enemy-shot', {position: {x: 4, y: 0, z: 0}}).status, 'started');
+  const previousShot = nodes[0];
+  assert.equal(mix.getActiveVoices(), 2);
+  assert.equal(mix.emit('wall-impact', {position: {x: 1, y: 0, z: 0}}).status, 'started');
+  assert.deepEqual(previousShot.stopArgs, [ctx.currentTime + 0.008]);
+  assert.equal(mix.getActiveVoices(), 2); // One voice replaced, no budget increase.
+  assert.equal(mix.emit('step').status, 'blocked');
+
+  // Damage still takes precedence over the wall-contact accent.
+  const {ctx: cappedCtx} = fakeAudio();
+  const capped = createWebImpactMix(cappedCtx, 1);
+  assert.equal(capped.emit('player-hit').status, 'started');
+  assert.equal(capped.emit('wall-impact').status, 'blocked');
+  capped.dispose();
+  mix.dispose();
+});
