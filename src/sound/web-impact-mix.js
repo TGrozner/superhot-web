@@ -266,6 +266,21 @@ export function createWebImpactMix(context, maxVoices = 24) {
         noise.connect(filter);
         filter.connect(burst);
         burst.connect(out);
+        // WEB-ORIGINAL shatter body: a short low-frequency debris pressure pulse
+        // behind the existing bright glass rings. Shares the noise source, HRTF
+        // route and voice budget; NOT an extracted MCD recording or Unity curve.
+        if (cue === 'shatter') {
+            const debrisLow = track(context.createBiquadFilter());
+            debrisLow.type = 'lowpass';
+            debrisLow.frequency.value = Math.min(390, context.sampleRate * 0.24);
+            const debris = track(context.createGain());
+            debris.gain.setValueAtTime(0.0001, at);
+            debris.gain.linearRampToValueAtTime(volume * 0.38, at + 0.014);
+            debris.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
+            noise.connect(debrisLow);
+            debrisLow.connect(debris);
+            debris.connect(out);
+        }
         // Web-authored transient: audible snap on hits, no extra BufferSourceNode.
         // This layer shares the spatial path, gain trim and existing voice budget.
         const snap = attackByCue[cue];
