@@ -490,10 +490,18 @@ function webNearMissProjectile(runtime, enemy, projectiles, enemies) {
  * bypassing the existing capsule, navigation or crowd collision.
  * @returns {boolean} Whether approved feet movement took place.
  */
-function tryWebHitSidestep(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
+function tryWebHitSidestep(runtime,enemy,playerFeet,playerPosition,enemies,scaledDeltaTime) {
   const start=position(enemy),state=enemy.encounter;
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_HIT_RECOVERY.speedFraction;
   if(!Number.isFinite(travel) || travel<=EPSILON)return false;
+  // Web-only: an armed survivor can use the recovery step to break a REAL
+  // visible firing lane. Prefer a covered legal step over an exposed one;
+  // without personal line of sight, keep the original hit-direction dodge
+  // rather than learning the player's current position through a wall.
+  const eye={x:start.x,y:start.y+runtime.aimHeight,z:start.z};
+  const seekCover=enemy.reaction.hasWeapon===true &&
+    nativeSphereHit(runtime.sightCollision,eye,playerPosition,.2)===null;
+  let fallback=null,selected=null;
   for(const sign of [1,-1]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:state.webHitSideX*travel*sign,y:0,z:state.webHitSideZ*travel*sign,
@@ -503,13 +511,24 @@ function tryWebHitSidestep(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
         occupied(runtime,start,moved,enemies,enemy) ||
         occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
-    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
-    enemy.walking=true;
-    state.route=null;
-    state.webHitSideX*=sign;state.webHitSideZ*=sign;
-    return true;
+    const candidate={moved,sign};
+    if(seekCover) {
+      const candidateEye={x:moved.x,y:moved.y+runtime.aimHeight,z:moved.z};
+      if(nativeSphereHit(runtime.sightCollision,candidateEye,playerPosition,.2)===null) {
+        fallback ??=candidate;
+        continue;
+      }
+    }
+    selected=candidate;
+    break;
   }
-  return false;
+  selected ??=fallback;
+  if(!selected)return false;
+  enemy.x=selected.moved.x;enemy.y=selected.moved.y;enemy.z=selected.moved.z;
+  enemy.walking=true;
+  state.route=null;
+  state.webHitSideX*=selected.sign;state.webHitSideZ*=selected.sign;
+  return true;
 }
 
 /** Shift feet laterally without tunneling, teleportation or fake shooting.
@@ -1062,7 +1081,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     if(scaledDeltaTime>0) {
       advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings??runtime.enemySettings,
         'running',scaledDeltaTime);
-      const moved=tryWebHitSidestep(runtime,enemy,playerFeet,enemies,scaledDeltaTime);
+      const moved=tryWebHitSidestep(runtime,enemy,playerFeet,playerPosition,enemies,scaledDeltaTime);
       state.webHitRemaining=Math.max(0,state.webHitRemaining-scaledDeltaTime);
       if(!moved)state.webHitRemaining=0;
       if(moved)return;
