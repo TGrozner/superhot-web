@@ -849,73 +849,6 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
 }
 
 /**
- * WEB-ONLY active-time catch-up slices for collision-aware Dojo integration.
- *
- * At 10 FPS, sampleActiveFrameDeltas reports 100ms active time but only 50ms
- * simulation time. The current Dojo player movement consumes tick.worldDelta,
- * so continuous walking loses half its distance per active second. This pure
- * adapter retains the EXACT scale already applied by stepMcdGameplayClock:
- * worldDelta / simulationDt. It splits only the additional active time into
- * chunks no larger than the existing capped simulation step.
- *
- * This does not advance clock.worldTime, resolve collisions, update gravity,
- * or change main.js. SH-05 must coordinate ALL affected world systems if
- * enabling the slices; applying them to the player alone can desynchronize
- * enemy positions, bullets and collision/grounding. The caller explicitly
- * chooses a bounded maximumSteps after measuring performance and stepping
- * behaviour in the Dojo; this is NOT a native MCD scheduler or a 1:1 claim.
- *
- * @param {{simulationDt:number,activeRealDt:number,worldDelta:number,maximumSteps:number}} frame
- * @returns {{worldSteps:number[],chargedActiveDt:number,discardedActiveDt:number}}
- */
-export function splitWebActiveWorldFrame({
-  simulationDt, activeRealDt, worldDelta, maximumSteps,
-} = {}) {
-  for (const [name, value] of Object.entries({simulationDt, activeRealDt, worldDelta})) {
-    if (!Number.isFinite(value) || value < 0) {
-      throw new RangeError(`${name} must be finite and nonnegative`);
-    }
-  }
-  // WEB-only resource budget: at most sixteen collision/world slices per RAF.
-  // No guessed native frame rate, time-scale, or automatic catch-up debt.
-  if (!Number.isSafeInteger(maximumSteps) || maximumSteps < 1 || maximumSteps > 16) {
-    throw new RangeError('maximumSteps must be an integer from 1 to 16');
-  }
-  if (simulationDt === 0) {
-    if (worldDelta !== 0) {
-      throw new RangeError('worldDelta requires a nonzero simulationDt');
-    }
-    return {worldSteps: [], chargedActiveDt: 0, discardedActiveDt: activeRealDt};
-  }
-  if (activeRealDt < simulationDt) {
-    throw new RangeError('activeRealDt must cover the simulation step');
-  }
-  // Forced zero world-time: do not dispatch phantom collision/world steps.
-  // Even a zero-dt callback can repeat input edges, ground snaps or events.
-  // The caller handles active wall time separately; this helper only
-  // schedules actual world-time advances. WEB integration safety only.
-  if (worldDelta === 0) {
-    return {worldSteps: [], chargedActiveDt: 0, discardedActiveDt: activeRealDt};
-  }
-  const chargedActiveDt = Math.min(activeRealDt, simulationDt * maximumSteps);
-  const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
-  const worldSteps = [];
-  let consumed = 0;
-  for (let i = 0; i < count; i++) {
-    const next = Math.min(chargedActiveDt, (i + 1) * simulationDt);
-    const step = worldDelta * ((next - consumed) / simulationDt);
-    if (!Number.isFinite(step)) throw new RangeError('world slice must be finite');
-    worldSteps.push(step);
-    consumed = next;
-  }
-  return {
-    worldSteps, chargedActiveDt,
-    discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
-  };
-}
-
-
-/**
  * WEB-ONLY clock-consistent Dojo catch-up scheduler for SH-05 integration.
  *
  * The legacy slice helper above is post-clock and CANNOT safely be connected
@@ -948,6 +881,11 @@ export function stepWebMcdGameplayFrame(clock, {
     if (!Number.isFinite(value) || value < 0) {
       throw new RangeError(`${label} must be finite and nonnegative`);
     }
+  }
+  // A collision-sized slice must retain the existing Web 50ms upper bound.
+  // Charged active time MAY exceed this per RAF, but each slice must not.
+  if (simulationDt > PROTOTYPE_FRAME_RULES.maximumDeltaSeconds) {
+    throw new RangeError('simulationDt exceeds the maximum collision step');
   }
   if (activeRealDt < simulationDt) {
     throw new RangeError('activeRealDt must cover simulationDt');
