@@ -107,8 +107,13 @@ export function runNativeEnemyGunAttack(state,settings,{
       actions.aim=true;
       actions.refreshAimTarget=state.attackDelayRemaining>settings.stopAimingTime || weaponInRightPosition!==true;
       if (weaponInRightPosition===false) state.afterglowRemaining=-1;
-      const ready=state.attackDelayRemaining<0 && state.alertness>settings.alertDelay*1.05 &&
-        allowAttacking && canShot && (settings.family!=='SniperRifle' || state.sniperCanShot);
+      // Web delivery guard (not a native MCD claim): Attack may be accepted
+      // before the animated muzzle pose is available. Preserve its pending
+      // target and avoid additional audio-only Attack intents until LateUpdate
+      // has actually emitted the original shot.
+      const ready=!state.pendingShot && state.attackDelayRemaining<0 &&
+        state.alertness>settings.alertDelay*1.05 && allowAttacking && canShot &&
+        (settings.family!=='SniperRifle' || state.sniperCanShot);
       if (ready && weaponInRightPosition===true) {
         const middleOfSeries=(settings.family==='MachineGun' || settings.family==='SniperRifle') &&
           state.seriesRemaining!==settings.seriesLength && state.seriesRemaining!==0;
@@ -129,7 +134,7 @@ export function runNativeEnemyGunAttack(state,settings,{
           state.targetNeedsReroll=true; state.targetRerollWait=.05;
           actions.shot=true;
         }
-      } else if (state.attackDelayRemaining<.1 && !state.reloaded) {
+      } else if (!state.pendingShot && state.attackDelayRemaining<.1 && !state.reloaded) {
         state.reloaded=true;
         if (!state.firstShotWarningSoundPlayed) { state.firstShotWarningSoundPlayed=true; actions.reloadWarning=true; }
       }
