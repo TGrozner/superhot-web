@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { composeLocalMatrix } from '../src/scenes/graph.js';
 import { prepareNativeCollision } from '../src/scenes/native-collision.js';
-import { createNativeDeathRuntime, applyNativeDeathForce, advanceNativeDeathRuntime } from '../src/animation/native-death-runtime.js';
+import { createNativeDeathRuntime, applyNativeDeathForce, advanceNativeDeathRuntime, applyNativeThrownDeathReaction } from '../src/animation/native-death-runtime.js';
+import { createEnemyReactionState, applyThrownEnemyContact, advanceEnemyReaction } from '../src/animation/enemy-reaction.js';
 
 const matrix=(x,y,z)=>composeLocalMatrix({position:{x,y,z}});
 const definition=()=>({
@@ -537,4 +538,58 @@ test('Dojo-grounded corpses lose sideways skating only after real floor contact'
     'floor anti-penetration remains intact');
   near(airborne.bodies[0].velocity.x,3);
   near(sourceStudy.bodies[0].velocity.x,3);
+});
+
+
+test('source lethal thrown body-force reaches the real Dojo corpse, not an inferred kill impulse',()=>{
+  const item={stickable:false,isKiller:false,headshotKiller:false,cutLimbs:false};
+  const hit={partId:'Torso',isBulletProof:false,isArmored:false,isMushroom:false,
+    bossMind:false,velocitySquared:9,thrownByPlayer:true,shouldKill:false,
+    direction:{x:0,y:0,z:1},relativeVelocity:{x:0,y:0,z:-3},
+    position:{x:0,y:2,z:0}};
+  const modifiers={damage:1,stunTimeMultiplier:1,superThrows:false};
+  const state=createEnemyReactionState({health:1,stunTime:2,hasWeapon:true});
+  const first=applyThrownEnemyContact(state,item,hit,modifiers);
+  const corpse=create();
+  assert.deepEqual(applyNativeThrownDeathReaction(corpse,first),
+    {status:'not-a-lethal-thrown-contact',applied:0});
+  advanceEnemyReaction(state,0);
+  const lethal=applyThrownEnemyContact(state,item,hit,modifiers);
+  assert.equal(lethal.outcome,'killed');
+  const applied=applyNativeThrownDeathReaction(corpse,lethal,{impactBoneIndex:2});
+  assert.equal(applied.mode,'Impulse');
+  assert.equal(applied.boneIndex,2);
+  assert.equal(applied.applied,1);
+  // The actual source reaction requests +Z even though incoming relative
+  // velocity is -Z. The Web neighbor transfer conserves that source impulse.
+  near(corpse.bodies.reduce((sum,body)=>sum+body.velocity.z*body.source.mass,0),100);
+  assert.ok(corpse.bodies[0].velocity.z>0&&corpse.bodies[1].velocity.z>0);
+  assert.deepEqual(applyNativeThrownDeathReaction(null,lethal),
+    {status:'freeze-fallback-missing-death-physics',applied:0});
+  advanceNativeDeathRuntime(corpse,1/60,{limitWebFrameWork:true});
+  assert.ok(Array.from(corpse.boneModelMatrices).every(Number.isFinite));
+});
+
+test('source sticky force uses the same contact bone parent and never invents an unresolved target',()=>{
+  const state=createEnemyReactionState({health:2,stunTime:1,hasWeapon:false});
+  const result=applyThrownEnemyContact(state,{
+    stickable:true,isKiller:true,headshotKiller:false,cutLimbs:true,
+  },{
+    partId:'LeftForearm',isBulletProof:false,isArmored:false,isMushroom:false,
+    bossMind:false,velocitySquared:9,thrownByPlayer:true,shouldKill:false,
+    direction:{x:0,y:0,z:1},relativeVelocity:{x:0,y:0,z:-3},
+    position:{x:0,y:2,z:0},
+  },{damage:1,stunTimeMultiplier:1,superThrows:false});
+  const withoutBone=create();
+  assert.deepEqual(applyNativeThrownDeathReaction(withoutBone,result),
+    {status:'source-body-unresolved',applied:0});
+  near(withoutBone.bodies[1].velocity.z,0);
+  const withBone=create();
+  const mapped=applyNativeThrownDeathReaction(withBone,result,{impactBoneIndex:3});
+  assert.equal(mapped.mode,'ConstantForce');
+  assert.equal(mapped.boneIndex,2);
+  advanceNativeDeathRuntime(withBone,0.02,{limitWebFrameWork:true});
+  assert.ok(withBone.bodies[1].velocity.z>0);
+  assert.throws(()=>applyNativeThrownDeathReaction(create(),result,{impactBoneIndex:999}),
+    /same-hit source bone/);
 });

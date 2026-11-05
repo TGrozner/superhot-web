@@ -728,3 +728,43 @@ corpus privé #11 (`spec/animation/verification.json`) et #12
 (`link-verification.json`) inventorie clips, transitions et marqueurs
 mais ne prouve toujours pas les 404 liaisons de destinataires d'événements
 ni la cadence d'exécution Unity/PhysX. Aucun PhysX 1:1 revendiqué.
+
+
+### SH-06 — source thrown-kill body force adapter (05/11/2026, intégration SH-05 requise)
+
+**Défaut observé dans le code Web (pas dans une capture navigateur) :**
+`applyThrownEnemyContact` émet un `body-force` après une vraie action `kill`
+(pour un projectile objet lancé, mode `Impulse` ou `ConstantForce`).
+`src/main.js::applyNativeEnemyContact` ne consomme actuellement que
+`drop-weapon`, `stun` et `kill` ; la commande `body-force` est ignorée.
+`prepareDojoDeathPhysics` injecte à sa place un élan créatif Web de
+1,5 m/s, y compris lorsque la réaction source a calculé sa propre force.
+Cela empêche le vrai feedback de lancer d'atteindre le ragdoll.
+
+**Livraison SH-06 :** `applyNativeThrownDeathReaction(runtime,reaction,{impactBoneIndex})`
+route uniquement le `body-force` d'une réaction déjà résolue comme létale
+vers `applyNativeDeathForce` et le runtime réellement construit. Une
+correspondance exacte `partId` est privilégiée ; le `boneIndex` du **même**
+contact permet de remonter uniquement l'arbre rig source jusqu'à un Rigidbody.
+Sans source, runtime ou os identifié : aucune force inventée ; fallback
+inchangé. Les deux modes source sont testés avec de **vrais résultats de
+`applyThrownEnemyContact`**, pas des intentions ad hoc.
+
+**Raccord requis par SH-05 uniquement, dans ses fichiers réservés :** après
+`killEnemy` et la création de `enemy.deathRuntime`, consommer exactement
+une fois la commande `body-force` de la réaction du **même contact** en
+appelant cet adaptateur avec `hit.boneIndex`. Supprimer le coup de pouce
+créatif `kind:'throw'` dans `prepareDojoDeathPhysics` **pour ces seuls
+kills dotés de cette commande**, sinon l'ennemi recevrait deux impulsions.
+Ne rien faire si le runtime source n'a pas été construit ; conserver les
+autres voies de kill, leurs VFX et la baseline F/E. L'issue #5 coordonne ce
+raccord, la fusion et le smoke Pages.
+
+**Provenance et limites :** `src/animation/enemy-reaction.js` réutilise les
+branches bornées GunPickup/PejAiController et la provenance privée existante ;
+aucune nouvelle extraction, aucun byte propriétaire, aucun runner. Le choix
+de projeter ces commandes vers un PBD Web est une approximation du jeu
+navigateur, **pas** une preuve d'exécution native Unity ni de parité PhysX.
+Tant que SH-05 n'a pas effectué ce raccord, la PR seule ne change pas la
+partie publiée. Tests requis ensuite : lancer létal blunt et sticky, trajectoire
+et contacts, impacts multiples, FPS, puis Dojo 7/7 et REJOUER.
