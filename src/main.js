@@ -16,7 +16,7 @@ import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from '
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
 import { advanceWebEnemyPunch, createWebEnemyPunchState } from './combat/web-enemy-punch.js';
-import { createNativeDeathRuntime, applyNativeDeathForce } from './animation/native-death-runtime.js';
+import { createNativeDeathRuntime, applyNativeDeathForce, applyNativeThrownDeathReaction } from './animation/native-death-runtime.js';
 import { createWebImpactFeedback, resetWebImpactFeedback, recordWebImpact, advanceWebImpactFeedback } from './vfx/web-combat-feedback.js';
 import { detectWebCleanDodge, WEB_DODGE_SCORE } from './combat/web-near-miss.js';
 import { createWebDodgeFeedback, resetWebDodgeFeedback, recordWebDodge, advanceWebDodgeFeedback } from './vfx/web-dodge-feedback.js';
@@ -1024,6 +1024,11 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
     recordWebImpact(webImpactFeedback,{
       kind:'hit',point:hit.point,direction:normalize3(velocity),
     });
+  // Only this admitted lethal throw's source body-force suppresses the
+  // separate Web-only 1.5 m/s death kick. Other kills retain their response.
+  const sourcedThrownForce=result.outcome==='killed' &&
+    result.actions.some(action=>action.type==='kill') &&
+    result.actions.some(action=>action.type==='body-force');
   for(const action of result.actions) {
     if(action.type==='drop-weapon')dropNativeEnemyWeapon(enemy);
     if(action.type==='stun') {
@@ -1038,9 +1043,25 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
       enemy.stunnedAt=state.worldClock;enemy.runtime.pendingShot=null;enemy.attackIntentAt=null;
       audio.stun({bodyId:enemy.id,position:enemy,realtimeSeconds:state.runClock});
     }
-    if(action.type==='kill')killEnemy(enemy,{
-      boneIndex:hit.boneIndex,point:hit.point,direction:normalize3(velocity),kind:'throw',
-    });
+    if(action.type==='kill') {
+      killEnemy(enemy,{
+        boneIndex:hit.boneIndex,point:hit.point,direction:normalize3(velocity),
+        kind:'throw',sourcedThrownForce,
+      });
+      // killEnemy creates the corpse runtime. Apply the SAME contact's source
+      // force only afterwards; do not replay it on nonlethal stuns or other kills.
+      if(sourcedThrownForce) {
+        try {
+          const routed=applyNativeThrownDeathReaction(enemy.deathRuntime??null,result,{
+            impactBoneIndex:Number.isInteger(hit.boneIndex)?hit.boneIndex:null,
+          });
+          enemy.deathThrownForceStatus=routed.status;
+        } catch {
+          // Unqualified rig/force cannot break gameplay or fabricate a PhysX impulse.
+          enemy.deathThrownForceStatus='source-thrown-force-rejected';
+        }
+      }
+    }
   }
   return result;
 }
@@ -1088,7 +1109,8 @@ function prepareDojoDeathPhysics(enemy,hitReceipt=null) {
     // Deliberately tuned Web-only impact response. A sampled limb collider
     // names the hit bone; walk its authored parents to the nearest Rigidbody
     // for fingers, hands or other bones without their own rigidbody.
-    if(hitReceipt && Number.isInteger(hitReceipt.boneIndex) &&
+    if(hitReceipt && !hitReceipt.sourcedThrownForce &&
+        Number.isInteger(hitReceipt.boneIndex) &&
         hitReceipt.boneIndex>=0 && hitReceipt.boneIndex<definition.boneParents.length &&
         hitReceipt.point && hitReceipt.direction &&
         ['x','y','z'].every(axis=>Number.isFinite(hitReceipt.point[axis]) &&
