@@ -232,9 +232,17 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       panner.refDistance = 2.5;
       panner.maxDistance = 40;
       panner.rolloffFactor = 1.2;
-      panner.positionX.setValueAtTime(position.x, at);
-      panner.positionY.setValueAtTime(position.y, at);
-      panner.positionZ.setValueAtTime(position.z, at);
+      // The legacy PannerNode API has setPosition but no position AudioParams.
+      // Without this fallback, located Web cues throw instead of sounding.
+      if (typeof panner.positionX?.setValueAtTime === 'function' &&
+          typeof panner.positionY?.setValueAtTime === 'function' &&
+          typeof panner.positionZ?.setValueAtTime === 'function') {
+        panner.positionX.setValueAtTime(position.x, at);
+        panner.positionY.setValueAtTime(position.y, at);
+        panner.positionZ.setValueAtTime(position.z, at);
+      } else if (typeof panner.setPosition === 'function') {
+        panner.setPosition(position.x, position.y, position.z);
+      }
       // Original Web mix coloration, NOT a recovered Unity attenuation law.
       // A remote emitter has a softer transient. The existing camera listener
       // is updated by SH-05; browsers without position AudioParams fail open.
