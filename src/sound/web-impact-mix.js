@@ -171,7 +171,20 @@ export function createWebImpactMix(context, maxVoices = 24) {
         if (!Object.hasOwn(specs, cue))
             throw new TypeError('unknown Web cue');
         const [duration, cutoff, startHz, endHz, volume] = specs[cue];
-        const priority = priorityByCue[cue];
+        // Web-only voice admission: distant enemy muzzles remain spatially playable
+        // when free, but cannot steal local movement or confirmed impacts.
+        // Share the 14m distance boundary with the existing footstep duck.
+        // These priorities are Web design, not recovered Unity mixer policy.
+        const lx = context.listener?.positionX?.value;
+        const ly = context.listener?.positionY?.value;
+        const lz = context.listener?.positionZ?.value;
+        const listenerDistance = position && typeof context.createPanner === 'function' &&
+            typeof lx === 'number' && Number.isFinite(lx) &&
+            typeof ly === 'number' && Number.isFinite(ly) &&
+            typeof lz === 'number' && Number.isFinite(lz)
+            ? Math.hypot(position.x - lx, position.y - ly, position.z - lz) : null;
+        const priority = cue === 'enemy-shot' && listenerDistance !== null &&
+            listenerDistance > 14 ? 0 : priorityByCue[cue];
         if (voices.size >= maxVoices) {
             let victim = null;
             for (const voice of voices) {
