@@ -98,4 +98,7 @@ test('bounded hitch, frozen world and pause never advance phantom world steps', 
   assert.throws(() => stepWebMcdGameplayFrame(frozen, {
     simulationDt: .05, activeRealDt: .1, maximumSteps: 0,
   }), RangeError);
+  assert.throws(() => stepWebMcdGameplayFrame(frozen, {
+    simulationDt: .051, activeRealDt: .1, maximumSteps: 4,
+  }), /maximum collision step/);
 });
