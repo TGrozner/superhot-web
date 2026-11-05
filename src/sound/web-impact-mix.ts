@@ -207,6 +207,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     out.gain.value = intensity;
     let panner: PannerNode | null = null;
     let distanceFilter: BiquadFilterNode | null = null;
+    let enemyShotDistanceMetres: number | null = null;
     if (position && typeof context.createPanner === 'function') {
       panner = context.createPanner();
       panner.panningModel = 'HRTF';
@@ -226,6 +227,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       if (lx !== undefined && ly !== undefined && lz !== undefined &&
         Number.isFinite(lx) && Number.isFinite(ly) && Number.isFinite(lz)) {
         const distance = Math.hypot(position.x - lx, position.y - ly, position.z - lz);
+        enemyShotDistanceMetres = distance;
         const cutoff = Math.max(1200, Math.min(context.sampleRate * 0.45,
         18000 / (1 + distance * distance / 450)));
         distanceFilter = context.createBiquadFilter();
@@ -484,9 +486,13 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       // WEB-ORIGINAL combat clarity: transient shots and confirmed contacts
       // briefly duck synthetic footsteps, never source-backed scene WAVs.
       // Movement cues and pickup/throw do not lower the walking bus.
-      if (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
+      // WEB-ORIGINAL near-field sidechain: far-away enemy fire is already HRTF/
+      // distance-attenuated; it must not repeatedly mask local movement.
+      // 14 metres is a creative Web threshold, NOT a Unity audio value.
+      if ((cue !== 'enemy-shot' || enemyShotDistanceMetres === null || enemyShotDistanceMetres <= 14) &&
+          (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
           cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana' ||
-          cue === 'punch-contact' || cue === 'dodge') {
+          cue === 'punch-contact' || cue === 'dodge')) {
         footsteps.gain.cancelScheduledValues(at);
         footsteps.gain.setTargetAtTime(0.10, at, 0.012);
         footsteps.gain.setTargetAtTime(0.3, at + 0.14, 0.18);
