@@ -69,6 +69,21 @@ const WEB_SQUAD_PUSH = Object.freeze({
   relaySeconds: 4.8, // Web-only readable leapfrog: swap the assault lead every few seconds.
 });
 
+// J3 Web-original weapon roles, not recovered MCD AI distances: a verified
+// shotgun should actually threaten close quarters, while a verified sniper
+// preserves a long firing lane and kites when rushed. Unknown/fallback gun
+// families retain the baseline pistol ring. No weapon, attack or damage change.
+const WEB_WEAPON_ROLE = Object.freeze({
+  Shotgun: Object.freeze({ stopFraction: 0.62, preferBreach: true }),
+  SniperRifle: Object.freeze({ stopFraction: 1.55, retreatFraction: 0.65, holdRange: true }),
+});
+function webWeaponRole(enemy) {
+  const family=enemy.activeWeaponSettings?.family;
+  return enemy.sourceActivation?.status==='qualified' &&
+    enemy.sourceActivation.family===family
+    ? WEB_WEAPON_ROLE[family] ?? null : null;
+}
+
 // J3 Web-original readable crossfire: nearby gunners with ACTUALLY clear
 // muzzles take alternating windows for new shots, rather than opening fire
 // simultaneously. Solo combat and already committed shots are unchanged.
@@ -127,8 +142,8 @@ function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
     if (visited.has(squad)) continue;
     visited.add(squad);
     if (squad.length<2) continue;
-    const candidates=squad.filter(candidate => {
-      if (!observingAllies.has(candidate)) return false;
+    const available=squad.filter(candidate => {
+      if (!observingAllies.has(candidate) || webWeaponRole(candidate)?.holdRange) return false;
       // An interrupted actor retains squad membership but cannot lead.
       return !(candidate.reaction.stunRemaining>0 ||
         candidate.reaction.stunnedThisFrame ||
@@ -137,7 +152,11 @@ function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
         candidate.encounter.webLossRemaining>0 ||
         candidate.runtime?.pendingShot);
     });
-    if (!candidates.length) continue;
+    if (!available.length) continue;
+    // Let a real, equipped shotgun take the close-range role while the others
+    // cover. A squad without such a gunner keeps the existing relay behavior.
+    const preferred=available.filter(candidate=>webWeaponRole(candidate)?.preferBreach);
+    const candidates=preferred.length ? preferred : available;
     candidates.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
     const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_PUSH.relaySeconds)%candidates.length;
     leaders.add(candidates[index]);
@@ -154,7 +173,8 @@ function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
 function webFinalSurvivorBreacher(runtime, enemy, enemies) {
   const remaining=runtime.killTarget-runtime.killed;
   if (runtime.killTarget<2 || remaining<1 || remaining>2 ||
-      enemy.reaction?.hasWeapon!==true || !participating(enemy)) return false;
+      enemy.reaction?.hasWeapon!==true || !participating(enemy) ||
+      webWeaponRole(enemy)?.holdRange) return false;
   let alive=0;
   for (const actor of enemies) if (participating(actor)) {
     alive++;
@@ -1080,7 +1100,10 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
     (breachingLeaders.has(enemy) ||
       webFinalSurvivorBreacher(runtime,enemy,enemies));
-  const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
+  const weaponRole=armed ? webWeaponRole(enemy) : null;
+  const normalStopDistance=armed
+    ? runtime.armedStopDistance*(weaponRole?.stopFraction ?? 1)
+    : runtime.unarmedStopDistance;
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(
         runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
@@ -1119,9 +1142,11 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   }
   // The pushing actor's close-contact retreat must not cancel the shorter
   // approach ring. Everyone else retains the original Web retreat distance.
-  const disengageDistance=Math.min(stopDistance*(breaching
-    ? WEB_SQUAD_PUSH.disengageFraction : WEB_DISENGAGE.stopRadiusFraction),
-    runtime.body.radius*WEB_DISENGAGE.maximumBodyRadii);
+  const disengageDistance=weaponRole?.retreatFraction
+    ? Math.min(stopDistance*weaponRole.retreatFraction,runtime.body.radius*15)
+    : Math.min(stopDistance*(breaching
+      ? WEB_SQUAD_PUSH.disengageFraction : WEB_DISENGAGE.stopRadiusFraction),
+      runtime.body.radius*WEB_DISENGAGE.maximumBodyRadii);
   const disengaging=stop && armed && !enemy.runtime.pendingShot &&
     playerDistance<disengageDistance;
   // J3 Web-only tactics: a body-visible enemy whose *known* muzzle is
