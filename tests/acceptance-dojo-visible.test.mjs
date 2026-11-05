@@ -46,6 +46,26 @@ test('SH10 real-frame PBD failure status is a Web regression candidate, not nati
   assert.match(result.issues.join(' '),/host binding/);
 });
 
+test('SH10 reports dead-enemy PBD initialization failures as Web gaps, not success or native refutation',()=>{
+  const t=trace();
+  t.frames[0].gameplay.encounter={enemies:[{id:'native-encounter-0',alive:false,
+    deathPhysics:'source-physics-construction-rejected'}]};
+  t.frames[1].gameplay.encounter={enemies:[{id:'native-encounter-0',alive:false,
+    deathPhysics:'source-physics-construction-rejected'}]};
+  const report=assessDojoVisibleIntegrations(t);
+  assert.equal(report.status,DOJO_VISIBLE_STATUS.RAGDOLL_INIT_GAP);
+  assert.equal(report.observed.ragdollInitializationRejectedFrames,2);
+  assert.equal(report.observed.firstRagdollInitializationRejectedFrameId,1);
+  assert.equal(report.nativeReferenceMatched,false);
+  assert.equal(report.nativeParityVerdict,'UNKNOWN');
+  for (const reason of ['unqualified-source-rig-or-definition',
+    'invalid-observed-web-velocity','skin-rig-replaced']) {
+    t.frames[0].gameplay.encounter.enemies[0].deathPhysics=reason;
+    t.frames[1].gameplay.encounter.enemies[0].deathPhysics=reason;
+    assert.equal(assessDojoVisibleIntegrations(t).status,DOJO_VISIBLE_STATUS.RAGDOLL_INIT_GAP);
+  }
+});
+
 test('SH10 older traces with no death status do not certify working ragdolls',()=>{
   const result=assessDojoVisibleIntegrations(trace());
   assert.equal(result.status,DOJO_VISIBLE_STATUS.OBSERVED);

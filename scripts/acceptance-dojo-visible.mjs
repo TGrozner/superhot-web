@@ -11,6 +11,7 @@ export const DOJO_VISIBLE_STATUS=Object.freeze({
   OBSERVED:'WEB_RENDERED_VISUAL_HOOKS_SAMPLED_NOT_NATIVE_PARITY',
   GAP:'WEB_DOJO_WARNING_ACTIVE_NO_LIGHT_SUBMITTED_NEEDS_VIEWPORT_CHECK',
   RAGDOLL_GAP:'WEB_DOJO_RAGDOLL_STEP_REJECTED_IN_CAPTURE',
+  RAGDOLL_INIT_GAP:'WEB_DOJO_RAGDOLL_INITIALIZATION_REJECTED_IN_CAPTURE',
   INCOMPLETE:'WEB_RENDERED_VISUAL_HOOKS_NOT_OBSERVED',
   INVALID:'WEB_RENDERED_VISUAL_HOOKS_INVALID',
 });
@@ -32,6 +33,12 @@ const readinessValues=new Set([
   'source-catalog-present','missing-private-door-catalog',
   'not-dojo-build10-source','unavailable',
 ]);
+// Existing Web failure codes from main.js, not inferred native PhysX results.
+// A dead enemy with any of these cannot run the Web PBD solver.
+const ragdollInitializationFailures=new Set([
+  'unqualified-source-rig-or-definition','invalid-observed-web-velocity',
+  'source-physics-construction-rejected','skin-rig-replaced',
+]);
 
 /** Diagnose one real, owner-supplied Web trace without asserting a native comparison. */
 export function assessDojoVisibleIntegrations(trace) {
@@ -46,6 +53,7 @@ export function assessDojoVisibleIntegrations(trace) {
     firstWarningGapFrameId:null,maxHandsTriangles:0,
     ragdollStatusFrames:0,ragdollActiveFrames:0,
     ragdollStepRejectedFrames:0,firstRagdollStepRejectedFrameId:null,
+    ragdollInitializationRejectedFrames:0,firstRagdollInitializationRejectedFrameId:null,
   };
   const report=status=>({
     status,source:'OWNER_SUPPLIED_WEB_FRAME_METADATA_UNAUTHENTICATED',
@@ -89,6 +97,10 @@ export function assessDojoVisibleIntegrations(trace) {
         observed.ragdollStepRejectedFrames++;
         observed.firstRagdollStepRejectedFrameId??=frame.frameId;
       }
+      if(dead.some(e=>ragdollInitializationFailures.has(e.deathPhysics))) {
+        observed.ragdollInitializationRejectedFrames++;
+        observed.firstRagdollInitializationRejectedFrameId??=frame.frameId;
+      }
     }
     hasVisual=true;
     observed.sampledPlayingFrames++;
@@ -126,6 +138,10 @@ export function assessDojoVisibleIntegrations(trace) {
     issues.push('observed Dojo Web corpse with web-pbd-step-rejected: step error disables the runtime; SH-05 must inspect the host binding before claiming ragdoll motion');
     return report(DOJO_VISIBLE_STATUS.RAGDOLL_GAP);
   }
+  if(observed.ragdollInitializationRejectedFrames) {
+    issues.push('observed Dojo Web corpse with failed PBD initialization/rig validity: no live solver for that corpse; inspect the source-qualified Web rig and first-pose binding');
+    return report(DOJO_VISIBLE_STATUS.RAGDOLL_INIT_GAP);
+  }
   if(observed.ragdollStatusFrames===0)
     issues.push('no dead-enemy PBD status sampled; ragdoll runtime remains UNKNOWN');
   if(observed.warningActiveWithoutAnyLightDrawFrames) {
@@ -153,7 +169,8 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
     const report=assessDojoVisibleIntegrations(JSON.parse(readFileSync(process.argv[index+1],'utf8')));
     process.stdout.write(JSON.stringify(report,null,2)+'\n');
     if(report.status===DOJO_VISIBLE_STATUS.GAP ||
-       report.status===DOJO_VISIBLE_STATUS.RAGDOLL_GAP) process.exitCode=1;
+       report.status===DOJO_VISIBLE_STATUS.RAGDOLL_GAP ||
+       report.status===DOJO_VISIBLE_STATUS.RAGDOLL_INIT_GAP) process.exitCode=1;
     else if(report.status!==DOJO_VISIBLE_STATUS.OBSERVED) process.exitCode=2;
   } catch(error) {
     process.stderr.write('Dojo visible integration report unavailable: '+error.message+'\n');
