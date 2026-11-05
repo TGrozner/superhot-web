@@ -147,9 +147,9 @@ test('disabled source colliders remain disabled for fragment contacts',()=>{
   assert.ok(shard.position.y<0);
 });
 
-test('Web hitch budget keeps moving authored shards while limiting scene sweeps and skipping invisible HDR debris',()=>{
-  // Count scene reads, not wall-clock microbenchmarks. The uncapped baseline
-  // does ~45 native-sized steps here; the live Dojo must remain <=4.
+test('Web hitch budget limits shard travel to 100ms while HDR debris expires on full elapsed time',()=>{
+  // Count sweeps, not wall-clock microbenchmarks. An interrupted 300ms Web
+  // frame must not throw fragments through all 300ms of ballistic travel.
   let scans=0;
   const emptyScene={get boxes(){scans++;return [];}};
   const physics={...context(),collisionScene:emptyScene,gravity:{x:0,y:0,z:0}};
@@ -157,12 +157,18 @@ test('Web hitch budget keeps moving authored shards while limiting scene sweeps 
   const contacts=advanceNativeFragmentBody(bounded,0.3,{...physics,limitWebFrameWork:true});
   const boundedReads=scans;
   assert.deepEqual(contacts,[]);
-  assert.ok(Math.abs(bounded.position.x-3)<1e-8,'no dropped displacement after a hitch');
+  assert.ok(Math.abs(bounded.position.x-1)<1e-8,
+    'budgeted Web shards must simulate only 100ms of a 300ms hitch');
   scans=0;
   const uncapped=body();uncapped.velocity={x:10,y:0,z:0};
   advanceNativeFragmentBody(uncapped,0.3,physics);
   assert.ok(scans>boundedReads*5,'a long frame must not perform all 150Hz collision queries');
-  assert.ok(Math.abs(uncapped.position.x-bounded.position.x)<1e-8);
+  assert.ok(Math.abs(uncapped.position.x-3)<1e-8,
+    'explicit unbudgeted native-study calls still consume the full elapsed time');
+  const at10fps=body();at10fps.velocity={x:10,y:0,z:0};
+  advanceNativeFragmentBody(at10fps,0.1,{...physics,limitWebFrameWork:true});
+  assert.ok(Math.abs(at10fps.position.x-bounded.position.x)<1e-8,
+    'a normal 10 FPS frame remains fully simulated');
   assert.throws(()=>advanceNativeFragmentBody(body(),0.1,{...physics,limitWebFrameWork:'yes'}),/required/);
 
   const group=createGunPickupShardRuntime({
