@@ -2280,5 +2280,5 @@ test('J3 Web post-stun cover recovery: armed witnesses choose sheltered swept la
   const hidden=make([box(5,1,5,.15,2,1.5)]);
   hidden.step(.3);
   assert.ok(hidden.enemy.z>5.05,
-    'cover selection does not infer a player's position through solid walls');
+    'cover selection never follows the hidden player through solid walls');
 });
