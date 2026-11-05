@@ -309,7 +309,12 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
     const value = Math.min(1, Math.max(0, elapsed - shard.delay));
     const sourceScale = 1 - Math.min(1, (value * 10 / 3) ** 2);
     shard.hdrPhase = value > 0.05 ? Math.min(1, (value * 5 - 0.05) ** 2) : 0;
-    if (sourceScale < shard.originalScale) shard.localScale = sourceScale;
+    // Web visual continuity: sourceMatrix ALREADY contains each authored
+    // shard's initial scale. HDR shrink is a normalized fade multiplier,
+    // not a replacement absolute scale (which made >1 shards visibly pop
+    // smaller at the first draw and <1 shards refuse to fade initially).
+    // This normalization is a Web presentation choice, not Unity's scale law.
+    shard.localScale = shard.originalScale * sourceScale;
     shard.fadeSaturated = sourceScale <= 0 && shard.hdrPhase >= 1;
     shard.visible = shard.localScale > 0;
     const ratio = shard.localScale / shard.originalScale;
