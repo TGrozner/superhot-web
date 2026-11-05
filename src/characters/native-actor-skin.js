@@ -170,20 +170,21 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSo
   const direction = hit ? webCameraHitDirection(modelMatrix, directionalPoint) : null;
   const vertical = hitSource?.verticalComponent ?? 0;
   const hasVertical = hit && Math.abs(vertical) > 1e-6;
+  const planarWeight = incoming ? Math.sqrt(Math.max(0, 1 - vertical * vertical)) : 1;
   // WEB-authored impact elevation response. Purely vertical accepted shots
   // have NO lateral attacker: neither a moving camera nor actor-id parity
   // should make the crystal enemy jerk sideways at this contact.
   const impactPitch = Math.max(-.32, Math.min(.32,
-    (direction?.pitch ?? (hasVertical ? 0 : .08)) - .18 * vertical));
-  const impactRoll = direction?.roll ?? (Math.abs(vertical) >= 1 - 1e-9
-    ? 0 : side * .22 * (1 - Math.abs(vertical)));
+    (direction?.pitch ?? (hasVertical ? 0 : .08)) * planarWeight - .18 * vertical));
+  const impactRoll = direction ? direction.roll * planarWeight :
+    (Math.abs(vertical) >= 1 - 1e-9 ? 0 : side * .22 * (1 - Math.abs(vertical)));
   return Object.freeze({
     kind: fire ? 'fire' : identity.name,
     pitch: (hit ? impactPitch : fire ? .12 : -.14) * envelope,
     roll: (hit ? impactRoll : side * (fire ? .05 : .035)) * envelope,
     // Web-only shoulder twist: a single GPU pose drives bones, hitboxes and
     // the weapon socket. Externally solved death poses never receive it.
-    yaw: hit && direction ? direction.yaw * envelope : 0,
+    yaw: hit && direction ? direction.yaw * planarWeight * envelope : 0,
     hitDirectionProvenance: hit
       ? (direction || hasVertical ? hitSource.provenance : 'actor-id fallback')
       : null,

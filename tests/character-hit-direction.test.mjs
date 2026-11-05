@@ -152,3 +152,24 @@ test('accepted vertical hits pitch the enemy without a fabricated lateral bearin
     'stair-angle shots should differ from identical azimuth at floor level');
   assert.equal(draws(), 6);
 });
+
+test('steep accepted impacts smoothly lose horizontal recoil without losing elevation', () => {
+  const {render} = actorFixture();
+  const level = render('level', 81, {x: 1, y: 0, z: 0}, null, 0, 2);
+  const diagonal = render('diagonal-angle', 81, {x: 1, y: -1, z: 0}, null, 0, 2);
+  const steep = render('steep-angle', 81, {x: 1, y: -100, z: 0}, null, 0, 2);
+  const vertical = render('vertical-angle', 81, {x: 0, y: -1, z: 0}, null, 0, 2);
+  const levelRoll = level.actorWebPoseReaction.roll;
+  const diagonalRoll = diagonal.actorWebPoseReaction.roll;
+  const steepRoll = steep.actorWebPoseReaction.roll;
+  assert.ok(levelRoll < diagonalRoll && diagonalRoll < steepRoll && steepRoll < 0,
+    'the same horizontal bearing must not produce a full sideways recoil at high elevation');
+  assert.equal(vertical.actorWebPoseReaction.roll, 0);
+  assert.ok(Math.abs(steepRoll) < .02);
+  assert.ok(steep.actorWebPoseReaction.pitch > .15,
+    'high-elevation hits keep their readable vertical response');
+  const opposite = render('steep-opposite', 81, {x: -1, y: -100, z: 0}, null, 0, 2);
+  assert.ok(opposite.actorWebPoseReaction.roll > 0 &&
+    Math.abs(opposite.actorWebPoseReaction.roll) < .02,
+  'the small remaining horizontal direction must retain its proper sign');
+});
