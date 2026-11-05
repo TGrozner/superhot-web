@@ -1194,9 +1194,12 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // Near the next shot it holds position again for a readable firing window;
   // shot-locked, blind, blocked-muzzle and other weapon families are unchanged.
   const weaponSettings=enemy.activeWeaponSettings ?? runtime.enemySettings;
+  // The explicit Web fallback owns weaponFamily='Pistol' but does not supply
+  // a source-qualified `settings.family`; never silently disable its tactics.
+  const activeFamily=enemy.activeWeaponSettings?.family ?? enemy.weaponFamily;
   const reloadScoot=stop && armed && state.canAttack && !enemy.runtime.pendingShot &&
     enemy.runtime.haveBeenSeen===true &&
-    (weaponSettings.family==='Pistol' || weaponSettings.family==='MachineGun') &&
+    (activeFamily==='Pistol' || activeFamily==='MachineGun') &&
     Number.isFinite(weaponSettings.attackDelay) && weaponSettings.attackDelay>0 &&
     enemy.runtime.attackDelayRemaining>weaponSettings.attackDelay*WEB_RELOAD_SCOOT.beginDelayFraction &&
     enemy.runtime.attackDelayRemaining<=weaponSettings.attackDelay*WEB_RELOAD_SCOOT.endDelayFraction;
