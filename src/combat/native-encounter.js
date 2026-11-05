@@ -340,18 +340,27 @@ function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime)
   const start=position(enemy),state=enemy.encounter;
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_PROJECTILE_EVADE.speedFraction;
   if(!Number.isFinite(travel) || travel<=EPSILON)return false;
-  const moved=moveNativeCharacter(runtime.collision,start,{
-    x:state.webDodgeSideX*travel,y:0,z:state.webDodgeSideZ*travel,
-  },runtime.body).position;
-  if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)return false;
-  const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
-  if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
-      occupied(runtime,start,moved,enemies,enemy) ||
-      occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))return false;
-  enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
-  enemy.walking=true;
-  state.route=null;
-  return true;
+  // A teammate or wall can close the first evasion lane while the opposite
+  // perpendicular lane remains safe. Try both using the SAME swept capsule,
+  // navmesh and live-actor gates; never teleport through the blocker. Remember
+  // the successful side for the remainder of this dodge to avoid oscillation.
+  for(const direction of [1,-1]) {
+    const moved=moveNativeCharacter(runtime.collision,start,{
+      x:state.webDodgeSideX*travel*direction,y:0,z:state.webDodgeSideZ*travel*direction,
+    },runtime.body).position;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null;
+    state.webDodgeSideX*=direction;
+    state.webDodgeSideZ*=direction;
+    return true;
+  }
+  return false;
 }
 
 /** Interrupt a live Web dodge instead of pausing its remaining time across a

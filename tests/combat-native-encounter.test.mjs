@@ -784,6 +784,51 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
 });
 
+test('J3 Web projectile dodge takes a free perpendicular lane if a teammate blocks the first one',()=>{
+  // Fabricated live projectile and actor capsules, never original MCD geometry.
+  // The approaching bullet travels along +Z: either +/-X is a valid dodge.
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const bullet={friendly:true,pos:p(2,1,-2),direction:p(0,0,1),speed:20};
+  function scenario(blockBothSides) {
+    const runtime=setup(),enemy=firstSpawn(runtime,target);
+    const initial=p(enemy.x,enemy.y,enemy.z);
+    const preferredX=-enemy.encounter.webTacticalSide;
+    const blocker=(id,side)=>({
+      id,x:initial.x+side*.8,y:initial.y,z:initial.z,alive:true,active:true,
+    });
+    const enemies=[enemy,blocker('preferred-lane',preferredX)];
+    if(blockBothSides)enemies.push(blocker('other-lane',-preferredX));
+    advanceNativeEncounter(runtime,input(enemies,{
+      ...target,scaledDeltaTime:.18,playerProjectiles:[bullet],
+    }));
+    return {runtime,enemy,enemies,initial,preferredX};
+  }
+  const free=scenario(false);
+  assert.ok((free.enemy.x-free.initial.x)*free.preferredX<-.05,
+    'ally blocks the preferred side, so the enemy genuinely dodges into the open opposite lane');
+  assert.equal(Math.sign(free.enemy.encounter.webDodgeSideX),-free.preferredX,
+    'remaining dodge retains the valid direction instead of jittering back into the ally');
+  assert.ok(free.enemy.encounter.webDodgeRemaining>0);
+  const xAfterFirst=free.enemy.x;
+  advanceNativeEncounter(free.runtime,input(free.enemies,{
+    ...target,scaledDeltaTime:.08,playerProjectiles:[],
+  }));
+  assert.ok((free.enemy.x-xAfterFirst)*free.preferredX<-.005,
+    'the next frame continues in the same collision-safe direction');
+  assert.equal(free.enemy.encounter.canAttack,false,'dodging never authorizes an attack');
+
+  const trapped=scenario(true);
+  assert.equal(trapped.enemy.x,trapped.initial.x,
+    'both lateral dodge lanes are blocked; ordinary non-dodge movement may still occur');
+  for(const blocker of trapped.enemies.slice(1)) {
+    assert.ok(Math.hypot(trapped.enemy.x-blocker.x,trapped.enemy.z-blocker.z)>=.8-1e-6,
+      'failed dodge cannot cross either living ally capsule');
+  }
+  assert.equal(trapped.enemy.encounter.webDodgeRemaining,0);
+  assert.ok(trapped.enemy.encounter.webDodgeCooldown>0,
+    'a fully blocked dodge still ends with finite recovery, not frame-by-frame jitter');
+});
+
 test('J3 Web dodge is cancelled by stun, pending fire or deactivation rather than resumed later',()=>{
   // Entirely synthetic positions, shot and Web timings. No real MCD source data.
   const data=scene();
