@@ -1866,3 +1866,45 @@ test('J3 Web solo pistol closes only when genuinely visible behind player, never
   assert.equal(hidden.x,hiddenControl.x,'no hidden-player camera tracking through real cover');
   assert.ok(hidden.x<=4.05,'cover collision continues to block pursuit');
 });
+
+test('J3 Web aim pressure never banks dodges or recovers cooldown while world time is frozen',()=>{
+  // Only the simulated world clock is allowed to advance an enemy reaction.
+  // The player may look around for seconds of wall time without moving time.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2),playerForward:p(-1,0,0)};
+  const runtime=setup(data), enemy=firstSpawn(runtime,target);
+  enemy.clock=0; // suppress unrelated ordinary strafe warmup
+  const initial=p(enemy.x,enemy.y,enemy.z);
+  const tick=(world,real)=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,scaledDeltaTime:world,unscaledDeltaTime:real,
+  }));
+
+  for(let frame=0;frame<12;frame++)tick(0,.2);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),initial);
+  assert.equal(enemy.encounter.webAimLock,0,'frozen camera focus cannot queue a dodge');
+  assert.equal(enemy.encounter.webAimRemaining,0);
+  assert.equal(enemy.encounter.webAimCooldown,0);
+
+  tick(.1,.1);
+  tick(.1,.1);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),initial,
+    'two brief active-time aim frames do not move a frozen gunner');
+  tick(.1,.1);
+  assert.ok(Math.abs(enemy.z-initial.z)>.01,
+    'three active-time aim frames still trigger the real swept side-step');
+  tick(.4,.4);
+  assert.equal(enemy.encounter.webAimRemaining,0);
+  const remaining=enemy.encounter.webAimCooldown;
+  assert.ok(remaining>1,'the existing recovery gate remains active after the dodge');
+  const resting=p(enemy.x,enemy.y,enemy.z);
+
+  for(let frame=0;frame<20;frame++)tick(0,.2);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),resting);
+  assert.equal(enemy.encounter.webAimCooldown,remaining,
+    'wall time alone never clears a world-time enemy recovery window');
+  tick(.1,.1);
+  assert.ok(enemy.encounter.webAimCooldown<remaining);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),resting,
+    'resumed world time drains recovery normally without an instant new dodge');
+});

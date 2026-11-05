@@ -910,7 +910,10 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
-  state.webAimCooldown=Math.max(0,state.webAimCooldown-unscaledDeltaTime);
+  // SH-03 Web game-feel: time is world-scaled in this FPS. Holding the camera
+  // on a frozen enemy must not charge a delayed dodge or refill its cooldown.
+  // Unscaled wall time is reserved for genuine real-time UI/spawn concerns.
+  state.webAimCooldown=Math.max(0,state.webAimCooldown-scaledDeltaTime);
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
@@ -1091,7 +1094,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   } else if (state.webAimRemaining<=0 && state.webAimCooldown<=EPSILON) {
     const threatened=state.visible &&
       webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward);
-    state.webAimLock=threatened ? state.webAimLock+unscaledDeltaTime : 0;
+    state.webAimLock=threatened ? state.webAimLock+scaledDeltaTime : 0;
     if(state.webAimLock>=WEB_AIM_PRESSURE.lockSeconds) {
       state.webAimLock=0;
       state.webAimRemaining=WEB_AIM_PRESSURE.evadeSeconds;
