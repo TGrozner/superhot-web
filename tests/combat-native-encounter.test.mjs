@@ -1908,3 +1908,61 @@ test('J3 Web aim pressure never banks dodges or recovers cooldown while world ti
   assert.deepEqual(p(enemy.x,enemy.y,enemy.z),resting,
     'resumed world time drains recovery normally without an instant new dodge');
 });
+
+test('J3 Web shoot-and-scoot: a gunner sidesteps after firing and settles before its next shot',()=>{
+  // Fabricated scene; Web-authored movement only. The existing GunAttack
+  // cooldown is the only shot receipt, not an invented native reload timer.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const spawn=(colliders=[])=>{
+    const runtime=setup(data,colliders);
+    const enemy=firstSpawn(runtime,target);
+    enemy.clock=0; // outside normal warmup/periodic Web strafe window
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    return {runtime,enemy};
+  };
+  const tick=({runtime,enemy},dt=.15)=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  }));
+
+  const firing=spawn();
+  firing.enemy.runtime.haveBeenSeen=true; // set by accepted Pistol GunAttack
+  firing.enemy.runtime.attackDelayRemaining=.48; // synthetic post-shot cooldown
+  const initial=p(firing.enemy.x,firing.enemy.y,firing.enemy.z);
+  tick(firing);
+  assert.ok(Math.abs(firing.enemy.z-initial.z)>.03,
+    'a visible gunner physically moves sideways while its real weapon is reloading');
+  assert.equal(firing.enemy.walking,true,'the existing animated locomotion flag is updated');
+  assert.equal(firing.enemy.runtime.attackDelayRemaining,.48,
+    'tactical movement cannot consume, refill or synthesize a weapon attack');
+  const afterScoot=p(firing.enemy.x,firing.enemy.y,firing.enemy.z);
+  firing.enemy.runtime.attackDelayRemaining=.05;
+  tick(firing);
+  assert.deepEqual(p(firing.enemy.x,firing.enemy.y,firing.enemy.z),afterScoot,
+    'the gunner holds still near readiness for a readable next shot');
+
+  const starting=spawn();
+  starting.enemy.runtime.attackDelayRemaining=.48;
+  tick(starting);
+  assert.deepEqual(p(starting.enemy.x,starting.enemy.y,starting.enemy.z),p(2,0,2),
+    'the initial delay before any shot does not pretend to be a reload');
+
+  const committed=spawn();
+  committed.enemy.runtime.haveBeenSeen=true;
+  committed.enemy.runtime.attackDelayRemaining=.48;
+  committed.enemy.runtime.pendingShot={target:{...target.playerPosition},speed:28};
+  tick(committed);
+  assert.deepEqual(p(committed.enemy.x,committed.enemy.y,committed.enemy.z),p(2,0,2),
+    'a shot waiting for its real animated muzzle is never displaced');
+
+  const blocked=spawn([box(5,.65,2,.15,1.3,2)]);
+  blocked.enemy.muzzlePosition=p(2,.3,2);
+  blocked.enemy.runtime.haveBeenSeen=true;
+  blocked.enemy.runtime.attackDelayRemaining=.48;
+  tick(blocked);
+  assert.equal(blocked.enemy.encounter.canAttack,false);
+  assert.deepEqual(p(blocked.enemy.x,blocked.enemy.y,blocked.enemy.z),p(2,0,2),
+    'blocked muzzle never activates a fake reload dodge before tactical peeking');
+});
