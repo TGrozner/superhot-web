@@ -48,7 +48,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   for (const bus of [weapons, impacts, footsteps, ambient]) bus.connect(dynamics);
   // Synthetic Web room slapback, not a recovered Unity reflection or impulse response.
   // Post-spatialization send colors weapon/item and impact cues, not footsteps.
-  // One shared delay/filter pair keeps node count constant during burst combat.
+  // Two shared delay/filter stages keep node count constant during burst combat.
   const roomReflections: AudioNode[] = [];
   if (typeof context.createDelay === 'function') {
     const send = context.createGain();
