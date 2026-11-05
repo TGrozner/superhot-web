@@ -25,6 +25,11 @@ export type WebStepEmitter = (cue: 'step' | 'landing', request: {
 export function createWebFootstepMotion(emit: WebStepEmitter) {
   if (typeof emit !== 'function') throw new TypeError('step emitter required');
   const metresPerStep = 1.3;
+  // Web game-feel: the first foot plants sooner after a stop or spawn.
+  // Distances and times are creative Web tuning, not MCD animation markers.
+  const firstContactMetres = 0.75;
+  const idleRearmSeconds = 0.4;
+  const idleTravelTolerance = 0.005;
   // Web gait policy: valid grounded movement can exceed 1 m in a slow frame.
   // A speed cap preserves strides while rejecting implausible teleports.
   // These are creative Web limits, not recovered MCD movement constants.
@@ -45,6 +50,8 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
   let previous: WebImpactPoint | null = null;
   let previousTime: number | null = null;
   let pendingMetres = 0;
+  let awaitingFirstContact = true;
+  let idleSeconds = 0;
   let groundedBaseline = false;
   let airborneSince: number | null = null;
   let airborneFrames = 0;
@@ -55,6 +62,8 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
     previous = null;
     previousTime = null;
     pendingMetres = 0;
+    awaitingFirstContact = true;
+    idleSeconds = 0;
     groundedBaseline = false;
     airborneSince = null;
     airborneFrames = 0;
@@ -80,6 +89,8 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
       previous = grounded ? current : null;
       previousTime = timeSeconds;
       pendingMetres = 0;
+      awaitingFirstContact = true;
+      idleSeconds = 0;
       groundedBaseline = grounded;
       airborneSince = null;
       airborneFrames = 0;
@@ -116,6 +127,8 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
       previous = null;
       previousTime = timeSeconds;
       pendingMetres = 0;
+      awaitingFirstContact = true;
+      idleSeconds = 0;
       return null;
     }
     if (airborneSince !== null) {
@@ -138,6 +151,9 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
       previous = current;
       previousTime = timeSeconds;
       pendingMetres = 0;
+      // A true landing already makes contact; don't double-clap the next stride.
+      awaitingFirstContact = !validLanding;
+      idleSeconds = 0;
       // Creative Web-only contact thud. Height adds weight without making
       // ordinary hops deafening; never infer native fall velocity/clip mapping.
       const intensity = Math.min(1.4, 0.55 + airtime * 0.35 +
@@ -150,6 +166,8 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
       previous = current;
       previousTime = timeSeconds;
       pendingMetres = 0;
+      awaitingFirstContact = true;
+      idleSeconds = 0;
       return null;
     }
     const dt = timeSeconds - previousTime;
@@ -160,11 +178,25 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
     previousTime = timeSeconds;
     if (distance > maxAllowedTravel(dt)) {
       pendingMetres = 0; // Spawn, fast-travel or focus recovery, not a stride.
+      awaitingFirstContact = true;
+      idleSeconds = 0;
       return null;
     }
+    // Rest/jitter cannot fake a shoe contact; rearm after sustained stillness.
+    if (distance <= idleTravelTolerance) {
+      idleSeconds += dt;
+      if (idleSeconds >= idleRearmSeconds) {
+        pendingMetres = 0;
+        awaitingFirstContact = true;
+      }
+      return null;
+    }
+    idleSeconds = 0;
     pendingMetres += distance;
-    if (pendingMetres < metresPerStep) return null;
-    pendingMetres %= metresPerStep;
+    const contactMetres = awaitingFirstContact ? firstContactMetres : metresPerStep;
+    if (pendingMetres < contactMetres) return null;
+    pendingMetres = Math.max(0, pendingMetres - contactMetres);
+    awaitingFirstContact = false;
     // More movement in the same real-time interval makes a stronger Web step.
     const speed = distance / Math.max(dt, 1 / 120);
     const intensity = Math.min(1, Math.max(0.45, speed / 4.5));
