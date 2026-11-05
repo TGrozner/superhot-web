@@ -116,16 +116,39 @@ test('accepted first stun reacts on its collision frame, freezes with world time
   assert.equal(draws(), 3);
 });
 
-test('stun direction rejects broken vectors before draw, vertical impacts fail closed', () => {
+test('accepted vertical hits pitch the enemy without a fabricated lateral bearing', () => {
   const {render, draws} = actorFixture();
   assert.throws(() => render('enemy', 1,
     {x: Number.NaN, y: 0, z: 1}, null, .1, 1),
   /hitIncomingDirection requires finite/);
   assert.throws(() => render('enemy', 1, {x: 0, y: 0, z: 0},
     null, .1, 1), /zero travel vector/);
-  const vertical = render('vertical', 1, {x: 0, y: -1, z: 0},
-    null, .1, 1);
-  assert.equal(vertical.actorWebPoseReaction.hitDirectionProvenance,
-    'actor-id fallback');
-  assert.equal(draws(), 1);
+  // Both are accepted collision velocities, not a projection from the camera.
+  const fromAbove = render('vertical', 1, {x: 0, y: -1, z: 0},
+    null, 0, 1);
+  const fromBelow = render('vertical-other', 1, {x: 0, y: 1, z: 0},
+    null, 0, 1);
+  assert.ok(fromAbove.actorWebPoseReaction.pitch > .15);
+  assert.ok(fromBelow.actorWebPoseReaction.pitch < -.15);
+  assert.equal(fromAbove.actorWebPoseReaction.roll, 0,
+    'a perfectly vertical shot must not invent left/right direction');
+  assert.equal(fromBelow.actorWebPoseReaction.roll, 0);
+  assert.equal(fromAbove.actorWebPoseReaction.hitDirectionProvenance,
+    'Web accepted vertical travel, planar hit direction unavailable');
+  // A continuing stun holds the original accepted direction even if
+  // the camera moves and incoming evidence on later frames changes.
+  const held = render('vertical', 1, {x: 0, y: 1, z: 0},
+    null, .05, 1.05, {x: 9, y: 4, z: 0});
+  assert.ok(held.actorWebPoseReaction.pitch > 0);
+  const opposite = render('vertical', 2, {x: 0, y: 1, z: 0},
+    null, .06, 1.06, {x: -9, y: -4, z: 0});
+  assert.ok(opposite.actorWebPoseReaction.pitch < 0,
+    'a new accepted contact can reverse the elevation of the flinch');
+  const planar = render('planar', 1, {x: 1, y: 0, z: 0},
+    null, 0, 1);
+  const diagonal = render('diagonal', 1, {x: 1, y: -1, z: 0},
+    null, 0, 1);
+  assert.ok(diagonal.actorWebPoseReaction.pitch > planar.actorWebPoseReaction.pitch + .1,
+    'stair-angle shots should differ from identical azimuth at floor level');
+  assert.equal(draws(), 6);
 });
