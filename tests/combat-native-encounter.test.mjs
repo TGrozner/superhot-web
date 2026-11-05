@@ -419,6 +419,29 @@ test('J3 Web peeking: a body-visible enemy sidesteps low cover until its real mu
     'unknown muzzle does not authorize speculative peeking or shooting');
 });
 
+test('J3 Web muzzle peeking chooses a genuinely open safe lane before an occluded one',()=>{
+  // Entirely synthetic low cover, not a native MCD asset or AI timing.
+  // Preferred starting side is -Z; only +Z clears the real projected muzzle ray.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,5),playerPosition:p(8,1.6,5)};
+  const runtime=setup(data,[box(5,.65,3.525,.15,1.3,3.05)]);
+  const enemy=firstSpawn(runtime,near);
+  enemy.z=5;enemy.clock=1.6;
+  enemy.muzzlePosition=p(2,.3,5);
+  enemy.muzzleForward=p(1,0,0);
+  assert.ok(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,near.playerPosition),
+    'real low cover blocks the starting muzzle');
+  advanceNativeEncounter(runtime,input([enemy],{...near,scaledDeltaTime:.2}));
+  assert.ok(enemy.z>5.05,
+    'cover-peeking chooses the physically open +Z lane instead of the occluded preferred side');
+  assert.equal(enemy.encounter.canAttack,false,
+    'predicted muzzle clearance NEVER authorizes firing on the movement tick');
+  enemy.muzzlePosition=p(enemy.x,.3,enemy.z); // The actual newly posed muzzle on the next tick.
+  advanceNativeEncounter(runtime,input([enemy],{...near,scaledDeltaTime:0}));
+  assert.equal(enemy.encounter.canAttack,true,
+    'next real muzzle/eye cast may authorize the now-clear shooting lane');
+});
+
 test('J3 Web crossfire: living allies block muzzle shots and trigger safe flanking, not ghost bullets',()=>{
   const data=scene();
   data.gameplay.enemy.MinimumDistanceToPlayer=10;
