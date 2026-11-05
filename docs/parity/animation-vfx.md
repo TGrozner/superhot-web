@@ -689,3 +689,42 @@ créatifs Web ; **aucun timing fixe PhysX/Unity n'est prétendu**. Les
 artifacts privés d'animation de research #11/#12 fournissent un inventaire
 statique, pas l'exécution des 404 liaisons événement/receveur, ni les
 valeurs de scheduling PhysX natives. Aucune requête privée ajoutée.
+
+
+### SH-06 — correctif du temps actif rAF du ragdoll Dojo (05/11/2026, PR de raccord)
+
+**Défaut de gameplay Web prouvé par chaîne d'appels (pas par vision navigateur) :**
+`sampleActiveFrameDeltas` émet `simulationDt=0.05` et
+`activeRealDt=0.1` à 10 FPS. Le `stepMcdGameplayClock` de `main.js`
+reçoit `dt=0.05`, puis `worldDt=tick.worldDelta` et le bridge de mort
+reçoit seulement `scaledDelta=worldDt`. Même après #458, le solveur
+ne peut jamais restituer les 50 ms qui n'atteignent pas son entrée :
+les cadavres prennent du retard à 10 FPS, malgré une CI verte.
+
+**Correction SH-06 dans sa lane :**
+`src/animation/native-gameplay-pose-bridge.js` accepte un reçu optionnel
+`frameTiming:{simulationDelta,activeRealDelta}` provenant du **même**
+rAF `sampleActiveFrameDeltas`. Il avance le solveur de
+`activeRealDelta * (scaledDelta / simulationDelta)`, préservant le
+facteur de ralentissement déjà appliqué à `worldDt` ; une frame de 100 ms
+à vitesse 1 transmet 100 ms, à vitesse 0,2 transmet 20 ms. Le solveur
+limite déjà la physique coûteuse d'un hitch >100 ms tout en avançant son
+horloge de nettoyage ; le bridge ne doit pas tronquer ce dernier temps.
+Pas de timestamp global, de nouvel asset, d'inférence Mecanim ou de
+lancement natif. Appels sans reçu inchangés.
+
+**Raccord exclusif SH-05 encore requis :** dans `src/main.js`, passer
+`frameTiming:{simulationDelta:dt,activeRealDelta}` à
+`advanceDojoDeathSkinFrame` en conservant `scaledDelta:worldDt`
+(pas de second calcul concurrent du ratio). Sans cette unique propriété,
+la correction **n'est pas active sur Pages**. Contrôler l'horloge de
+ralentissement, les transitions de pause, 10/30/60 FPS, contacts
+sol/mur, boucle Dojo 7/7, et p95/p99 après merge et déploiement.
+Le test Node valide le calcul de la chaîne d'entrée et le passage
+effectif dans le bridge ; il ne remplace pas le smoke navigateur.
+
+**Limite de preuve native :** choix d'horloge original Web. Le
+corpus privé #11 (`spec/animation/verification.json`) et #12
+(`link-verification.json`) inventorie clips, transitions et marqueurs
+mais ne prouve toujours pas les 404 liaisons de destinataires d'événements
+ni la cadence d'exécution Unity/PhysX. Aucun PhysX 1:1 revendiqué.
