@@ -50,8 +50,10 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   // Post-spatialization send colors weapon/item and impact cues, not footsteps.
   // Two shared delay/filter stages keep node count constant during burst combat.
   const roomReflections: AudioNode[] = [];
+  let roomSend: GainNode | null = null;
   if (typeof context.createDelay === 'function') {
     const send = context.createGain();
+    roomSend = send;
     const delay = context.createDelay(0.25);
     const tone = context.createBiquadFilter();
     const returnGain = context.createGain();
@@ -96,6 +98,8 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   // Web-original kill-chain color; do not count blocked/muted shatters.
   let lastShatterAt = -Infinity;
   let shatterChain = 0;
+  let lastRoomTransientAt = -Infinity;
+  let roomBurstCount = 0;
 
   /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
   function setMixLevel(level: number): void {
@@ -219,6 +223,18 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
         return {status: 'blocked', source: 'web-original-synthesis', at: null, spatial: false};
       }
       retire(victim);
+    }
+    // WEB-ORIGINAL combat clarity: avoid muddy reflections under sustained
+    // gunfire/impacts. One shared send, no new sources or per-shot nodes.
+    // This is a creative Web duck/recovery envelope, NOT a Unity mixer curve.
+    if (roomSend && (cue === 'player-shot' || cue === 'enemy-shot' ||
+        cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana')) {
+      const gap = at - lastRoomTransientAt;
+      roomBurstCount = gap >= 0 && gap <= 0.28 ? Math.min(4, roomBurstCount + 1) : 0;
+      lastRoomTransientAt = at;
+      roomSend.gain.cancelScheduledValues(at);
+      roomSend.gain.setTargetAtTime(0.34 - roomBurstCount * 0.045, at, 0.008);
+      roomSend.gain.setTargetAtTime(0.34, at + 0.24, 0.11);
     }
     // Use real AudioContext time for successive confirmed death cues.
     // Creative Web feedback, not a recovered MCD combo rule or timer.
