@@ -310,7 +310,7 @@ function webProjectileCanReach(projectile,secondsToPass) {
  * @param {object[]} projectiles Live projectile snapshots from SH-05.
  * @returns {{sideX:number,sideZ:number}|null} A safe-direction hint, not a hit.
  */
-function webIncomingProjectile(runtime, enemy, projectiles) {
+function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
   if (!Array.isArray(projectiles) || projectiles.length===0) return null;
   let bestTime=Infinity, threat=null;
   for (const projectile of projectiles) {
@@ -332,9 +332,10 @@ function webIncomingProjectile(runtime, enemy, projectiles) {
     if(closest.y<enemy.y || closest.y>enemy.y+runtime.body.height)continue;
     const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
     if(separation>runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii)continue;
-    // A projectile hidden behind actual world cover should not trigger an
-    // omniscient sidestep. The trace is checked only for plausible threats.
-    if(nativeSegmentHit(runtime.sightCollision,origin,closest)!==null)continue;
+    // A bullet stopped by real cover or an intercepting living teammate
+    // cannot warn enemies farther downrange. Web prediction, not native MCD AI.
+    if(nativeSegmentHit(runtime.sightCollision,origin,closest)!==null ||
+        webLivingAllyIntersectsSegment(runtime,enemy,origin,closest,enemies))continue;
     const speed=Math.sqrt(planarSpeedSquared);
     const cross=v.x*dz-v.z*dx;
     const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
@@ -352,7 +353,7 @@ function webIncomingProjectile(runtime, enemy, projectiles) {
  * @param {object[]} projectiles Actual projectile snapshots.
  * @returns {{x:number,y:number,z:number}|null} Nearest visible passage point.
  */
-function webNearMissProjectile(runtime, enemy, projectiles) {
+function webNearMissProjectile(runtime, enemy, projectiles, enemies) {
   if (!Array.isArray(projectiles)) return null;
   let earliest=Infinity, passage=null;
   for (const projectile of projectiles) {
@@ -376,7 +377,8 @@ function webNearMissProjectile(runtime, enemy, projectiles) {
         separation>runtime.body.radius*WEB_NEAR_MISS.outerBodyRadii) continue;
     const eye={x:enemy.x,y:enemy.y+runtime.aimHeight*0.55,z:enemy.z};
     if (nativeSegmentHit(runtime.sightCollision,origin,closest)!==null ||
-        nativeSegmentHit(runtime.sightCollision,closest,eye)!==null) continue;
+        nativeSegmentHit(runtime.sightCollision,closest,eye)!==null ||
+        webLivingAllyIntersectsSegment(runtime,enemy,origin,closest,enemies)) continue;
     earliest=until;
     passage=closest;
   }
@@ -605,11 +607,11 @@ function occupied(runtime, start, end, enemies, except = null) {
   return enemies.some(other => other !== except && participating(other) &&
     occupiedSegment(start, end, position(other), runtime.body.radius*2, runtime.body.height));
 }
-// J3 Web crossfire: a living teammate between a proven muzzle and the player
-// blocks the fire order. Check the body at the shot's interpolated height;
-// an ally behind the shooter, beyond the target, or already dead is not cover.
-// This is gun permission, NOT a new projectile hitbox or friendly-fire damage.
-function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
+// A live actor capsule blocks both another gunner's muzzle and the Web AI's
+// prediction of an incoming PLAYER bullet. A bullet intercepted by a teammate
+// must not make an enemy farther downrange dodge or panic. Web tactical test,
+// NOT a new native projectile collision, piercing or damage contract.
+function webLivingAllyIntersectsSegment(runtime, shooter, muzzle, target, enemies) {
   const dx=target.x-muzzle.x, dz=target.z-muzzle.z;
   const lengthSquared=dx*dx+dz*dz;
   if(!Number.isFinite(lengthSquared) || lengthSquared<=EPSILON)return false;
@@ -647,7 +649,7 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime,
         !observers.has(enemy) || !enemy.muzzlePosition || !enemy.muzzleForward)continue;
     if(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,target)!==null)continue;
     clear.add(enemy);
-    if(webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,target,enemies)) {
+    if(webLivingAllyIntersectsSegment(runtime,enemy,enemy.muzzlePosition,target,enemies)) {
       allyBlocked.add(enemy);
       continue;
     }
@@ -918,7 +920,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   state.webDodgeCooldown=Math.max(0,state.webDodgeCooldown-scaledDeltaTime);
   if(state.visible && !enemy.runtime.pendingShot &&
       state.webDodgeRemaining<=0 && state.webDodgeCooldown<=EPSILON) {
-    const threat=webIncomingProjectile(runtime,enemy,playerProjectiles);
+    const threat=webIncomingProjectile(runtime,enemy,playerProjectiles,enemies);
     if(threat) {
       state.webDodgeRemaining=WEB_PROJECTILE_EVADE.dodgeSeconds;
       state.webDodgeSideX=threat.sideX;
@@ -965,7 +967,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   if (armed && scaledDeltaTime>0 && !enemy.runtime.pendingShot &&
       state.webDodgeRemaining<=0 && state.webSuppressionRemaining<=0 &&
       state.webSuppressionCooldown<=EPSILON) {
-    const passage=webNearMissProjectile(runtime,enemy,playerProjectiles);
+    const passage=webNearMissProjectile(runtime,enemy,playerProjectiles,enemies);
     if (passage) {
       state.webSuppressionFrom=passage;
       state.webSuppressionRemaining=WEB_NEAR_MISS.retreatSeconds;
@@ -1203,10 +1205,10 @@ export function advanceNativeEncounter(runtime, input) {
       continue;
     }
     if(nativeSegmentHit(runtime.sightCollision,muzzle,playerPosition)!==null ||
-        webAllyShieldsMuzzle(runtime,enemy,muzzle,playerPosition,enemies)) {
+        webLivingAllyIntersectsSegment(runtime,enemy,muzzle,playerPosition,enemies)) {
       enemy.encounter.canAttack=false;
       enemy.encounter.webAllyBlockingShot=
-        webAllyShieldsMuzzle(runtime,enemy,muzzle,playerPosition,enemies);
+        webLivingAllyIntersectsSegment(runtime,enemy,muzzle,playerPosition,enemies);
     }
   }
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
