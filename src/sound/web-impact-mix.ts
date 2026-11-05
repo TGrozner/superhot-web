@@ -293,6 +293,21 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       debrisLow.connect(debris);
       debris.connect(out);
     }
+    // WEB-ORIGINAL fist body: a compressed low thud after an accepted
+    // melee contact. One existing noise source, voice and spatial route;
+    // not a recovered Unity punch clip or source-authored envelope.
+    if (cue === 'punch-contact') {
+      const fistLow = track(context.createBiquadFilter());
+      fistLow.type = 'lowpass';
+      fistLow.frequency.value = Math.min(340, context.sampleRate * 0.28);
+      const fistBody = track(context.createGain());
+      fistBody.gain.setValueAtTime(0.0001, at);
+      fistBody.gain.linearRampToValueAtTime(volume * 0.54, at + 0.012);
+      fistBody.gain.exponentialRampToValueAtTime(0.0001, at + 0.115);
+      noise.connect(fistLow);
+      fistLow.connect(fistBody);
+      fistBody.connect(out);
+    }
     // Web-authored transient: audible snap on hits, no extra BufferSourceNode.
     // This layer shares the spatial path, gain trim and existing voice budget.
     const snap = attackByCue[cue];
