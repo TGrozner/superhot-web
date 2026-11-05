@@ -217,6 +217,61 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   } else throw new TypeError('Only source Impulse/ConstantForce supported');
 }
 
+
+/**
+ * Apply only the actual BODY FORCE command emitted by the already-resolved
+ * `applyThrownEnemyContact` lethal branch to the existing Dojo corpse solver.
+ * This is not collision admission, an inferred death trigger or PhysX.
+ * A source body is preferred; an explicitly supplied SAME-contact skinned bone
+ * may be walked through the recovered bone parents to a nearby Rigidbody.
+ * Unknown targets fail closed, preserving the host's freeze fallback.
+ *
+ * SH-05 owns the callsite: call only after `killEnemy` creates the runtime,
+ * and suppress its separate creative throw kick for this confirmed source
+ * command. Never apply this AND the synthetic kick to the same thrown kill.
+ *
+ * @param {object|null} runtime Source-rig-qualified corpse runtime, or null.
+ * @param {object} reaction Result from applyThrownEnemyContact for this hit.
+ * @param {{impactBoneIndex?:number|null}} options Same-hit skin bone receipt.
+ * @returns {{status:string,applied:number,mode?:string,boneIndex?:number}}
+ */
+export function applyNativeThrownDeathReaction(runtime,reaction,{impactBoneIndex=null}={}) {
+  if(!reaction || !Array.isArray(reaction.actions))
+    throw new TypeError('Resolved thrown reaction actions required');
+  if(reaction.outcome!=='killed' || !reaction.actions.some(action=>action?.type==='kill'))
+    return {status:'not-a-lethal-thrown-contact',applied:0};
+  const forces=reaction.actions.filter(action=>action?.type==='body-force');
+  if(forces.length!==1)return {status:'unqualified-thrown-force-count',applied:0};
+  if(!runtime)return {status:'freeze-fallback-missing-death-physics',applied:0};
+  const action=forces[0];
+  if(typeof action.partId!=='string' || !action.partId ||
+      !['Impulse','ConstantForce'].includes(action.mode))
+    throw new TypeError('Source thrown body-force part and mode required');
+  // Input is a source reaction RECEIPT, not arbitrary guessed momentum.
+  const force=vector(action.vector);
+  const contact=action.mode==='Impulse'?vector(action.position):null;
+  if(action.mode==='ConstantForce' &&
+      (!Number.isFinite(action.duration)||action.duration<0))
+    throw new TypeError('Source ConstantForce duration required');
+  let target=runtime.bodies.find(body=>body.source.partId===action.partId);
+  if(!target && impactBoneIndex!==null) {
+    const parents=runtime.definition?.boneParents;
+    if(!Array.isArray(parents) || !Number.isInteger(impactBoneIndex) ||
+        impactBoneIndex<0 || impactBoneIndex>=parents.length)
+      throw new RangeError('Exact same-hit source bone index required');
+    let bone=impactBoneIndex;
+    while(bone>=0 && !runtime.byBone.has(bone))bone=parents[bone];
+    target=runtime.byBone.get(bone);
+  }
+  if(!target)return {status:'source-body-unresolved',applied:0};
+  applyNativeDeathForce(runtime,{
+    boneIndex:target.source.boneIndex,mode:action.mode,vector:force,
+    duration:action.duration,point:contact,
+  });
+  return {status:'source-thrown-force-routed-to-web-pbd',applied:1,
+    mode:action.mode,boneIndex:target.source.boneIndex};
+}
+
 // The static Dojo collider AABBs do not move during a round; only enabled
 // changes (shared with nativeCollisionView). Index their X intervals once per
 // collision view, instead of scanning every authored box for every sphere,
