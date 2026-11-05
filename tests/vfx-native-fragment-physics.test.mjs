@@ -367,3 +367,27 @@ test('many distant Dojo boxes are pruned from shard sweeps without changing exac
   scene.setEnabled('floor',false);
   assert.deepEqual(run(scene).hits,[],'a cached index must respect a disabled source support');
 });
+
+test('shattering preserves each authored mesh scale from first draw through HDR fading',()=>{
+  for (const originalScale of [0.25, 2]) {
+    // The fragment source matrix already carries the visible authored scale.
+    // Native HDR easing is not asserted; the Web visual must not pop at t=0.
+    const modelMatrix=matrix(0,0,0);
+    for (const index of [0,5,10]) modelMatrix[index]=originalScale;
+    const runtime=createGunPickupShardRuntime({
+      shards:[{id:'authored-scale-'+originalScale,modelMatrix,originalScale}],
+      parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+      torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[0],
+      gravity:{x:0,y:0,z:0},
+    });
+    const [shard]=advanceGunPickupShardRuntime(runtime,0);
+    assert.equal(shard.localScale,originalScale);
+    assert.equal(shard.modelMatrix[0],originalScale,
+      'the very first rendered frame must retain the authored scale');
+    advanceGunPickupShardRuntime(runtime,0.15);
+    assert.ok(Math.abs(shard.localScale-originalScale*0.75)<1e-10);
+    assert.ok(Math.abs(shard.modelMatrix[0]-originalScale*0.75)<1e-10,
+      'HDR shrink must apply consistently to small and large source shards');
+    assert.equal(shard.sourceMatrix[0],originalScale,'source transforms are immutable');
+  }
+});
