@@ -1715,3 +1715,47 @@ test('J3 Web finale: last two armed survivors close together only after real kil
   assert.ok(moved.length<=1,
     'an arriving third gunner restores the single squad-breacher policy');
 });
+
+
+test('J3 Web disarmed rush zigzags toward visible player with swept feet, while armed/occluded tactics remain unchanged',()=>{
+  // Synthetic geometry and original Web tactics: no claim about MCD melee AI.
+  const data=scene();
+  data.gameplay.enemy.MeleeAttackDistance=.8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),unarmed=firstSpawn(runtime,player);
+  unarmed.reaction.hasWeapon=false;
+  const armedRuntime=setup(data),armed=firstSpawn(armedRuntime,player);
+  const initial=p(unarmed.x,unarmed.y,unarmed.z);
+  const dt=.18;
+  const frame=(world,actor)=>advanceNativeEncounter(world,input([actor],{
+    ...player,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  }));
+  frame(runtime,unarmed);
+  frame(armedRuntime,armed);
+  assert.ok(unarmed.x>initial.x+.1,'unarmed attacker actually advances toward melee');
+  assert.ok(Math.abs(unarmed.z-initial.z)>.05,
+    'the disarmed rush is no longer a straight-line target');
+  assert.equal(armed.z,2,'armed gunners retain their existing route/fire tactics');
+  assert.equal(unarmed.encounter.canAttack,false,'approach grants no gun or punch damage');
+  const firstSide=Math.sign(unarmed.z-initial.z);
+  let counterstepped=false;
+  for(let i=0;i<7;i++) {
+    const before=p(unarmed.x,unarmed.y,unarmed.z);
+    frame(runtime,unarmed);
+    const step=Math.hypot(unarmed.x-before.x,unarmed.z-before.z);
+    assert.ok(step<=data.gameplay.enemy.RunningSpeed*dt+1e-6,
+      'the rush never exceeds real swept movement speed');
+    if((unarmed.z-before.z)*firstSide<-.03)counterstepped=true;
+    assert.ok(Math.hypot(unarmed.x-player.playerFeet.x,unarmed.z-player.playerFeet.z)>=
+      runtime.body.radius*2-1e-6,'the rush cannot step into the player capsule');
+  }
+  assert.ok(counterstepped,'the diagonal attack side changes during the close-range rush');
+  assert.ok(unarmed.x>initial.x+1,'weaving must not replace forward pursuit with a stationary dance');
+  assert.equal(unarmed.reaction.hasWeapon,false,'no weapons invented by movement');
+
+  const wall=setup(data,[box(5,1,2,.2,2,4)]),hidden=firstSpawn(wall,player);
+  hidden.reaction.hasWeapon=false;
+  frame(wall,hidden);
+  assert.equal(hidden.encounter.visible,false,'world occlusion prohibits the visible-player weave');
+  assert.equal(hidden.encounter.canAttack,false,'the wall never grants attack permission');
+});
