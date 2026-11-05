@@ -542,12 +542,21 @@ export function createNativeActorSkinRuntime(skinPass) {
       previousHit?.state === 'hit' && previousHit.hitEventId !== hitEventId &&
       Number.isFinite(shaderTime) && shaderTime >= previousHit.time &&
       pose.time >= previousHit.poseTime;
-    // The repeated contact has ALREADY landed when this draw runs: start at
-    // the Web flinch's authored 45ms attack peak, not a blank zero-response
-    // frame. The source clip time is untouched and keeps progressing.
-    const hitAccentStartTime = repeatedAcceptedHit ? pose.time - .045
+    // The first accepted contact (and each accepted repeat) has ALREADY
+    // landed when this frame is drawn. Start its Web flinch at the attack
+    // peak instead of rendering a motionless impact frame, especially when
+    // SUPERHOT slows the world. Keep the sampled source clip time untouched.
+    const firstAcceptedHit = selected.identity.name === 'hit' &&
+      solvedPose === null && hitEventId !== null &&
+      previousHit?.state !== 'hit';
+    const freshAcceptedHit = firstAcceptedHit || repeatedAcceptedHit;
+    const hitAccentStartTime = freshAcceptedHit ? pose.time - .045
       : continuedHit ? (previousHit.hitAccentStartTime ?? 0) : 0;
     const hitAccentElapsed = pose.time - hitAccentStartTime;
+    // The visual lean starts at its peak, but the material flash still
+    // starts white-hot at the real accepted collision and fades from there.
+    const hitFlashElapsed = hitEventId === null
+      ? hitAccentElapsed : Math.max(0, hitAccentElapsed - .045);
     const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
       modelMatrix, hitSource, hitAccentElapsed)
       ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
@@ -565,7 +574,7 @@ export function createNativeActorSkinRuntime(skinPass) {
     const webFireArmKick = webFireRightArmKick(reaction,
       skinPass.webFireArmKickAvailable === true);
     const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
-      ? Math.max(0, 1 - hitAccentElapsed / .22) ** 2 : 0;
+      ? Math.max(0, 1 - hitFlashElapsed / .22) ** 2 : 0;
     // WEB-authored warm afterglow follows an actual accepted fire action.
     // Its blend gate prevents any false warning before the firing event.
     const fireStateSpeed = skinPass.states.fire?.speed;
