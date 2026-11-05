@@ -175,7 +175,8 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSo
   // should make the crystal enemy jerk sideways at this contact.
   const impactPitch = Math.max(-.32, Math.min(.32,
     (direction?.pitch ?? (hasVertical ? 0 : .08)) - .18 * vertical));
-  const impactRoll = direction?.roll ?? side * .22 * (1 - Math.abs(vertical));
+  const impactRoll = direction?.roll ?? (Math.abs(vertical) >= 1 - 1e-9
+    ? 0 : side * .22 * (1 - Math.abs(vertical)));
   return Object.freeze({
     kind: fire ? 'fire' : identity.name,
     pitch: (hit ? impactPitch : fire ? .12 : -.14) * envelope,
