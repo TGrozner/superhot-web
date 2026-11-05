@@ -20,6 +20,12 @@ const WARNING_EVENT_STATUS = new Set([
   'source-door-not-in-private-catalog', 'source-controller-rejected',
   'missing-private-door-catalog', 'not-dojo-build10-source',
 ]);
+// Fixed Web runtime statuses only; no source rig keys, meshes or arbitrary errors in captures.
+const DEATH_PHYSICS_STATES = new Set([
+  'unqualified-source-rig-or-definition', 'no-timestamped-skinned-pose',
+  'invalid-observed-web-velocity', 'source-parameters-web-pbd-active',
+  'source-physics-construction-rejected', 'skin-rig-replaced', 'web-pbd-step-rejected',
+]);
 const nonnegativeInt = v => Number.isSafeInteger(v) && v >= 0 ? v : null;
 const enumerated = (v, choices) => choices.has(v) ? v : null;
 
@@ -218,7 +224,13 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
       gameplay: {
         encounter: encounter ? {
           killTarget: encounter.killTarget, killed: encounter.killed,
-          enemies: encounter.enemies?.map(enemy => ({ id: enemy.id, alive: enemy.alive })) ?? [],
+          enemies: encounter.enemies?.map(enemy => ({
+            id: enemy.id, alive: enemy.alive,
+            // The host already exposes this status. Capture the bounded Web-only
+            // failure reason for real owner-browser acceptance; no native claim.
+            deathPhysics: enemy.alive === false
+              ? enumerated(enemy.deathPhysics, DEATH_PHYSICS_STATES) : null,
+          })) ?? [],
         } : null,
         weapon: g.weapon, ammo: g.ammo,
         // App reports the NEXT scale; worldClock already used the prior one.
