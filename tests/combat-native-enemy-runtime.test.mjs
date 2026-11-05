@@ -122,9 +122,9 @@ test('J2 Web gunfeel: moving pistol shots get bounded sampled yaw, still shots r
   // represent the actual ATTACK-time motion, not stale/current draw poses.
   moving.speed=0;
   let stationaryDraws=0,movingDraws=0;
-  const straight=consumeNativeEnemyVolley(standing,pistol,p(),null,
+  const straight=consumeNativeEnemyVolley(standing,pistol,p(0),null,
     ()=>{stationaryDraws++;return .75;})[0];
-  const scattered=consumeNativeEnemyVolley(moving,pistol,p(),null,
+  const scattered=consumeNativeEnemyVolley(moving,pistol,p(0),null,
     ()=>{movingDraws++;return .75;})[0];
   assert.equal(stationaryDraws,0,'no jitter RNG for standing shooter');
   assert.equal(movingDraws,1,'one deterministic sample per moving pistol shot');
@@ -141,9 +141,9 @@ test('J2 Web gunfeel: failed moving-shot RNG does not erase deferred attack',()=
   const pistol={...settings,family:'Pistol'};
   const state=ready();state.speed=3;
   assert.equal(runNativeEnemyGunAttack(state,pistol,input(),()=>.5).shot,true);
-  assert.throws(()=>consumeNativeEnemyVolley(state,pistol,p(),null,()=>NaN),/random/);
+  assert.throws(()=>consumeNativeEnemyVolley(state,pistol,p(0),null,()=>NaN),/random/);
   assert.ok(state.pendingShot,'failed spawn preparation keeps committed shot');
-  const [shot]=consumeNativeEnemyVolley(state,pistol,p(),null,()=>.5);
+  const [shot]=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>.5);
   assert.deepEqual(shot.direction,p(1));
   assert.equal(state.pendingShot,null);
 });
