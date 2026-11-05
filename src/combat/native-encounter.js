@@ -256,6 +256,22 @@ const WEB_NEAR_MISS = Object.freeze({
   recoverySeconds: 2.4,
 });
 
+/**
+ * A shot scheduled to disappear before its projected closest pass cannot
+ * credibly provoke an evasive reaction. The shipped Dojo bullet object has
+ * a remaining world-time ttl; legacy synthetic callers without it retain
+ * their prior detection policy. This is Web AI fairness, not an MCD rule.
+ *
+ * @param {object} projectile Live browser projectile snapshot.
+ * @param {number} secondsToPass Predicted world seconds until closest passage.
+ * @returns {boolean} Whether the bullet can still exist at that instant.
+ */
+function webProjectileCanReach(projectile,secondsToPass) {
+  const ttl=projectile.ttl;
+  return ttl===undefined ||
+    (Number.isFinite(ttl) && ttl>0 && secondsToPass<=ttl+EPSILON);
+}
+
 /** Find the earliest observable player bullet that will pass near the body.
  * @param {object} runtime Source collision/navmesh adapter.
  * @param {object} enemy Current live enemy.
@@ -278,7 +294,8 @@ function webIncomingProjectile(runtime, enemy, projectiles) {
     if(planarSpeedSquared<=EPSILON)continue;
     const dx=enemy.x-origin.x,dz=enemy.z-origin.z;
     const until=(dx*v.x+dz*v.z)/planarSpeedSquared;
-    if(until<=0 || until>WEB_PROJECTILE_EVADE.lookaheadSeconds || until>=bestTime)continue;
+    if(until<=0 || until>WEB_PROJECTILE_EVADE.lookaheadSeconds || until>=bestTime ||
+        !webProjectileCanReach(projectile,until))continue;
     const closest={x:origin.x+v.x*until,y:origin.y+v.y*until,z:origin.z+v.z*until};
     if(closest.y<enemy.y || closest.y>enemy.y+runtime.body.height)continue;
     const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
@@ -318,7 +335,8 @@ function webNearMissProjectile(runtime, enemy, projectiles) {
     const speedSquared=velocity.x**2+velocity.z**2;
     if (speedSquared<=EPSILON) continue;
     const until=((enemy.x-origin.x)*velocity.x+(enemy.z-origin.z)*velocity.z)/speedSquared;
-    if (until<=0 || until>WEB_NEAR_MISS.lookaheadSeconds || until>=earliest) continue;
+    if (until<=0 || until>WEB_NEAR_MISS.lookaheadSeconds || until>=earliest ||
+        !webProjectileCanReach(projectile,until)) continue;
     const closest={x:origin.x+velocity.x*until,y:origin.y+velocity.y*until,z:origin.z+velocity.z*until};
     if (closest.y<enemy.y || closest.y>enemy.y+runtime.body.height) continue;
     const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
