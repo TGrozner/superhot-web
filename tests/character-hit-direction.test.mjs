@@ -92,6 +92,30 @@ test('a second accepted stun refreshes Web flinch and damage pulse without resta
   assert.equal(draws(), 5);
 });
 
+test('accepted first stun reacts on its collision frame, freezes with world time and preserves full flash', () => {
+  const {render, draws} = actorFixture();
+  const incoming = {x: 2, y: 0, z: 0};
+  // The contact is accepted at the start of the sampled hit clip, before
+  // the next animation tick. The existing GPU lean must not wait one frame.
+  const impact = render('first-frame', 91, incoming, null, 0, 1);
+  assert.equal(impact.sampledTime, 0, 'source clip timing is never pre-advanced');
+  assert.equal(impact.actorWebPoseReaction.kind, 'hit');
+  assert.ok(impact.actorWebPoseReaction.roll < -.25,
+    'the first accepted frame already shows a directional full-strength Web flinch');
+  assert.equal(impact.actorWebHitFlash, 1,
+    'first-frame material glow stays white-hot while the pose starts at impact peak');
+
+  // SUPERHOT can advance shader/real time while the world pose is frozen.
+  const frozen = render('first-frame', 91, incoming, null, 0, 1.1);
+  assert.deepEqual(frozen.actorWebPoseReaction, impact.actorWebPoseReaction);
+  assert.equal(frozen.actorWebHitFlash, 1);
+
+  const recovering = render('first-frame', 91, incoming, null, .1, 1.2);
+  assert.ok(recovering.actorWebPoseReaction.roll < 0);
+  assert.ok(recovering.actorWebHitFlash > 0 && recovering.actorWebHitFlash < 1);
+  assert.equal(draws(), 3);
+});
+
 test('stun direction rejects broken vectors before draw, vertical impacts fail closed', () => {
   const {render, draws} = actorFixture();
   assert.throws(() => render('enemy', 1,
