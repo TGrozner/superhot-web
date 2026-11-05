@@ -145,20 +145,22 @@ function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
   return leaders;
 }
 
-// J3 Web-only last-stand pressure: the final armed opponent must not become
-// passive simply because the squad breacher lost its covering wingman. Only
-// start the closer pursuit ring after the ACTUAL encounter death receipts
-// leave exactly one active actor and the kill quota is one away. Any new
-// arrival immediately restores ordinary squad/solo spacing; no forced shot.
+// J3 Web-only final stand: once ACTUAL kill receipts leave one or two
+// opponents before victory, a matching number of surviving armed gunners
+// close the firing ring together. The final pair is a more intense, readable
+// climax than one rusher and one stationary guard. If an extra actor arrives,
+// restore ordinary single-breacher squad tactics immediately. This changes
+// movement targets only: cover, nav, capsules and all gun gates still apply.
 function webFinalSurvivorBreacher(runtime, enemy, enemies) {
-  if (runtime.killTarget<2 || runtime.killed<runtime.killTarget-1 ||
+  const remaining=runtime.killTarget-runtime.killed;
+  if (runtime.killTarget<2 || remaining<1 || remaining>2 ||
       enemy.reaction?.hasWeapon!==true || !participating(enemy)) return false;
   let alive=0;
   for (const actor of enemies) if (participating(actor)) {
     alive++;
-    if (actor!==enemy || alive>1) return false;
+    if (alive>remaining) return false;
   }
-  return alive===1;
+  return alive===remaining;
 }
 
 /** Keep the native collision/navmesh as the authority even for Web-only
