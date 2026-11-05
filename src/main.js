@@ -518,7 +518,7 @@ function setScreen(name) {
   dodgePulse.hidden = !playing;
   dodgeBanner.hidden = !playing || webDodgeFeedback.seconds<=0;
   for (const [key, screen] of Object.entries(screens)) screen.hidden = key !== name;
-  if (!playing) { keys.clear(); webPointerPath = 0; }
+  if (!playing) { keys.clear(); webPointerPath = 0; jumpRequested = false; }
 }
 
 /** Gameplay target exists only after the original OBJ has been authenticated
