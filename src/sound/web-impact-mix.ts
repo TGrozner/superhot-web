@@ -438,7 +438,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     noise.start(at, textureIndex * 0.025, duration);
     const osc = context.createOscillator();
     osc.type = cue === 'player-shot' || cue === 'enemy-shot' ? 'sawtooth' :
-      cue === 'katana' ? 'sine' : 'triangle';
+      cue === 'katana' || cue === 'wall-impact' ? 'sine' : 'triangle';
     const body = track(context.createGain());
     if (cue === 'katana') {
       // WEB-ORIGINAL steel contact: a bright attack settles into a short
@@ -450,6 +450,15 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       body.gain.setValueAtTime(0.0001, at);
       body.gain.linearRampToValueAtTime(volume * 0.68, at + 0.008);
       body.gain.exponentialRampToValueAtTime(volume * 0.18, at + 0.065);
+      body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    } else if (cue === 'wall-impact') {
+      // WEB-ORIGINAL falling ricochet chirp on confirmed world collision.
+      // This reuses the same oscillator and voice as the wall grit; no new clip.
+      // Neither surface material nor these acoustic values come from MCD.
+      osc.frequency.setValueAtTime(1950 * texturePitch, at);
+      osc.frequency.exponentialRampToValueAtTime(750 * texturePitch, at + duration);
+      body.gain.setValueAtTime(0.0001, at);
+      body.gain.linearRampToValueAtTime(volume * 0.40, at + 0.008);
       body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
     } else {
       osc.frequency.setValueAtTime(startHz * texturePitch, at);
