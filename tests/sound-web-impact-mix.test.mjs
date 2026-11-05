@@ -920,7 +920,7 @@ test('sustained Web gunfire dries shared Dojo room return without muting isolate
   ctx.currentTime = 2.48;
   assert.equal(mix.emit('impact').status, 'started');
   assert.ok(Math.abs(target()[0] - 0.25) < 1e-12);
-  assert.deepEqual(send.gain.targets.at(-1), [0.34, 2.72, 0.11]);
+  assert.deepEqual(send.gain.targets.at(-1), [0.34, ctx.currentTime + 0.24, 0.11]);
   const targetCount = send.gain.targets.length;
   assert.equal(mix.emit('step').status, 'started');
   assert.equal(send.gain.targets.length, targetCount); // Steps stay dry.
