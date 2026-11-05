@@ -1496,3 +1496,61 @@ test('J3 Web fireteams skip unalerted and re-aiming gunners without wasting a li
   assert.deepEqual(fire(2,false,[wing,lead]),[wing.id],
     'once both are really ready, the scheduled wing can fire regardless of actor iteration');
 });
+
+test('J3 Web sustained player aim provokes one visible, nav-safe gunner sidestep without wallhacks',()=>{
+  // Web-authored aim pressure; synthetic Dojo/nav mesh, not a recovered
+  // MCD perception or timing rule. This exercises the live encounter loop.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const near={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const runtime=setup(data), enemy=firstSpawn(runtime,near);
+  enemy.clock=0; // outside ordinary warmup strafing
+  const aimed=p(-1,0,0), away=p(0,0,-1);
+  const tick=(fwd,world=.1,real=.1)=>
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...near,playerForward:fwd,scaledDeltaTime:world,unscaledDeltaTime:real,
+    }));
+  const first=p(enemy.x,enemy.y,enemy.z);
+  tick(aimed);tick(aimed);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),first,
+    'a fleeting camera glance does not trigger a supernatural dodge');
+  tick(away);tick(aimed);tick(aimed);
+  assert.equal(enemy.encounter.webAimRemaining,0,
+    'looking away resets the consecutive active-time aiming requirement');
+  tick(aimed);
+  assert.ok(Math.abs(enemy.z-first.z)>.04,
+    'a sustained, visible aim triggers a swept sidestep before the first shot');
+  assert.equal(enemy.encounter.canAttack,false,
+    'movement interrupts this enemy firing stance but creates no invulnerability');
+  const side=Math.sign(enemy.z-first.z);
+  const moved=enemy.z;
+  tick(aimed);
+  assert.ok((enemy.z-moved)*side>0,
+    'the same short avoidance beat continues without jitter or teleportation');
+  for(let i=0;i<8;i++)tick(away);
+  assert.equal(enemy.encounter.webAimRemaining,0,
+    'the move ends even while this actor remains armed and alive');
+  const resting=enemy.z;
+  tick(aimed);tick(aimed);tick(aimed);
+  assert.equal(enemy.z,resting,
+    'cooldown prevents an immediate repetitive evasive dance');
+
+  const hidden=setup(data,[box(5,1,2,.3,2.2,3)]);
+  const behind=firstSpawn(hidden,near);
+  behind.clock=0;
+  for(let i=0;i<6;i++)advanceNativeEncounter(hidden,input([behind],{
+    ...near,playerForward:aimed,scaledDeltaTime:.1,unscaledDeltaTime:.1,
+  }));
+  assert.equal(behind.encounter.webAimRemaining,0,
+    'a wall that blocks actual enemy sight never authorizes aim-based evasion');
+  assert.equal(behind.encounter.webAimLock,0,
+    'the player camera cannot reveal itself to a hidden enemy through world cover');
+
+  const invalid=setup(data), blind=firstSpawn(invalid,near);
+  blind.clock=0;
+  for(let i=0;i<5;i++)advanceNativeEncounter(invalid,input([blind],{
+    ...near,playerForward:p(0,0,0),scaledDeltaTime:.1,unscaledDeltaTime:.1,
+  }));
+  assert.equal(blind.encounter.webAimRemaining,0,
+    'zero camera direction fails closed rather than inventing aim pressure');
+});
