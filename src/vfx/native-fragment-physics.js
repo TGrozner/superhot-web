@@ -4,6 +4,10 @@ const axes = ['x', 'y', 'z'];
 // Original Web frame budget: source fixed steps on normal frames, at most four
 // swept steps after a hitch. This is NOT an extracted Unity/PhysX policy.
 export const WEB_FRAGMENT_MAX_SUBSTEPS = 4;
+// Web-only hitch policy: do not fling shattered weapons through a whole
+// stalled browser frame. Keep the first 100 ms of motion; HDR fade remains
+// on the caller's full elapsed clock. The ragdoll solver uses the same cap.
+const WEB_FRAGMENT_MAX_HITCH_DELTA = 0.1;
 // Web-only sleep: grounded, nearly stationary shards stop wasting CCD sweeps
 // while their authored HDR fade and absolute-time visual spin still advance.
 // No PhysX sleep thresholds are inferred from these deliberately small values.
@@ -222,13 +226,14 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
     body.webShardRestSeconds = 0;
     body.webShardSupport = null;
   }
-  let remaining = scaledDelta;
-  // At 60fps, keep source-sized substeps. A slow Web frame would otherwise
-  // multiply 150Hz fragment sweeps across every active shattered object.
-  // Use at most four larger *swept* steps, preserving elapsed motion and the
-  // independent HDR lifetime instead of accumulating a physics catch-up debt.
+  // An interrupted tab must not turn a single shard frame into a giant
+  // ballistic leap. Ordinary 10 FPS (100 ms) frames are still fully simulated.
+  // The external HDR fade continues to receive the original scaledDelta.
+  const simulatedDelta = limitWebFrameWork ? Math.min(scaledDelta, WEB_FRAGMENT_MAX_HITCH_DELTA) : scaledDelta;
+  let remaining = simulatedDelta;
+  // Preserve source-sized steps at 60 FPS, at most four swept steps at 10 FPS.
   const stepLimit = limitWebFrameWork
-    ? Math.max(fixedDelta, scaledDelta / WEB_FRAGMENT_MAX_SUBSTEPS)
+    ? Math.max(fixedDelta, simulatedDelta / WEB_FRAGMENT_MAX_SUBSTEPS)
     : fixedDelta;
   let steps = 0;
   while (remaining > 1e-12) {
@@ -243,7 +248,7 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
     // The contact solver returns the swept fraction inside this substep.
     // Initial penetration has t=0; the Web clock is only a linear-sweep
     // estimate, NOT Unity/PhysX native event timing.
-    const stepStart = scaledDelta - remaining;
+    const stepStart = simulatedDelta - remaining;
     const stepContacts = moveNativeFragmentSphere(collisionScene, body.position, body.velocity,
       displacement, body.collisionRadius, material);
     for (const contact of stepContacts) {
