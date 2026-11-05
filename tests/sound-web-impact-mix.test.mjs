@@ -360,8 +360,38 @@ test('Web-original thrown weapon has a descending air swish without extra voices
   assert.equal(air.connections.length, 1); // Shared output and spatial path.
   assert.equal(mix.emit('pickup').status, 'started');
   assert.equal(nodes.length, 4);
-  assert.equal(nodes[2].connections.length, 1); // Pickup is uncolored.
-  assert.equal(filters.filter(f => f.type === 'bandpass').length, 1);
+  assert.equal(nodes[2].connections.length, 2); // Base burst plus new pickup latch.
+  assert.equal(filters.filter(f => f.type === 'bandpass').length, 2); // Throw swish + pickup latch.
+  mix.dispose();
+});
+
+test('pickup latch adds two timed clicks within the existing 80ms noise voice', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const rises = [];
+  const createGain = ctx.createGain;
+  ctx.createGain = () => {
+    const node = createGain();
+    const ramp = node.gain.linearRampToValueAtTime;
+    node.gain.linearRampToValueAtTime = function(value, at) {
+      rises.push({node, value, at});
+      return ramp.call(this, value, at);
+    };
+    return node;
+  };
+  const mix = createWebImpactMix(ctx, 1);
+  const result = mix.emit('pickup');
+  assert.equal(result.status, 'started');
+  assert.equal(result.source, 'web-original-synthesis');
+  assert.equal(nodes.length, 2, 'no extra playback sources, voices or clip assets');
+  assert.deepEqual(nodes[0].startArgs, [ctx.currentTime, 0, 0.08]);
+  const band = filters.find(node => node.type === 'bandpass' && node.frequency.value === 2300);
+  assert.ok(band);
+  assert.ok(nodes[0].connections.includes(band), 'latch reuses the existing noise source');
+  const latch = gains.find(node => band.connections.includes(node));
+  assert.ok(latch);
+  assert.deepEqual(rises.filter(entry => entry.node === latch).map(entry => entry.at),
+    [ctx.currentTime + 0.004, ctx.currentTime + 0.052]);
+  assert.equal(mix.getActiveVoices(), 1);
   mix.dispose();
 });
 
