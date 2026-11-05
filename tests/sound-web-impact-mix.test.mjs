@@ -693,3 +693,37 @@ test('empty-gun click remains available under enemy fire and steps without maski
   assert.equal(nodes[2].stopped, true, 'player damage must still outrank dry-fire');
   mix.dispose();
 });
+
+test('remote enemy muzzles do not steal close contact or footsteps in a saturated mix', () => {
+  // Web-authored source-distance admission policy, NOT a Unity mixing value.
+  const {ctx, nodes} = fakeAudio();
+  ctx.listener = {positionX: {value: 0}, positionY: {value: 0}, positionZ: {value: 0}};
+  const mix = createWebImpactMix(ctx, 1);
+  const close = {x: 1, y: 0, z: 0};
+  const remote = {x: 30, y: 0, z: 0};
+  assert.equal(mix.emit('wall-impact', {position: close}).status, 'started');
+  const emittedSources = nodes.length;
+  assert.equal(mix.emit('enemy-shot', {position: remote}).status, 'blocked');
+  assert.equal(nodes.length, emittedSources, 'suppressed distant muzzle allocates no voice');
+  assert.equal(nodes[0].stopped, undefined, 'the real nearby impact is uninterrupted');
+  assert.equal(mix.emit('enemy-shot', {position: {x: 5, y: 0, z: 0}}).status, 'started');
+  assert.equal(nodes[0].stopped, true, 'nearby threats retain gunfire priority');
+  mix.dispose();
+
+  const stepAudio = fakeAudio();
+  stepAudio.ctx.listener = {positionX: {value: 0}, positionY: {value: 0},
+    positionZ: {value: 0}};
+  const walking = createWebImpactMix(stepAudio.ctx, 1);
+  assert.equal(walking.emit('step', {position: close}).status, 'started');
+  assert.equal(walking.emit('enemy-shot', {position: remote}).status, 'blocked');
+  assert.equal(stepAudio.nodes[0].stopped, undefined, 'distant bullets do not mute a footfall');
+  walking.dispose();
+
+  const freeAudio = fakeAudio();
+  freeAudio.ctx.listener = {positionX: {value: 0}, positionY: {value: 0},
+    positionZ: {value: 0}};
+  const free = createWebImpactMix(freeAudio.ctx, 1);
+  assert.equal(free.emit('enemy-shot', {position: remote}).status, 'started',
+    'far muzzle remains spatially audible when a voice is free');
+  free.dispose();
+});
