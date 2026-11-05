@@ -408,7 +408,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
             body.gain.linearRampToValueAtTime(volume * 0.68, at + 0.008);
             body.gain.exponentialRampToValueAtTime(volume * 0.18, at + 0.065);
             body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-        } else {
+        }
+        else {
             osc.frequency.setValueAtTime(startHz * texturePitch, at);
             osc.frequency.exponentialRampToValueAtTime(endHz * texturePitch, at + duration);
             body.gain.setValueAtTime(volume * 0.48, at);
