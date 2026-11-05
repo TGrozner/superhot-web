@@ -727,3 +727,38 @@ test('remote enemy muzzles do not steal close contact or footsteps in a saturate
     'far muzzle remains spatially audible when a voice is free');
   free.dispose();
 });
+
+
+test('resolved Web wall hits have a distinct falling ricochet body without extra voices', () => {
+  // This is creative Web feedback behind the already-wired collision gate.
+  // It proves graph scheduling, NOT that a user heard a sound or that MCD does this.
+  const {ctx, nodes} = fakeAudio();
+  const frequencies = [];
+  const originalOscillator = ctx.createOscillator;
+  ctx.createOscillator = () => {
+    const osc = originalOscillator();
+    const originalSet = osc.frequency.setValueAtTime;
+    const originalRamp = osc.frequency.exponentialRampToValueAtTime;
+    osc.frequency.setValueAtTime = function(value, at) {
+      frequencies.push({op: 'set', value, at});
+      originalSet.call(this, value, at);
+    };
+    osc.frequency.exponentialRampToValueAtTime = function(value, at) {
+      frequencies.push({op: 'ramp', value, at});
+      originalRamp.call(this, value, at);
+    };
+    return osc;
+  };
+  const mix = createWebImpactMix(ctx, 2);
+  assert.equal(mix.emit('wall-impact', {position: {x: 1, y: 0, z: 0}}).status, 'started');
+  assert.equal(nodes.length, 2, 'ricochet reuses the existing noise and body sources');
+  assert.equal(nodes[1].type, 'sine');
+  assert.ok(frequencies[0].value > 1800, 'wall contact starts with a bright chirp');
+  assert.ok(frequencies[1].value < 800 && frequencies[1].value > 600,
+    'tone falls below its initial pitch during the same voice');
+  assert.equal(frequencies[1].at, ctx.currentTime + 0.16);
+  assert.equal(mix.emit('impact').status, 'started');
+  assert.equal(nodes[3].type, 'triangle', 'other impacts keep their existing timbre');
+  assert.equal(mix.getActiveVoices(), 2);
+  mix.dispose();
+});
