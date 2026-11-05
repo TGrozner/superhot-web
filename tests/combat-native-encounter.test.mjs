@@ -2227,3 +2227,58 @@ test('J3 Web gunner reload selects real side cover without inventing a shot or b
   assert.equal(committed.enemy.z,5,
     'a committed shot awaiting its animated muzzle is never dragged into cover');
 });
+
+test('J3 Web post-stun cover recovery: armed witnesses choose sheltered swept lane, blind or disarmed actors keep impact dodge',()=>{
+  // Fabricated eye-height obstacle and Web-only tactics, not original MCD data.
+  // The +Z hit-direction escape is open, but -Z passes behind genuine cover.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,5),playerPosition:p(8,1.6,5)};
+  const make=(colliders=[],armed=true)=>{
+    const runtime=setup(data,colliders),enemy=firstSpawn(runtime,target);
+    enemy.z=5;
+    enemy.reaction.hasWeapon=armed;
+    // First spawned actor's stable tactical sign makes -X impact prefer +Z.
+    enemy.hitIncomingDirection=p(-1,0,0);
+    enemy.reaction.reactionRevision=1;
+    enemy.reaction.stunRemaining=.75;
+    enemy.reaction.stunnedThisFrame=true;
+    const step=dt=>advanceNativeEncounter(runtime,input([enemy],{
+      ...target,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+    }));
+    step(0);
+    assert.equal(enemy.encounter.webHitPending,true);
+    assert.ok(enemy.encounter.webHitSideZ>0,'known impact initially prefers +Z');
+    advanceEnemyReaction(enemy.reaction,.75);
+    return {runtime,enemy,step};
+  };
+
+  const cover=[box(5,1.2,4.63,.15,2.4,.2)];
+  const protectedGunner=make(cover);
+  assert.equal(nativeSegmentHit(protectedGunner.runtime.sightCollision,
+    p(2,1.6,5),target.playerPosition),null,
+    'enemy really has sight before beginning its recovery');
+  protectedGunner.step(.3);
+  assert.ok(protectedGunner.enemy.z<4.95,
+    'surviving gunner chooses the -Z lane shielding its eye instead of default +Z');
+  assert.notEqual(nativeSegmentHit(protectedGunner.runtime.sightCollision,
+    p(protectedGunner.enemy.x,1.6,protectedGunner.enemy.z),target.playerPosition),null,
+    'real level geometry, not an invented cover flag, breaks the firing line');
+  assert.equal(protectedGunner.enemy.walking,true);
+  assert.equal(protectedGunner.enemy.encounter.canAttack,false,
+    'post-contact escape never authorizes a new shot');
+  assert.equal(protectedGunner.enemy.runtime.pendingShot,null);
+
+  const open=make();
+  open.step(.3);
+  assert.ok(open.enemy.z>5.05,'without cover the original preferred hit dodge wins');
+
+  const disarmed=make(cover,false);
+  disarmed.step(.3);
+  assert.ok(disarmed.enemy.z>5.05,
+    'unarmed enemies keep the known impact dodge, not an armed cover tactic');
+
+  const hidden=make([box(5,1,5,.15,2,1.5)]);
+  hidden.step(.3);
+  assert.ok(hidden.enemy.z>5.05,
+    'cover selection does not infer a player's position through solid walls');
+});
