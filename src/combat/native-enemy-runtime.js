@@ -13,6 +13,10 @@ const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
 const angle=(a,b)=>Math.acos(clamp(dot(normalized(a),normalized(b)),-1,1))*180/Math.PI;
 const signedAngle=(a,b)=>angle(a,b)*(a.z*b.x-a.x*b.z<0 ? -1 : 1);
 const flat=v=>({x:v.x,y:0,z:v.z});
+// J2 authored Web game-feel, NOT a recovered MCD accuracy value. Mobile
+// pistols/burst gunners should not track the player with stationary precision.
+// Capture movement at ATTACK time; animated muzzle delivery may happen later.
+const WEB_MOVING_SHOT_MAX_YAW=0.075; // radians, at full running speed
 function nonnegative(value,name) {
   if (!Number.isFinite(value)||value<0) throw new TypeError(name+' must be finite and nonnegative');
 }
@@ -119,8 +123,12 @@ export function runNativeEnemyGunAttack(state,settings,{
           state.seriesRemaining!==settings.seriesLength && state.seriesRemaining!==0;
         if (middleOfSeries || aimReady===true) {
           point(animationTarget,'animationTarget');
+          const mobileGun=settings.family==='Pistol'||settings.family==='MachineGun';
+          const speedFraction=settings.runningSpeed>0
+            ? clamp(state.speed/settings.runningSpeed,0,1) : 0;
           state.pendingShot={target:{...animationTarget},speed:settings.projectileSpeed,
-            family:settings.family,shooterHaveBeenSeen:state.haveBeenSeen};
+            family:settings.family,shooterHaveBeenSeen:state.haveBeenSeen,
+            webMovingYawRange:mobileGun?WEB_MOVING_SHOT_MAX_YAW*speedFraction:0};
           let delay=settings.attackDelay;
           let completed=true;
           if (settings.family==='MachineGun' || settings.family==='SniperRifle') {
@@ -169,8 +177,22 @@ export function consumeNativeEnemyShot(state,muzzlePosition) {
 export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponForward,random=Math.random) {
   if (!state.pendingShot) return [];
   if (settings.family!=='Shotgun') {
+    // Roll only when the ATTACK snapshot recorded actual weapon movement.
+    // Keep idle accuracy exact and leave native shotgun dispersion untouched.
+    // Invalid RNG must not consume the pending shot.
+    const range=state.pendingShot.webMovingYawRange ?? 0;
+    const yaw=range>0 ? (sample(random)*2-1)*range : 0;
     const shot=consumeNativeEnemyShot(state,muzzlePosition);
-    return [{...shot,sniper:settings.family==='SniperRifle',
+    let direction=shot.direction;
+    if(yaw!==0) {
+      const cosine=Math.cos(yaw),sine=Math.sin(yaw);
+      direction={x:shot.direction.x*cosine-shot.direction.z*sine,
+        y:shot.direction.y,
+        z:shot.direction.x*sine+shot.direction.z*cosine};
+    }
+    return [{...shot,direction,
+      velocity:addScaled({x:0,y:0,z:0},direction,shot.speed),
+      sniper:settings.family==='SniperRifle',
       goThroughGlass:settings.family==='SniperRifle',muzzleFlash:true}];
   }
   const insideSphere=()=>{
