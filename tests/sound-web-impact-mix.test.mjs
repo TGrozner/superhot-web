@@ -876,3 +876,23 @@ test('Web fist contact adds a compressed bass thump without another source or vo
   assert.equal(low.disconnected, true);
   mix.dispose();
 });
+
+
+test('Web audio keeps located gunfire on legacy PannerNode.setPosition browsers', () => {
+  const {ctx, nodes} = fakeAudio();
+  const positions = [];
+  ctx.createPanner = () => ({
+    connections: [],
+    connect(target) { this.connections.push(target); return target; },
+    disconnect() { this.disconnected = true; },
+    setPosition(x, y, z) { positions.push([x, y, z]); },
+  });
+  const mix = createWebImpactMix(ctx, 1);
+  const receipt = mix.emit('enemy-shot', {position: {x: 5, y: 1, z: -2}});
+  assert.deepEqual(positions, [[5, 1, -2]]);
+  assert.equal(receipt.status, 'started');
+  assert.equal(receipt.spatial, true);
+  assert.equal(nodes.length, 2);
+  assert.equal(mix.getActiveVoices(), 1);
+  mix.dispose();
+});
