@@ -42,30 +42,53 @@ export function recordWebImpact(feedback,{kind,point,direction}){
   if(!side)return false;
   const up=cross(side,forward);
   const enemy=kind!=='wall',count=kind==='kill'?11:kind==='hit'?7:5;
+  // A later wall contact must not evict a still-visible confirmed kill/hit.
+  // This is Web feedback priority, not native MCD event ordering.
+  const priority=kind==='kill'?2:kind==='hit'?1:0;
   const baseSpeed=kind==='kill'?2.8:kind==='hit'?2.0:1.4;
   const burst=feedback.burst++;
+  // Tiny world-space glints currently translate but never rotate. Give each
+  // existing shard a deterministic, opposing angular drift; same draw budget.
+  // The spin rates are original Web art direction, NOT source MCD/PhysX.
+  const spinRate=kind==='kill'?12:kind==='hit'?9:6;
   const tint=kind==='wall'?'#40515c':'#c71739';
   for(let i=0;i<count;i++){
     const theta=(i*2.399963229728653+burst*.61);
+    const spin=spinRate*(i%2===0?1:-1);
     const radial=add(scale(side,Math.cos(theta)),scale(up,Math.sin(theta)));
     const speed=baseSpeed*(.48+(i%5)*.14);
     const velocity=add(scale(radial,speed),
-      scale(forward,enemy?(.28*speed):(-.32*speed)));
+      // Enemy hit bursts should eject toward the incoming projectile instead
+      // of disappearing INTO the red target mesh (wall contacts already do).
+      // Purely Web-authored visibility polish; direction is the accepted hit.
+      scale(forward,enemy?(-.38*speed):(-.32*speed)));
     const duration=(enemy?.24:.16)+(i%3)*.025;
     feedback.particles.push({
       x:point.x-forward.x*.025,y:point.y-forward.y*.025,z:point.z-forward.z*.025,
       vx:velocity.x,vy:velocity.y,vz:velocity.z,
       size:(enemy?.021:.012)+(i%3)*.008,
       rx:theta,ry:theta*.73,rz:theta*.41,
+      vrx:spin,vry:spin*(i%3===0?.65:-.55),vrz:spin*(i%4===0?-.45:.35),
       color:i%4===0&&enemy?'#f4dfe5':tint,
-      life:duration,maxLife:duration,
+      life:duration,maxLife:duration,webPriority:priority,
     });
   }
-  if(feedback.particles.length>MAX_PARTICLES)
-    feedback.particles.splice(0,feedback.particles.length-MAX_PARTICLES);
+  // Retain the newest glints within a priority class, but discard wall dust
+  // before accepted enemy contacts. The 64-draw budget never increases.
+  while(feedback.particles.length>MAX_PARTICLES){
+    let victim=0;
+    for(let j=1;j<feedback.particles.length;j++)
+      if(feedback.particles[j].webPriority<feedback.particles[victim].webPriority)
+        victim=j;
+    feedback.particles.splice(victim,1);
+  }
   if(enemy){
-    feedback.hitSeconds=kind==='kill'?.22:.14;
-    feedback.hitKind=kind;
+    // A nonlethal hit cannot replace an active lethal confirmation. Keep the
+    // original expiration instead of allowing incidental hits to extend it.
+    if(kind==='kill'||feedback.hitKind!=='kill'||feedback.hitSeconds<=0){
+      feedback.hitSeconds=kind==='kill'?.22:.14;
+      feedback.hitKind=kind;
+    }
   }
   feedback.impactCount++;
   return true;
@@ -74,15 +97,25 @@ export function recordWebImpact(feedback,{kind,point,direction}){
 /** Effects move on unscaled time: readable even in slow-motion; pause freezes. */
 export function advanceWebImpactFeedback(feedback,realDelta){
   if(!Number.isFinite(realDelta)||realDelta<0)throw new RangeError('Real delta must be nonnegative');
-  const dt=Math.min(realDelta,.05);
-  feedback.hitSeconds=Math.max(0,feedback.hitSeconds-dt);
+  // A browser hitch must not extend real-time hit markers or keep expired
+  // particles alive. The caller supplies ACTIVE elapsed seconds, not a capped
+  // world/physics delta. One analytic gravity step preserves the same flight
+  // at 30/60 Hz and after a single delayed frame. Web-authored VFX, not MCD.
+  feedback.hitSeconds=Math.max(0,feedback.hitSeconds-realDelta);
   if(feedback.hitSeconds===0)feedback.hitKind=null;
   for(let i=feedback.particles.length-1;i>=0;i--){
     const p=feedback.particles[i];
-    p.life-=dt;
+    p.life-=realDelta;
     if(p.life<=0){feedback.particles.splice(i,1);continue;}
-    p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;
-    p.vy-=1.6*dt;
+    p.x+=p.vx*realDelta;
+    p.y+=p.vy*realDelta-0.8*realDelta*realDelta;
+    p.z+=p.vz*realDelta;
+    p.vy-=1.6*realDelta;
+    // Angular movement is time-analytic, so a 100ms hitch and two 50ms
+    // frames render the same orientation (until the shard expires).
+    p.rx+=p.vrx*realDelta;
+    p.ry+=p.vry*realDelta;
+    p.rz+=p.vrz*realDelta;
   }
 }
 

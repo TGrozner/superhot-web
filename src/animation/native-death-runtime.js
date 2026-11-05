@@ -5,6 +5,24 @@ import { moveNativeFragmentSphere } from '../vfx/native-fragment-physics.js';
 const axes=['x','y','z'];
 // Browser-side frame budget only: never advertise it as a Unity fixed-step policy.
 const WEB_MAX_DEATH_SUBSTEPS = 4;
+// Four swept substeps cover sustained 10 FPS frames; longer hitches remain capped.
+// This is a Web game-feel policy, not a Unity or PhysX fixed-step value.
+const WEB_MAX_DEATH_CONTINUOUS_FRAME_SECONDS = 0.1;
+// Web-only grounded rest threshold: skip repeated full PBD passes for a corpse
+// that has been continuously supported and truly motionless for a short time.
+const WEB_GROUNDED_REST_SECONDS = 0.3;
+// Web-only angular surface friction: real static floor contacts dissipate
+// excess post-impact spin; free-flying limbs retain their sourced angular drag.
+const WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND = 7;
+// Web-only kinetic friction after an actual static floor contact: without
+// horizontal damping, fallen enemies keep skating between successive hits.
+// Never touch airborne velocity or the unbudgeted source-study path.
+const WEB_GROUNDED_LINEAR_FRICTION_PER_SECOND = 4;
+// Web-only game feel: cap extreme post-impact speeds, preventing tiny-mass
+// limbs from rocketing across a room in one four-substep browser frame.
+// This is not PhysX damping or a value recovered from MCD.
+const WEB_DEATH_MAX_LINEAR_SPEED = 24;
+const WEB_DEATH_MAX_ANGULAR_SPEED = 16;
 const zero=()=>({x:0,y:0,z:0});
 const point=m=>({x:m[12],y:m[13],z:m[14]});
 const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
@@ -153,7 +171,8 @@ export function createNativeDeathRuntime({definition,boneModelMatrices,modelMatr
   });
   const runtime={definition,collisionScene,bodies,joints,byBone,sourceWorld,sourceLocal,inverseModel:inverse(model),
     boneWorldMatrices:sourceWorld.map(m=>m.slice()),boneModelMatrices:new Float32Array(boneModelMatrices),
-    elapsed:0,cleanupRequested:false,gravity:vector(definition.gravity),physics:'source-anchored-angular-PBD-static-contacts-not-PhysX'};
+    elapsed:0,cleanupRequested:false,resting:false,restCandidateSeconds:0,
+    restSupportBox:null,gravity:vector(definition.gravity),physics:'source-anchored-angular-PBD-static-contacts-not-PhysX'};
   runtime.getBoneWorldMatrix=index=>runtime.boneWorldMatrices[index]??null;
   return runtime;
 }
@@ -164,13 +183,30 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   const body=boneIndex==null?runtime.bodies.find(b=>b.source.partId===partId):runtime.byBone.get(boneIndex);
   if(!body)throw new RangeError('Impact has no source Rigidbody');
   const value=vector(force);
+  if(mode==='Impulse'||mode==='ConstantForce') {
+    // An actual later impact/force must always wake a settled Web corpse.
+    runtime.resting=false;runtime.restCandidateSeconds=0;runtime.restSupportBox=null;
+  }
   if(mode==='Impulse') {
-    for(const axis of axes)body.velocity[axis]+=value[axis]*body.inverseMass;
-    if(hitPoint!==null) {
-      // An actual world-space contact generates torque about the body origin.
-      // Capping the angular kick is a Web stability/feel choice, not PhysX.
-      const lever=sub(vector(hitPoint),body.position);
-      const angularKick=mul(cross(lever,value),body.inverseInertia);
+    const contactPoint=hitPoint===null?null:vector(hitPoint);
+    // Web-only game feel: a verified, localized hit should move the whole
+    // articulated corpse, not only fling one limb against static joints.
+    // Transfer 22% of linear impulse to DIRECT, authored joint neighbors.
+    // Distributing by their mass gives each neighbor the same delta-v;
+    // total impulse remains conserved. No contact point => original behavior.
+    const neighbors=contactPoint===null?[]:[...new Set(runtime.joints.flatMap(joint=>
+      joint.a===body?[joint.b]:joint.b===body?[joint.a]:[]))];
+    const neighborMass=neighbors.reduce((sum,neighbor)=>sum+neighbor.source.mass,0);
+    const share=neighborMass>0?0.22:0; // creative Web tuning, NOT source PhysX.
+    const localImpulse=mul(value,1-share);
+    for(const axis of axes)body.velocity[axis]+=localImpulse[axis]*body.inverseMass;
+    if(share>0)for(const neighbor of neighbors)for(const axis of axes)
+      neighbor.velocity[axis]+=value[axis]*share/neighborMass;
+    if(contactPoint!==null) {
+      // Only the impulse retained by the struck bone contributes local torque.
+      // The transferred linear impulse acts at connected body centres.
+      const lever=sub(contactPoint,body.position);
+      const angularKick=mul(cross(lever,localImpulse),body.inverseInertia);
       const speed=length(angularKick);
       const bounded=speed>12?mul(angularKick,12/speed):angularKick;
       for(const axis of axes)body.angularVelocity[axis]+=bounded[axis];
@@ -181,18 +217,104 @@ export function applyNativeDeathForce(runtime,{boneIndex,partId,mode,vector:forc
   } else throw new TypeError('Only source Impulse/ConstantForce supported');
 }
 
-// Broadphase before expensive triangle/penetration sweeps. Collider boxes
-// are authored and the candidate corridor is conservative for each sphere.
-// This still handles the source geometry, not simplified replacement geometry.
+// The static Dojo collider AABBs do not move during a round; only enabled
+// changes (shared with nativeCollisionView). Index their X intervals once per
+// collision view, instead of scanning every authored box for every sphere,
+// contact correction and joint iteration of every corpse. This is a Web-only
+// broadphase: original source boxes, contacts and sweep order remain intact.
+// Rebuild if the host replaces or changes the length of scene.boxes.
+const deathCollisionIndexes = new WeakMap();
+function deathBoxIntervalTree(entries) {
+  if(entries.length===0)return null;
+  const mids=entries.map(entry=>entry.box.min.x/2+entry.box.max.x/2)
+    .sort((a,b)=>a-b);
+  const center=mids[Math.floor(mids.length/2)];
+  const left=[],right=[],crossing=[];
+  for(const entry of entries) {
+    if(entry.box.max.x<center)left.push(entry);
+    else if(entry.box.min.x>center)right.push(entry);
+    else crossing.push(entry);
+  }
+  return {
+    center,
+    left:deathBoxIntervalTree(left),
+    right:deathBoxIntervalTree(right),
+    byMin:crossing.slice().sort((a,b)=>a.box.min.x-b.box.min.x||a.index-b.index),
+    byMax:crossing.slice().sort((a,b)=>b.box.max.x-a.box.max.x||a.index-b.index),
+  };
+}
+function deathCollisionIndex(scene) {
+  const cached=deathCollisionIndexes.get(scene);
+  if(cached?.boxes===scene.boxes && cached.length===scene.boxes.length)return cached.root;
+  const root=deathBoxIntervalTree(scene.boxes.map((box,index)=>({box,index})));
+  deathCollisionIndexes.set(scene,{boxes:scene.boxes,length:scene.boxes.length,root});
+  return root;
+}
+// Sleeping Dojo corpses keep the original static support reference. Reuse the
+// existing per-scene collision index to find that box without N-collider
+// includes/find scans on every resting frame. Enabled changes remain live.
+// In-place replacement is checked at its original slot, so a removed floor
+// cannot keep a body suspended (the X-tree itself assumes static bounds).
+function deathSupportIndex(scene) {
+  deathCollisionIndex(scene);
+  const index=deathCollisionIndexes.get(scene);
+  if(!index.supports) {
+    const positions=new Map(),byCollider=new Map();
+    for(let i=0;i<scene.boxes.length;i++) {
+      const box=scene.boxes[i];
+      positions.set(box,i);
+      const existing=byCollider.get(box.collider);
+      if(existing)existing.push({box,index:i});
+      else byCollider.set(box.collider,[{box,index:i}]);
+    }
+    index.supports={positions,byCollider};
+  }
+  return index.supports;
+}
+function deathSupportStillEnabled(scene,box) {
+  if(!box?.enabled)return false;
+  const position=deathSupportIndex(scene).positions.get(box);
+  return position!==undefined && scene.boxes[position]===box;
+}
+function deathFindEnabledSupport(scene,collider) {
+  const matches=deathSupportIndex(scene).byCollider.get(collider);
+  return matches?.find(({box,index})=>scene.boxes[index]===box&&box.enabled)?.box??null;
+}
+function deathBoxCandidates(node,minX,maxX,entries) {
+  if(!node)return;
+  if(maxX<node.center) {
+    for(const entry of node.byMin) {
+      if(entry.box.min.x>maxX)break;
+      entries.push(entry);
+    }
+    deathBoxCandidates(node.left,minX,maxX,entries);
+  } else if(minX>node.center) {
+    for(const entry of node.byMax) {
+      if(entry.box.max.x<minX)break;
+      entries.push(entry);
+    }
+    deathBoxCandidates(node.right,minX,maxX,entries);
+  } else {
+    entries.push(...node.byMin);
+    deathBoxCandidates(node.left,minX,maxX,entries);
+    deathBoxCandidates(node.right,minX,maxX,entries);
+  }
+}
+// Broadphase before expensive triangle/penetration sweeps. Preserve the
+// original scene.boxes order for equal-time hit tie-breaking and keep enabled
+// dynamic: toggling a source collider must be visible without rebuilding.
 function nearbyStaticBoxes(scene,start,end,radius) {
   const min={x:Math.min(start.x,end.x)-radius,y:Math.min(start.y,end.y)-radius,
     z:Math.min(start.z,end.z)-radius};
   const max={x:Math.max(start.x,end.x)+radius,y:Math.max(start.y,end.y)+radius,
     z:Math.max(start.z,end.z)+radius};
-  return { boxes:scene.boxes.filter(box=>box.enabled &&
+  const entries=[];
+  deathBoxCandidates(deathCollisionIndex(scene),min.x,max.x,entries);
+  entries.sort((a,b)=>a.index-b.index);
+  return {boxes:entries.map(({box})=>box).filter(box=>box.enabled &&
     box.max.x>=min.x && box.min.x<=max.x &&
     box.max.y>=min.y && box.min.y<=max.y &&
-    box.max.z>=min.z && box.min.z<=max.z) };
+    box.max.z>=min.z && box.min.z<=max.z)};
 }
 function contactsFor(runtime,body,displacement,contacts) {
   // Sweep the shape centers from the last collision-admitted pose, including
@@ -201,6 +323,10 @@ function contactsFor(runtime,body,displacement,contacts) {
   const from=body.collisionWorld,requested=body.world.slice();
   for(let i=0;i<3;i++)requested[12+i]+=displacement[axes[i]];
   let fraction=1;
+  const atStartNormals=[],sweptNormals=[];
+  // Reuse the already-admitted contact velocity when recovering the
+  // *remaining* tangent of a partial-frame impact; friction may have spent it.
+  const incomingVelocity={...body.velocity};
   const record=hit=>contacts.push({boneIndex:body.source.boneIndex,partId:body.source.partId,...hit});
   for(const sphere of body.spheres) {
     const start=transform(from,sphere.center),end=transform(requested,sphere.center),candidate={...start};
@@ -211,13 +337,95 @@ function contactsFor(runtime,body,displacement,contacts) {
       : [];
     const first=hits.find(hit=>!hit.penetration);
     if(first)fraction=Math.min(fraction,first.t);
-    for(const hit of hits)record(hit);
+    for(const hit of hits) {
+      if(!hit.penetration) {
+        sweptNormals.push({t:hit.t,normal:hit.normal});
+        if(hit.t<=1e-7)atStartNormals.push(hit.normal);
+      }
+      record(hit);
+    }
   }
   if(fraction===1)body.world=requested;
-  else {
+  else if(fraction<=1e-7 && atStartNormals.length) {
+    // A grounded body can hit the floor at t=0 while a horizontal impulse
+    // should still move it. A scalar t=0 truncated ALL axes and glued bodies
+    // to the ground. Keep rotation conservatively at the last admitted pose,
+    // but project translation onto the contact tangent(s) and sweep that
+    // motion again against EVERY source sphere (walls still block it).
+    // Web-only contact/sliding correction, not native PhysX friction or CCD.
+    let tangent=sub(point(requested),point(from));
+    for(let pass=0;pass<4;pass++)for(const normal of atStartNormals) {
+      const inward=dot(tangent,normal);
+      if(inward<0)tangent=sub(tangent,mul(normal,inward));
+    }
+    // At t=0 the source floor contact has already changed the velocity.
+    // Apply that same tangential retention to the swept displacement, rather
+    // than gliding a whole Web substep at the PRE-impact speed. A glancing
+    // impulse still slides when friction permits it (and the next sweep still
+    // respects walls). This is Web integration, not a native PhysX rule.
+    const before=dot(incomingVelocity,tangent);
+    const after=dot(body.velocity,tangent);
+    const retention=before>1e-10?Math.min(1,Math.max(0,after/before)):0;
+    tangent=mul(tangent,retention);
+    let admitted=length(tangent)>1e-9?1:0;
+    if(admitted)for(const sphere of body.spheres) {
+      const start=transform(from,sphere.center),end={
+        x:start.x+tangent.x,y:start.y+tangent.y,z:start.z+tangent.z,
+      };
+      const candidate={...start};
+      const localScene=nearbyStaticBoxes(runtime.collisionScene,start,end,sphere.radius);
+      const hits=localScene.boxes.length
+        ? moveNativeFragmentSphere(localScene,candidate,body.velocity,tangent,
+          sphere.radius,runtime.definition.material)
+        : [];
+      const first=hits.find(hit=>!hit.penetration);
+      if(first)admitted=Math.min(admitted,first.t);
+      for(const hit of hits)record(hit);
+    }
+    body.world=from.slice();
+    for(let i=0;i<3;i++)body.world[12+i]+=tangent[axes[i]]*admitted;
+  } else {
     const angular=rotationVector(multiplyMatrices(requested,inverse(from)));
     body.world=multiplyMatrices(rotation(mul(angular,fraction)),from);
     for(let i=0;i<3;i++)body.world[12+i]=from[12+i]+(requested[12+i]-from[12+i])*fraction;
+    if(fraction>1e-7 && fraction<1-1e-7) {
+      // A floor/wall hit halfway through the step previously discarded the
+      // ENTIRE remaining translation, making dead actors briefly stick to
+      // geometry even when a tangential velocity survived. Keep their
+      // conservatively clamped rotation but sweep the available tangent in
+      // the remainder of this same step. This is Web motion, not PhysX CCD.
+      let tangent=mul(sub(point(requested),point(from)),1-fraction);
+      const normals=sweptNormals.filter(hit=>Math.abs(hit.t-fraction)<=1e-6)
+        .map(hit=>hit.normal);
+      for(let pass=0;pass<4;pass++)for(const normal of normals) {
+        const inward=dot(tangent,normal);
+        if(inward<0)tangent=sub(tangent,mul(normal,inward));
+      }
+      // Recovered friction already changed body.velocity at first contact.
+      // Never move farther than the remaining pre-contact tangent, and do not
+      // slide when the authored contact material arrested that velocity.
+      const before=dot(incomingVelocity,tangent);
+      const after=dot(body.velocity,tangent);
+      const retention=before>1e-10?Math.min(1,Math.max(0,after/before)):0;
+      tangent=mul(tangent,retention);
+      if(length(tangent)>1e-9) {
+        let admitted=1;
+        for(const sphere of body.spheres) {
+          const start=transform(body.world,sphere.center);
+          const end={x:start.x+tangent.x,y:start.y+tangent.y,z:start.z+tangent.z};
+          const candidate={...start};
+          const localScene=nearbyStaticBoxes(runtime.collisionScene,start,end,sphere.radius);
+          const hits=localScene.boxes.length
+            ? moveNativeFragmentSphere(localScene,candidate,body.velocity,tangent,
+              sphere.radius,runtime.definition.material)
+            : [];
+          const first=hits.find(hit=>!hit.penetration);
+          if(first)admitted=Math.min(admitted,first.t);
+          for(const hit of hits)record(hit);
+        }
+        for(let i=0;i<3;i++)body.world[12+i]+=tangent[axes[i]]*admitted;
+      }
+    }
   }
   body.position=point(body.world);
   // Initial overlaps and rotational chord error are resolved against actual
@@ -298,13 +506,35 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
     return {boneModelMatrices:runtime.boneModelMatrices,contacts:[],
       cleanupRequested:false,droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
   }
+  if(limitWebFrameWork && runtime.resting) {
+    const support=runtime.restSupportBox;
+    if(deathSupportStillEnabled(runtime.collisionScene,support)) {
+      // The source Kill clock still advances while the purely Web solver
+      // sleeps. This does not alter cleanup timing or source-authored poses.
+      runtime.elapsed=target;
+      const cleanupRequested=runtime.elapsed>=runtime.definition.cleanupAfterSeconds;
+      if(cleanupRequested)runtime.cleanupRequested=true;
+      return {boneModelMatrices:runtime.boneModelMatrices,contacts:[],
+        cleanupRequested,droppedWebSimulationTime:runtime.droppedWebSimulationTime??0};
+    }
+    // A formerly supporting source collider can be disabled (e.g. a door).
+    // Resume integration instead of leaving a corpse hovering on stale ground.
+    runtime.resting=false;runtime.restCandidateSeconds=0;runtime.restSupportBox=null;
+  }
+  const restBefore=limitWebFrameWork?runtime.bodies.map(body=>body.world.slice()):null;
   const contacts=[];
-  // Source dt retained for every executed substep. On a slow Web frame,
-  // dropping excess simulation time is preferable to a feedback loop of
-  // more work, lower FPS and ever larger deltas. Cleanup still uses world time.
+  // Four swept PBD passes cover the complete active 100ms at sustained
+  // 10 FPS instead of making fallen enemies move at one-third real speed.
+  // At 30/60 FPS, preserve the existing smaller step; large stalls still
+  // discard catch-up simulation, not the source cleanup clock.
+  // This adaptive time step is original Web gameplay, not PhysX.
   const budgetedDelta=limitWebFrameWork
-    ? Math.min(scaledDelta,WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta)
+    ? Math.min(scaledDelta,Math.max(
+      WEB_MAX_DEATH_SUBSTEPS*runtime.definition.fixedDelta,WEB_MAX_DEATH_CONTINUOUS_FRAME_SECONDS))
     : scaledDelta;
+  const webStep=limitWebFrameWork
+    ? Math.max(runtime.definition.fixedDelta,budgetedDelta/WEB_MAX_DEATH_SUBSTEPS)
+    : runtime.definition.fixedDelta;
   // No further Web PBD work after the source's first cleanup trigger. The
   // HDR branch can extend *visibility* by one scaled second: only the host,
   // with the actual HDR flags, may choose when to hide/pool the mesh.
@@ -313,8 +543,12 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
   runtime.droppedWebSimulationTime=(runtime.droppedWebSimulationTime??0)+scaledDelta-budgetedDelta;
   let remaining=acceptedDelta;
   while(remaining>1e-12) {
-    const dt=Math.min(runtime.definition.fixedDelta,remaining);
+    const dt=Math.min(webStep,remaining);
     const contactStart=contacts.length;
+    // One exponential per substep, reused by every contacted body. The
+    // continuous-time factor avoids a 30/60 FPS-dependent skid distance.
+    const groundSlideRetention=limitWebFrameWork
+      ? Math.exp(-WEB_GROUNDED_LINEAR_FRICTION_PER_SECOND*dt) : 1;
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
       for(const axis of axes) {
@@ -322,6 +556,17 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
         for(const force of body.forces)impulse+=force.vector[axis]*Math.max(0,Math.min(dt,force.until-runtime.elapsed));
         body.velocity[axis]=(body.velocity[axis]+(body.source.useGravity?runtime.gravity[axis]*dt:0)+impulse*body.inverseMass)/(1+body.source.drag*dt);
         body.angularVelocity[axis]/=1+body.source.angularDrag*dt;
+      }
+      if(limitWebFrameWork) {
+        // Preserve normal sourced impulses, joint geometry and collision
+        // physics; bound only extreme forces on real-time Dojo frames.
+        for(const [key,maximum] of [
+          ['velocity',WEB_DEATH_MAX_LINEAR_SPEED],
+          ['angularVelocity',WEB_DEATH_MAX_ANGULAR_SPEED],
+        ]) {
+          const speed=length(body[key]);
+          if(speed>maximum)body[key]=mul(body[key],maximum/speed);
+        }
       }
       rotateBody(body,mul(body.angularVelocity,dt));
       contactsFor(runtime,body,mul(body.velocity,dt),contacts);
@@ -346,15 +591,62 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       // repeated that impulse each substep: artificial energy, flying elastic
       // corpses. Preserve source gravity/forces and admitted collision
       // impulses only; never turn solver error into kinetic energy.
+      let groundedContact=false;
       for(let c=contactStart;c<contacts.length;c++) {
         const contact=contacts[c];
         if(contact.boneIndex!==body.source.boneIndex)continue;
         const inward=dot(body.velocity,contact.normal);
         if(inward<0)for(const axis of axes)body.velocity[axis]-=contact.normal[axis]*inward;
+        if(contact.collider && contact.normal.y>0.55)groundedContact=true;
+      }
+      // Actual floor contact bleeds residual spin before grounded sleep. This
+      // is a Web-only contact friction, not a recovered Unity PhysX coefficient.
+      // Exponential decay gives consistent results at 30/60 Hz; no floor
+      // contact means all original airborne angular motion survives.
+      if(groundedContact) {
+        // The source collision material still handles the immediate hit.
+        // This is additional, explicitly Web-authored post-impact settling,
+        // applied only on live floor contact in the real-time Dojo path.
+        if(limitWebFrameWork) {
+          body.velocity.x*=groundSlideRetention;
+          body.velocity.z*=groundSlideRetention;
+        }
+        const angularRetention=Math.exp(-WEB_GROUNDED_ANGULAR_FRICTION_PER_SECOND*dt);
+        for(const axis of axes)body.angularVelocity[axis]*=angularRetention;
       }
       // Likewise, do not create spin from a joint-correction quaternion.
     }
     runtime.elapsed+=dt;remaining-=dt;composePose(runtime);
+  }
+  if(restBefore && acceptedDelta>0) {
+    // Rest only after a REAL upward static contact and 300ms with *all*
+    // bodies slow and their solved WORLD poses nearly unchanged. Never sleep
+    // free-falling, spinning or actively forced limbs. This is a Web game-feel
+    // and CPU budget policy, NOT Unity/PhysX sleeping.
+    const groundContact=contacts.find(c=>c.normal?.y>0.55 && c.collider);
+    const support=groundContact
+      ? deathFindEnabledSupport(runtime.collisionScene,groundContact.collider)
+      : null;
+    const steady=!!support && runtime.bodies.every((body,i)=>{
+      if(body.forces.length || length(body.velocity)>0.07 ||
+          length(body.angularVelocity)>0.08)return false;
+      const before=restBefore[i];
+      if(!before)return false;
+      if(length(sub(body.position,point(before)))>0.0015)return false;
+      for(const index of [0,1,2,4,5,6,8,9,10])
+        if(Math.abs(body.world[index]-before[index])>0.004)return false;
+      return true;
+    });
+    if(steady) {
+      runtime.restCandidateSeconds+=acceptedDelta;
+      if(runtime.restCandidateSeconds>=WEB_GROUNDED_REST_SECONDS){
+        runtime.resting=true;
+        runtime.restSupportBox=support;
+      }
+    }else{
+      runtime.restCandidateSeconds=0;
+      runtime.restSupportBox=null;
+    }
   }
   runtime.elapsed=target;
   const cleanupRequested=!runtime.cleanupRequested&&runtime.elapsed>=runtime.definition.cleanupAfterSeconds;

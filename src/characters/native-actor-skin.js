@@ -19,6 +19,377 @@
  */
 
 /**
+ * WEB-only directional damage stagger. An explicitly supplied gameplay impact
+ * origin is preferred; absent that, capture the live camera position ONCE at
+ * the first successful stun draw. Holding the origin for the stun avoids an
+ * enemy elastically flipping its recoil when the player circles the target.
+ * A camera-derived origin is NOT the actual hit/contact vector.
+ * Project into the enemy's rendered model basis rather than world X/Z, so
+ * mirrored/rotated enemies recoil consistently. Invalid/overlapping cameras
+ * retain the previous actor-id fallback instead of introducing NaNs.
+ *
+ * @param {number[] | Float32Array} modelMatrix column-major actor model matrix
+ * @param {{x: number, y: number, z: number} | number[] | Float32Array | null} cameraPosition
+ * @returns {{pitch: number, roll: number, yaw: number} | null}
+ */
+function webCameraHitDirection(modelMatrix, cameraPosition) {
+  if (!cameraPosition || !modelMatrix || modelMatrix.length !== 16) return null;
+  const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+  const cx = indexed ? cameraPosition[0] : cameraPosition.x;
+  const cz = indexed ? cameraPosition[2] : cameraPosition.z;
+  if (!Number.isFinite(cx) || !Number.isFinite(cz)) return null;
+  const dx = cx - modelMatrix[12];
+  const dz = cz - modelMatrix[14];
+  const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
+  const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  if (!Number.isFinite(rightLength) || !Number.isFinite(forwardLength) ||
+      rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  const lateral = (dx * modelMatrix[0] + dz * modelMatrix[2]) / rightLength;
+  const frontal = (dx * modelMatrix[8] + dz * modelMatrix[10]) / forwardLength;
+  const distance = Math.hypot(lateral, frontal);
+  if (!Number.isFinite(distance) || distance < .1) return null;
+  // The lean rotates around source hips. +roll leans away from a camera on
+  // the actor's right; -pitch leans backward from a camera in front.
+  return {
+    pitch: -.22 * frontal / distance,
+    roll: .32 * lateral / distance,
+    yaw: -.20 * lateral / distance,
+  };
+}
+
+/**
+ * Lock a Web incoming travel direction or a genuine attacker origin per
+ * accepted stun event; an event ID distinguishes repeated accepted stuns.
+ * hitOrigin is an ATTACK SOURCE position, not hit.point on the victim.
+ * A collision point can be nearly coincident with the model origin and
+ * cannot establish the projectile's incoming travel direction.
+ * An explicit velocity vector takes precedence and is source-qualified as
+ * Web gameplay evidence; the camera fallback remains only a proxy.
+ */
+function webHitSource(hitOrigin, cameraPosition, hitIncomingDirection = null) {
+  if (hitIncomingDirection != null) {
+    if (typeof hitIncomingDirection !== 'object' ||
+        !Number.isFinite(hitIncomingDirection.x) ||
+        !Number.isFinite(hitIncomingDirection.y) ||
+        !Number.isFinite(hitIncomingDirection.z)) {
+      throw new TypeError('Web hitIncomingDirection requires finite world-space x/y/z from an accepted contact');
+    }
+    const {x, y, z} = hitIncomingDirection;
+    const magnitude = Math.hypot(x, y, z);
+    if (magnitude < 1e-6) {
+      throw new RangeError('Web hitIncomingDirection cannot be a zero travel vector');
+    }
+    const horizontal = Math.hypot(x, z);
+    return Object.freeze({
+      point: null,
+      incomingDirection: horizontal < 1e-6 ? null
+        : Object.freeze({x: x / horizontal, z: z / horizontal}),
+      provenance: horizontal < 1e-6
+        ? 'Web accepted vertical travel, planar hit direction unavailable'
+        : 'Web accepted projectile travel direction, not native MCD impulse',
+    });
+  }
+  if (hitOrigin != null) {
+    if (typeof hitOrigin !== 'object' ||
+        !Number.isFinite(hitOrigin.x) ||
+        !Number.isFinite(hitOrigin.y) ||
+        !Number.isFinite(hitOrigin.z)) {
+      throw new TypeError('Web hitOrigin requires finite world-space x/y/z from an accepted contact');
+    }
+    return Object.freeze({
+      point: Object.freeze({x:hitOrigin.x,y:hitOrigin.y,z:hitOrigin.z}),
+      provenance: 'Web gameplay contact origin, not native MCD impulse',
+    });
+  }
+  const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+  const x = indexed ? cameraPosition[0] : cameraPosition?.x;
+  const y = indexed ? cameraPosition[1] : cameraPosition?.y;
+  const z = indexed ? cameraPosition[2] : cameraPosition?.z;
+  return Object.freeze({
+    point: [x,y,z].every(Number.isFinite) ? Object.freeze({x,y,z}) : null,
+    provenance: 'Web camera-facing proxy, not contact origin',
+  });
+}
+
+/**
+ * Reactive Web animation accents; these are a deliberate game-feel choice,
+ * NOT source Animator clips or native timing. They only accompany an actual
+ * available hit/punch clip or source-composable fire action; no missing source
+ * animation, attack event or fire decision is synthesized.
+ * Clock and actor identity come from the live Dojo gameplay caller.
+ */
+function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSource,
+                         hitAccentElapsed = pose.time) {
+  if (solvedPose !== null) return null;
+  const hit = identity.name === 'hit';
+  const melee = identity.name === 'punch';
+  // An actual, validated fire action already exists in the active actor
+  // package. Its action time (not the looping locomotion time) drives a
+  // short Web-authored recoil AFTER the firing edge, never before it.
+  const fire = !hit && !melee && pose.action?.state === 'fire';
+  if (!hit && !melee && !fire) return null;
+  let envelope;
+  if (fire) {
+    const time = pose.action.time;
+    const weight = pose.action.weight;
+    const blend = pose.action.blend ?? 1;
+    if (!Number.isFinite(time) || time <= 0 || time >= .9 ||
+        !Number.isFinite(weight) || !Number.isFinite(blend)) return null;
+    // Source clip seconds at the current controller speed. The snap/recovery
+    // curve and angles are deliberate WEB gameplay values, not MCD data.
+    const snap = Math.min(1, time / .15);
+    const recovery = Math.min(1, (.9 - time) / .75);
+    envelope = snap * recovery * Math.max(0, Math.min(1, weight)) *
+      Math.max(0, Math.min(1, blend));
+  } else if (hit) {
+    // An immediate readable flinch, then a longer diminishing recovery.
+    // Pure Web tuning: no claim about MCD's impact kinetics.
+    if (hitAccentElapsed <= 0 || hitAccentElapsed >= .36) return null;
+    envelope = Math.min(1, hitAccentElapsed / .045) *
+      Math.min(1, (.36 - hitAccentElapsed) / .30);
+  } else {
+    if (pose.time <= 0 || pose.time >= .36) return null;
+    envelope = Math.sin(Math.PI * pose.time / .36);
+  }
+  if (envelope <= 0) return null;
+  let parity = typeof actorId === 'number' ? actorId % 2 : 0;
+  if (typeof actorId === 'string') {
+    for (let i = 0; i < actorId.length; i++) parity = (parity + actorId.charCodeAt(i)) % 2;
+  }
+  const side = parity ? 1 : -1;
+  // A contact location is not the projectile's source. Project a verified
+  // incoming travel vector from the actor center solely for the existing
+  // signed, model-space lean computation; do not label it an actual origin.
+  const incoming = hitSource?.incomingDirection;
+  const directionalPoint = incoming
+    ? {x: modelMatrix[12] - incoming.x, z: modelMatrix[14] - incoming.z}
+    : hitSource?.point;
+  const direction = hit ? webCameraHitDirection(modelMatrix, directionalPoint) : null;
+  return Object.freeze({
+    kind: fire ? 'fire' : identity.name,
+    pitch: (hit ? (direction?.pitch ?? .08) : fire ? .12 : -.14) * envelope,
+    roll: (hit ? (direction?.roll ?? side * .22) : side * (fire ? .05 : .035)) * envelope,
+    // Web-only shoulder twist: a single GPU pose drives bones, hitboxes and
+    // the weapon socket. Externally solved death poses never receive it.
+    yaw: hit && direction ? direction.yaw * envelope : 0,
+    hitDirectionProvenance: hit
+      ? (direction ? hitSource.provenance : 'actor-id fallback')
+      : null,
+    design: 'Web-only reactive animation accent',
+  });
+}
+
+/**
+ * Web-only secondary head whiplash for an already accepted hit reaction.
+ * Oppose the torso's turn and shoulder lean, after source sampling, so the
+ * enemy's crystal head visibly lags the impact. Only rigs with a separate,
+ * source-defined Head subtree may receive this; weapons/arms stay on the
+ * authoritative source pose and primary hit lean.
+ *
+ * These values are Web tuning, NOT native animation data or contact physics.
+ */
+function webHitHeadWhiplash(reaction, available) {
+  if (!available || reaction?.kind !== 'hit') return null;
+  const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
+  const yaw = clamp(-reaction.yaw * 1.35 - reaction.roll * .32, .34);
+  const pitch = clamp(-reaction.pitch * .85, .25);
+  const roll = clamp(-reaction.roll * .52, .20);
+  if (Math.abs(yaw) + Math.abs(pitch) + Math.abs(roll) < .008) return null;
+  return Object.freeze({
+    yaw, pitch, roll, design: 'Web-only secondary hit head whiplash',
+  });
+}
+
+/**
+ * Web-authored, post-fire articulated right-arm kick on the validated Dojo
+ * pistol shoulder chain. The source fire pose has already been sampled;
+ * no new shot, muzzle direction or animation clip is invented. Unlike a
+ * second full-body lean, the kick moves the already-posed arm/weapon socket
+ * relative to the chest, while leaving the left arm and head alone.
+ */
+function webFireRightArmKick(reaction, available) {
+  if (!available || reaction?.kind !== 'fire') return null;
+  const pitch = Math.min(.23, Math.max(0, reaction.pitch * 1.45));
+  const roll = Math.max(-.05, Math.min(.05, reaction.roll * .45));
+  if (pitch < .008 && Math.abs(roll) < .008) return null;
+  return Object.freeze({
+    pitch, yaw: 0, roll,
+    design: 'Web-only right-shoulder gunshot kick after accepted fire',
+  });
+}
+
+/**
+ * WEB game-feel: bank toward observed travel AND observed heading changes,
+ * then ease into and out of that bank using elapsed GAME-WORLD animation
+ * seconds, even when slow motion advances the Red Crystal shader on a different
+ * clock. A stationary guard settles instead of snapping rigidly upright. Paused
+ * world time preserves the last GPU posture; an actual action/transition,
+ * teleport, clock rewind or death cancels the bank.
+ *
+ * Per-actor history is committed ONLY after a successful GPU draw, so an
+ * invalid frame cannot alter the next frame's visual/weapon/hitbox pose.
+ * This is an intentional Web animation layer, not a recovered MCD controller.
+ *
+ * @param {Map<string | number, {time: number, poseTime: number, state: string, x: number, z: number, fx: number, fz: number, bankPitch: number, bankRoll: number}>} frames
+ * @param {string | number} actorId
+ * @param {{name: string}} identity
+ * @param {number[] | Float32Array} modelMatrix
+ * @param {number | undefined} shaderTime red-crystal/unscaled Web clock (not movement time)
+ * @param {number} poseTime elapsed gameplay-world seconds in this state
+ * @param {object | null} solvedPose
+ * @param {object | null} action
+ * @param {object | null} transition
+ * @returns {{kind: string, pitch: number, roll: number, design: string} | null}
+ */
+function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTime,
+                            poseTime, solvedPose, action, transition) {
+  const locomoting = identity.name === 'walk' || identity.name === 'run';
+  if (solvedPose !== null || action !== null || transition !== null ||
+      (!locomoting && identity.name !== 'idle') ||
+      !Number.isFinite(shaderTime) || !modelMatrix || modelMatrix.length !== 16) return null;
+  const previous = frames.get(actorId);
+  if (!previous) return null;
+  const describe = (pitch, roll) => Object.freeze({
+    kind: locomoting ? 'locomotion' : 'turn', pitch, roll,
+    design: 'Web-only inertial travel and turn banking',
+  });
+  // Dojo samples source pose.time from worldClock, while shaderTime is runClock
+  // (real active seconds). Under SUPERHOT slow motion these are very different:
+  // dividing world displacement by real seconds makes an enemy lean as if
+  // barely moving, and a shader-only tick must not unfreeze a held pose.
+  const shaderDt = shaderTime - previous.time;
+  const sameState = identity.name === previous.state;
+  const dt = sameState ? poseTime - previous.poseTime : shaderDt;
+  if (shaderDt < 0 || dt < 0) return null; // REJOUER or state clock rewind
+  // Freeze the exact bank while the sampled GAME pose time is frozen.
+  if (dt === 0) {
+    return Math.abs(previous.bankPitch) + Math.abs(previous.bankRoll) >= .012
+      ? describe(previous.bankPitch, previous.bankRoll) : null;
+  }
+  if (!(dt > 0 && dt <= .15)) return null;
+  const dx = modelMatrix[12] - previous.x;
+  const dz = modelMatrix[14] - previous.z;
+  if (!Number.isFinite(dx) || !Number.isFinite(dz) ||
+      Math.hypot(dx, dz) > 1.5) return null;
+  const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
+  const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  if (!Number.isFinite(rightLength) || !Number.isFinite(forwardLength) ||
+      rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  const fx = modelMatrix[8] / forwardLength;
+  const fz = modelMatrix[10] / forwardLength;
+  // Crossing state identities resets pose.time. Only settle the previous
+  // lean in that case; a new state's first transform is not a velocity sample.
+  const headingChange = sameState ? Math.atan2(previous.fx * fz - previous.fz * fx,
+    previous.fx * fx + previous.fz * fz) : 0;
+  if (!Number.isFinite(headingChange) || Math.abs(headingChange) > .7) return null;
+  const strafe = locomoting && sameState
+    ? (dx * modelMatrix[0] + dz * modelMatrix[2]) / (dt * rightLength) : 0;
+  const advance = locomoting && sameState
+    ? (dx * modelMatrix[8] + dz * modelMatrix[10]) / (dt * forwardLength) : 0;
+  const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
+  // First-order damped response is independent of frame rate. Target angles
+  // retain the bounded Web-only game-feel from the original movement bank.
+  const pitchTarget = clamp(-advance * .022, .11);
+  const rollTarget = clamp(-strafe * .05 - headingChange / dt * .035, .18);
+  const response = 1 - Math.exp(-14 * dt);
+  const pitch = previous.bankPitch + (pitchTarget - previous.bankPitch) * response;
+  const roll = previous.bankRoll + (rollTarget - previous.bankRoll) * response;
+  if (Math.abs(pitch) + Math.abs(roll) < .012) return null;
+  return describe(pitch, roll);
+}
+
+/**
+ * A stationary sentry gets a small independent breath/weight-shift cycle.
+ * Uses the ACTUAL gameplay state time (not wall time), so a frozen game
+ * freezes the pose too. Fades in after entering idle and never overlays
+ * actions, transitions, fire aim, hits or ragdolls.
+ */
+function webIdleReaction(actorId, pose, identity, solvedPose, action, transition) {
+  if (solvedPose !== null || action !== null || transition !== null ||
+      identity.name !== 'idle' || !Number.isFinite(pose.time) || pose.time <= 0) return null;
+  let phase = typeof actorId === 'number' ? actorId * .618 : 0;
+  if (typeof actorId === 'string') {
+    for (let i = 0; i < actorId.length; i++) phase += actorId.charCodeAt(i) * .13;
+  }
+  const ramp = Math.min(1, pose.time / .28);
+  const pitch = Math.sin(pose.time * 2.4 + phase) * .035 * ramp;
+  const roll = Math.sin(pose.time * 1.3 + phase * 1.5) * .025 * ramp;
+  return Object.freeze({
+    kind: 'idle', pitch, roll, design: 'Web-only idle weight shifting',
+  });
+}
+
+
+/**
+ * Web-only anticipation: on the existing sampled Head branch, guards glance
+ * toward the camera in both azimuth and elevation while their torso/weapon
+ * maintain the source pose. Vertical gaze uses the previous sampled, actual
+ * Head pivot instead of an invented humanoid head height. This is deliberately
+ * NOT a native head IK controller or a projectile aim vector.
+ * Slow-world time damps movement; a frozen world pose freezes the gaze too.
+ * Replays, teleports, attacks and death never carry a stale head transform.
+ *
+ * @param {Map<string|number, object>} frames committed GPU actor histories
+ * @returns {{yaw: number, design: string} | null}
+ */
+function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPosition,
+                         action, transition, solvedPose, available) {
+  if (!available || solvedPose !== null || action !== null || transition !== null ||
+      !['idle', 'walk', 'run'].includes(identity.name) ||
+      !Number.isFinite(pose.time) || !modelMatrix || modelMatrix.length !== 16 ||
+      !cameraPosition) return null;
+  const previous = frames.get(actorId);
+  if (!previous || previous.state !== identity.name || pose.time < previous.poseTime) return null;
+  const dt = pose.time - previous.poseTime;
+  if (!Number.isFinite(dt) || dt > .15) return null;
+  const indexed = Array.isArray(cameraPosition) || ArrayBuffer.isView(cameraPosition);
+  const cx = indexed ? cameraPosition[0] : cameraPosition.x;
+  const cz = indexed ? cameraPosition[2] : cameraPosition.z;
+  if (!Number.isFinite(cx) || !Number.isFinite(cz)) return null;
+  const rightLength = Math.hypot(modelMatrix[0], modelMatrix[2]);
+  const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  if (!Number.isFinite(rightLength) || !Number.isFinite(forwardLength) ||
+      rightLength < 1e-6 || forwardLength < 1e-6) return null;
+  const dx = cx - modelMatrix[12], dz = cz - modelMatrix[14];
+  const lateral = (dx * modelMatrix[0] + dz * modelMatrix[2]) / rightLength;
+  const frontal = (dx * modelMatrix[8] + dz * modelMatrix[10]) / forwardLength;
+  const distance = Math.hypot(lateral, frontal);
+  let target = distance > 1 && frontal > .05
+    ? Math.max(-.33, Math.min(.33, Math.atan2(lateral, frontal))) : 0;
+  if (identity.name === 'idle' && frontal > .05) {
+    // Deliberately authored small scanning offset, tied to world time.
+    const phase = typeof actorId === 'number' ? actorId * .61 :
+      Array.from(String(actorId)).reduce((sum, ch) => sum + ch.charCodeAt(0) * .03, 0);
+    target = Math.max(-.35, Math.min(.35, target + .06 * Math.sin(pose.time * 1.45 + phase)));
+  }
+  // The head pivot was sampled from this actor's actual skeleton on the
+  // previous successful draw. Transform it by the CURRENT actor model matrix:
+  // this follows stairs, different rig proportions and actor scale without
+  // guessing that every head is a fixed distance above the pelvis.
+  const head = previous.headLocal;
+  const cameraY = indexed ? cameraPosition[1] : cameraPosition.y;
+  let pitchTarget = 0;
+  if (head && Number.isFinite(cameraY) && frontal > .05) {
+    const headX = modelMatrix[0]*head[0] + modelMatrix[4]*head[1] +
+      modelMatrix[8]*head[2] + modelMatrix[12];
+    const headY = modelMatrix[1]*head[0] + modelMatrix[5]*head[1] +
+      modelMatrix[9]*head[2] + modelMatrix[13];
+    const headZ = modelMatrix[2]*head[0] + modelMatrix[6]*head[1] +
+      modelMatrix[10]*head[2] + modelMatrix[14];
+    const horizontal = Math.hypot(cx - headX, cz - headZ);
+    if (Number.isFinite(horizontal) && horizontal > 1) {
+      pitchTarget = Math.max(-.32, Math.min(.32, Math.atan2(cameraY - headY, horizontal)));
+    }
+  }
+  const blend = dt === 0 ? 0 : 1 - Math.exp(-12 * dt);
+  const yaw = (previous.gazeYaw ?? 0) * (1 - blend) + target * blend;
+  const pitch = (previous.gazePitch ?? 0) * (1 - blend) + pitchTarget * blend;
+  return Number.isFinite(yaw) && Number.isFinite(pitch) &&
+    (Math.abs(yaw) + Math.abs(pitch) >= .008)
+    ? Object.freeze({yaw, pitch, design: 'Web-only isolated 3D head gaze'}) : null;
+}
+
+/**
  * @param {ReturnType<import('./native-skin-pass.js').createNativeSkinPass>} skinPass
  */
 export function createNativeActorSkinRuntime(skinPass) {
@@ -35,6 +406,16 @@ export function createNativeActorSkinRuntime(skinPass) {
   const transitions = new Set(skinPass.availableTransitions);
   const actions = new Set(skinPass.availableActions);
   const instances = new Map();
+  // One tiny previous-transform sample per actor. Never share camera or
+  // movement history between enemies; the runtime is recreated per rig.
+  const movementFrames = new Map();
+  // The active Dojo source rig's head is the weighted Neck_01/Neck_Top
+  // branch, not a bone literally named Head. Read the indexed source
+  // sampler chosen by the GPU pass, or world-space gaze never activates.
+  // This is a Web animation pivot, NOT reconstructed native head IK.
+  const webHeadIndex = skinPass.webHeadTrackingAvailable === true &&
+    Number.isInteger(skinPass.webHeadSampleBone)
+    ? skinPass.webHeadSampleBone : -1;
 
   function choosePose(selection, label) {
     if (!selection || typeof selection !== 'object' || Array.isArray(selection)) {
@@ -133,14 +514,108 @@ export function createNativeActorSkinRuntime(skinPass) {
         !actions.has(action.state))) {
       throw new RangeError('Source-composable actor action unavailable: ' + String(action?.state));
     }
+    // A hit's first accepted frame freezes its attack origin. Repeated draws
+    // in the same stun cannot flip recoil just because the player moves.
+    // A new event ID, state-time rewind, replay or long gap re-anchors it.
+    const previousHit = movementFrames.get(actorId);
+    const hitEventId = pose.hitEventId ?? null;
+    if (selected.identity.name === 'hit' && hitEventId !== null &&
+        !(typeof hitEventId === 'string' && hitEventId.length > 0) &&
+        !Number.isFinite(hitEventId)) {
+      throw new TypeError('Web hitEventId must be a finite number or nonempty string');
+    }
+    const continuedHit = solvedPose === null && selected.identity.name === 'hit' &&
+      previousHit?.state === 'hit' && previousHit.hitSource &&
+      previousHit.hitEventId === hitEventId &&
+      Number.isFinite(shaderTime) && Number.isFinite(previousHit.time) &&
+      shaderTime >= previousHit.time && shaderTime - previousHit.time <= .75 &&
+      pose.time >= previousHit.poseTime;
+    const hitSource = selected.identity.name === 'hit' && solvedPose === null
+      ? (continuedHit ? previousHit.hitSource
+        : webHitSource(pose.hitOrigin, cameraPosition, pose.hitIncomingDirection))
+      : null;
+    // Source enemy-reaction emits restartAnimation:false for an already-stunned
+    // actor. Respect that native clip clock, but give every NEW accepted Web
+    // stun its own brief directional accent/flash, even within one hit state.
+    const repeatedAcceptedHit = selected.identity.name === 'hit' &&
+      solvedPose === null && hitEventId !== null &&
+      previousHit?.state === 'hit' && previousHit.hitEventId !== hitEventId &&
+      Number.isFinite(shaderTime) && shaderTime >= previousHit.time &&
+      pose.time >= previousHit.poseTime;
+    // The repeated contact has ALREADY landed when this draw runs: start at
+    // the Web flinch's authored 45ms attack peak, not a blank zero-response
+    // frame. The source clip time is untouched and keeps progressing.
+    const hitAccentStartTime = repeatedAcceptedHit ? pose.time - .045
+      : continuedHit ? (previousHit.hitAccentStartTime ?? 0) : 0;
+    const hitAccentElapsed = pose.time - hitAccentStartTime;
+    const reaction = webPoseReaction(actorId, pose, selected.identity, solvedPose,
+      modelMatrix, hitSource, hitAccentElapsed)
+      ?? webLocomotionReaction(movementFrames, actorId, selected.identity,
+        modelMatrix, shaderTime, pose.time, solvedPose, action, transitionDescriptor)
+      ?? webIdleReaction(actorId, pose, selected.identity,
+        solvedPose, action, transitionDescriptor);
+    // Web game-feel: a hard impact reads instantly against the red crystalline
+    // silhouette. This pulse follows the live, already accepted hit state;
+    // it never fabricates a hit event, clip, or ragdoll motion.
+    const webHeadLook = webHitHeadWhiplash(reaction,
+      skinPass.webHeadTrackingAvailable === true)
+      ?? webHeadTracking(movementFrames, actorId, selected.identity,
+        pose, modelMatrix, cameraPosition, action, transitionDescriptor, solvedPose,
+        skinPass.webHeadTrackingAvailable === true);
+    const webFireArmKick = webFireRightArmKick(reaction,
+      skinPass.webFireArmKickAvailable === true);
+    const webHitFlash = solvedPose === null && selected.identity.name === 'hit'
+      ? Math.max(0, 1 - hitAccentElapsed / .22) ** 2 : 0;
+    // WEB-authored warm afterglow follows an actual accepted fire action.
+    // Its blend gate prevents any false warning before the firing event.
+    const fireStateSpeed = skinPass.states.fire?.speed;
+    // action.time is in sampled clip seconds; the Web glow lasts gameplay
+    // seconds regardless of the source fire state's playback speed.
+    const fireTime = action?.state === 'fire' && Number.isFinite(fireStateSpeed) &&
+      fireStateSpeed > 0 ? action.time / fireStateSpeed : null;
+    const webFireGlow = solvedPose === null && selected.identity.name !== 'hit' &&
+      Number.isFinite(fireTime) && fireTime >= 0 && fireTime < .24 &&
+      Number.isFinite(action.weight) && Number.isFinite(action.blend ?? 1)
+      ? (1 - fireTime / .24) ** 2 *
+        Math.max(0, Math.min(1, action.weight)) *
+        Math.max(0, Math.min(1, action.blend ?? 1)) : 0;
     const draw = {
       instance: selected.instance, time: selected.time,
       modelMatrix, viewProjection, color, cameraPosition,
       transition, action, solvedPose,
+      webPoseLean: reaction, webHeadLook, webFireArmKick, webHitFlash, webFireGlow,
     };
     if (shaderTime !== undefined) draw.shaderTime = shaderTime;
     if (sourceLighting !== undefined) draw.sourceLighting = sourceLighting;
     const report = skinPass.draw(draw);
+    // Update history only after a successful, real GPU draw. A failed
+    // frame cannot poison the next actor's banking sample.
+    if (solvedPose !== null) {
+      movementFrames.delete(actorId);
+    } else if (Number.isFinite(shaderTime)) {
+      const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+      const movementBank = reaction?.kind === 'locomotion' || reaction?.kind === 'turn'
+        ? reaction : null;
+      movementFrames.set(actorId, {
+        time: shaderTime, poseTime: pose.time, state: selected.identity.name,
+        x: modelMatrix[12], z: modelMatrix[14],
+        fx: modelMatrix[8] / forwardLength, fz: modelMatrix[10] / forwardLength,
+        bankPitch: movementBank?.pitch ?? 0, bankRoll: movementBank?.roll ?? 0,
+        gazeYaw: webHeadLook?.yaw ?? 0, gazePitch: webHeadLook?.pitch ?? 0,
+        hitEventId: selected.identity.name === 'hit' ? hitEventId : null,
+        hitAccentStartTime, hitSource,
+        headLocal: webHeadIndex < 0 ? null : [
+          report.boneModelMatrices[webHeadIndex*16 + 12],
+          report.boneModelMatrices[webHeadIndex*16 + 13],
+          report.boneModelMatrices[webHeadIndex*16 + 14],
+        ],
+      });
+      if (movementFrames.size > 128) {
+        for (const [id, sample] of movementFrames) {
+          if (shaderTime - sample.time > 10) movementFrames.delete(id);
+        }
+      }
+    }
     // GPU pass reuses its matrix scratch for every actor; copy *immediately*.
     const matrices = new Float32Array(report.boneModelMatrices);
     const socket = report.weaponAttachmentMatrix === null
@@ -148,6 +623,9 @@ export function createNativeActorSkinRuntime(skinPass) {
     return Object.freeze({
       ...report, actorId, actorSourceSelection: selected.identity,
       boneModelMatrices: matrices, weaponAttachmentMatrix: socket,
+      actorWebPoseReaction: reaction, actorWebHitFlash: webHitFlash,
+      actorWebFireGlow: webFireGlow, actorWebHeadLook: webHeadLook,
+      actorWebFireArmKick: webFireArmKick,
       // A serialized controller/state name is NOT proof of active native
       // Mecanim runtime branch or of 1:1 gameplay animation behavior.
       nativeActorControllerExecutionVerified: false,

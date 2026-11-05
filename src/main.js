@@ -1,5 +1,6 @@
 import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
+import { accumulateWebPointerLookPath } from './input.js';
 import { LEVELS, CONTAINERS_WEB_FALLBACK_SPAWN, buildContainersCollisionSolids, containersWalkSolids, buildStaticGeometry, buildSyntheticManifest, drawGeneratedManifest, drawContainersBuild28Preview } from './levels.js';
 import { CONTAINERS_BUILD28_DEMO_CAMERA } from './scenes/containers-build28.js';
 import { planLocalMesh6Draws } from './scenes/containers-mesh6-local-plan.js';
@@ -8,12 +9,13 @@ import { parseObjGroupsIntoIndexedMesh } from './render/mesh-format.js';
 import { parseLocalObjGroup, readLocalObjFile } from './preview/local-obj-group.js';
 import { loadNativeEnemyObj } from './characters/native-enemy-local.js';
 import { prepareNativeScene } from './scenes/native-scene-local.js';
-import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove } from './time.js';
+import { createMcdGameplayClock, stepMcdGameplayClock, addMcdGameplayPulse, mcdSourcePlayerPreConstraintMove, sampleActiveFrameDeltas } from './time.js';
 import { add3, cameraAxes, clamp, distance3, lerp, multiply3, normalize3, resolveWalk, segmentAabb, segmentSphere } from './math.js';
 import { prepareNativeCollision, nativeCollisionView, moveNativeCharacter, nativeGroundAt, nativeSegmentHit, nativeSphereHit } from './scenes/native-collision.js';
 import { createNativeEncounter, advanceNativeEncounter, readyForVictory } from './combat/native-encounter.js';
 import { createNativeItems, nearestNativeItem, pickupNativeItem, throwNativeItem, advanceNativeItems, nativeItemDraws, getNativeItemPosition } from './combat/native-items.js';
 import { advanceEnemyReaction, applyThrownEnemyContact } from './animation/enemy-reaction.js';
+import { advanceWebEnemyPunch, createWebEnemyPunchState } from './combat/web-enemy-punch.js';
 import { createNativeDeathRuntime, applyNativeDeathForce } from './animation/native-death-runtime.js';
 import { createWebImpactFeedback, resetWebImpactFeedback, recordWebImpact, advanceWebImpactFeedback } from './vfx/web-combat-feedback.js';
 import { detectWebCleanDodge, WEB_DODGE_SCORE } from './combat/web-near-miss.js';
@@ -28,6 +30,8 @@ import { multiplyMatrices } from './scenes/graph.js';
 import { isDojoBuild10Source } from './flow/dojo-round-intents.js';
 import { createDojoDoorWarningBridge } from './scenes/dojo-door-warning-bridge.js';
 import { resolveDojoKillCompletion } from './flow/dojo-combat-completion.js';
+import { createDojoReplayRecap, readDojoReplayBest } from './flow/dojo-replay-recap.js';
+import { readDojoGlobalStreak, advanceDojoGlobalStreak } from './flow/dojo-global-streak.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('scene');
@@ -41,6 +45,9 @@ const dodgeBanner = $('dodge-banner');
 const flash = $('damage-flash');
 const shootFlash = $('shoot-flash');
 const audio = createAudio();
+// Active browser time, independent of capped physics dt; re-anchor START/RESUME/REJOUER.
+let activeSinceTimestampMs = performance.now();
+let webPointerPath = 0;
 const nativeHud = createNativeHud(hud, crosshair, $('health'), id => assetUrl(id));
 let renderer;
 try { renderer = createRenderer(canvas); }
@@ -511,7 +518,7 @@ function setScreen(name) {
   dodgePulse.hidden = !playing;
   dodgeBanner.hidden = !playing || webDodgeFeedback.seconds<=0;
   for (const [key, screen] of Object.entries(screens)) screen.hidden = key !== name;
-  if (!playing) keys.clear();
+  if (!playing) { keys.clear(); webPointerPath = 0; }
 }
 
 /** Gameplay target exists only after the original OBJ has been authenticated
@@ -529,6 +536,8 @@ function resetContainersTarget() {
 }
 
 function loadLevel(index) {
+  // REJOUER/scene changes may not inherit a half-finished stride.
+  audio.resetFootsteps();
   state.levelIndex = index;
   state.level = LEVELS[index];
   state.objects = buildStaticGeometry(state.level);
@@ -608,6 +617,7 @@ function loadLevel(index) {
   nativeHud.setActive(Boolean(nativeGameplay() && nativeHudReady));
   nativeHud.reset();
   state.reload = 0; state.fireDelay = 0;
+  webPointerPath = 0;
   state.hop = 0; state.verticalSpeed = 0; state.walkCycle = 0;
   state.recoil = 0; state.muzzle = 0;
   resetWebImpactFeedback(webImpactFeedback);
@@ -632,22 +642,77 @@ function resetGame() {
   state.kills = 0; state.runClock = 0; state.worldClock = 0;
   loadLevel(0);
   setScreen('playing');
+  activeSinceTimestampMs = performance.now();
 }
 function requestMouse() {
   canvas.focus({ preventScroll: true });
-  if (document.pointerLockElement !== canvas) {
+  if (document.pointerLockElement === canvas) return;
+  // A denied lock leaves the mouse unable to aim or shoot; running the enemy
+  // clock anyway makes the round unwinnable. Pause and allow a deliberate retry.
+  // Modern browsers reject a Promise; older implementations can throw or emit
+  // pointerlockerror. Never claim a non-lock fallback that does not exist.
+  try {
     const maybe = canvas.requestPointerLock();
     if (maybe && typeof maybe.catch === 'function') maybe.catch(() => {
-      // The game remains usable with keyboard if the browser declines pointer lock.
+      if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
     });
+  } catch {
+    if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
   }
 }
 function start() { if (!nativeGameplay()) { dojoUnavailable('Le Dojo original doit être entièrement chargé avant de jouer.'); return; } initializeAudio(); resetGame(); requestMouse(); }
-function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen('playing'); requestMouse(); }
-function pause() { if (state.screen === 'playing') setScreen('paused'); }
+function resume() { if (!nativeGameplay()) return; initializeAudio(); setScreen('playing'); activeSinceTimestampMs = performance.now(); requestMouse(); }
+function pause() {
+  if (state.screen !== 'playing') return;
+  if (nativeGameplay() && nativeCombatStarted) {
+    // Clear interrupted Web look impulses without advancing world/physics.
+    stepMcdGameplayClock(nativeClock, {
+      dt: 0, unscaledDt: 0, paused: true,
+      yaw: state.camera.yaw, pitch: state.camera.pitch,
+    });
+  }
+  setScreen('paused');
+}
 function finish(win) {
+  // A terminal round must be scored and persisted exactly once even if
+  // multiple impact producers resolve during the same Web frame.
+  if (state.screen === 'dead' || state.screen === 'win') return;
   if (document.pointerLockElement === canvas) document.exitPointerLock();
-  const stats = `${state.kills} ennemis éliminés · ${state.shots} tirs · ${state.runClock.toFixed(1)} secondes`;
+  let stats = `${state.kills} ennemis éliminés · ${state.shots} tirs · ${state.runClock.toFixed(1)} secondes`;
+  // Original Web replay goals on the *actual* Dojo scoreboard. Storage failure
+  // must never block victory, death or REJOUER; 6/7-kill records are separate.
+  const quota = nativeEncounter?.killTarget;
+  if (nativeGameplay() && isDojoBuild10Source(nativeScene?.source) &&
+      (quota === 6 || quota === 7)) {
+    try {
+      const key = 'framebreak-dojo-record-v1-' + quota;
+      let previous = null;
+      try { previous = readDojoReplayBest(window.localStorage.getItem(key), quota); }
+      catch { /* Private mode or disabled storage: still display this run. */ }
+      const recap = createDojoReplayRecap({
+        quota, victory: win, kills: state.kills, shots: state.shots,
+        dodges: state.dodges, score: state.score, elapsedSeconds: state.runClock,
+      }, previous);
+      stats = recap.text;
+      if (recap.shouldPersist) {
+        try { window.localStorage.setItem(key, JSON.stringify(recap.best)); }
+        catch { /* A blocked write must never interrupt REJOUER. */ }
+      }
+    } catch { /* Preserve the previously validated win/death screen. */ }
+    // Chronological Web-only streak spanning BOTH Dojo quotas. Per-format
+    // records do not contain enough history to reconstruct previous rounds.
+    try {
+      const globalKey = 'framebreak-dojo-global-streak-v1';
+      let raw = null;
+      try { raw = window.localStorage.getItem(globalKey); }
+      catch { /* Private storage: this round starts a volatile record. */ }
+      const {record, announcement} = advanceDojoGlobalStreak(
+        readDojoGlobalStreak(raw), {quota, victory: win});
+      if (announcement) stats += ` · ${announcement}`;
+      try { window.localStorage.setItem(globalKey, JSON.stringify(record)); }
+      catch { /* A blocked write never interrupts victory or REJOUER. */ }
+    } catch { /* Optional Web stat must never prevent terminal screen. */ }
+  }
   $(win ? 'win-stats' : 'death-stats').textContent = stats;
   setScreen(win ? 'win' : 'dead');
   if (win) audio.win();
@@ -663,11 +728,24 @@ canvas.addEventListener('click', () => { if (state.screen === 'paused') resume()
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
 });
+document.addEventListener('pointerlockerror', () => {
+  // Legacy pointer-lock APIs may signal refusal only through this event.
+  if (document.pointerLockElement !== canvas && state.screen === 'playing') pause();
+});
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && state.screen === 'playing') pause();
 });
 document.addEventListener('keydown', (event) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+  // The Dojo preview is already on the PLAYING screen, but the round has
+  // not started. Do not allow free movement, a jump or F/E item mutations
+  // before the player deliberately starts combat on the canvas.
+  if (state.screen === 'playing' && nativeGameplay() && !nativeCombatStarted &&
+      ['KeyW', 'KeyZ', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown',
+        'ArrowLeft', 'ArrowRight', 'Space', 'KeyF', 'KeyE'].includes(event.code)) {
+    event.preventDefault();
+    return;
+  }
   keys.add(event.code);
   if (event.repeat) return;
   if (state.screen === 'menu' && event.code === 'Enter') { start(); return; }
@@ -690,15 +768,36 @@ document.addEventListener('keydown', (event) => {
 document.addEventListener('keyup', (event) => keys.delete(event.code));
 document.addEventListener('mousemove', (event) => {
   if (state.screen !== 'playing' || document.pointerLockElement !== canvas) return;
+  const previousYaw = state.camera.yaw;
+  const previousPitch = state.camera.pitch;
   state.camera.yaw += event.movementX * .00245;
   const pitchLimit = nativeGameplay() ? 80 * Math.PI / 180 : 1.42;
   state.camera.pitch = clamp(state.camera.pitch - event.movementY * .00245, -pitchLimit, pitchLimit);
+  // Preserve opposing high-polling pointer events within one RAF; rejected
+  // pitch changes do not add imaginary world-speed input.
+  webPointerPath = accumulateWebPointerLookPath(webPointerPath, {
+    previousYaw, previousPitch, yaw: state.camera.yaw, pitch: state.camera.pitch,
+  });
   state.lookActivity = clamp(Math.hypot(event.movementX, event.movementY) / 34, .12, 1);
 });
 document.addEventListener('contextmenu', (event) => { if (state.screen === 'playing') event.preventDefault(); });
 document.addEventListener('mousedown', (event) => {
   if ((event.button !== 0 && event.button !== 2) || state.screen !== 'playing') return;
-  if (document.pointerLockElement !== canvas) { nativeCombatStarted = true; initializeAudio(); requestMouse(); return; }
+  if (document.pointerLockElement !== canvas) {
+    // A document-level listener also receives clicks on scene-mode, buttons
+    // and overlays. Only an intentional primary click on the actual canvas
+    // may start the Dojo preview, never a click on those HTML controls.
+    if (event.target !== canvas) return;
+    if (nativeGameplay() && !nativeCombatStarted) {
+      if (event.button !== 0) return;
+      // The first canvas click starts the round, not a pistol shot.
+      state.runClock = 0;
+      activeSinceTimestampMs = performance.now();
+      nativeCombatStarted = true;
+      setScreen('playing'); // Hide preview controls as soon as combat starts.
+    }
+    initializeAudio(); requestMouse(); return;
+  }
   if (event.button === 2) throwWeapon();
   else shoot();
 });
@@ -750,6 +849,16 @@ function shoot() {
   state.shotPulse = 1;
   state.recoil = 1;
   if (!state.weapon) {
+    // The source Hands controller already supports Attack on its unarmed profile.
+    // Trigger on the accepted punch, not on every animation frame.
+    if (nativeGameplay() && nativeHandsController && nativeHandsEquippedId === 'unarmed') {
+      try { nativeHandsController.action('attack'); }
+      catch {
+        renderer.replaceDojoPlayerHands(null);
+        nativeHandsController = null;
+        nativeHandsStatus = 'DOJO_UNARMED_ATTACK_DESCRIPTOR_REJECTED_FALLBACK';
+      }
+    }
     // Unarmed close-range attack; useful after throwing the gun.
     const hit = findMeleeTarget();
     if (hit) {
@@ -761,7 +870,8 @@ function shoot() {
         direction:cameraAxes(state.camera.yaw,state.camera.pitch).forward,kind:'melee',
       });
     }
-    else audio.empty();
+    if (nativeGameplay()) audio.punch({hit: Boolean(hit), position: state.camera});
+    else if (!hit) audio.empty();
     return;
   }
   if (state.ammo <= 0) {
@@ -776,7 +886,15 @@ function shoot() {
   const origin = add3(add3(state.camera, multiply3(forward, .68)), multiply3(right, .12));
   // The visible first-person muzzle may extend past a wall; do not start a
   // projectile on its far side.
-  if(!nativeGameplay() || !nativeSegmentHit(nativeShotCollision,state.camera,origin))addBullet(origin, forward, true);
+  const muzzleBlock = nativeGameplay() ? nativeSegmentHit(nativeShotCollision,state.camera,origin) : null;
+  if (!muzzleBlock) addBullet(origin, forward, true);
+  else if (muzzleBlock.t > 0.01) {
+    // The shot was genuinely blocked *before* its muzzle: show that exact
+    // wall contact, without spawning a bullet through cover or a false hitmarker.
+    recordWebImpact(webImpactFeedback, {
+      kind: 'wall', point: muzzleBlock.point, direction: forward,
+    });
+  }
   state.muzzle = .09;
   shootFlash.style.opacity = '.5';
   audio.shoot();
@@ -909,6 +1027,14 @@ function applyNativeEnemyContact(enemy,item,hit,velocity) {
   for(const action of result.actions) {
     if(action.type==='drop-weapon')dropNativeEnemyWeapon(enemy);
     if(action.type==='stun') {
+      // Only a confirmed nonlethal contact can steer this Web hit reaction.
+      // hit.point is on the victim, NOT the attacker position.
+      if(!result.actions.some(other=>other.type==='kill')) {
+        const speed=Math.hypot(velocity.x,velocity.y,velocity.z);
+        enemy.hitIncomingDirection=Number.isFinite(speed) && speed>1e-6
+          ? {x:velocity.x/speed,y:velocity.y/speed,z:velocity.z/speed} : null;
+        enemy.hitEventId=(enemy.hitEventId??0)+1;
+      }
       enemy.stunnedAt=state.worldClock;enemy.runtime.pendingShot=null;enemy.attackIntentAt=null;
       audio.stun({bodyId:enemy.id,position:enemy,realtimeSeconds:state.runClock});
     }
@@ -1034,6 +1160,10 @@ function killEnemy(enemy,hitReceipt=null) {
   } else if (state.enemies.length && state.enemies.every((e) => !e.alive)) state.transition = containersPreviewEnabled ? 1.0 : 2;
 }
 function damagePlayer() {
+  // Never apply another hit to an already terminal/paused round. The Dojo
+  // preview uses the playing screen before the first intentional START.
+  if (state.screen !== 'playing' || state.health <= 0 ||
+      (nativeGameplay() && !nativeCombatStarted)) return;
   state.health--;
   state.damage = .48;
   state.shotPulse = 1;
@@ -1084,8 +1214,13 @@ function walkThroughScene(position, feet) {
   const obstacles = containersPreviewEnabled ? containersWalkSolids(state.solids, feet + 1.6) : state.solids;
   return resolveWalk(position,.34,obstacles);
 }
-function update(dt) {
-  state.runClock += dt;
+function update(dt, activeRealDt) {
+  // Web game-clock and 360ms unarmed recovery must count only actual PLAYING time.
+  // Physics/animation/world clock keep the existing capped simulation dt.
+  // The standalone Dojo opens in PLAYING for visual preview, before the
+  // player has actually started combat. Never score that preview as run time.
+  // Other non-Dojo modes retain their existing timer behavior.
+  if (!nativeGameplay() || nativeCombatStarted) state.runClock += activeRealDt;
   state.waveClock += dt;
   state.stageBanner = Math.max(0, state.stageBanner - dt);
   state.lookActivity = Math.max(0, state.lookActivity - dt * 2.1);
@@ -1093,33 +1228,51 @@ function update(dt) {
   state.damage = Math.max(0, state.damage - dt);
   state.muzzle = Math.max(0, state.muzzle - dt);
   state.recoil = Math.max(0, state.recoil - dt * 4.8);
-  advanceWebImpactFeedback(webImpactFeedback,dt);
-  advanceWebDodgeFeedback(webDodgeFeedback,dt);
-  if (!nativeGameplay()) state.fireDelay = Math.max(0, state.fireDelay - dt);
+  // Dojo VFX use active elapsed time after a frame hitch; legacy scenes retain capped physics time.
+  advanceWebImpactFeedback(webImpactFeedback,nativeGameplay()?activeRealDt:dt);
+  advanceWebDodgeFeedback(webDodgeFeedback,nativeGameplay()?activeRealDt:dt);
+  // Web game feel: Dojo player attacks recover on ACTIVE real time, not the
+  // nearly frozen world clock. Keep nominal pistol/katana/throw/punch delays;
+  // legacy previews still use their capped simulation dt. update() is never
+  // called while PAUSED, so inactive wall time cannot advance cooldowns.
+  state.fireDelay = Math.max(0, state.fireDelay - (nativeGameplay() ? activeRealDt : dt));
   if (state.reload > 0) {
     state.reload -= dt;
     if (state.reload <= 0) { state.reload = 0; state.ammo = 6; }
   }
-  const fwd = (keys.has('KeyW') || keys.has('KeyZ') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
-  const horizontal = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
+  const native = nativeGameplay();
+  // Keep world/animation settling active in the preview while ignoring
+  // physical player input until the first accepted combat-start gesture.
+  const playerInputActive = !native || nativeCombatStarted;
+  const fwd = playerInputActive
+    ? (keys.has('KeyW') || keys.has('KeyZ') || keys.has('ArrowUp') ? 1 : 0) -
+      (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0)
+    : 0;
+  const horizontal = playerInputActive
+    ? (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) -
+      (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0)
+    : 0;
   // KeyboardEvent.code follows physical keys: works on both QWERTY and AZERTY layouts.
   const moving = Math.hypot(fwd, horizontal) > 0;
-  const native = nativeGameplay();
   let worldDt;
   if (native) {
     const tick = stepMcdGameplayClock(nativeClock, {
-      dt, x: horizontal, y: fwd, grounded: nativeGrounded,
+      dt, unscaledDt: activeRealDt, x: horizontal, y: fwd, grounded: nativeGrounded,
       yaw: state.camera.yaw, pitch: state.camera.pitch,
+      lookPathDegrees: webPointerPath,
     });
+    // The Web look path is consumed once; don't queue acceleration on idle.
+    webPointerPath = 0;
     state.speed = tick.timeScale;
     worldDt = tick.worldDelta;
-    state.fireDelay = Math.max(0, state.fireDelay - worldDt);
     audio.updateWorldAudio({ aggregateTargetTimescale: tick.aggregate });
     audio.advanceWorldTime(worldDt);
     audio.setListener({ position: state.camera, forward: cameraAxes(state.camera.yaw, state.camera.pitch).forward });
     // Advance existing warning envelopes before accepting fresh commands.
     // This preserves trigger()'s first source-clock sample.
-    nativeDoorWarningBridge?.advance(worldDt);
+    // Spawn and warning countdowns use active real time even when physics dt is capped.
+    // Light curve animation remains driven by worldDt.
+    nativeDoorWarningBridge?.advance(worldDt, state.camera, activeRealDt);
     if (nativeHandsController) {
       try {
         const heldId = nativeItems?.held?.id ?? 'unarmed';
@@ -1194,6 +1347,12 @@ function update(dt) {
     const support=nativeGroundAt(nativePlayerCollision,nativeFeet,{...player,maxDrop:30,maxRise:0});
     state.hop=nativeGrounded?0:Math.max(.001,nativeFeet.y-(support?.y??nativeFeet.y));
     state.walkCycle += worldDt * Math.hypot(nativeVelocity.x, nativeVelocity.z) * 1.4;
+    // Resolve collisions and ground contact BEFORE scheduling a footstep.
+    // No preview footsteps before START; no movement inferred from mouse look.
+    if (nativeCombatStarted) audio.advanceFootsteps({
+      position: {x: state.camera.x, y: state.camera.y, z: state.camera.z},
+      grounded: nativeGrounded,
+    });
   } else {
     if (moving) {
       const yaw = state.camera.yaw;
@@ -1217,8 +1376,10 @@ function update(dt) {
   if(!native)state.camera.y = (containersPreviewEnabled ? previewCameraY : 1.68) + state.hop;
   if(native && nativeCombatStarted) {
     const events=advanceNativeEncounter(nativeEncounter,{
-      scaledDeltaTime:worldDt,unscaledDeltaTime:dt,playerPosition:state.camera,
+      scaledDeltaTime:worldDt,unscaledDeltaTime:activeRealDt,playerPosition:state.camera,
       playerForward:cameraAxes(state.camera.yaw,state.camera.pitch).forward,playerFeet:nativeFeet,enemies:state.enemies,
+      // Only actual already-launched player bullets; never a predicted mouse click.
+      playerProjectiles:state.bullets,
     });
     for(const event of events) {
       if(event.type==='door-warning') {
@@ -1259,7 +1420,7 @@ function update(dt) {
       },worldDt):{ready:false,targetInSight:false,position:toUnity(aim)};
       enemy.aimReady=aimed.ready;
       const attack=runNativeEnemyGunAttack(enemy.runtime,activeWeaponSettings,{
-        scaledDeltaTime:worldDt,unscaledDeltaTime:dt,targetSight:enemy.encounter.visible,
+        scaledDeltaTime:worldDt,unscaledDeltaTime:activeRealDt,targetSight:enemy.encounter.visible,
         sightMode:'all-directions',aimTargetInSight:enemy.encounter.canAttack&&aimed.targetInSight,aimReady:aimed.ready,
         weaponInRightPosition:enemy.encounter.canAttack,allowAttacking:true,canShot:true,
         active:enemy.alive&&enemy.reaction.hasWeapon&&enemy.reaction.stunRemaining===0,animationTarget:toUnity(aimed.position),
@@ -1280,12 +1441,27 @@ function update(dt) {
           }
         }
       }
-      if(!enemy.reaction.hasWeapon && enemy.reaction.stunRemaining===0 &&
-          distance3(enemy,nativeFeet)<nativeEncounter.unarmedStopDistance+.15 &&
-          !nativeSegmentHit(nativeSightCollision,vec(enemy.x,enemy.y+1.2,enemy.z),state.camera) &&
-          state.worldClock>=(enemy.nextPunchAt??0)) {
-        enemy.nextPunchAt=state.worldClock+.75;enemy.punchAt=state.worldClock;damagePlayer();
-        if(state.screen!=='playing')return;
+      // Web J3 melee: a visible windup precedes an actual contact event.
+      // Recheck reach, cover, stun and weapon state on EVERY world tick;
+      // attack intent alone must never decrement player health.
+      const punch = advanceWebEnemyPunch(
+        enemy.webPunch ??= createWebEnemyPunchState(), {
+          scaledDeltaTime: worldDt,
+          attackerActive: enemy.active !== false,
+          attackerAlive: enemy.alive,
+          playerAlive: state.screen === 'playing' && state.health > 0,
+          unarmed: !enemy.reaction.hasWeapon,
+          stunned: enemy.reaction.stunRemaining > 0 || Boolean(enemy.reaction.stunnedThisFrame),
+          inReach: distance3(enemy,nativeFeet) < nativeEncounter.unarmedStopDistance + .15,
+          lineClear: !nativeSegmentHit(nativeSightCollision,
+            vec(enemy.x,enemy.y+1.2,enemy.z),state.camera),
+        },
+      );
+      if(punch.event === 'started') enemy.punchAt = state.worldClock;
+      else if(punch.event === 'cancelled') enemy.punchAt = -Infinity;
+      else if(punch.event === 'contact') {
+        damagePlayer();
+        if(state.screen !== 'playing') return;
       }
       continue;
     }
@@ -1361,10 +1537,14 @@ function update(dt) {
         });
       }
       else if (impact.type==='player') damagePlayer();
-      else if (impact.type==='wall' && bullet.friendly)
+      else if (impact.type==='wall' && bullet.friendly) {
         recordWebImpact(webImpactFeedback,{
           kind:'wall',point:contactPoint,direction:bullet.direction,
         });
+        // Only a resolved normal player bullet hitting a world collider:
+        // no speculative near-miss, thrown item or duplicate impact cue.
+        if (bullet.type==='normal') audio.wallImpact({position:contactPoint});
+      }
       if (bullet.type==='throw' && impact.type==='wall' && !native) {
         const p=add3(start,multiply3(vec(end.x-start.x,end.y-start.y,end.z-start.z),impact.t));
         state.drops.push({x:p.x,y:floorAt(p.x,p.z,p.y)+.38,z:p.z,bob:0,ammo:bullet.ammo,
@@ -1388,6 +1568,8 @@ function update(dt) {
           })) {
             state.dodges++;
             state.score+=WEB_DODGE_SCORE;
+            // Play only after the projectile missed and scoring accepted the dodge.
+            audio.dodge({position:clean.point});
           }
         }
       }
@@ -1416,6 +1598,7 @@ function update(dt) {
       const frame=advanceDojoDeathSkinFrame({
         runtime:enemy.deathRuntime, rig:enemy.deathRig,
         sourceBoneOrder:enemy.deathBoneOrder, scaledDelta:worldDt,
+        frameTiming:{simulationDelta:dt,activeRealDelta},
         provenance:enemy.deathPhysicsProvenance,
       });
       enemy.deathSolvedPose=frame.solvedPose;
@@ -1426,7 +1609,8 @@ function update(dt) {
     }
   }
   if (state.transition>0) {
-    state.transition-=dt;
+    // A Dojo victory should not take twice as long at 10 FPS because physics dt is capped.
+    state.transition-=nativeGameplay() ? activeRealDt : dt;
     if (state.transition<=0) {
       if (containersPreviewEnabled || state.levelIndex === LEVELS.length - 1) finish(true);
       else {state.health=Math.min(3,state.health+1);loadLevel(state.levelIndex+1);}
@@ -1559,10 +1743,13 @@ function drawEnemy(enemy) {
     const time = animationClock - animation.startedAt;
     enemy.fireAction=enemyFireAction(enemy,animationClock);
     const solvedPose=dying ? enemy.deathSolvedPose??null : null;
+    const activeHit=!dying && animation.state==='hit' && enemy.reaction?.stunRemaining>0;
     nativeEnemyStats = renderer.drawNativeActorSkin(enemy.id, actorMatrix, animation.state, time, {
       statePlayback, transition:solvedPose?null:transition,
       action:solvedPose?null:enemy.fireAction, solvedPose,
       shaderTime: state.runClock, cameraPosition: state.camera,
+      hitIncomingDirection: activeHit ? (enemy.hitIncomingDirection??null) : null,
+      hitEventId: activeHit ? (enemy.hitEventId??null) : null,
     })
       ?? renderer.drawNativeSkin(actorMatrix, animation.state, time, {
         statePlayback, transition:solvedPose?null:transition,
@@ -1917,12 +2104,14 @@ setScreen('playing');
 let last=performance.now();
 function frame(now) {
   const frameMs = Math.max(0, now - last);
-  const dt=Math.min(.05,frameMs/1000);last=now;
+  const {simulationDt:dt,activeRealDt,nextTimestampMs} =
+    sampleActiveFrameDeltas(last,now,activeSinceTimestampMs);
+  last=nextTimestampMs;
   if (visualPreviewEnabled && frameMs > 0) {
     measuredFrameMs.push(frameMs);
     if (measuredFrameMs.length > 240) measuredFrameMs.shift();
   }
-  if(state.screen==='playing') update(dt);
+  if(state.screen==='playing') update(dt,activeRealDt);
   render();
   if(state.screen==='playing') flushDojoEnemyLateShots();
   if (visualPreviewEnabled && now >= metricsNextAt && measuredFrameMs.length) {
@@ -1953,8 +2142,16 @@ function frame(now) {
         ragdollStatus: e.deathPhysicsStatus ?? (!e.alive ? 'no-verified-runtime' : 'alive'),
         ragdollPoseAvailable: Boolean(e.deathSolvedPose),
       })),
-      ragdollPackVerified: Boolean(localAssetManifest?.features?.ragdoll &&
-        nativeRigSha256 === nativeScene?.gameplay?.deathPhysicsRigSha256),
+      // The canonical pack may omit optional manifest.features.ragdoll. Boot
+      // checks the actual 22 bodies, 21 joints, source identity and rig hash.
+      ragdollPackVerified: Boolean(nativeRigSha256 &&
+        nativeRigSha256 === nativeScene?.gameplay?.deathPhysicsRigSha256 &&
+        nativeScene?.gameplay?.deathPhysics?.source?.identity ===
+          'sharedassets0.assets::5163 / EnemyMergedForPooler' &&
+        nativeScene?.gameplay?.deathPhysics?.bodies?.length === 22 &&
+        nativeScene?.gameplay?.deathPhysics?.joints?.length === 21 &&
+        nativeScene?.gameplay?.deathPhysics?.boneParents?.length ===
+          nativeSkinInfo?.skinRig?.boneOrder?.length),
       activeRagdolls: state.enemies.filter(e => !e.alive && e.deathRuntime).length,
       nativeActionActivationVerified: false,
       worldClock: state.worldClock,

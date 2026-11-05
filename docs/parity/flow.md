@@ -208,3 +208,158 @@ Les fonctions n'exécutent aucune intention, n'écrivent ni save, ni UI, ni scè
 **BLOQUÉ — intégration P0.** Le jeu public ne possède pas encore un reçu Dojo live `EndRunLevel` avec `SHRLGame.GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `CurrentRun.SkipDefragBetweenLevels`, plus objet de run natif/équivalent de sauvegarde, captures, événement et LevelLoad reliés. **SH-05** doit confirmer la route natif → callback différé → services autoritatifs avant de l'invoquer dans `src/main.js`. Ne pas substituer `readyForVictory` ou le compteur 6/7 Web : conserver le parcours Web 7/7 tant que ces entrées manquent. Le code ajouté n'active donc **pas** encore la fin native et n'est **pas** un smoke Pages, une capture de partie ou une revendication 1:1.
 
 Le pack `local-assets/manifest.json` reste à vérifier sur HEAD et sur Pages séparément; aucun asset/source Unity privé n'est requis par cette fonction ni publié avec elle.
+
+
+## SH-08 / J3 — Web replay score and personal records (2026-11-03)
+
+**PROUVÉ — source Web at main@1c1f308ac796:** `src/main.js` already owns kill-chain scoring (#271), clean-dodge points (#274), elapsed run seconds, shots, kills and 6/7 source-selected quota. The existing `finish(win)` currently shows only kills/shots/time. No native MCD run save is used for that screen.
+
+**IMPLÉMENTÉ — Web original, not native:** `src/flow/dojo-replay-recap.ts` + generated JS compute a deterministic end-of-round message from the actual Web counters, with first-clear / best-score / fastest-clear milestones. Separate 6- and 7-kill personal records avoid comparing unequal enemy quotas. Death never changes the stored best. This module does **not** award score, replace the combo, alter spawns, delay victory, persist data on its own or call MCD flow transitions.
+
+**SH-05 UI integration (shared file reserved):** in `finish(win)`, after selecting the confirmed Dojo and checking `nativeEncounter.killTarget` is 6 or 7, use `readDojoReplayBest(localStorage.getItem('framebreak-dojo-record-v1-'+quota), quota)`, then `createDojoReplayRecap({quota, victory:win, kills:state.kills, shots:state.shots, dodges:state.dodges, score:state.score, elapsedSeconds:state.runClock}, previous)`. Set the existing `win-stats` / `death-stats` text from `recap.text`. If `recap.shouldPersist`, store `JSON.stringify(recap.best)` at the **same quota-specific key**. Catch unavailable localStorage reads/writes and retain the ordinary end screen; do not gate death, victory or REJOUER on storage. No DOM/style/new asset is required. Don't call from kill handler or from frame update.
+
+**OBSERVÉ — targeted Node only:** two focused tests cover separate 6/7 records, faster vs higher score, malformed storage and loss preserving previous best. **INCONNU — browser UX/FPS:** no smoke of the updated end screen has been performed. SH-05 owns the actual main glue and Pages release; the module alone does not change the rendered game.
+
+
+## SH-08 — J3 grade visible et objectif de retry (03/11/2026)
+
+**PROUVÉ — Web uniquement :** sur main `a21e6ca18382`, SH-05 a déjà raccordé `createDojoReplayRecap` aux écrans `finish(win)` (#286, sans modifier ici le fichier partagé). La fonction reçoit les vrais compteurs `state.score`, `state.kills`, le quota combat Dojo 6/7 et les vrais tirs/esquives/secondes. La règle Web #271 donne 100, 200, 300… points aux kills consécutifs ; les esquives peuvent ajouter des points. Pas de nouvelle origine MCD revendiquée.
+
+**IMPLÉMENTÉ — Web gameplay/UX :** le texte de ces écrans **déjà câblés** affiche désormais un rang de style C/B/A/S pour chaque victoire et le seuil de points du prochain rang ; après une défaite, il affiche le nombre d'ennemis restant à éliminer. Pour chaque quota, S correspond au score de combo seul sans interruption (6: 2 100, 7: 2 800) ; B commence à 50 % et A à 70 %, arrondis au prochain palier de 50 points. Les esquives peuvent dépasser ce repère, volontairement. **Ces seuils sont une décision créative Web, non des valeurs natives.** Les valeurs sont des guides de replay, pas des points attribués. Les records localStorage v1 et les milestones précédents restent compatibles. Aucun asset, clock, input ni spawner modifié.
+
+**OBSERVÉ — à vérifier après merge :** le module est consommé directement par le `finish(win)` existant ; la CI doit vérifier TS/JS/test sur la PR, puis SH-05 doit effectuer le smoke navigateur (perdre à 4/7 puis gagner à 6/7 avec score modéré/fort, vérifier texte et REJOUER). L'affichage depuis Pages n'est pas prouvé avant ce smoke.
+
+**INCONNU — natif :** les gardes `GameType`, `AllNeededEnemyKilled`, `WinOnDeath` et `SkipDefragBetweenLevels` restent hors de cet ajout. La progression MCD `RunEnding` et le système de sauvegarde ne sont ni activés ni simulés par ce grade Web.
+
+
+## SH-08 / J3 — séries de victoires et record persistant par quota (03/11/2026)
+
+**PROUVÉ — Web et effet visible déjà raccordé :** `src/main.js:finish(win)` appelle `createDojoReplayRecap` sur les compteurs réels et écrit sous `framebreak-dojo-record-v1-<6|7>` lorsque `shouldPersist` est vrai (#286). La nouvelle logique ajoute `currentStreak` et `bestStreak` au modèle de record (schéma 2) et affiche `SÉRIE N` dès deux victoires d'affilée, `RECORD SÉRIE` au meilleur enchaînement, `SÉRIE N BRISÉE` après une défaite. Une défaite ne modifie pas score record, chrono record ou total de victoires, mais **doit maintenant être persistée si une série active est interrompue**. Aucun changement dans la glue SH-05, les armes, les scores, les spawns, les horloges, les entrées ou le quota.
+
+**Migration :** `readDojoReplayBest` accepte les records de schéma 1 déjà enregistrés et les convertit en schéma 2, avec série initiale 0 (l'historique ne permet pas de prouver des victoires consécutives). Même clé localStorage afin que SH-05 n'ait rien à adapter ; les deux quotas restent strictement indépendants. Les snapshots cassés sont refusés. Les records acquis restent conservés ; un navigateur sans stockage garde l'écran de victoire/défaite et REJOUER via le chemin déjà sécurisé de SH-05.
+
+**OBSERVÉ — validation :** test ciblé `flow-dojo-replay-recap.test.mjs` pour migration, deux victoires, défaite, reprise et séparation 6/7. SH-05 doit vérifier CI sur HEAD exact puis, après merge, Pages et le test navigateur : gagner deux manches même quota avec REJOUER, perdre la troisième, gagner la quatrième ; constater série 2 → brisée → série 1, records inchangés. **INCONNU :** le rendu navigateur et les conditions natives `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` ne sont pas couverts ici. Cette progression est une mécanique Web créative, pas une donnée native MCD ni une activation de `RunEnding`.
+
+## SH-08 / J3 — personalized post-win replay challenge (04/11/2026)
+
+**PROUVÉ — Web code only:** `src/main.js:finish(win)` already passes the actual Dojo 6/7 scoreboard and quota-scoped persisted record to `createDojoReplayRecap`. This update adds a concrete next-run challenge **to that existing win screen**: if score did not beat the previous best, display the exact extra points required to set a new record (strictly +1); otherwise, if this run did not beat the previous fastest time, show the previous time to beat; otherwise invite a victory with **zero shots**. No target is fabricated on a first clear or after a loss. An unreachable numeric PB (MAX_SAFE_INTEGER or zero seconds) is never suggested. `replayTarget` is also exposed as typed output for future UI use.
+
+**IMPLÉMENTÉ — creative Web UX, not MCD:** the score comparison always uses the **previous** same-quota record, not the newly persisted record, and it does not mutate score, timing, encounter quota, combo, input or REJOUER. Existing `finish(win)` wiring renders the new suffix without changing shared files. One targeted deterministic test covers score/time/no-shot priorities, first clear, loss and 6/7 isolation. **INCONNU — browser experience:** Pages render and manual 7/7 smoke remain SH-05/Thomas verification tasks after CI and merge. MCD `RunEnding` callbacks and native checkpoint activation remain unproven.
+
+
+## SH-08 / J3 — progression de maîtrise du Dojo Web (04/11/2026)
+
+**PROUVÉ — mécanismes Web uniquement :** l'intégration existante `main.js:finish(win)` appelle `createDojoReplayRecap` une seule fois et conserve la fiche par quota 6/7 dans la clé localStorage déjà en place. La nouvelle fiche v3 préserve les records et séries v1/v2, sans inventer des réussites antérieures. Lors d'une victoire effective, trois médailles Web indépendantes sont obtenues depuis les compteurs de la partie : style S, victoire sans tir, victoire avec au moins trois esquives propres. Leur progression 0/3 à 3/3 et les nouvelles médailles apparaissent dans le récapitulatif existant ; aucune récompense ni point supplémentaire n'est accordé, aucune médaille ne s'obtient à la défaite. Validation : test ciblé `tests/flow-dojo-replay-recap.test.mjs` et CI SHA exact de la PR.
+
+**OBSERVÉ — source Web, pas MCD :** les badges sont des objectifs créatifs de rejouabilité, pas des achievements natifs. Aucun asset, horaire, input, condition de victoire, compte d'ennemis, ragdoll, UI partagée ni service `private/` modifié. `finish(win)` est déjà raccordé ; SH-05 doit seulement fusionner après CI, puis observer victoire / redémarrage / défaite sur Pages.
+
+**INCONNU — progression native :** les conditions live `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et la destination de chargement après `RunEnding` restent non qualifiées ; ne jamais remplacer ces signaux par des badges ou le compteur Web.
+
+## SH-08 / J4 — coaching de reprise depuis les compteurs de manche (04/11/2026)
+
+**PROUVÉ — Web, pas MCD.** La boucle existante `src/main.js:finish(win)` appelle déjà `createDojoReplayRecap` après une vraie fin de manche Dojo. Les écrans de première victoire et de défaite disposaient de métriques, mais pas d'objectif explicite `DÉFI`. Le module SH-08 ajoute un objectif *sans modifier les mécaniques* : en défaite incomplète, viser une élimination supplémentaire au prochain essai ; si le quota est atteint mais le joueur meurt, survivre jusqu'à la victoire ; à la première victoire, proposer une médaille manquante. Les manches répétées conservent la priorité du record personnel précédent (score/temps) puis passent aux médailles non obtenues, y compris STYLE S. Les médailles déjà gagnées ne sont pas reproposées.
+
+**OBSERVÉ — validation attendue.** La validation se limite au test ciblé `flow-dojo-replay-recap.test.mjs`, à TypeScript strict avec JS généré et à la CI exacte de la PR. Le code de l'écran est consommé par `finish(win)` sans modification de `src/main.js`, CSS ou DOM. Aucune variation de spawn, score, timer, armes, F/E, comptage des morts ou succès. Les objectifs sont des conseils de rejouabilité **WEB_ONLY**, jamais des données natives MCD.
+
+**INCONNU.** Aucune observation navigateur faite pour cette livraison. Les gardes natifs actifs de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et les checkpoints restent non établis. SH-05 vérifie l'écran sur Pages après fusion (défaite 0/7, défaite 4/7, première victoire 6/6, maîtrise complète, REJOUER).
+
+
+## SH-08 / J4 — progrès sur défaites Dojo (Web, 2026-11-04)
+
+**PROUVÉ — source Web, pas MCD.** `src/main.js:finish(win)` fournit déjà les vrais compteurs finaux (kills, quota 6/7, victoire/défaite) et sauvegarde `recap.best` quand `shouldPersist`. Le schéma Web v4 de `src/flow/dojo-replay-recap.ts` mémorise désormais `trackedAttempts` et `bestFailedKills`, même avant une première victoire. Une défaite à 4/7 puis à 2/7 conserve le meilleur essai à 4/7 et propose de viser 5 ; une première vraie victoire reste affichée comme première victoire. Les anciennes sauvegardes v1/v2/v3 sont lues avec le total de victoires connu, sans inventer d'anciens échecs. Série, médailles et PB score/temps sont préservés, quotas distincts ; aucun délai, dommage, spawn, événement natif ni asset modifié.
+
+**OBSERVÉ — validation Web.** PR #335 sur branche SH-08, Verify #41760787685 **SUCCESS** sur SHA `ad611d3834c6b6cb5968a440c887ae0e3f82f353` (avant ce complément documentaire) : tests Node, TypeScript strict, JS compilé conforme et pack Pages vérifiés. Ce résultat n'est **pas** un smoke navigateur.
+
+**INCONNU — MCD natif.** L'activation réelle de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et la persistance/checkpoints MCD restent non qualifiés pour le Dojo exécuté. `bestFailedKills` est une simple donnée de rejouabilité **WEB_ONLY**, jamais un checkpoint natif. SH-05 conserve `main.js`, la fusion et les tests du site public ; aucun runner local ni ressource originale n'a été utilisé.
+
+
+## SH-08 / J4 — paliers visibles avant la première victoire (Web, 04/11/2026)
+
+**PROUVÉ — code Web :** sur `finish(win)` déjà raccordé par SH-05, une défaite qui établit un **nouveau meilleur essai partiel** avant le premier clear affiche désormais « NOUVEAU PALIER AVANT LA VICTOIRE ! » dès le début du résumé. Une défaite plus faible ne répète pas le palier ; mourir après quota complet ne simule pas une victoire. Le premier clear gagné après des défaites affiche le nombre **d'essais réellement suivis** avant réussite (par exemple 4), sans inventer l'historique des sauvegardes v1–v3. Les informations décisives sont placées avant les métriques dans le paragraphe de fin pour une lecture plus rapide sur mobile. Aucune variation de combat, F/E, score, spawns, temps, checkpoint, REJOUER, ni schéma v4 ; quota 6/7 et sauvegarde inchangés.
+
+**OBSERVÉ — validation à vérifier :** test ciblé de la séquence 4/7 perdu → 2/7 perdu → 5/7 perdu → victoire au 4e essai et du clear en un seul essai ; contrôler CI sur SHA exact et smoke Pages après merge par SH-05. Pas de navigateur ni de FPS observé ici.
+
+**INCONNU — MCD natif :** le signal concret `RunEnding` et ses gardes (`GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`), les checkpoints et menus MCD live restent non qualifiés. Ce retour de progression est un choix **WEB_ONLY**, pas une prétention de parité native.
+
+
+## SH-08 — Follow-through des défis entre deux runs (Web-only, 2026-11-04)
+
+**PROUVÉ — contrat Web :** le récapitulatif Dojo déjà raccordé à `finish(win)` persistait un objectif de rejouabilité sans pouvoir reconnaître sa réalisation à l'essai suivant. Le schéma de sauvegarde **v5** mémorise le défi exactement affiché à la fin d'un essai (`pendingChallenge.kind/target`) et l'évalue **une fois sur le score du prochain essai**. Les objectifs d'éliminations peuvent être réussis sur une nouvelle défaite (5/7 après 4/7). Les objectifs de survie, score, temps, sans tir, 3 esquives et style S nécessitent une victoire réelle. Un objectif non atteint n'est jamais présenté comme réussi. Le contrat reste `WEB_ONLY`, indépendant de `RunEnding`, sans nouveau score, spawn, temps ni input. Il réutilise strictement les métriques existantes et le stockage par quota 6/7, sans envoyer de données externes.
+
+**PROUVÉ — migration et limites :** v1–v4 restent lisibles et migrent sans inventer de défi antérieur. v5 refuse les cibles corrompues/inconnues, retourne un nouvel historique au lieu de planter la fin de partie (les erreurs de stockage sont déjà protégées par SH-05). Une victoire après un échec au quota valide le défi de survie, non un checkpoint MCD. SH-05 conserve `src/main.js`, le merge et la validation du rendu.
+
+**OBSERVÉ — vérification technique :** tests ciblés `tests/flow-dojo-replay-recap.test.mjs` sur séquences d'échecs successifs, réussite d'un défi sans victoire, victoire sans tir, objectifs de score/chrono et séparation 6/7. CI et Pages doivent être contrôlés après émission de la PR et fusion. Aucun smoke navigateur n'est présumé.
+
+**INCONNU — MCD :** valeurs natives live de `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, activation de `RunEnding`, transitions menus et sauvegardes. Le défi persistant Web ne constitue aucune preuve de progression/sequence/checkpoint original.
+
+
+## SH-08 / J4 — défi repris jusqu'à son accomplissement (Web-only, 04/11/2026)
+
+**PROUVÉ — anomalie de progression Web corrigée.** Le schéma v5 conserve déjà un `pendingChallenge` par quota 6/7, mais `createDojoReplayRecap` remplaçait cet objectif à la fin de chaque manche, même lorsque la manche n'avait **pas** rempli la condition. Exemple vérifiable avant correction : la première victoire attribue « GAGNE SANS TIRER » ; mourir ensuite à 3/6 remplaçait silencieusement cet objectif par une cible d'éliminations. Désormais, une tentative non réussie conserve exactement le même `kind/target` et affiche **« DÉFI À RETENTER »**, même après défaite ou victoire insuffisante. Une vraie réussite affiche **« DÉFI RÉUSSI »** puis calcule le prochain objectif depuis les compteurs existants. Les objectifs score et temps gardent leurs cibles numériques enregistrées, non recalculées à chaque essai.
+
+**OBSERVÉ / À VÉRIFIER — intégration.** `src/main.js:finish(win)` consomme déjà `recap.text` et persiste `recap.best`. Aucun raccord partagé, champ de stockage supplémentaire, changement de schéma, combat, chrono, bonus, spawn, F/E, input, asset ou runner nécessaire. Test ciblé : victoire → objectif sans tir → défaite → victoire avec tir → victoire sans tir ; et quota 7 / défi de score → défaite → score dépassé. Contrôler la CI sur SHA exact puis le rendu Pages après merge par SH-05 ; aucun smoke navigateur de cette tranche n'est affirmé.
+
+**INCONNU — MCD.** Cette continuité est une décision UX `WEB_ONLY` ; elle ne renseigne ni l'activation live de `RunEnding`, ni `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, ni les checkpoints/menus natifs. Aucune nouvelle requête corpus n'est lancée.
+
+
+## SH-08 / J4 — chrono affiché et objectif réellement atteignable (Web-only, 04/11/2026)
+
+**PROUVÉ — défaut Web reproductible sur main `12c43c0b601d`.** Une meilleure marque de `22.049 s` produisait le défi affiché **« SOUS 22.0 S »**, mais persistait une cible de `22.049`. Le prochain essai à `22.02 s` pouvait donc afficher **« DÉFI RÉUSSI »** sans respecter le seuil annoncé. Ce désaccord provenait du `toFixed(1)` d'affichage et d'une comparaison au flottant non arrondi, non d'un chrono MCD.
+
+**PROUVÉ — contrat correctif Web.** Les *nouveaux* défis chrono arrondissent leur **cible vers le bas au dixième** avant de la sauvegarder : PB 22.049 → objectif strictement inférieur à 22.0. Les anciens défis v5 déjà enregistrés restent inchangés et sont affichés avec leur précision réelle à chaque tentative, sans être secrètement modifiés. Aucun objectif chrono impossible à 0.0 s. Les PB continuent à stocker la précision originale ; seule la cible explicite de rejouabilité Web est quantifiée. Le test ciblé couvre attribution → échec à 22.02 → réussite à 21.99 → ancien défi précis et PB ultra court. Ce réglage d'UX est **WEB_ONLY**.
+
+**OBSERVÉ — intégration existante, validation encore requise.** SH-05 utilise déjà le résultat `createDojoReplayRecap` dans `finish(win)` pour les quotas 6/7 ; aucune modification des fichiers partagés. Vérifier `npm run check` / CI exacte, puis Pages et un smoke chrono réel après merge. Aucune observation navigateur ou FPS n'est revendiquée.
+
+**PROUVÉ — provenance statique privée, pas une transition active.** Relu l'artifact existant du corpus privé [issue research #14](https://github.com/TGrozner/superhot-research/issues/14), run `41427032620`, artifact `13134425178`, `spec/world/README.md` : l'index pointe vers `world-runs.md`, `persistence-ui.md` et `progression-deep.md`, avec 132 classes `LevelTimeline` indexées ; présence/indexation n'implique ni activation ni preuve d'exécution.
+
+**INCONNU — MCD natif.** Activation live `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels`, progression, checkpoints et menus ; rien n'est extrapolé depuis l'index. Pas de nouvelle requête ni runner déclenché, aucune donnée privée publiée.
+
+**Précision d'affichage en fin de manche :** lorsqu'un défi chrono est actif, la métrique du run affiche au moins les centièmes et ajoute les décimales strictement nécessaires pour préserver la même relation `< target` que la validation. Exemple succès réel à 21.999 s ⇒ affichage 21.999 s, jamais un trompeur « 22.00 s » sous un défi « SOUS 22.0 ». Les autres temps du récapitulatif conservent le format historique ; aucune modification de calcul du temps (SH-02).
+
+
+## SH-08 / J4 — bilan de défi après tentative non réussie (Web-only, 04/11/2026)
+
+**PROUVÉ — code Web.** Les défis conservés sur plusieurs parties (#361) annonçaient « DÉFI À RETENTER » sans dire pourquoi l'essai avait échoué. Le récapitulatif Dojo déjà raccordé à `finish(win)` expose désormais `retryDetail` et affiche un **BILAN DÉFI** calculé depuis les vrais compteurs de la manche : éliminations manquantes, déficit de points, tirs effectués, esquives manquantes, style insuffisant ou victoire/survie encore nécessaire. Si une défaite atteint numériquement le score ou le chrono, le bilan précise **VICTOIRE REQUISE** plutôt que de créditer le défi. Le défi restant garde exactement son `kind/target` en sauvegarde v5 ; il n'est jamais remplacé par une approximation de progression native. Aucun nouveau timer, input, point, spawn, arme, asset, état de combat ou fichier partagé.
+
+**OBSERVÉ — validation technique requise.** Test ciblé d'une victoire sans tir encore manquée, score cible 901 approché à 850, score 930 sur mort **non** crédité, objectif 5 éliminations raté à 2 puis réussi à 5, deux esquives manquantes. Vérifier `npm run check` et CI sur SHA PR exact puis Pages + smoke des écrans de fin après fusion par SH-05 ; CI seule n'est pas une observation navigateur.
+
+**INCONNU — MCD natif.** Les gardes vivantes de `RunEnding`, `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, `SkipDefragBetweenLevels` et les checkpoints restent non qualifiés. Cette explication de défi est une création `WEB_ONLY`, jamais un résultat d'analyse native.
+
+## SH-08 — priorité à la série après maîtrise 3/3 (04/11/2026)
+
+**PROUVÉ — Web-only.** Le défi de série introduit en #395 était écrasé, immédiatement après une série réussie, par un objectif de score/chrono dès que la nouvelle victoire ne battait pas les anciens records. Le branchement des records précédait le nouveau défi de série. Désormais, une maîtrise complète 3/3 donne priorité à une série croissante (2, 3, 4...), y compris avec des scores décroissants. Les défis déjà assignés restent conservés jusqu'à réussite. Le test ciblé `tests/flow-dojo-streak.test.mjs` vérifie trois victoires, conservation du PB et défaite brisant le compteur sans effacer le but. Aucun compteur combat, score, temps, arme, spawn, quota, entrée ou fichier SH-05 n'est modifié.
+
+**OBSERVÉ / non vérifié.** La vérification CI sur le SHA de PR et le rendu Pages doivent être contrôlés séparément ; aucun smoke navigateur ni mesure FPS n'est revendiqué par cette preuve statique.
+
+**INCONNU — MCD.** La requête privée `superhot-research#233` sur l'initialisation de `SHRLManager` ne présentait encore aucun résultat. Les signaux Dojo live de `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, activation `RunEnding`, checkpoints et menus ne sont pas établis. Les séries sont une mécanique Web, pas native. Aucun fichier original ni extraction privée publiée.
+
+## SH-08 — objectif de score absolu entre deux runs (Web, 04/11/2026)
+
+**PROUVÉ — code Web.** Une manche à 800 points après un meilleur score de 1 000 points générait l'affichage « +201 PTS POUR UN NOUVEAU RECORD » alors que le score repart de zéro à chaque essai et que l'objectif `pendingChallenge.target` est **1 001**. Le texte pouvait être interprété à tort comme une cible de 201 points. La correction annonce « ATTEINS 1001 PTS POUR UN NOUVEAU RECORD », cohérent avec le défi persisté et le bilan d'une tentative ratée. Les points, quotas, armes, sauvegardes, timers et règles de victoire ne changent pas.
+
+**OBSERVÉ — contrôle automatisé ciblé.** `tests/flow-dojo-score-target.test.mjs` modélise victoire 1 000 → défi sans tir réussi à 800 → objectif 1 001 conservé après défaite → succès à 1 001. Le JavaScript ESM généré reste synchronisé avec le TypeScript strict. L'exécution CI et le smoke navigateur doivent être relevés distinctement sur la PR, puis sur le SHA déployé.
+
+**INCONNU — MCD natif.** Défis, médailles, score et séries sont des mécaniques de rejouabilité Web : ils n'établissent aucune donnée native Dojo. Les sources privées existantes (research #176/#177) décrivent statiquement la configuration `RunEnding` et `LevelTimeline → EndRunLevel`, sans capture de victoire. La requête `superhot-research#233` pour `SHRLManager.cs:1–180` n'avait aucun commentaire au dernier contrôle ; `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, checkpoints et destination native restent à confirmer sans duplicata.
+
+## SH-08 — séries par quota sur le Dojo Web (04/11/2026)
+
+**PROUVÉ (source Web, main 3dc2e8b).** `src/main.js::finish(win)` utilise la clé `framebreak-dojo-record-v1-${quota}`. Les champs `currentStreak` / `bestStreak` et leurs défis persistent indépendamment pour les quotas 6 et 7. Une défaite sur une manche à 7 n'interrompt donc pas la sous-série de victoires à 6 ; ce n'est pas une série globale. Le nouveau libellé `FORMAT 6/7 UNIQUEMENT` clarifie la portée dans les annonces et les défis, sans modifier les règles de combat ou la sauvegarde.
+
+**OBSERVÉ (code Web uniquement).** `createDojoReplayRecap` est appelée depuis `finish(win)`. Les tests existants `tests/flow-dojo-replay-recap.test.mjs` couvrent déjà les records par quota et la rupture d'une série du même quota. Un nouveau test de l'entrelacement 6 gagné → 7 perdu → 6 gagné reste à intégrer avant validation du comportement transversal en navigateur. Aucune CI ni visite navigateur de cette branche n'est revendiquée sans vérification.
+
+**INCONNU (MCD natif).** Les rapports privés existants research #176/#177 établissent un branchement statique `RunEnding` / `LevelTimeline` ; ils ne documentent ni les valeurs effectives des gardes de fin de run ni une capture de victoire du Dojo. Research #233 n'a toujours pas de résultat. Ne pas confondre ce défi Web avec un checkpoint MCD.
+
+**Raccord demandé à SH-05 :** pour de vraies séries globales, stocker une progression partagée sur toutes les manches et traiter `finish(win)` une seule fois après chaque victoire ou défaite (y compris quota différent), en conservant distincts records et maîtrises 6/7. Le test de référence est 6 gagné → 7 perdu → 6 gagné = série globale 1. SH-08 ne modifie ni `src/main.js` ni les inputs/horloges.
+
+
+## SH-08 — vraie série globale entre quotas Dojo (04/11/2026)
+
+**PROUVÉ (Web, source et reproducteur)** : `src/main.js::finish(win)` n'utilise à ce jour que `framebreak-dojo-record-v1-${quota}`. Après la PR #452, le récapitulatif indique honnêtement `FORMAT 6/7 UNIQUEMENT`, mais une défaite à 7 ne réinitialise pas le compteur par quota 6. Ce comportement n'est **pas** une série globale chronologique.
+
+**IMPLÉMENTÉ (Web seulement, non raccordé)** : `src/flow/dojo-global-streak.ts`, accompagné du JavaScript ESM généré, expose `readDojoGlobalStreak(raw)` et `advanceDojoGlobalStreak(previous, {quota,victory})`. Les champs `attempts/victories/currentStreak/bestStreak/lastQuota` sont strictement validés avant réutilisation ; résultat immuable, sans accès au DOM, aux inputs, aux horloges, aux assets ni au stockage. Une victoire au quota 7 après une victoire à 6 fait une série globale de 2 ; une défaite à n'importe quel quota casse toute série globale. Le message `SÉRIE GLOBALE` est distinct des messages par quota. Les archives par quota, leurs défis et leur maîtrise restent inchangés.
+
+**OBSERVÉ (exécution Web locale, non navigateur)** : `tsc -p tsconfig.json` avec les options strictes actuelles et `node --test tests/flow-dojo-global-streak.test.mjs` : 2/2 tests PASS sous Node 22.16.0 / TypeScript 5.8.3, dans un mini-workspace isolé. Ce n'est ni une CI sur SHA de PR ni un smoke Pages ; ces deux gates doivent encore être contrôlées après push/merge.
+
+**Contrat de raccord pour SH-05 (fichiers partagés réservés)** : dans l'unique `finish(win)`, et seulement lorsque `nativeGameplay() && isDojoBuild10Source(nativeScene?.source) && (quota === 6 || quota === 7)`, lire la nouvelle clé `framebreak-dojo-global-streak-v1` depuis `localStorage` (si lecture interdite, valeur `null`), appeler **une seule fois** `advanceDojoGlobalStreak(readDojoGlobalStreak(raw),{quota,victory:win})`, suffixer `stats` avec `announcement` quand non nul et sauvegarder `JSON.stringify(record)` avec un `try/catch` non bloquant. Ne **pas** remplacer `framebreak-dojo-record-v1-${quota}`, modifier les défis/records existants, ni exécuter ce calcul à chaque kill, frame, pause ou REJOUER. La garde terminale déjà présente dans `finish(win)` assure l'unicité ; la clé globale ne prétend pas reconstituer les anciennes parties. Exemple du nouveau contrat : 6 gagné → 7 perdu → 6 gagné = série **1**, même si les compteurs de quota 6 affichent 2 sous le libellé `FORMAT 6 UNIQUEMENT` ; 6 gagné → 7 gagné = série globale **2**. Le compteur global est un bonus Web créatif, pas un checkpoint ni une transition native.
+
+**INCONNU (MCD natif)** : ni `RunEnding` ni `LevelTimeline → EndRunLevel` ne démontrent une sortie effectivement atteinte après victoire Dojo. `GameType`, `AllNeededEnemyKilled`, `WinOnDeath`, les checkpoints et le menu de destination restent sans preuve d'exécution dans les artifacts statiques privés #176/#177. La requête privée research #233 n'avait aucun commentaire au contrôle du 04/11 23h ; aucune nouvelle requête ni runner déclenché. Pas de revendication 1:1.

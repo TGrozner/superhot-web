@@ -152,10 +152,10 @@ SH-10 owns three files:
 - `scripts/acceptance-dojo-browser.mjs`: explicitly imported browser-only sampler that serializes *only* screen, native scene identity, kill target, kills and enemy id/alive fields. No pixels, matrices, user paths, audio or original assets.
 - `tests/acceptance-dojo-playthrough.test.mjs`: synthetic positive and negative fixtures, never a browser success claim.
 
-At the user's final localhost test, open DevTools on `http://localhost:4173/` BEFORE starting the Dojo encounter:
+**Legacy v1 diagnostic (limited milestones only):** on Pages or `http://localhost:4173/`, open DevTools BEFORE Start. Prefer the stronger v2 procedure below for the complete game loop:
 
 ```js
-const { startDojoCapture } = await import('/scripts/acceptance-dojo-browser.mjs');
+const { startDojoCapture } = await import(new URL('./scripts/acceptance-dojo-browser.mjs', document.baseURI));
 window.dojoRun = startDojoCapture();
 ```
 
@@ -208,15 +208,38 @@ recorder output and fails closed unless each observable milestone is present:
   comparison, not an automatically verified door/step identity, and not
   source-derived movement tolerances.
 
-### Owner-local browser procedure (after SH-05 merges; not executed by SH-10)
+### Owner-browser procedure: public Pages or localhost (not executed by SH-10)
 
-Run the **existing** `node server.mjs` and open
-`http://localhost:4173/` with the private Dojo scene configured. In
-DevTools **before clicking Start**, arm the opt-in recorder once:
+The read-only browser recorder is included in the **standalone Pages package**
+since SH-05 PR #417 (first merged SHA `2b4c953`), but packaging alone is
+not an HTTP, browser, FPS or complete-run result. Public site:
+`https://tgrozner.github.io/superhot-web/`. The same procedure works on
+`http://localhost:4173/` when running the existing `node server.mjs`.
+
+**Optional HTTP-only site preflight** (no game launched, no private file
+uploaded, no commercial assets downloaded):
+
+```sh
+node scripts/acceptance-dojo-pages.mjs
+# Or: node scripts/acceptance-dojo-pages.mjs --site http://localhost:4173/
+```
+
+It checks the actual HTTP responses for index, Dojo/build10 manifest, browser
+recorder and FPS recorder. `WEB_QA_HTTP_READY_NOT_BROWSER_VERIFIED` (exit 0)
+means these resources were served and recognizable, not that the game loads or
+plays. HTTP 404/invalid content reports `WEB_QA_HTTP_GAP` (exit 2);
+inaccessible network is `WEB_QA_HTTP_UNKNOWN` (exit 3), **not** proof the
+site is broken. This command runs only on the machine invoking it and does
+not use the original MCD executable or a research runner.
+
+In the browser DevTools console **before clicking Start**, arm the opt-in
+recorder once. Use a URL relative to `document.baseURI`, not absolute
+`/scripts/...`: Pages lives under `/superhot-web/` while localhost is
+usually at `/`:
 
 ```js
 const { inspectDojoCaptureReadiness, startDojoCapture } =
-  await import('/scripts/acceptance-dojo-browser.mjs');
+  await import(new URL('./scripts/acceptance-dojo-browser.mjs', document.baseURI));
 inspectDojoCaptureReadiness(); // pre-Start preview is NOT a started combat
 window.dojoRun = startDojoCapture({
   intervalMs: 50, maxFrames: 30000, waitForStart: true,
@@ -302,6 +325,16 @@ overwrite earlier evidence. Save the trace to a **private local file** with:
 ```js
 dojoRun.save('dojo-full-run.json');
 ```
+
+
+For a **second complete encounter**, save the first trace *after its REJOUER*
+reset, then stop that recorder and arm a fresh v2 capture **before the next
+kill**, while the restarted game is fresh (zero kills). Alternatively, reload
+the page and arm in preview before START. Each v2 trace covers **one** victory plus
+its restart (including unique route markers 1–6); concatenating two traces
+or reusing the first recorder's consumed markers does **not** constitute a
+valid second full-run receipt. Verify both JSON files locally and keep them
+out of Git.
 
 The saved JSON contains only bounded actor IDs/states, event counters and
 player feet coordinates; **no original assets, audio buffers, object names,
@@ -432,26 +465,30 @@ same-scene/angle original visual reference remain **UNKNOWN**.
 
 ### SH-10: trusted in-browser Start and victory Replay receipts (3 November 2026)
 
-The public runtime has concrete buttons: `start-button` / `play-original`
-call `start()`, and `again-button` calls `start()` on the win overlay.
-Counter/scene snapshots alone cannot distinguish a genuine replay click from
-some other reset or a synthetic sequence. The owner-local read-only browser
-recorder now attaches a **capture-phase click listener** when armed before Start.
-It serializes only bounded button IDs, rendered frame IDs, and screen names,
-**only for events with `isTrusted === true`**; JS-dispatched `.click()`
-events are not accepted. It does not intercept or alter the game event and
-removes its listener at stop. The full-run gate requires a Start click before
-the first sampled combat frame and an `again-button` click on the win overlay
-between sampled win and restart frames. Missing receipts yield **INCOMPLETE**,
-not a native failure; invalid receipt schema yields INVALID.
+The public runtime can start by `start-button` / `play-original` calling
+`start()`, **or by the first primary mousedown on the actual `#scene` canvas**
+while the Dojo/build10 preview is rendered and `#scene-controls` is visible.
+The latter path in `src/main.js` sets `nativeCombatStarted` and requests
+pointer lock, but does **not** fire the pistol. A button-only recorder wrongly
+classified this legitimate owner-started 6/7-kill run as INCOMPLETE.
+
+The read-only recorder now records a canvas-start receipt as
+`{type:'start', buttonId:'scene', ...}` only on a *trusted primary gesture*
+targeting the canvas, with validated Dojo source identity, active preview and
+pre-start controls. It does not count control-panel/scene-mode events, synthetic
+mouse events, right clicks or the first pointer-lock press as a gunshot. Normal
+button Start receipts remain accepted. On victory, `again-button` must still
+produce a separate trusted click before the sampled restart; counters alone
+cannot prove Replay. Missing receipts are **INCOMPLETE**, invalid receipt schemas
+are INVALID, and user-supplied traces remain unauthenticated.
 
 **Operator requirement:** arm `startDojoCapture({waitForStart:true})` *before*
-pressing Start, and after victory press the actual **REJOUER** button; do not
-reset through DevTools or a different control. Older browser JSON recordings
-without `uiActions` remain inspectable but cannot satisfy this stronger full
-run gate. Even a browser-trusted click is not a cryptographic signature, and
-authored Node tests still only test the validator; a genuine completed Dojo
-Chromium trace and an executed matched native MCD capture remain **UNKNOWN**.
+the intended button or canvas Start; after victory press actual **REJOUER**.
+An unrelated pre-start click on a visible UI control currently may also trigger
+combat in the runtime (SH-01 has already escalated this to SH-05), but the
+acceptance harness never credits that as an intentional canvas Start.
+Browser-trusted clicks are not cryptographic proof. Node fixtures do not certify
+a Chromium 6/7-kill run or native MCD parity: both remain **UNKNOWN**.
 
 
 ### SH-10: browser input attempts must accompany the Dojo actions (3 November 2026)
@@ -613,8 +650,9 @@ Node fixture, a GPU draw submission or a clicked button with native 1:1 parity.
 The recorder now includes bounded scalar-only `gameplay.visual` metadata from
 the same already-rendered browser frame: number of source-world draw calls,
 hands draw calls/triangles, the reported hand pose/socket flags, and whether
-the source door-warning envelope and Web spotlights are active. It does **not**
-store original textures, model names, IDs, shader contents, pixel images,
+the source warning, projector draw receipts and separate creative Web red-wash
+GPU draw receipts are active. Submission is **not** visible pixel proof.
+It does **not** store original textures, model names, IDs, shader contents, pixel images,
 proprietary meshes, camera paths, or assets. Missing fields stay `null`.
 Known warning status tokens are allowlisted, not copied from arbitrary source
 strings.
@@ -629,13 +667,15 @@ Results distinguish:
 - `WEB_RENDERED_VISUAL_HOOKS_SAMPLED_NOT_NATIVE_PARITY` — actual browser
   snapshot-shaped Web receipts were supplied, **not** an independently
   executed/verified Chromium session and **not** a native screenshot match.
-- `WEB_DOJO_WARNING_ACTIVE_WITHOUT_RENDERED_SPOTLIGHT` — a source warning
-  envelope was active while the same sampled frame reported **zero Web
-  spotlight draws**. This is a **Web integration gap** (`exit 1`), not proof of
-  a native light error. With `main@980dad6` the warning bridge is wired, but
-  `renderedSpotlights:0` is explicit pending source world TRS/cookie data and
-  the actual native-world fragment pass. An active warning must be **sampled**:
-  absent/degraded source packet or a missed 50 ms transition does not count.
+- `WEB_DOJO_WARNING_ACTIVE_NO_LIGHT_SUBMITTED_NEEDS_VIEWPORT_CHECK` —
+  the same sampled warning frame reports **zero source projector AND zero Web
+  false-light GPU draws** (`exit 1`). This is a potential missing shader
+  submission, not proof of a visible red-light bug: offscreen/per-mesh culling
+  may legitimately yield zero. Reproduce at a fixed angle near the actual
+  doorway and inspect real pixels. The creative Web red wash introduced in
+  #340/#355 uses `generatedManifest.warningWebFalseLightDrawCalls` separately
+  from `doorWarning.renderedSpotlights`: zero native spotlights is not by
+  itself a regression. Missing new counters in older traces stay UNKNOWN.
 - `WEB_RENDERED_VISUAL_HOOKS_NOT_OBSERVED` — older capture or no world GPU
   draw evidence (`exit 2`). Invalid/mislabeled source data is also rejected
   (`exit 2`). A pistol-only run with zero hands is **unexercised**, not a
@@ -649,8 +689,8 @@ especially door warning ROI, and a second time-separated frame. The
 snapshot-only report has **no pixels, no matched native camera and no
 reference RGB/light measurements**. Visual parity stays **UNKNOWN**. The
 SH-10 script does not edit a gameplay/renderer owner file; the first proven
-Web spotlights gap goes to SH-05/SH-13, and contact/physics issues go to
-SH-03/SH-06.
+Any no-light GPU submission candidate goes to SH-05/SH-13 only after an
+actual doorway/camera viewport check; contact/physics issues go to SH-03/SH-06.
 
 **Clock recorder correction:** `gameplay.moving` is now a **Web keyboard
 axis intent** (physical `KeyboardEvent.code`) matching the real
@@ -762,3 +802,72 @@ Owner assignments: **SH-05** native-world warning GPU cookie/layer8 hook;
 and native matching/ROI evidence; **SH-10** acceptance metrics/provenance
 and first reproducible differences. Protect the previously manually validated
 7/7 Dojo loop, including F/E, kills, victory and REJOUER.
+
+## Focused Dojo browser FPS gate (SH-10; gameplay-first, opt-in)
+
+The built-in `__superhotSceneMetrics.p95FrameMs` rolls over up to 240 recent
+rAF timestamps, **including non-gameplay states**. It cannot by itself provide
+a clean idle-versus-combat comparison: its rolling window can mix pauses,
+menus, and fights. The optional SH-10 profiler instead groups *real browser*
+`requestAnimationFrame` intervals by an **operator-marked phase**. It only
+records when the Dojo HUD is visible, combat controls are hidden, the page is
+visible and `__superhotSceneMetrics.mode` reports native-source Dojo Web
+gameplay. It reads app-reported draw counts at most once per second. No
+renderer hook, native asset, private runner, new dependency or CI browser
+claim is introduced.
+
+After loading **SHRL_Dojo2 / build10 on Pages**, open DevTools and arm
+**before** clicking Start. **Do not reopen DevTools during the fight:** releasing
+pointer lock can pause the game and distort the FPS sample. Once playing,
+use physical **number-row 7 = idle, 8 = combat, 9 = ragdolls, 0 = save** to
+switch phases and export the trace without losing focus. These keys are scoped
+to this opt-in capture, ignored while hidden/inactive or typing in editable
+controls, and removed after save/stop. Route markers 1–6 remain separate.
+A key-0 export is an owner-browser file download; it does not upload anything.
+You may still mark from the console while paused; samples resume only when
+Dojo gameplay is visible:
+
+```js
+const { startDojoFpsCapture } = await import(new URL('./scripts/acceptance-dojo-fps.mjs', document.baseURI));
+window.sh10fps = startDojoFpsCapture();
+window.sh10fps.mark('idle');      // arm now, click Start, then stand still for >=120 frames
+// During actual gameplay, press 8 to start combat and 9 for ragdolls.
+// After >=120 visible rAF frames in each of idle + combat, press 0 to save.
+// The following manual calls remain an alternative ONLY when focus is not lost:
+// window.sh10fps.mark('combat'); window.sh10fps.mark('ragdolls');
+// window.sh10fps.save('dojo-fps.json');
+```
+
+The relative import works on both **Pages** (`/superhot-web/`) and localhost root; it does not require a second copy of the profiler.
+Operator labels are *claims about the local activity*, not independently
+verified combat intensity; the report also records maximum reported
+`livingEnemies` and `activeRagdolls` for context. The browser requests a
+download; confirm that it actually saved locally. The file contains only
+rAF intervals, draw-count samples, Dojo identity, resolution and DPR; no
+screen captures, geometry, source strings, paths, gameplay inputs or native
+pixels. Do not commit real owner traces to Git.
+
+```bash
+node scripts/acceptance-dojo-fps-report.mjs --trace private/dojo-fps.json
+# For ragdoll optimization reviews: opt-in strict observation gate.
+node scripts/acceptance-dojo-fps-report.mjs --trace private/dojo-fps.json --require-ragdolls
+node --test tests/acceptance-dojo-fps.test.mjs
+```
+
+The optional hotkeys are a capture ergonomics fix, not a gameplay feature; they have no effect until the module is imported and the recorder started. Avoid multiple simultaneous recorders. The CLI exits 2 on missing/corrupt/insufficient samples. It computes nearest-rank
+p50/p95/p99 **browser frame intervals**, FPS at p95 frametime, hitch counts,
+and reported WebGL draw calls for each operator-labelled segment. It requires
+at least 120 active visible rAF intervals in each of idle and combat and at
+least one draw sample in both. By default this does **not** require a
+ragdolls segment, so its green status cannot validate ragdoll performance.
+For ragdoll FPS reviews use `--require-ragdolls`: at least 120 rAF intervals
+in the **ragdolls-labelled** segment plus a draw sample within that phase
+observing >=2 concurrently active ragdolls. Draw counts are sampled at most
+once per second; this does **not** prove two bodies remained active for all
+120 measured frames. A positive status means **owner-supplied Web
+samples analyzed**, not GPU timestamp-query measurements, not a human FPS
+comfort verdict, not a passed full Dojo run, and not native MCD parity.
+Compare two builds only at matching browser, resolution, DPR, GPU, workload
+and capture rules; do not fabricate an FPS or assume that app-reported draw
+counts measure all GPU work. During a restart, mark a new segment after
+the next combat begins. Keep the existing SH-10 full-run recorder separate.

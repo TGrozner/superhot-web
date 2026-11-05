@@ -396,3 +396,361 @@ remains separately subject to authorization.
 **Défaut Web corrigé, mesurable en charge :** `advanceNativeDeathRuntime` continuait à résoudre articulations et contacts de chaque corps après avoir émis une fois `cleanupRequested`, parce que l'hôte n'a pas encore consommé ce signal. Désormais, les sous-étapes PBD sont limitées à la première échéance de cleanup attestée ; ensuite, le dernier packet osseux est conservé sans nouveau solveur, sans nouveaux contacts, et l'horloge scaled continue. Le compteur de temps de simulation abandonné ne comptabilise que le vrai plafond de budget Web, pas le temps après disparition demandée. Test de régression ciblé dans `tests/animation-native-death-runtime.test.mjs` : dépassement de deadline, pose stable, signal unique, forces post-deadline inactives.
 
 **Limites, raccord SH-05 :** c'est un **fallback de performance Web**, pas une équivalence de Unity PhysX ni une disparition native déjà rendue. Pour masquer/pooler effectivement l'acteur, le propriétaire de `main.js` doit consommer `cleanupRequested` et connaître les flags HDR, l'identité rig/prefab et la branche d'effet source. En l'absence du packet physique/rig actif, la pose figée reste le fallback. Ne créer ni particules commerciales ni shader de disparition inventé. Aucun smoke navigateur n'est déduit du test Node.
+
+### SH-06 — couplage articulé des impacts de mort (Web J4, 2026-11-03)
+
+**Défaut visible ciblé :** une balle localisée faisait accélérer son unique os
+physique ; le reste du corps était ensuite déplacé seulement par projection des
+contraintes, avec des réactions de membre trop isolées. Le moteur conserve la
+localisation du contact et l'impulsion existante mais, lorsqu'un contact monde
+qualifié est fourni, redistribue **22 % de l'impulsion linéaire** aux voisins
+directs reliés par les CharacterJoint déjà présents dans la définition source.
+La masse de chaque voisin détermine sa part, sans ajouter d'impulsion totale ;
+les 78 % restants et leur couple restent sur l'os touché. Un Kill sans contact
+qualifié conserve strictement l'ancien comportement, sans kick inventé.
+
+**Niveau de preuve :** la topologie joints/corps et les masses proviennent du
+paquet Dojo source-lié déjà publié (22 Rigidbody / 21 articulations, identité
+rig vérifiée par la chaîne Pages). La répartition 78/22 est un **réglage
+créatif Web**, non un prédicat MCD/Unity/PhysX. Le solveur conserve son budget
+de quatre sous-étapes Web, la décision de cleanup et l'absence de fragments
+artificiels. Test ciblé : impulsion linéaire totale conservée et voisinage
+limité à un saut, absence d'effet pour un hit sans point, pose finie après PBD.
+
+**À observer sur Pages après merge SH-05 :** sur un tir latéral bras/torse,
+le tronc devrait accompagner davantage la réaction et éviter l'effet « bras
+seul ». Comparer kill avec et sans point d'impact, au moins six morts à FPS
+stable, puis victoire/rejouer. Aucun smoke navigateur ou gain FPS ne découle
+de la CI ; pas de revendication PhysX 1:1.
+
+### SH-06 — coût VFX après hitch : quatre sweeps maximum par shard visible (Web J4, 03/11/2026)
+
+Les morceaux **déjà présents et autorisés** issus d'un GunPickup passent par `advanceGunPickupShardRuntime` et `advanceNativeFragmentBody` dans le Dojo live (`src/combat/native-items.js`). Avant cette modification, un fragment simulait autant de pas fixes que nécessaires pour rattraper un long `worldDt`. À 150 Hz, un intervalle de 300 ms provoquait environ 45 sweeps **par morceau** ; plusieurs objets brisés pouvaient amplifier une chute de FPS.
+
+**Réglage créatif Web, pas une propriété native :** le runtime de fragments visibles conserve les petits pas issus du paquet physique sur les frames ordinaires et limite à **quatre pas balayés par frame** les grandes durées, en répartissant le temps total sur les pas plus grands. Pas d'accumulation de dette simulée : position et durée HDR suivent toujours le temps passé. Après disparition HDR, le morceau n'exécute plus aucun sweep. L'API de simulation hors runtime conserve par défaut les sous-pas source pour les simulations/testeurs qui en ont besoin. Tous les contacts utilisent toujours les colliders de la scène hébergée, pas un sol inventé.
+
+**Test ciblé :** après une pause de 300 ms, la translation libre conserve la distance et utilise au moins cinq fois moins d'accès à la scène de collision ; la disparition à expiration HDR ne fait aucun accès. La trajectoire avec rebonds peut changer légèrement sur un gros hitch, compromis Web assumé pour fluidifier le combat. **À mesurer sur Pages :** briser plusieurs objets avec les touches F/E, provoquer un ralentissement/retour d'onglet, puis contrôler les fragments, les collisions, les FPS, victoire et REJOUER. Les tests Node/CI ne valent pas mesure navigateur, et aucune équivalence PhysX n'est revendiquée.
+
+## SH-06 — J4: ragdoll source-box interval broadphase (Web-only, 03/11/2026)
+
+**Défaut Web concret** : avant ce changement, chaque balayage de sphère de chaque os relisait **toute** la liste des collider boxes du Dojo pour obtenir les quelques AABB autour du corps. Cette opération se répétait à chaque correction de joint/contact et sur chaque cadavre actif. La chaîne live existante reste `main.js → advanceDojoDeathSkinFrame → advanceNativeDeathRuntime → moveNativeFragmentSphere` ; aucun raccord renderer ou asset supplémentaire.
+
+**Amélioration** : un arbre d'intervalles sur les bornes X des **mêmes** collider boxes pré-calculés élimine les boîtes éloignées avant les calculs de collision. La requête finale conserve les bornes Y/Z, le champ `enabled` dynamique et l'ordre d'origine des colliders pour les égalités de temps de contact. L'index est partagé entre les ragdolls qui utilisent la même vue de collision et reconstruit si le tableau de boxes change. Test ciblé : plusieurs centaines de scans éliminés pour un contact local, collision de support conservée, désactivation et ajout de source box observables.
+
+**Limite** : indexation calculée à partir de la géométrie statique du Dojo; une boîte qui change ses coordonnées en place sans remplacer le tableau n'est pas supportée par cet index. Les transitions des portes restent gérées par l'activation des colliders existants. Cette optimisation est une décision **Web**, sans donnée PhysX ou règle MCD revendiquée. Aucun navigateur/FPS mesuré par la CI ; vérifier après merge six morts, impacts bras/torse, stabilité au sol, F/E, victoire et REJOUER avec FPS p95. Pas de nouvelle extraction privée, d'asset ou de script propriétaire.
+
+
+### SH-06 / J4 — cadence ragdoll 30 Hz (choix Web, 03/11/2026)
+
+**Défaut jouable ciblé :** dans le bridge Dojo déjà raccordé, le mode PBD limité à quatre sous-pas de `fixedDelta=1/150` seconde ne simulait que 26,7 ms pour une frame de 33,3 ms. À 30 FPS, le corps pouvait tomber plus lentement que le temps du jeu. **Réglage créatif Web, non natif :** les frames normales gardent les pas source ; à 30 Hz, quatre pas balayés légèrement plus grands couvrent la frame entière. Après un hitch plus long, le solveur abandonne toujours le temps de rattrapage au-delà du budget de 33,3 ms, tandis que l'horloge de nettoyage reste en temps réel du jeu. Le nombre de sous-pas reste borné à quatre ; les collisions continuent à utiliser les colliders fournis par le pack. La précision des articulations à pas allongé est un compromis Web, **pas** une équivalence PhysX ni une nouvelle information du corpus privé.
+
+**Régression ciblée :** `tests/animation-native-death-runtime.test.mjs` compare la chute à 30 Hz avec l'intégration sans budget, vérifie que le temps PBD n'est plus abandonné sur une frame normale 30 Hz et que 300 ms de hitch ne lancent pas 45 étapes pour chacun des ragdolls. Après fusion par SH-05 : vérifier en navigateur plusieurs morts et leur vitesse de chute à 30/60 FPS, contacts au sol et absence d'étirement, 6–7 kills, victoire et REJOUER ; aucune mesure FPS ni smoke navigateur ne découle du test Node.
+
+
+### SH-06 / J4 — mise en sommeil des ragdolls au sol (04/11/2026)
+
+**Défaut visé (Web) :** après une mort, chaque corps continue à exécuter ses contraintes articulées et ses balayages de collision pendant toute la durée de visibilité, même lorsqu'il est immobile sur le sol. Les cadavres s'accumulent pendant les 6–7 kills du Dojo ; ces passes PBD ne font alors que consommer du CPU. **Politique de jeu Web assumée, non extraite de PhysX** : après 300 ms de contact statique ascendant confirmé, tous les Rigidbody doivent avoir vitesse linéaire et angulaire très faibles et pose résolue quasi identique d'une frame à l'autre. Le solveur met alors ce corps au repos, conserve sa pose skinnée et laisse courir l'horloge Kill/cleanup. Pas de repos en chute libre, en rotation, sous force active ou sans collision qualifiée. Un nouvel impact/force réveille immédiatement le corps ; la désactivation du collider de support le réveille également. Aucun changement d'assets, de rendu ou de durée d'existence.
+
+**Test ciblé :** `tests/animation-native-death-runtime.test.mjs` couvre une sphère corporelle au repos sur la véritable géométrie de collision du test, l'absence de passes physiques pendant le sommeil, un nouvel impact qui déplace le corps, et le retrait du support qui réactive la chute. Ce n'est ni un algorithme native-PhysX ni une mesure FPS. Après merge, contrôler sur Pages chutes, impacts successifs, désactivation de portes et p95 FPS avec plusieurs corps ; maintenir F/E, victoire et REJOUER.
+
+### SH-06 — glissement latéral au réveil sur contacts t=0 (Web J4, 04/11/2026)
+
+**Bug reproductible :** après endormissement d'un corps au sol, un impact latéral réveille bien le solveur, mais la sphère déjà tangente au support produit un contact à `t=0`. Le facteur de collision unique gelait alors **tous** les axes de la pose, y compris le déplacement tangentiel horizontal. Le test de repos antérieur n'exerçait que le réveil vertical ; cette correction cible précisément l'impulsion horizontale.
+
+**Correction Web, sans règle PhysX inventée :** à une première collision `t≈0`, conserver prudemment l'orientation précédente, projeter le déplacement sur les tangentes des contacts réels et rebalayer chacune des sphères du Rigidbody contre les **mêmes colliders source** avant d'admettre le déplacement. La friction/impulsion et la politique de sommeil existantes restent conservées. Le test ciblé vérifie le mouvement latéral depuis le repos et l'absence de traversée d'un mur adjacent. Ces règles de résolution sont un compromis de moteur Web ; ni valeurs MCD ni fidélité native annoncées.
+
+**Limites :** le second balayage ne s'exécute que pour un contact initial bloquant avec translation tangentielle, donc coût supplémentaire sur les chocs rasants ; l'orientation au point de contact est conservatrice, pas une CCD angulaire native. Après merge SH-05, tester dans le Dojo Pages une impulsion sur corps tombé, la stabilité des contacts mur/sol, plusieurs cadavres/FPS, victoire et REJOUER. Aucun smoke navigateur, mesure p95 ou certificat de parité n'est fourni par les tests Node.
+
+### SH-06 / J4 — rotation visible des fragments réels (Web, 04/11/2026)
+
+**Défaut perceptible :** la rupture de GunPickup appliquait déjà la vitesse, le recul radial, les colliders du Dojo et l'effacement HDR aux morceaux autorisés du pack, mais le vecteur de couple prélevé dans la commande `ShatterInternal` restait seulement stocké : **aucun fragment ne tournait à l'écran**. Le rendu paraissait rigide malgré des éclats qui se déplaçaient correctement.
+
+**Modification active dans la chaîne gameplay :** `native-items → advanceGunPickupShardRuntime → modelMatrix` fait maintenant tourner **les meshes de fragments déjà sourcés** sur l'axe du couple existant, dans le même modèle ESM servi local/Pages. Une rotation Rodrigues sur la matrice d'origine est recalculée depuis l'horloge des fragments ; elle ne s'accumule pas d'une frame à l'autre et ne dépend pas de la fréquence d'affichage. Si le centre de collision extrait est décalé par rapport au pivot du mesh, la translation de la matrice est corrigée de manière à garder ce centre sur la trajectoire déjà résolue par les colliders de la scène. Aucun nouveau mesh, draw call, collider, asset, fallback ou hook `main.js` n'a été ajouté.
+
+**Source et choix Web séparés :** le vecteur `torque`, sa limite de norme et la demande native `AddTorque` sont issus du contrat privé `GunPickup.ShatterInternal` (research #76, artifact 13137959097), mais leur conversion en vitesse angulaire est inconnue sans le tenseur d'inertie et PhysX. La cadence **un tour/seconde pour une norme 1** est une règle artistique Web, non une valeur Unity/MCD. L'axe et les meshes viennent du plan existant, aucune rotation native 1:1 n'est revendiquée.
+
+**Régression ciblée :** rotation à 90° en 250 ms avec couple unitaire, centre de collision conservé malgré un pivot décalé, invariance entre deux découpages de frame et absence de rotation lorsque le couple vaut zéro. Après merge SH-05, smoke sur Pages : briser une arme à proximité, observer rotation et impacts contre sol/mur (sans éclats qui orbitent autour d'un faux pivot), répéter à 30/60 FPS, mesurer p95, puis 6–7 kills, victoire et REJOUER. Test Node/CI ≠ validation visuelle ou FPS.
+
+
+## SH-06 — stabilisation angulaire des fragments sur contact (Web, 04/11/2026)
+
+Un fragment de `GunPickup` reçoit déjà le couple échantillonné et des contacts avec les boîtes du Dojo, mais sa rotation visuelle restait constante même après le premier choc. Le runtime Web conserve maintenant la pose angulaire au **premier contact physique effectivement rapporté** par `advanceNativeFragmentBody`, puis amortit analytiquement sa rotation (décroissance 12/s, **réglage créatif Web**). Sans collision, la rotation reste celle du temps absolu; une pause de temps de jeu ne change rien. Un test de régression distingue contact sol, libre vol et subdivision de frames. Pas de nouvelle géométrie, asset, draw call ou source privée.
+
+**Limites :** un premier contact est horodaté à la fin du pas navigateur, pas au temps exact de l'impact sous-frame. Le rayon de collision reste sphérique; aucune résolution du couple PhysX, des faces de mesh ou de contacts entre fragments n'est revendiquée. Le rendu Pages, le ressenti et les FPS ne sont pas vérifiés par la seule CI. L'effet est déjà consommé via le chemin existant `main.js → advanceGunPickupShardRuntime` ; aucun fichier partagé à modifier.
+
+### SH-06 / J4 — amortissement angulaire après contact au sol (Web, 04/11/2026)
+
+**Défaut visible ciblé :** un corps mort peut garder une rotation résiduelle très longtemps après avoir touché le sol, puisque ses `angularDrag` de source et la projection PBD ne fournissent pas à elles seules une friction angulaire de contact crédible. Cela retarde le repos et consomme des calculs physiques pour des membres qui oscillent encore.
+
+**Changement déjà branché sur Dojo :** dans `advanceNativeDeathRuntime`, lorsqu'un Rigidbody a eu un contact **réel** avec un collider statique et une normale ascendante (>0,55), la rotation résiduelle est amortie par une exponentielle indépendante du framerate (7/s, **réglage Web**). En vol libre, aucune friction supplémentaire n'est appliquée ; les impulsions ultérieures peuvent réveiller le corps. Les joints, masses, gravité, collisions, poses skinnées et horloge Kill sont inchangés. Aucun asset, hook `main.js` ou draw call ajouté.
+
+**Provenance et limites :** collision réelle = solveur Web sur les boîtes de scène source-qualifiées, définition 22 corps / 21 joints du pack Dojo ; la **friction angulaire 7/s est créative**, ni PhysX ni une constante MCD démontrée. Le test isolé vérifie contact sol, décroissance de spin et conservation de rotation hors contact. Une collision inclinée avec normale Y <= 0,55 ne bénéficie pas de cet amortissement : choix conservateur à évaluer en jeu. Après merge SH-05, vérifier impacts sur cadavres, atterrissages, stabilité au sol, sommeil PBD, p95 FPS avec 6–7 corps et REJOUER sur Pages ; tests Node/CI ne prouvent ni FPS ni ressenti navigateur.
+
+### SH-06 / J4 — contact de départ dans la géométrie Dojo (Web, 04/11/2026)
+
+**Défaut de collision observable :** lorsqu'un éclat naît avec son centre **déjà dans** une boîte source du Dojo, le solveur le dépénètre vers la face la plus proche, mais rapportait un `contact.point` sur le **mauvais côté** de la face. La vitesse encore dirigée vers la boîte pouvait provoquer une nouvelle pénétration au pas suivant. Ces contacts alimentent aussi la chaîne VFX et ragdoll déjà raccordée ; il ne faut pas les inventer hors de la scène source.
+
+**Correction active :** `src/vfx/native-fragment-physics.js::recoverPenetration` place désormais le point d'impact **sur la face réellement empruntée** pour sortir d'une boîte et annule uniquement la composante de vitesse qui rentre encore dans cette face. Une vitesse tangentielle ou sortante reste inchangée : les éclats peuvent glisser ou repartir normalement. `moveNativeFragmentSphere` est déjà utilisé par les fragments GunPickup et les sphères de contact des ragdolls ; aucun fichier commun, asset, shader ou nouvelle passe de collision.
+
+**Preuve/limite :** boîtes `prepareNativeCollision` du pack Dojo source-qualifié, points et normales du solveur Web. Le choix de dé-pénétration non énergisant est **créatif Web** et ne prétend ni retrouver les impulsions/restitution de PhysX ni générer de nouveaux effets natifs. Régression ciblée `tests/vfx-native-fragment-physics.test.mjs` : sortie sur face supérieure du sol et face latérale d'un mur, normale, vitesse entrante supprimée et vitesse tangentielle préservée. Le test navigateur (casser des armes près du sol/mur, plusieurs cadavres, p95 FPS, F/E, 6–7 kills, victoire et REJOUER) reste à faire après fusion/déploiement par SH-05.
+
+### SH-06 / J4 — friction cohérente sur le balayage restant d'un impact (Web, 04/11/2026)
+
+**Défaut visible :** dans `moveNativeFragmentSphere`, un impact pouvait ramener instantanément la vitesse tangentielle d'un éclat à zéro via le vrai matériau de collision, tandis que **le déplacement résiduel de la même frame** utilisait encore le vecteur d'avant contact. Lors d'une frame lente, un fragment immobilisé par le sol continuait donc à glisser plusieurs mètres avant de s'arrêter au pas suivant. Le même adapter de contacts sert également aux spheres du ragdoll.
+
+**Correctif Web réellement raccordé :** après un `nativeSphereHit` source-qualifié, le sol/mur garde sa restitution et la normale sortante, mais le déplacement tangentiel restant est réduit de la **même fraction de friction que la vitesse tangentielle**. Les matériaux sans friction continuent de laisser glisser et chaque déplacement conservé est balayé contre les colliders réels. Aucun nouveau paramètre, asset, draw call, connexion au PC ni changement `main.js`/renderer. Le test `vfx-native-fragment-physics.test.mjs` compare arrêt sur sol rugueux et glissement sur sol lisse au cours de la même frame, en conservant l'absence de traversée.
+
+**Preuve/limite :** les colliders proviennent du paquet Dojo et les paramètres `dynamicFriction`/`staticFriction` sont transmis par les définitions physiques déjà chargées. L'application de cette friction au **reste du déplacement Web** est une approximation de moteur, pas un ordre prouvé du solveur PhysX ni une mesure MCD. Validation navigateur nécessaire après fusion SH-05 : briser une arme au ras du sol sous charge, vérifier contact sans long glissement différé, rebonds normaux, ragdolls, FPS et baseline F/E, kills, victoire, REJOUER.
+
+### SH-06 — relecture directe des preuves statiques d'animation (04/11/2026)
+
+**PROUVÉ — inventaire et vérification structurelle, pas exécution en jeu :** les deux artifacts privés existants ont été relus sans relancer de runner ni requête corpus. `superhot-research #11` (run `41426635850`, artifact `13133782424`, `spec/animation/verification.json`, texte SHA-256 `22ac2e6e87887f84cfc2d57be5d8ea10000465c1c69791945d24ecdd72d0f71b`) confirme **511 AnimationClip, 15 AnimatorController, 25 Avatar, 135 états, 292 transitions et 213 événements déclarés**. Ce sont des objets/liaisons statiques vérifiés, **pas** les transitions effectivement traversées en Dojo. La vérification rapporte cinq chemins de binding non résolus et trois noms d'événement dont le destinataire précis n'est pas établi : `BlockHand`, `CutHand`, `CutThrowable`.
+
+**Liens et inconnues :** `superhot-research #12` (run `41426647047`, artifact `13133383280`, `spec/animation/link-verification.json`, texte SHA-256 `6d23cbe93310da72e01cd44f707358ea410b0d16cee17c5dbd2496c1cd71dd54`) rapporte **660 références de feuilles de contrôleur, 36 séquences d'événements de dégâts et 243 jointures explicites de courbes**, toutes fondées sur les identités `owner/path_id`. **404** résolutions de destinataires d'événements restent non prouvées faute d'héritage statique/configuration runtime ; **1 028** appariements de binding ne sont pas présents dans le sous-arbre de l'instance examinée. Zéro hash de binding non résolu **ne signifie donc pas** zéro chemin d'animation inconnu. La validation privée certifie les jointures et la structure sérialisée, **ni** la sélection live d'un clip, **ni** un callback exécuté, **ni** le timing de ses transitions, **ni** une fracture visible. Pour le Dojo, SH-05/SH-14 doivent qualifier acteur, couche/état actifs et événements/contact réels ; l'absence de preuve reste un refus de parité, pas un trigger inventé.
+
+## SH-06 — rebond de fragments dans la frame de contact (Web, 04/11/2026)
+
+**Défaut observable du solveur Web :** avant cette correction, `moveNativeFragmentSphere` appliquait déjà la restitution du matériau Dojo à la vitesse de l'éclat mais supprimait la composante normale du déplacement restant dans la frame. Lors d'une collision sol sous charge (frame longue), l'éclat restait visuellement au sol jusqu'à la frame suivante, puis rebondissait. Le même adaptateur est appelé par les contacts des corps ragdoll.
+
+**Correction limitée et déjà raccordée :** conserver le CCD sur les vraies boîtes du Dojo et réintégrer, dans le reste du balayage, la composante *sortante* issue de la restitution calculée sur la vitesse entrante. Une surface inélastique n'acquiert pas de rebond ; la friction tangentielle livrée par #368 reste inchangée. Le test ciblé vérifie le départ au rebond dans la même frame et le repos avec restitution nulle. Aucun nouveau collider, effet, asset ni hook `main.js` / renderer.
+
+**Provenance et limite :** `material.bounciness`, `bounceThreshold` et les colliders arrivent du pack Dojo existant ; la répartition du temps de sweep est une **politique physique Web**, PAS le scheduler PhysX/MCD. CI et tests ne prouvent ni le ressenti réel ni les FPS : contrôler après merge sur Pages les rebonds après bris d'armes à 30/60 Hz, contacts sol/plafond, les ragdolls et la boucle 7/7.
+
+
+## SH-06 — glissement des corps après contact dans une sous-étape (Web 2026-11-04)
+
+**Défaut observable ciblé :** le solveur PBD de `src/animation/native-death-runtime.js` conservait une fraction de trajet jusqu'à la première collision (sol/mur), mais abandonnait tout déplacement restant lorsqu'un hit se produisait strictement à l'intérieur d'une sous-étape. Un ragdoll pouvait ainsi s'arrêter brièvement en longeant un sol ou un mur même si la friction n'avait pas arrêté sa vitesse tangentielle.
+
+**Correction Web, pas native :** après le premier TOI balayé, l'orientation reste conservativement bornée, tandis que la translation résiduelle est projetée sur les normales de contact. La vitesse post-contact déjà modifiée par le matériau borne ce reste (friction forte = aucun glissement). Une seconde requête bornée sur les **mêmes** sphères et colliders Dojo interdit de traverser un mur voisin. Aucune pose supplémentaire, aucun objet, aucune ressource commerciale ni modification de `main.js`/`renderer.js`.
+
+**Test falsifiable :** un corps à sphère source unique, allant diagonalement au sol, doit parcourir sa tangente dans la même frame sans friction, s'arrêter plus tôt avec friction, et rester du bon côté d'un second BoxCollider. Le test ne prouve ni la cinématique PhysX native ni les FPS réels : ces deux points et le comportement interactif restent inconnus jusqu'au smoke sur GitHub Pages. Les valeurs, tolérances et la projection sont une conception de physique **Web**.
+
+
+## SH-06 — contact sol déjà présent, glissement après friction (Web, 04/11/2026)
+
+**Défaut visé dans le Dojo live :** la branche de contact initial t=0 de `contactsFor` autorisait correctement une impulsion latérale sur un cadavre posé au sol (livraison #322), mais réutilisait encore le déplacement latéral **pré-impact** même lorsque `moveNativeFragmentSphere` avait déjà réduit la vitesse via le matériau de contact. Sur une sous-étape Web chargée, un corps pouvait ainsi glisser trop loin sur un sol rugueux avant de ralentir.
+
+**Correctif directement consommé par SH-05 :** la branche t=0 garde son projeté tangentiel et son second balayage anti-mur, mais multiplie son déplacement résiduel par la rétention de vitesse tangentielle réellement calculée au contact. Un sol sans friction conserve le glissement; une friction suffisante supprime le faux trajet de la frame. Le test `animation-native-death-runtime` construit la même impulsion latérale et descendante sur un collider de sol source pour comparer les deux matériaux, sans aucune scène/asset supplémentaire.
+
+**Provenance et inconnues :** sphère, collision et `dynamicFriction/staticFriction` sont consommés de la définition/du collider Dojo existants. L'application de friction à la translation dans la même sous-étape est une **politique Web**, et ne démontre ni timing PhysX/MCD, ni sélection live d'état Mecanim, ni gain FPS/rendu navigateur. Le patch reste limité à SH-06, aucun changement SH-05/SH-04/SH-14, pas de runner ni nouvel asset.
+
+
+## SH-06 — éviter les catapultages de ragdolls extrêmes (04/11/2026)
+
+**Défaut en jeu ciblé :** un impact ou une force sur un membre de masse relativement faible peut accélérer le solveur Web jusqu'à projeter la pose sur plusieurs mètres en une seule frame, créant des cadavres élastiques ou volants. Le Dojo passe déjà `limitWebFrameWork:true` au solveur ; les collisions/rigs et leurs données restent ceux du paquet standalone.
+
+**Politique créative Web, PAS native :** au moment de l'intégration temps-réel, après les forces et le drag source mais avant la résolution CCD, les vitesses extrêmes sont bornées à **24 m/s linéaires** et **16 rad/s angulaires**, direction conservée. Une impulsion ordinaire ne change pas, et un appel non budgété conserve l'entrée complète. Ce plafonnement ne reproduit pas PhysX et ne constitue pas un réglage extrait de MCD. Les masses, joints, impacts, scènes et horloge Kill restent inchangés ; aucun asset supplémentaire ou fichier SH-05 modifié.
+
+**Test ciblé :** `tests/animation-native-death-runtime.test.mjs` vérifie une impulsion extrême, une force soutenue extrême, une impulsion ordinaire et la simulation explicitement non budgétée. **À contrôler après merge :** le ressenti de 6–7 morts au Dojo à 30/60 FPS, des réimpulsions sur corps posés, l'absence de membres lancés à travers la pièce, les collisions sol/mur et victoire/REJOUER. La CI ne prouve pas ces sensations. Les valeurs du solveur natif effectif et la sélection live des transitions Mecanim demeurent inconnues ; les rapports `spec/animation/verification.json` et `link-verification.json` ne doivent pas être interprétés comme preuve d'exécution d'un état.
+
+
+### SH-06 — pas de catapultage de fragments après un hitch navigateur (Web, 05/11/2026)
+
+**Défaut du Dojo Web :** avec `limitWebFrameWork:true`, le budget historique
+limitait le **nombre** de sous-pas CCD à 4 mais leur attribuait tout le
+`scaledDelta`. Une interruption de 300 ms faisait ainsi avancer chaque éclat
+sur 300 ms en quatre grands sauts de 75 ms, au risque d'une projection visuelle
+excessive, contrairement au solveur ragdoll déjà borné à 100 ms.
+
+**Correction directement utilisée :** `advanceNativeFragmentBody` garde au
+maximum les **100 premières millisecondes** d'un hitch pour la physique Web
+(mouvement, gravité, friction, CCD et temps de contact). Une frame normale de
+100 ms à 10 FPS est intégralement simulée ; 30/60 FPS et les appels
+explicitement non budgétés conservent leur comportement. Le runtime externe
+`advanceGunPickupShardRuntime` continue de consommer le temps complet pour
+le fondu HDR et la destruction, sans dette de rattrapage physique. Aucun
+fichier SH-05 ni renderer à raccorder, aucun nouvel asset/draw call.
+
+**Test ciblé :** `tests/vfx-native-fragment-physics.test.mjs` compare
+une interruption de 300 ms (1 m à 10 m/s, contre 3 m avant correction),
+une frame normale de 100 ms (1 m), le chemin d'étude non budgété (3 m)
+et l'arrêt des balayages CCD pour les éclats invisibles. C'est une politique
+**originale Web**, pas une durée ou trajectoire PhysX/MCD prouvée ; les
+transitions Mecanim réelles et le paquet natif complet restent inconnus.
+La CI valide uniquement les calculs : SH-05 doit encore vérifier les éclats
+après alt-tab/hitch, 6–7 kills, F/E, REJOUER et p95/p99 sur Pages.
+
+### Web combat VFX clock after a browser hitch (SH-06, 2026-11-04)
+
+`advanceWebImpactFeedback` now consumes the *full* active real-time delta given by
+its host instead of truncating each update to 50 ms. This prevents the hit marker
+and short hit/kill/wall sparks from surviving twice as long at 10 FPS. The
+particle trajectory uses the analytic constant-gravity step (Web-authored
+1.6 units/s²), which agrees across a 100 ms frame and two 50 ms frames. No
+new particles, textures, draw calls or source claims. **SH-05 integration**:
+`src/main.js` currently passes its capped `dt` (update around line 1208);
+pass the already-computed `activeRealDt` on native Dojo gameplay updates,
+while preserving pause behavior and legacy timing. Until that shared-file
+change lands, a 10 FPS frame may still look capped. This is an intentionally
+original Web visual policy, **not** a reconstructed Unity HDR/VFX timing.
+
+### SH-06 / 2026-11-04 — Performance des débris au sol dans le Dojo
+
+`advanceNativeFragmentBody` suspends now its **Web-only** CCD workload after
+at least 0.2 seconds of consecutive, slow (<0.06 m/s) upward contact with
+the **existing sourced static Dojo collider**. The resting shard keeps its
+last collision-admitted position while `advanceGunPickupShardRuntime` still
+advances the authored disappearance/HDR clock and its existing Web visual
+spin. Contact time starts at the swept impact fraction, **not** at the
+beginning of a long hitch frame. A changed shard velocity/position, a disabled
+support collider, or an unbudgeted simulation call immediately wakes it.
+Airborne fragments and frictionless moving shards cannot sleep by elapsed
+time alone. This avoids repeated collision sweeps for settled fragments in
+multi-kill scenes without introducing assets or additional draw calls.
+
+The 0.2 s / 0.06 m/s thresholds are **creative browser performance policies,
+not MCD PhysX sleep parameters**. Source identity remains the active scene
+collision boxes; no new original physics data, animated play state, or
+fracture asset is inferred. Validate visually on standalone Pages after
+SH-05 merge: multiple kills and thrown items, resting vs sliding fragments,
+re-enabled/disabled collision surfaces, FPS at 30/60 Hz and replay. Node CI
+only proves the deterministic code path, not real browser frame times.
+
+
+### SH-06 / 2026-11-04 — Broadphase des fragments à scènes Dojo chargées
+
+Pour les grandes vues de BoxColliders déjà préparées (16+), les balayages des débris
+interrogent désormais un index d'intervalles X construit une seule fois, puis
+filtrent les limites AABB Y/Z avant le test géométrique exact existant. L'ordre
+initial des colliders est préservé pour les impacts ex aequo ; les collisions,
+frictions et normales finales restent calculées par le même solveur. L'index
+est reconstruit si la liste des colliders change de référence ou de taille ;
+les bascules `enabled` sont prises en compte à chaque requête. Le détachement
+des corps et les portes conservent donc leur état collision courant. C'est une
+**optimisation Web originale**, pas un ordre ni un accélérateur PhysX observé.
+
+Un test ciblé compare collision et réponse avec/sans 96 colliders éloignés,
+contrôle l'absence de parcours intégral après échauffement de l'index et la
+désactivation du plancher. Cela vise le coût CPU des premières frames de
+multiples fractures, avant le sommeil des fragments livré précédemment. Aucun
+asset, maillage, draw call, timing natif Mecanim ou événement MCD n'est ajouté.
+**Non vérifié** : FPS et rendu en navigateur sur Pages après merge SH-05.
+
+### SH-06 / 2026-11-04 — rendre les éclats des impacts ennemis visibles (Web J2)
+
+**Défaut visible ciblé :** `recordWebImpact` positionne correctement les
+éclats à 2,5 cm en amont du contact, mais leur donne ensuite une vitesse
+**dans le sens de la balle** pour les hits/kills ennemis ; ils rentrent
+dans le modèle rouge et peuvent disparaître derrière sa surface au lieu
+de donner un impact lisible. Le contact est déjà confirmé par le gameplay.
+
+**Modification Web :** l'éjection normale des éclats de hits/kills est
+maintenant orientée **contre le trajet entrant** (facteur Web -0,38 de
+la vitesse de particule). La répartition radiale, les couleurs,
+les durées, le hit-marker, les impacts murs, le plafond de 64 particules
+et les appels existants de `src/main.js`/`renderer.js` ne changent pas.
+Un test ciblé contrôle le côté du contact et le mouvement des éclats
+pour un tir entrant -Z, ainsi que la branche mur non régressée.
+
+**Provenance :** uniquement la direction et le point d'un hit accepté
+par le moteur Web actuel. Ce comportement et son coefficient sont
+des choix de lisibilité Web **non extraits de MCD**. Aucun asset
+commercial supplémentaire ni rendu en navigateur n'est prétendu.
+Après fusion SH-05 : comparer sur Pages des tirs/throws qui tuent
+ou blessent un ennemi, puis vérifier F/E, victoire, REJOUER et FPS.
+
+
+## SH-06 — confirmed-contact visual priority (2026-11-04)
+
+The live Dojo calls `recordWebImpact` for resolved hits, kills and wall contacts. Previously, frequent wall glints could evict still-visible enemy hit/kill particles from the shared 64-particle pool; an ordinary hit could also replace an active kill-confirm marker. The Web VFX module now preserves live kill particles first, then hit particles, evicting older wall dust preferentially. Within a priority tier, older particles are removed first. A nonlethal hit does not downgrade or extend an active kill pulse. The renderer and gameplay wiring are unchanged.
+
+These priorities and timings are **original Web design**, not recovered MCD event priority or PhysX parameters. Existing private evidence (research issues #3, #11 and #12, `spec/animation/verification.json` and `link-verification.json`) verifies static animation/event inventories, but does not establish executed event dispatch for all receiver combinations or native VFX ordering. No new private query or asset is required. After SH-05 merges, the remaining proof is a Pages browser smoke under repeated wall fire and enemy hits, including FPS and the standard Dojo play/replay flow.
+
+
+## SH-06 — animated impact-glint rotation (Web art direction, 2026-11-04)
+
+Actual resolved Dojo hits, kills and wall contacts already emit bounded `web-combat-feedback` shards, and the live renderer already consumes `rx`, `ry`, `rz` for each draw. Their orientation was previously fixed for the entire burst, so debris translated without tumbling. The SH-06 module now assigns deterministic opposing angular rates per existing particle and advances its orientation using **active real elapsed time**. A 100 ms frame and two 50 ms frames produce the same particle positions, lifetimes and angles; replay resets the existing buffer. No renderer/main wiring, asset, additional draw or particle-cap change is needed. The actual visibility improvement and FPS remain to be validated by SH-05 in the browser.
+
+These spin rates are deliberately **authored Web visuals**, not observed MCD animation, fracture or PhysX parameters. The private `spec/animation/verification.json` (research #11, SHA-256 `22ac2e6e…`) counts 511 clips, 292 transitions and 213 events; `link-verification.json` (research #12, SHA-256 `6d23cbe9…`) reports 404 receiver relationships without proven static inheritance/runtime dispatch. No native event-driven angular-VFX timing is inferred from those static inventories. No new private query or asset publication was performed.
+
+
+## SH-06 — active-real-time dodge cue (Web game feel, 2026-11-04)
+
+The Dojo's existing confirmed enemy-projectile near-miss cue (src/vfx/web-dodge-feedback.js) lasts 0.42 active seconds, but its advance method previously silently capped every supplied real-time delta to 50 ms. At sustained 10 FPS, 100 ms active frames consequently advance only 50 ms, prolonging the cyan dodge cue to ~0.9 s instead of ~0.42 s. The SH-06 VFX module now consumes the full **active elapsed time** supplied by its caller, including a long hitch; paused calls remain at delta 0. A focused VFX regression compares a 100 ms frame with two 50 ms frames and verifies expiry after a hitch.
+
+**SH-05 integration gate (shared file, not modified here):** src/main.js::update(dt,activeRealDt) currently invokes advanceWebDodgeFeedback(webDodgeFeedback,dt) with capped physics dt. For Dojo only, SH-05 must change that call to advanceWebDodgeFeedback(webDodgeFeedback,nativeGameplay()?activeRealDt:dt), preserving the legacy-mode clock and pause boundary. Without this owned callsite change, the low-FPS defect is **not corrected in live Pages gameplay** by this module fix alone. After SH-05 wiring, validate near-miss cyan duration, cooldown, score and replay at 60/10 FPS plus the Dojo 7/7 smoke; CI alone does not establish browser timing. Related source-level diagnosis: public SH-01 issue #1 comment 6638287894.
+
+This fix is strictly **original Web-only feedback timing**, not a native MCD event or Mecanim receiver assertion. Previously read research #11 / spec/animation/verification.json and #12 / link-verification.json establish inventories only; the 404 unverified receiver relationships and actual MCD VFX/IK/PhysX timing remain unknown. No new private runner, extraction or asset is used.
+
+### SH-06 / J4 — sommeil des débris sur scènes Dojo chargées (Web, 04/11/2026)
+
+**Défaut de coût en production :** #418 évitait déjà les balayages CCD une fois un fragment réellement au repos, mais chaque éclat endormi scannait encore **toutes** les boîtes de collision à chaque frame pour vérifier son support. Avec plusieurs fractures et les colliders source du Dojo, ce coût restait proportionnel à `fragments endormis × colliders`.
+
+**Correctif en jeu :** `advanceNativeFragmentBody` réutilise la table de boîtes pré-indexée par `moveNativeFragmentSphere` pour accéder directement aux colliders qui portent un fragment. La table d'identités n'est construite qu'à la première consultation d'un support endormi ; ses entrées conservent les références aux boîtes source, et l'état `enabled` est **relu en direct** : une porte/support désactivé réveille normalement l'éclat. Pour une scène non indexée, le balayage initial de secours est conservé ; un remplacement de liste n'utilise jamais un index périmé. Aucun nouvel asset, nombre de fragments, draw call, timer, changement de physique active ni dépendance au poste de Thomas.
+
+**Test ciblé :** 97 colliders source synthétiques, sommeil après vrais contacts, 36 frames de repos sans rescanner les 96 obstacles éloignés, puis désactivation du sol qui réveille le fragment. Il s'agit d'une **optimisation créative Web** et non d'un sommeil PhysX ou d'un comportement extrait de MCD. Gain p95/FPS réel à mesurer sur Pages après CI, merge SH-05 et smoke à plusieurs fractures (F/E, tirs, 6–7 kills, victoire/REJOUER).
+
+## SH-06 — Collision-support lookup des corps endormis (Dojo, Web only)
+
+After source-grounded rest, the Web ragdoll previously checked its support with `scene.boxes.includes(support)` on every frame; finding a later-authored floor required reading the whole BoxCollider array per corpse. On the same static collision view already used for active PBD, the sleeper now uses a lazily created reference/index lookup, while remaining sensitive to live `enabled` flags, removed/replaced boxes and new impulses. The initial support lookup after contacts uses the same index. No source material, pose, joint constraint, effect or cleanup clock is changed. The targeted synthetic test checks 161 colliders, 30 sleeping frames and waking/falling when the actual supporting floor is disabled. This is **Web performance maintenance**, not a recovered MCD/PhysX broadphase. Verify/Pages on exact merge SHA and browser p95/FPS with 6–7 corpses are still required to establish any real gain.
+
+
+## SH-06 — Grounded corpse skid damping (Dojo, Web-only)
+
+**Gameplay correction:** with source mass, joint constraints and collision already active, a body could retain noticeable lateral velocity after landing and appear to skate across the Dojo. For budgeted **real-time Dojo ragdolls only**, each *actual upward floor contact* now applies an additional exponential horizontal-velocity retention (`exp(-4 × dt)`) after the ordinary source-material contact response. Angular friction, impulses, collisions, authored rig/joints, cleanup and off-ground movement remain unchanged. The exponential is evaluated once per substep for all bodies. A focused test compares a real source floor, the same freely falling body without a floor and an unbudgeted source-study run; only grounded Dojo velocity decays, and the body still slides briefly rather than being pinned. This is **original Web game-feel tuning**, *not* a recovered MCD/PhysX damping constant or a claim of native parity. The effects on actual skating, FPS and 7/7 Dojo play-through remain to be checked visually on Pages after CI and SH-05 integration.
+
+
+## SH-06 — mort/ragdoll à 10 FPS soutenus (réglage Web, 04/11/2026)
+
+**Défaut dans le Dojo Web :** l'ancien budget de quatre sous-pas acceptait
+au maximum 33,3 ms de simulation même pendant une frame active de 100 ms à
+10 FPS. Les corps pouvaient donc tomber environ trois fois trop lentement,
+tandis que l'horloge de disparition continuait d'avancer normalement.
+
+**Correction :** le PBD existant accepte jusqu'à 100 ms de temps actif par
+frame, avec toujours au maximum quatre sous-pas de collisions balayées
+(25 ms chacun à 10 FPS). Les frames usuelles 30/60 FPS conservent leur pas
+antérieur. Une interruption de 300 ms laisse encore 200 ms de simulation
+non rattrapée afin de limiter le coût CPU, sans retarder le cleanup.
+Aucune modification du renderer, de main.js, des assets, des données
+rigidbodies/joints, des impulsions ou des contacts source.
+
+**Vérification :** test ciblé de chute 100 ms vs six frames 60 FPS,
+franchissement des boîtes de sol source, garde de hitch 300 ms et
+finitude du rig. CI exacte, collisions en vrai navigateur, p95/p99 FPS et
+ressenti 6–7 cadavres restent à vérifier après intégration SH-05.
+
+**Provenance :** régression et budget du code Web existant, paramètres
+créatifs Web ; **aucun timing fixe PhysX/Unity n'est prétendu**. Les
+artifacts privés d'animation de research #11/#12 fournissent un inventaire
+statique, pas l'exécution des 404 liaisons événement/receveur, ni les
+valeurs de scheduling PhysX natives. Aucune requête privée ajoutée.
+
+
+### SH-06 — correctif du temps actif rAF du ragdoll Dojo (05/11/2026, PR de raccord)
+
+**Défaut de gameplay Web prouvé par chaîne d'appels (pas par vision navigateur) :**
+`sampleActiveFrameDeltas` émet `simulationDt=0.05` et
+`activeRealDt=0.1` à 10 FPS. Le `stepMcdGameplayClock` de `main.js`
+reçoit `dt=0.05`, puis `worldDt=tick.worldDelta` et le bridge de mort
+reçoit seulement `scaledDelta=worldDt`. Même après #458, le solveur
+ne peut jamais restituer les 50 ms qui n'atteignent pas son entrée :
+les cadavres prennent du retard à 10 FPS, malgré une CI verte.
+
+**Correction SH-06 dans sa lane :**
+`src/animation/native-gameplay-pose-bridge.js` accepte un reçu optionnel
+`frameTiming:{simulationDelta,activeRealDelta}` provenant du **même**
+rAF `sampleActiveFrameDeltas`. Il avance le solveur de
+`activeRealDelta * (scaledDelta / simulationDelta)`, préservant le
+facteur de ralentissement déjà appliqué à `worldDt` ; une frame de 100 ms
+à vitesse 1 transmet 100 ms, à vitesse 0,2 transmet 20 ms. Le solveur
+limite déjà la physique coûteuse d'un hitch >100 ms tout en avançant son
+horloge de nettoyage ; le bridge ne doit pas tronquer ce dernier temps.
+Pas de timestamp global, de nouvel asset, d'inférence Mecanim ou de
+lancement natif. Appels sans reçu inchangés.
+
+**Raccord exclusif SH-05 encore requis :** dans `src/main.js`, passer
+`frameTiming:{simulationDelta:dt,activeRealDelta}` à
+`advanceDojoDeathSkinFrame` en conservant `scaledDelta:worldDt`
+(pas de second calcul concurrent du ratio). Sans cette unique propriété,
+la correction **n'est pas active sur Pages**. Contrôler l'horloge de
+ralentissement, les transitions de pause, 10/30/60 FPS, contacts
+sol/mur, boucle Dojo 7/7, et p95/p99 après merge et déploiement.
+Le test Node valide le calcul de la chaîne d'entrée et le passage
+effectif dans le bridge ; il ne remplace pas le smoke navigateur.
+
+**Limite de preuve native :** choix d'horloge original Web. Le
+corpus privé #11 (`spec/animation/verification.json`) et #12
+(`link-verification.json`) inventorie clips, transitions et marqueurs
+mais ne prouve toujours pas les 404 liaisons de destinataires d'événements
+ni la cadence d'exécution Unity/PhysX. Aucun PhysX 1:1 revendiqué.

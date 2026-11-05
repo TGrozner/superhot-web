@@ -1,3 +1,5 @@
+import { WEB_LOOK_ANGLE_CAP, webLookDeltaDegrees } from './time.js';
+
 /**
  * Pure, browser-independent input interpretation for FRAME//BREAK.
  * PROVENANCE: superhot-web/src/main.js at 9f01f92411b4e125b2c992deee53602a8c67c416.
@@ -26,6 +28,45 @@ const BACK = ['KeyS', 'ArrowDown'];
 const RIGHT = ['KeyD', 'ArrowRight'];
 const LEFT = ['KeyA', 'ArrowLeft'];
 const SPRINT = ['ShiftLeft', 'ShiftRight'];
+
+/**
+ * WEB-ONLY pointer path accumulator for the playable Dojo.
+ *
+ * A browser can dispatch multiple mousemove events before one RAF update.
+ * Opposite movements leave the same final yaw and pitch, but the player
+ * actually moved the crosshair. Sampling only the last pose (the legacy
+ * gameplay-clock path) hides that motion from the slow-motion shifter.
+ *
+ * Accumulate the *applied* yaw/pitch changes after any camera pitch clamp.
+ * Large single-event yaw rotations retain their winding (one full turn is
+ * motion, even when the final camera orientation matches the initial one).
+ * Keep the existing Web anti-linger cap: large rapid flicks cannot queue a
+ * long acceleration after the mouse stops. This is a Web comfort heuristic,
+ * NOT a native input model or a source-qualified MCD parameter.
+ *
+ * @param {number} pendingDegrees Accumulated degrees from earlier events in this frame.
+ * @param {{previousYaw:number,previousPitch:number,yaw:number,pitch:number}} sample
+ *   Old and new actually rendered camera angles (radians).
+ * @returns {number} Web camera travel to consume once on the next gameplay tick.
+ */
+export function accumulateWebPointerLookPath(pendingDegrees, {
+  previousYaw, previousPitch, yaw, pitch,
+} = {}) {
+  if (!Number.isFinite(pendingDegrees) || pendingDegrees < 0) {
+    throw new RangeError('pendingDegrees must be finite and nonnegative');
+  }
+  // Camera yaw is deliberately unwrapped. A single large pointer-lock event
+  // can turn more than half a circle; a full revolution ends at the same pose
+  // and the shortest quaternion angle would incorrectly report zero travel.
+  // Keep the existing short-arc estimate for ordinary events and use the
+  // applied yaw/pitch path only when the event crosses 180 degrees.
+  const shortestDegrees = webLookDeltaDegrees(previousYaw, previousPitch, yaw, pitch);
+  const appliedYaw = yaw - previousYaw;
+  const degrees = Math.abs(appliedYaw) > Math.PI
+    ? Math.hypot(appliedYaw, pitch - previousPitch) * 180 / Math.PI
+    : shortestDegrees;
+  return Math.min(WEB_LOOK_ANGLE_CAP, pendingDegrees + degrees);
+}
 
 const anyPressed = (keys, options) => options.some((key) => keys.has(key));
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));

@@ -13,18 +13,29 @@ import {
 // Three authored warning components can have separate decoded cookies.
 const warningSlots = 3;
 const warningPreviewGlsl = [
-  'uniform int uDoorWarningCount;',
+  'uniform int uDoorWarningCount, uDoorFalseCount;',
   ...Array.from({length: warningSlots}, (_, i) =>
     'uniform sampler2D uDoorCookie' + i + ';\n' +
+    'uniform int uDoorProcedural' + i + ';\n' +
     'uniform vec3 uDoorPosition' + i + ', uDoorDirection' + i + ', uDoorRight' + i + ', uDoorUp' + i + ', uDoorColor' + i + ';\n' +
     'uniform float uDoorRange' + i + ', uDoorCos' + i + ', uDoorTan' + i + ', uDoorIntensity' + i + ';'),
+  ...Array.from({length: warningSlots}, (_, i) =>
+    'uniform vec3 uDoorFalsePosition' + i + ';\n' +
+    'uniform float uDoorFalseIntensity' + i + ';'),
   DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
   'vec3 dojoWarningPreview(vec3 worldPosition) { vec3 rgb = vec3(0.0);',
   ...Array.from({length: warningSlots}, (_, i) =>
-    'if (uDoorWarningCount > ' + i + ') rgb += dojoDoorWarningSpotWebPreview(' +
+    'if (uDoorWarningCount > ' + i + ') { ' +
+    'if (uDoorProcedural' + i + ' != 0) rgb += dojoDoorWarningSpotWebGlow(' +
+    'worldPosition, uDoorPosition' + i + ', uDoorDirection' + i + ',' +
+    ' uDoorRange' + i + ', uDoorCos' + i + ', uDoorColor' + i + ', uDoorIntensity' + i + ');' +
+    'else rgb += dojoDoorWarningSpotWebPreview(' +
     'uDoorCookie' + i + ', worldPosition, uDoorPosition' + i + ', uDoorDirection' + i + ',' +
     ' uDoorRight' + i + ', uDoorUp' + i + ', uDoorRange' + i + ', uDoorCos' + i + ',' +
-    ' uDoorTan' + i + ', uDoorColor' + i + ', uDoorIntensity' + i + ');'),
+    ' uDoorTan' + i + ', uDoorColor' + i + ', uDoorIntensity' + i + '); }'),
+  ...Array.from({length: warningSlots}, (_, i) =>
+    'if (uDoorFalseCount > ' + i + ') rgb += dojoDoorFalseLightWashWeb(' +
+    'worldPosition, uDoorFalsePosition' + i + ', uDoorFalseIntensity' + i + ');'),
   'return rgb; }',
 ].join('\n');
 const vertex = `#version 300 es
@@ -350,7 +361,7 @@ export function createNativeWorldPass(gl, scene, images) {
     scene.source.serializedOwner === 'level10' &&
     scene.gameplay?.audio?.doors && scene.instanceMap instanceof Map &&
     scene.textures instanceof Map
-    ? createDojoDoorWarningSceneAdapter(scene, images) : null;
+    ? createDojoDoorWarningSceneAdapter(scene, images, {allowWebCookieFreeGlow:true}) : null;
   const auxiliaryInstances = scene.auxiliaryInstances ?? [];
   const worldInstances = [...scene.instances, ...auxiliaryInstances];
   const program = gl.createProgram(), meshes = new Map(), textures = new Map();
@@ -584,10 +595,11 @@ export function createNativeWorldPass(gl, scene, images) {
     'uGroundFog', 'uGroundFogColor',
     'uWorldSpaceLightDirection',
     'uClock', 'uMonitor', 'uBlackState', 'uCutoff', 'uObjectPhase',
-    'uFirstPersonProjectionScale', 'uFirstPersonDepth', 'uDoorWarningCount',
+    'uFirstPersonProjectionScale', 'uFirstPersonDepth', 'uDoorWarningCount', 'uDoorFalseCount',
     ...Array.from({length: warningSlots}, (_, slot) => [
       'uDoorCookie', 'uDoorPosition', 'uDoorDirection', 'uDoorRight', 'uDoorUp',
       'uDoorColor', 'uDoorRange', 'uDoorCos', 'uDoorTan', 'uDoorIntensity',
+      'uDoorProcedural', 'uDoorFalsePosition', 'uDoorFalseIntensity',
     ].map(prefix => prefix + slot)).flat(),
   ]) uniforms[name] = gl.getUniformLocation(program, name);
   const colorLocation = gl.getAttribLocation(program, 'aColor');
@@ -647,7 +659,8 @@ export function createNativeWorldPass(gl, scene, images) {
       previousTextureBindings.push(gl.getParameter(gl.TEXTURE_BINDING_2D));
     }
     let drawCalls = 0, triangles = 0;
-    let warningPreviewDrawCalls = 0;
+    let warningPreviewDrawCalls = 0, warningWebGlowDrawCalls = 0;
+    let warningWebFalseLightDrawCalls = 0;
     const warningDoorIdsDrawn = new Set();
     let sourceConcreteDrawCalls = 0, concreteDrawCalls = 0;
     let blackCrystalDrawCalls = 0, redCrystalDrawCalls = 0, cutoutDrawCalls = 0, monitorDrawCalls = 0;
@@ -714,19 +727,30 @@ export function createNativeWorldPass(gl, scene, images) {
         gl.uniform1f(uniforms.uModelSign, transform.mirrored ? -1 : 1);
         const objectPhase = (transform.model[13] - transform.model[12]) * 1000;
         gl.uniform1f(uniforms.uObjectPhase, objectPhase - Math.floor(objectPhase));
-        // Only authored, source-layer meshes receive source-door projection.
-        // Missing ImageBitmap => adapter supplies no spotlight, never a fake cookie.
+        // Only authored, source-layer meshes receive live warning lights.
+        // Missing ImageBitmap retains the existing Web glow, not a fake cookie.
         const worldSource = scene.instanceMap?.get(instance.id);
         const qualified = warningAdapter && Array.isArray(warningPackets) &&
           worldSource && Number.isInteger(worldSource.layer) &&
           !firstPerson && !weaponMatrix && !selectedInstance
-          ? warningAdapter.prepareForInstance(instance.id, warningPackets).spotlights : [];
-        const activeWarnings = qualified.slice(0, warningSlots);
+          ? warningAdapter.prepareForInstance(instance.id, warningPackets) : null;
+        const activeWarnings = qualified?.spotlights.slice(0, warningSlots) ?? [];
+        // Existing moving doorway false-lights: bounded Web-only 4m wash,
+        // culled by the authored mesh sphere, never native XULM parity.
+        const activeFalseLights = qualified?.webFalseLights?.slice(0, warningSlots) ?? [];
         gl.uniform1i(uniforms.uDoorWarningCount, activeWarnings.length);
+        gl.uniform1i(uniforms.uDoorFalseCount, activeFalseLights.length);
         for (let slot = 0; slot < warningSlots; slot++) {
           const spot = activeWarnings[slot];
           gl.activeTexture(gl.TEXTURE0 + 5 + slot);
-          gl.bindTexture(gl.TEXTURE_2D, spot ? textures.get(spot.cookieTextureId) : null);
+          gl.bindTexture(gl.TEXTURE_2D, spot?.sourceCookieDecoded ? textures.get(spot.cookieTextureId) : null);
+          gl.uniform1i(uniforms['uDoorProcedural' + slot],
+            spot?.webPreviewMode === 'web-procedural-no-cookie' ? 1 : 0);
+          const fill = activeFalseLights[slot];
+          if (fill) {
+            gl.uniform3fv(uniforms['uDoorFalsePosition' + slot], fill.position);
+            gl.uniform1f(uniforms['uDoorFalseIntensity' + slot], fill.intensity);
+          }
           if (!spot) continue;
           gl.uniform1i(uniforms['uDoorCookie' + slot], 5 + slot);
           for (const [key, value] of [
@@ -768,6 +792,9 @@ export function createNativeWorldPass(gl, scene, images) {
           meshes.get(draw.meshId).draw(draw.range);
           drawCalls++;
           if (activeWarnings.length) warningPreviewDrawCalls++;
+          if (activeFalseLights.length) warningWebFalseLightDrawCalls++;
+          if (activeWarnings.some(spot => spot.webPreviewMode === 'web-procedural-no-cookie'))
+            warningWebGlowDrawCalls++;
           if (material.sourceConcrete) sourceConcreteDrawCalls++;
           if (material.concrete) concreteDrawCalls++;
           if (material.mode === 1) blackCrystalDrawCalls++;
@@ -802,6 +829,8 @@ export function createNativeWorldPass(gl, scene, images) {
       nativeLightingParity: false,
       warningPreviewSpotlights: warningDoorIdsDrawn.size,
       warningPreviewDrawCalls,
+      warningWebGlowDrawCalls,
+      warningWebFalseLightDrawCalls,
       warningCookieStatus: warningAdapter?.cookieStatus ?? [],
       sourceConcreteLightmappedDrawCalls: sourceConcreteDrawCalls,
       unsupportedConcreteCompositionDrawCalls: concreteDrawCalls - sourceConcreteDrawCalls,

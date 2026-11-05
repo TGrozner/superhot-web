@@ -11,7 +11,7 @@ function mockBrowser() {
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
   const snapshot=()=>({frameId:seq,activeScreen:screen,worldClock:seq*.1,
     nativeScene:{source},
-    generatedManifest:{drawCalls:360,privateSourceName:'DO_NOT_SERIALIZE'},
+    generatedManifest:{drawCalls:360,warningWebFalseLightDrawCalls:14,privateSourceName:'DO_NOT_SERIALIZE'},
     nativeHands:{handsDrawCalls:2,handsTriangles:140,sourcePoseSampled:true,
       webKatanaSocketApplied:true,privateRig:'DO_NOT_SERIALIZE'},
     gameplay:{doorWarning:{readiness:'source-catalog-present',
@@ -43,7 +43,9 @@ function mockBrowser() {
     setFrame(n){seq=n;}, setScreen(value){screen=value;},
     setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
     setPointerLock(value){pointerLocked=value;},
-    mouse(button=0,trusted=true){documentListeners.get('mousedown')?.({button,isTrusted:trusted});},
+    mouse(button=0,trusted=true,target=sceneCanvas){
+      documentListeners.get('mousedown')?.({button,isTrusted:trusted,target});
+    },
     setSceneBuildIndex(index){source.sceneBuildIndex=index;},
     tick(){intervalCallback();},
     click(buttonId, trusted=true){documentListeners.get('click')?.({isTrusted:trusted,
@@ -75,6 +77,7 @@ test('SH10 browser recorder samples rendered frame telemetry without private ite
       handsSourcePoseSampled:true,katanaSocketApplied:true,
       warningReadiness:'source-catalog-present',warningEventStatus:'triggered',
       warningActiveEnvelopes:1,warningRenderedSpotlights:0,
+      warningWebFalseLightDrawCalls:14,
     });
     assert.equal(data.frames[1].nativeScene.source.serializedOwner,'level10');
     assert.equal(JSON.stringify(data).includes('PRIVATE_NAME'),false);
@@ -204,6 +207,23 @@ test('SH10 can arm once before Start, then samples only post-start rendered fram
   } finally {mock.teardown();}
 });
 
+test('SH10 preview-blocked held W never creates a phantom moving clock span after canvas Start',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.key('KeyW'); // #374 ignores this pre-start keydown in game input.
+    mock.setControlsHidden(true);mock.setFrame(2);mock.tick();
+    // Initial combat frame must stay idle: the runtime never saw W pressed.
+    mock.key('KeyW',true,{repeat:true}); // The post-start repeat *is* accepted.
+    mock.setFrame(3);mock.tick();
+    mock.key('KeyW',false);mock.setFrame(4);mock.tick();
+    const observed=recorder.stop().frames.map(f=>f.gameplay.moving);
+    assert.deepEqual(observed,[false,true,false]);
+    assert.equal(mock.listenerCount,0);
+  } finally {mock.teardown();}
+});
+
 test('SH10 armed recorder does not begin on pause/win or mid-combat resume',()=>{
   const mock=mockBrowser();
   try {
@@ -253,6 +273,36 @@ test('SH10 does not accept an attempted Replay click outside win screen',()=>{
   } finally {mock.teardown();}
 });
 
+
+test('SH10 owner-canvas preview click is a trusted Start receipt, not a gunshot',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.mouse(0,true,{id:'scene-mode'}); // Runtime has a separate UI bug; never credit it as Start.
+    mock.mouse(0,false); // synthetic mousedown must not satisfy acceptance.
+    mock.mouse(2); // secondary click must not satisfy Start.
+    assert.equal(recorder.ready,false);
+    mock.mouse(0); // real canvas primary mousedown, before pointer lock.
+    mock.setControlsHidden(true);mock.setFrame(2);mock.tick();
+    const receipt=recorder.stop();
+    assert.deepEqual(receipt.uiActions,[
+      {type:'start',buttonId:'scene',frameId:1,activeScreen:'playing'},
+    ]);
+    assert.deepEqual(receipt.inputActions,[]);
+    assert.equal(receipt.frames[0].frameId,2);
+  } finally {mock.teardown();}
+});
+
+test('SH10 wrong scene cannot forge the canvas-start Dojo receipt',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setControlsHidden(false);mock.setSceneBuildIndex(28);
+    const recorder=startDojoCapture({waitForStart:true});
+    mock.mouse(0);
+    assert.deepEqual(recorder.stop().uiActions,[]);
+  } finally {mock.teardown();}
+});
 
 test('SH10 browser input receipts exclude first mouse-lock click and synthetic or nonplaying actions',()=>{
   const mock=mockBrowser();

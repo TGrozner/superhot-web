@@ -1,0 +1,76 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { accumulateWebPointerLookPath } from '../src/input.js';
+import {
+  WEB_LOOK_ANGLE_CAP, createMcdGameplayClock, stepMcdGameplayClock,
+} from '../src/time.js';
+
+// WEB gameplay regression only: no MCD native event/cadence claim.
+// The browser may dispatch multiple mousemove events before a single RAF tick.
+test('Dojo look-time counts opposing mouse events inside one render frame', () => {
+  let path = 0;
+  path = accumulateWebPointerLookPath(path, {
+    previousYaw: 0, previousPitch: 0, yaw: 0.25, pitch: 0,
+  });
+  path = accumulateWebPointerLookPath(path, {
+    previousYaw: 0.25, previousPitch: 0, yaw: 0, pitch: 0,
+  });
+  assert.equal(path, WEB_LOOK_ANGLE_CAP,
+    'the path retains both applied turns even though the final yaw matches');
+
+  const legacy = createMcdGameplayClock();
+  legacy.source.delayedUpdates = 0;
+  const missed = stepMcdGameplayClock(legacy, {
+    dt: 1 / 60, yaw: 0, pitch: 0,
+  });
+  assert.equal(missed.timeScale, Math.fround(0.005),
+    'the old once-per-frame pose comparison cannot see same-frame reversal');
+
+  const withEvents = createMcdGameplayClock();
+  withEvents.source.delayedUpdates = 0;
+  const first = stepMcdGameplayClock(withEvents, {
+    dt: 1 / 60, yaw: 0, pitch: 0, lookPathDegrees: path,
+  });
+  assert.equal(first.appliedTimeScale, 1,
+    'the current frame must still consume the previously applied timescale');
+  assert.equal(first.timeScale, Math.fround(0.3),
+    'the next world tick reacts to the actual input events');
+
+  const second = stepMcdGameplayClock(withEvents, {
+    dt: 1 / 60, yaw: 0, pitch: 0, lookPathDegrees: 0,
+  });
+  assert.equal(second.timeScale, Math.fround(0.3),
+    'existing two-sample comfort cap is unchanged');
+  const third = stepMcdGameplayClock(withEvents, {
+    dt: 1 / 60, yaw: 0, pitch: 0, lookPathDegrees: 0,
+  });
+  assert.equal(third.timeScale, Math.fround(0.005),
+    'the camera must return to slow motion after the brief pulse');
+
+  assert.equal(accumulateWebPointerLookPath(0, {
+    previousYaw: 0, previousPitch: 80 * Math.PI / 180,
+    yaw: 0, pitch: 80 * Math.PI / 180,
+  }), 0, 'a mouse movement rejected by the pitch clamp adds no fictitious pulse');
+});
+
+
+test('Dojo Web look-time retains an unwrapped full-turn pointer flick', () => {
+  // A single mousemove may carry more than one half-turn (pointer lock, high
+  // polling or event batching). The final camera orientation is unchanged,
+  // but the aim traveled and must still pulse the already-wired Web clock.
+  // This is a WEB comfort regression, not a native MCD angular rule.
+  const path = accumulateWebPointerLookPath(0, {
+    previousYaw: 0, previousPitch: 0, yaw: Math.PI * 2, pitch: 0,
+  });
+  assert.equal(path, WEB_LOOK_ANGLE_CAP,
+    'the existing cap bounds full revolutions without turning them into zero input');
+
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  const tick = stepMcdGameplayClock(clock, {
+    dt: 1 / 60, yaw: Math.PI * 2, pitch: 0, lookPathDegrees: path,
+  });
+  assert.equal(tick.appliedTimeScale, 1);
+  assert.equal(tick.timeScale, Math.fround(0.3),
+    'the next game tick must respond even if the camera completes one full revolution');
+});

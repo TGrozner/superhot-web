@@ -319,7 +319,10 @@ function mockGl({ uniformLimit = 256 } = {}) {
     useProgram: value => { program = value; calls.push(['program', value]); },
     frontFace: value => { winding = value; calls.push(['winding', value]); },
     uniformMatrix4fv: (location, _transpose, value) => calls.push(['matrix', location.name, Array.from(value)]),
-    uniform3f: () => {}, uniform2f: () => {}, uniform4f: () => {},
+    uniform3f: () => {}, uniform2f: () => {},
+    uniform4f: (location, first, second) => {
+      if (location.name === 'uWebHitFlash') calls.push(['hitFlash', location.name, first, second]);
+    },
     drawElements: (mode, count, type, offset) => calls.push(['draw', mode, count, type, offset]),
     deleteBuffer: value => calls.push(['deleteBuffer', value]),
     deleteVertexArray: value => calls.push(['deleteVao', value]),
@@ -607,5 +610,839 @@ test('per-actor real GPU draws use source states, action, transition and solved 
     state: 'run', time: .2, action: { state: 'fire', time: 0, weight: 1 },
   }), /action unavailable/);
   assert.equal(calls.filter(call => call[0] === 'draw').length, 4);
+  pass.dispose();
+});
+
+test('Web-only hit/melee accents lean the real sampled GPU rig, socket and hit pose per actor', () => {
+  const pkg = transitionPackage();
+  // Authored source-neutral clips: nothing from the commercial game.
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic test socket', coordinates: 'synthetic local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, pose) => actors.drawActor({
+    actorId, pose, modelMatrix: identity(), viewProjection: identity(),
+    color: [.8, .1, .2, 1],
+  });
+
+  const baseline = draw(1, { state: 'hit', time: 0 });
+  const originalSocket = Array.from(baseline.weaponAttachmentMatrix);
+  near(originalSocket.slice(12, 15), [1, 0, 0]);
+  assert.equal(baseline.actorWebPoseReaction, null);
+  assert.equal(baseline.webPoseLeanApplied, false);
+
+  const struck = draw(1, { state: 'hit', time: .16 });
+  assert.equal(struck.actorWebPoseReaction.kind, 'hit');
+  assert.equal(struck.webPoseLeanApplied, true);
+  assert.ok(struck.weaponAttachmentMatrix[13] > .1);
+  assert.ok(struck.boneModelMatrices[16 + 13] > .1);
+  const hitPalette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
+  assert.ok(hitPalette[16 + 1] > .1, 'GPU skin rotation follows the same lean as collision/socket');
+
+  const opposite = draw(2, { state: 'hit', time: .16 });
+  assert.ok(opposite.weaponAttachmentMatrix[13] < -.1, 'distinct actors react in opposite directions');
+  near(Array.from(baseline.weaponAttachmentMatrix), originalSocket);
+  assert.ok(struck.weaponAttachmentMatrix[13] > .1, 'owned receipt survives the other actor draw');
+
+  const melee = draw(1, { state: 'punch', time: .18 });
+  assert.equal(melee.actorWebPoseReaction.kind, 'punch');
+  assert.equal(melee.webPoseLeanApplied, true);
+  assert.notDeepEqual(Array.from(melee.boneModelMatrices), Array.from(baseline.boneModelMatrices));
+
+  const recovered = draw(1, { state: 'hit', time: .36 });
+  assert.equal(recovered.actorWebPoseReaction, null);
+  near(Array.from(recovered.weaponAttachmentMatrix), originalSocket);
+
+  const finalChild = identity();
+  finalChild[12] = 1;
+  const solved = draw(1, {
+    state: 'hit', time: .16,
+    solvedPose: { rig: pass.rig, provenance: 'synthetic death pose',
+      boneModelMatrices: new Float32Array([...identity(), ...finalChild]) },
+  });
+  assert.equal(solved.solvedPoseApplied, true);
+  assert.equal(solved.webPoseLeanApplied, false, 'Web accent must never modify ragdoll/death pose');
+  near(Array.from(solved.weaponAttachmentMatrix), originalSocket);
+
+  const before = calls.filter(call => call[0] === 'draw').length;
+  assert.throws(() => pass.draw({
+    instance: pass.createInstance({ clip: 'hit', playback: 'clamp' }),
+    modelMatrix: identity(), viewProjection: identity(),
+    color: [.8, .1, .2, 1], time: .16,
+    webPoseLean: { pitch: 100, roll: 0 },
+  }), /bounded pitch\/roll/);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, before);
+  pass.dispose();
+});
+
+test('source fire action produces a visible post-shot Web recoil without moving the firing-edge muzzle', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic recoil test', coordinates: 'synthetic local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const frameAt = (actorId, time, blend = 1) => actors.drawActor({
+    actorId,
+    pose: { state: 'idle', time: 0,
+      action: { state: 'fire', time, weight: 1, blend } },
+    modelMatrix: identity(), viewProjection: identity(),
+    color: [.8, .1, .2, 1],
+  });
+
+  const atShot = frameAt('enemy-A', 0);
+  assert.equal(atShot.actorWebPoseReaction, null,
+    'shot time zero must retain the original source muzzle aim');
+  assert.equal(atShot.webPoseLeanApplied, false);
+  const shotSocket = Array.from(atShot.weaponAttachmentMatrix);
+
+  const recoiling = frameAt('enemy-A', .15);
+  assert.equal(recoiling.actorWebPoseReaction.kind, 'fire');
+  assert.ok(recoiling.actorWebPoseReaction.pitch > .1);
+  assert.equal(recoiling.webPoseLeanApplied, true);
+  assert.ok(Math.abs(recoiling.weaponAttachmentMatrix[13] - shotSocket[13]) > .03,
+    'recoil must move the actual rendered weapon socket in world space');
+  assert.ok(Math.abs(recoiling.boneModelMatrices[16 + 13]) > .03,
+    'live model-space bones for hitboxes follow the GPU recoil');
+  const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
+  assert.ok(Math.abs(palette[16 + 1]) > .03,
+    'the weighted GPU palette rotates with the same receipt');
+
+  const opposite = frameAt('enemy-B', .15);
+  assert.ok(recoiling.actorWebPoseReaction.roll * opposite.actorWebPoseReaction.roll < 0,
+    'opposite stable actor IDs produce distinct recoil silhouettes');
+  near(Array.from(atShot.weaponAttachmentMatrix), shotSocket);
+  assert.notEqual(opposite.weaponAttachmentMatrix, recoiling.weaponAttachmentMatrix);
+
+  const suppressed = frameAt('enemy-A', .15, 0);
+  assert.equal(suppressed.actorWebPoseReaction, null,
+    'source action blend zero must not introduce procedural recoil');
+  const settled = frameAt('enemy-A', .9);
+  assert.equal(settled.actorWebPoseReaction, null);
+  assert.equal(settled.webPoseLeanApplied, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 5);
+  pass.dispose();
+});
+
+
+test('Web-only impact glow hits the actual GPU material once, fades, and spares ragdolls', () => {
+  const pkg = transitionPackage();
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (time, solvedPose = null) => actors.drawActor({
+    actorId: 'enemy-impact',
+    pose: { state: 'hit', time, ...(solvedPose ? { solvedPose } : {}) },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+  const impact = draw(0);
+  assert.equal(impact.actorWebHitFlash, 1, 'accepted hit begins white-hot');
+  assert.equal(impact.webHitFlashIntensity, 1);
+  assert.equal(impact.webHitFlashDesign, 'Web-only white-hot damage pulse');
+  const fading = draw(.11);
+  assert.ok(fading.actorWebHitFlash > .2 && fading.actorWebHitFlash < .3);
+  const settled = draw(.22);
+  assert.equal(settled.actorWebHitFlash, 0);
+  const solved = draw(.05, { rig: pass.rig, provenance: 'authored death fixture',
+    boneModelMatrices: new Float32Array([...identity(), ...identity()]) });
+  assert.equal(solved.actorWebHitFlash, 0, 'ragdoll never flashes from the hit pose');
+  assert.deepEqual(calls.filter(call => call[0] === 'hitFlash' && call[1] === 'uWebHitFlash')
+    .map(call => call[2]), [1, fading.actorWebHitFlash, 0, 0]);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 4,
+    'the full-body crystal hit pulse requires no second draw');
+  assert.throws(() => pass.draw({
+    instance: pass.createStateInstance('hit'), time: 0,
+    modelMatrix: identity(), viewProjection: identity(), color: [.8,.1,.2,1],
+    webHitFlash: 2,
+  }), /hit flash must be a finite intensity/);
+  pass.dispose();
+});
+
+
+test('Web locomotion bank follows live per-actor strafing while sparing shots, teleports and ragdolls', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic test socket', coordinates: 'synthetic local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, x, z, clock, extra = {}) => {
+    const matrix = identity();
+    matrix[12] = x;
+    matrix[14] = z;
+    return actors.drawActor({
+      actorId, pose: { state: 'run', time: Math.max(0, clock - .85), ...extra },
+      modelMatrix: matrix, viewProjection: identity(),
+      shaderTime: clock, color: [.8, .1, .2, 1],
+    });
+  };
+
+  const first = draw('strafing', 0, 0, 1);
+  assert.equal(first.actorWebPoseReaction, null, 'no invented movement on first frame');
+  const leaning = draw('strafing', .28, .15, 1.1);
+  assert.equal(leaning.actorWebPoseReaction.kind, 'locomotion');
+  assert.ok(leaning.actorWebPoseReaction.roll < -.1);
+  assert.ok(leaning.actorWebPoseReaction.pitch < -.02);
+  assert.equal(leaning.webPoseLeanApplied, true);
+  const fresh = draw('fresh', .28, .15, 1.1);
+  assert.equal(fresh.webPoseLeanApplied, false, 'other actor has independent history');
+  assert.notDeepEqual(Array.from(leaning.boneModelMatrices), Array.from(fresh.boneModelMatrices));
+  assert.ok(Math.abs(leaning.weaponAttachmentMatrix[13] - fresh.weaponAttachmentMatrix[13]) > .05,
+    'weapon socket follows the same banked bones, not a separate visual transform');
+  const uploaded = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  assert.equal(uploaded.length, 3, 'GPU palette is submitted once per real enemy draw');
+
+  const shot = draw('strafing', .55, .30, 1.2, {
+    action: { state: 'fire', time: 0, weight: 1, blend: 1 },
+  });
+  assert.equal(shot.actorWebPoseReaction, null,
+    'no strafe banking on the real firing edge: deferred muzzle aim is preserved');
+  assert.equal(shot.webPoseLeanApplied, false);
+
+  assert.equal(draw('strafing', 40, 0, 1.3).actorWebPoseReaction, null,
+    'teleport cannot create a fake dramatic bank');
+  assert.equal(draw('strafing', 40.2, 0, 1.65).actorWebPoseReaction, null,
+    'paused or delayed frames are not velocity samples');
+  assert.equal(draw('strafing', 40.3, 0, 0).actorWebPoseReaction, null,
+    'REJOUER rewinds the clock without carrying old momentum');
+
+  const death = draw('strafing', 40.3, 0, .1, {
+    solvedPose: { rig: pass.rig, provenance: 'synthetic ragdoll frame',
+      boneModelMatrices: new Float32Array([...identity(), ...identity()]) },
+  });
+  assert.equal(death.webPoseLeanApplied, false);
+  assert.equal(draw('strafing', 40.4, 0, .2).actorWebPoseReaction, null,
+    'externally solved ragdoll clears this actor movement history');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 9);
+  pass.dispose();
+});
+
+
+test('Web J3 sentry breathing and real turning animate the same GPU bones/socket without disturbing fire or death', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'authored J3 fixture', coordinates: 'test bone local',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, poseTime, shaderTime, heading = 0, extra = {}) => {
+    const model = identity();
+    model[0] = Math.cos(heading);
+    model[2] = -Math.sin(heading);
+    model[8] = Math.sin(heading);
+    model[10] = Math.cos(heading);
+    return actors.drawActor({
+      actorId, pose: { state: 'idle', time: poseTime, ...extra },
+      modelMatrix: model, viewProjection: identity(), shaderTime,
+      color: [.8, .1, .2, 1],
+    });
+  };
+
+  const first = draw('enemy-1', 0, 1);
+  assert.equal(first.actorWebPoseReaction, null, 'fresh idle state should not snap');
+  const breathing = draw('enemy-1', .55, 1.1);
+  assert.equal(breathing.actorWebPoseReaction.kind, 'idle');
+  assert.equal(breathing.webPoseLeanApplied, true);
+  assert.ok(Math.abs(breathing.weaponAttachmentMatrix[13] - first.weaponAttachmentMatrix[13]) > .002,
+    'subtle idle movement must reach the same sampled weapon socket as the GPU pose');
+  assert.notDeepEqual(Array.from(breathing.boneModelMatrices), Array.from(first.boneModelMatrices));
+
+  const turning = draw('enemy-1', .65, 1.2, .25);
+  assert.equal(turning.actorWebPoseReaction.kind, 'turn');
+  assert.ok(Math.abs(turning.actorWebPoseReaction.roll) > .06,
+    'actual heading change must trigger a readable, bounded body bank');
+  assert.ok(Math.abs(turning.actorWebPoseReaction.roll) <= .18);
+  const separate = draw('enemy-2', .65, 1.2);
+  assert.equal(separate.actorWebPoseReaction.kind, 'idle',
+    'another actor must not inherit the first guard heading history');
+
+  const snap = draw('enemy-1', .75, 1.3, 2.8);
+  assert.notEqual(snap.actorWebPoseReaction?.kind, 'turn',
+    'a sudden orientation snap cannot be mistaken for a physical turn');
+  const shot = draw('enemy-1', .8, 1.4, 2.8, {
+    action: { state: 'fire', time: 0, weight: 1, blend: 1 },
+  });
+  assert.equal(shot.actorWebPoseReaction, null,
+    'the firing edge must preserve source muzzle aim, without idle or turn banking');
+  const death = draw('enemy-1', .85, 1.5, 2.8, {
+    solvedPose: { rig: pass.rig, provenance: 'authored solved J3 fixture',
+      boneModelMatrices: new Float32Array([...identity(), ...identity()]) },
+  });
+  assert.equal(death.webPoseLeanApplied, false, 'ragdolls remain fully source-driven');
+  assert.equal(death.actorWebPoseReaction, null);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 7,
+    'no extra draw calls or fabricated meshes for Web-only pose accents');
+  pass.dispose();
+});
+
+test('Web J4 gunshot glow uses accepted fire actions and never tints a solved death', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const actors = createNativeActorSkinRuntime(pass);
+  const fire = (time, blend = 1) => actors.drawActor({
+    actorId: 'source-fire-guard',
+    pose: { state: 'idle', time: .4,
+      action: { state: 'fire', time, weight: 1, blend } },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+
+  assert.equal(fire(0, 0).actorWebFireGlow, 0, 'action blend zero has no pre-shot flash');
+  const glowing = fire(.08);
+  assert.ok(glowing.actorWebFireGlow > .45 && glowing.actorWebFireGlow < 1);
+  assert.equal(glowing.webFireGlowIntensity, glowing.actorWebFireGlow);
+  assert.equal(glowing.webFireGlowDesign, 'Web-only warm discharge afterglow');
+  assert.equal(glowing.actorWebHitFlash, 0, 'fire never masquerades as damage');
+  const continued = fire(.3);
+  assert.ok(continued.actorWebFireGlow > 0 && continued.actorWebFireGlow < glowing.actorWebFireGlow,
+    'source fire speed cannot compress a readable Web glow to a couple of frames');
+  assert.equal(fire(.08, 0).actorWebFireGlow, 0, 'no action blend = no fire glow');
+  const settled = actors.drawActor({
+    actorId: 'source-fire-guard', pose: { state: 'idle', time: .6 },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+  assert.equal(settled.actorWebFireGlow, 0, 'flare stops once the accepted fire action ends');
+  const dead = actors.drawActor({
+    actorId: 'source-fire-guard',
+    pose: { state: 'idle', time: .4, solvedPose: {
+      rig: pass.rig, provenance: 'authored J4 fixture',
+      boneModelMatrices: new Float32Array([...identity(), ...identity()]),
+    } },
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+  });
+  assert.equal(dead.actorWebFireGlow, 0, 'solved ragdoll receives no glow');
+  const uniforms = calls.filter(call => call[0] === 'hitFlash' && call[1] === 'uWebHitFlash');
+  assert.deepEqual(uniforms.map(call => call[3]),
+    [0, glowing.actorWebFireGlow, continued.actorWebFireGlow, 0, 0, 0]);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 6,
+    'afterglow uses existing single GPU skin draw');
+  assert.throws(() => pass.draw({
+    instance: pass.createStateInstance('idle'), time: .1,
+    modelMatrix: identity(), viewProjection: identity(), color: [.8, .1, .2, 1],
+    webFireGlow: 2,
+  }), /fire glow must be a finite intensity/);
+  pass.dispose();
+});
+
+test('Web hit stagger follows the actual rendered facing and live player camera, not actor parity', () => {
+  const pkg = transitionPackage();
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'authored socket fixture', coordinates: 'authored local frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (cameraPosition, modelMatrix = identity(), solvedPose = null) =>
+    actors.drawActor({
+      actorId: 'same-actor',
+      pose: { state: 'hit', time: .11, ...(solvedPose ? { solvedPose } : {}) },
+      cameraPosition, modelMatrix, viewProjection: identity(), color: [.8, .1, .2, 1],
+    });
+
+  const fromRight = draw([4, 1, 0]);
+  const fromLeft = draw([-4, 1, 0]);
+  assert.equal(fromRight.actorWebPoseReaction.hitDirectionProvenance,
+    'Web camera-facing proxy, not contact origin');
+  assert.ok(fromRight.actorWebPoseReaction.roll > .2);
+  assert.ok(fromLeft.actorWebPoseReaction.roll < -.2);
+  assert.ok(fromRight.actorWebPoseReaction.yaw < -.15,
+    'right-side hits twist away from the player');
+  assert.ok(fromLeft.actorWebPoseReaction.yaw > .15,
+    'left-side hits twist in the opposite direction');
+  assert.ok(fromRight.weaponAttachmentMatrix[8] < -.1 &&
+    fromLeft.weaponAttachmentMatrix[8] > .1,
+    'the weapon socket inherits the directional torso twist');
+  assert.ok(fromRight.weaponAttachmentMatrix[13] > .2);
+  assert.ok(fromLeft.weaponAttachmentMatrix[13] < -.2);
+  assert.ok(fromRight.boneModelMatrices[16 + 13] > .2,
+    'socket and bone matrix must share the GPU pose');
+  const front = draw({ x: 0, y: 1, z: 4 });
+  const rear = draw({ x: 0, y: 1, z: -4 });
+  assert.ok(front.actorWebPoseReaction.pitch < -.15, 'frontal impact throws shoulders back');
+  assert.ok(rear.actorWebPoseReaction.pitch > .15, 'rearward hit throws shoulders forward');
+
+  const turn = [0,0,-1,0, 0,1,0,0, 1,0,0,0, 0,0,0,1];
+  const rotated = draw([4, 1, 0], turn);
+  assert.ok(rotated.actorWebPoseReaction.pitch < -.15,
+    'camera direction is projected into the rotated enemy basis');
+  const fallback = draw(null);
+  assert.equal(fallback.actorWebPoseReaction.hitDirectionProvenance, 'actor-id fallback');
+  const overlapping = draw([0, 1, 0]);
+  assert.equal(overlapping.actorWebPoseReaction.hitDirectionProvenance, 'actor-id fallback');
+
+  const solved = draw([4, 1, 0], identity(), {
+    rig: pass.rig, provenance: 'authored death fixture',
+    boneModelMatrices: new Float32Array([...identity(), ...identity()]),
+  });
+  assert.equal(solved.actorWebPoseReaction, null, 'ragdoll owns its own pose');
+  assert.equal(solved.webPoseLeanApplied, false);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 8,
+    'no added render passes for direction-aware impact feedback');
+  pass.dispose();
+});
+
+test('Web inertial bank eases to idle, freezes on paused time and yields to source transitions', () => {
+  const pkg = precomposedFirePackage();
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'synthetic inertial test socket', coordinates: 'synthetic bone local',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, state, x, z, clock, transition = null) => {
+    const model = identity();
+    model[12] = x;
+    model[14] = z;
+    return actors.drawActor({
+      actorId, pose: { state, time: Math.max(0, clock - .6), ...(transition ? { transition } : {}) },
+      modelMatrix: model, viewProjection: identity(), shaderTime: clock,
+      color: [.8, .1, .2, 1],
+    });
+  };
+  assert.equal(draw('guard', 'run', 0, 0, 1).actorWebPoseReaction, null);
+  const moving = draw('guard', 'run', .28, .15, 1.1);
+  assert.equal(moving.actorWebPoseReaction.kind, 'locomotion');
+  assert.ok(moving.actorWebPoseReaction.roll < -.1);
+  const paused = draw('guard', 'run', .28, .15, 1.1);
+  assert.deepEqual(Array.from(paused.boneModelMatrices), Array.from(moving.boneModelMatrices),
+    'zero game-time must not snap the previously banked GPU pose to upright');
+  assert.deepEqual(Array.from(paused.weaponAttachmentMatrix),
+    Array.from(moving.weaponAttachmentMatrix),
+    'held source pose, weapon socket and hitboxes must freeze together');
+  const settling = draw('guard', 'idle', .28, .15, 1.2);
+  assert.equal(settling.actorWebPoseReaction.kind, 'turn');
+  assert.ok(Math.abs(settling.actorWebPoseReaction.roll) > .012 &&
+    Math.abs(settling.actorWebPoseReaction.roll) < Math.abs(moving.actorWebPoseReaction.roll),
+  'standing still should smoothly shed the inherited locomotion bank');
+  const settled = draw('guard', 'idle', .28, .15, 1.3);
+  assert.equal(settled.actorWebPoseReaction.kind, 'idle',
+    'ordinary breathing resumes once inertial banking has faded');
+  const transitioning = draw('guard', 'run', .48, .15, 1.4,
+    { from: { state: 'idle', time: .4 }, elapsed: .05 });
+  assert.equal(transitioning.actorWebPoseReaction, null,
+    'an accepted source locomotion transition suppresses procedural bank');
+  const resumed = draw('guard', 'run', .68, .15, 1.5);
+  assert.equal(resumed.actorWebPoseReaction.kind, 'locomotion');
+  assert.ok(Math.abs(resumed.actorWebPoseReaction.roll) < .1,
+    'source transition clears inertial history before the next run frame');
+  assert.equal(draw('other', 'run', .68, .15, 1.5).actorWebPoseReaction, null,
+    'new actors cannot inherit banking from other actor IDs');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 8,
+    'inertial pose uses the existing skin draw, not additional GPU passes');
+  pass.dispose();
+});
+
+test('Web J4 slow-motion locomotion banks on world time, not unrelated crystal shader time', () => {
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, precomposedFirePackage());
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, x, poseTime, shaderTime) => {
+    const model = identity();
+    model[12] = x;
+    return actors.drawActor({
+      actorId, pose: { state: 'run', time: poseTime },
+      modelMatrix: model, viewProjection: identity(),
+      shaderTime, color: [.8, .1, .2, 1],
+    });
+  };
+  assert.equal(draw('slow-guard', 0, .4, 1).actorWebPoseReaction, null);
+  const slow = draw('slow-guard', .125, .45, 1.5);
+  assert.equal(slow.actorWebPoseReaction?.kind, 'locomotion',
+    '10x shader-clock advance must not discard real pose-world movement');
+  assert.ok(slow.actorWebPoseReaction.roll < -.04,
+    'actor visibly banks with world velocity despite 10x slowed world time');
+  const paused = draw('slow-guard', .125, .45, 2);
+  assert.equal(paused.actorWebPoseReaction.roll, slow.actorWebPoseReaction.roll,
+    'shader-only time advances cannot settle or unfreeze a game-time pose');
+  assert.deepEqual(Array.from(paused.boneModelMatrices), Array.from(slow.boneModelMatrices),
+    'the GPU pose and collision bones remain frozen together');
+
+  assert.equal(draw('normal-guard', 0, .4, 1).actorWebPoseReaction, null);
+  const normal = draw('normal-guard', .125, .45, 1.05);
+  assert.ok(Math.abs(normal.actorWebPoseReaction.roll - slow.actorWebPoseReaction.roll) < 1e-9,
+    'identical world motion has identical banking regardless of real/shader seconds');
+  const replay = draw('slow-guard', .126, .01, .1);
+  assert.equal(replay.actorWebPoseReaction, null,
+    'replayed actor ID must not inherit movement through either clock rewind');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 6,
+    'the slow-motion fix adds no extra indexed GPU draws');
+  pass.dispose();
+});
+
+
+test('Web head gaze turns the sampled Head subtree without turning the real weapon socket or frozen poses', () => {
+  // Fully authored four-bone humanoid branch and two independent children:
+  // no Unity mesh, animation clip, controller or proprietary byte is copied.
+  const moved = (x, y, z) => {
+    const matrix = identity();
+    matrix[12] = x; matrix[13] = y; matrix[14] = z;
+    return matrix;
+  };
+  const idleFrame = {
+    positions: [0,0,0, 0,1,0, 0,.4,0, 1,0,0],
+    rotations: Array.from({length: 4}, () => [0,0,0,1]).flat(),
+    scales: Array.from({length: 4}, () => [1,1,1]).flat(),
+  };
+  const base = sourcePackage();
+  const pkg = sourcePackage({
+    bones: [
+      {name:'root', parent:-1, position:[0,0,0], rotation:[0,0,0,1], scale:[1,1,1]},
+      {name:'neck', parent:0, position:[0,1,0], rotation:[0,0,0,1], scale:[1,1,1]},
+      {name:'Head', parent:1, position:[0,.4,0], rotation:[0,0,0,1], scale:[1,1,1]},
+      {name:'hand', parent:0, position:[1,0,0], rotation:[0,0,0,1], scale:[1,1,1]},
+    ],
+    mesh: {
+      ...base.mesh,
+      positions: [0,1.4,0, .4,1.4,0, 0,2,0],
+      jointIndices: Array.from({length:3}, () => [2,0,0,0]).flat(),
+      inverseBindMatrices: [
+        ...identity(), ...moved(0,-1,0), ...moved(0,-1.4,0), ...moved(-1,0,0),
+      ],
+    },
+    clips: {
+      idle: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
+      hit: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
+    },
+    states: {
+      idle: {clip:'idle', playback:'loop', speed:1},
+      hit: {clip:'hit', playback:'clamp', speed:1},
+    },
+    weaponAttachment: {
+      bone:'hand', localMatrix:identity(),
+      source:'authored head-gaze fixture', coordinates:'authored test basis',
+    },
+  });
+  const {gl, calls} = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  assert.equal(pass.webHeadTrackingAvailable, true);
+  const actors = createNativeActorSkinRuntime(pass);
+  const controlActors = createNativeActorSkinRuntime(pass);
+  const control = time => controlActors.drawActor({
+    actorId:'watchman', pose:{state:'idle', time},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:null, shaderTime:time * 10,
+    color:[.8,.1,.2,1],
+  });
+  const draw = (time, x, z, extra = {}, y = 1.5) => actors.drawActor({
+    actorId: 'watchman', pose: {state:'idle', time, ...extra},
+    modelMatrix: identity(), viewProjection: identity(),
+    cameraPosition: {x, y, z}, shaderTime: time * 10,
+    color: [.8,.1,.2,1],
+  });
+  const first = draw(0, 5, 5);
+  const sourceAtRight = control(.1);
+  assert.equal(first.actorWebHeadLook, null, 'first pose does not invent a snap');
+  const lookingRight = draw(.1, 5, 5);
+  assert.equal(lookingRight.webHeadLookApplied, true);
+  assert.ok(lookingRight.actorWebHeadLook.yaw > .1);
+  assert.ok(lookingRight.boneModelMatrices[2*16 + 8] > .1,
+    'the real head bone rotates toward the right');
+  near(Array.from(lookingRight.boneModelMatrices.slice(0, 16)),
+    Array.from(sourceAtRight.boneModelMatrices.slice(0,16)));
+  near(Array.from(lookingRight.boneModelMatrices.slice(3*16,4*16)),
+    Array.from(sourceAtRight.boneModelMatrices.slice(3*16,4*16)));
+  near(Array.from(lookingRight.weaponAttachmentMatrix),
+    Array.from(sourceAtRight.weaponAttachmentMatrix));
+  const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
+  assert.ok(palette[8] > .1, 'GPU palette receives the same head turn');
+
+  const paused = draw(.1, -5, 5);
+  assert.equal(paused.actorWebHeadLook.yaw, lookingRight.actorWebHeadLook.yaw,
+    'shader-only/camera changes never animate a frozen world frame');
+  near(Array.from(paused.boneModelMatrices), Array.from(lookingRight.boneModelMatrices));
+  const lookingLeft = draw(.21, -5, 5);
+  assert.ok(lookingLeft.actorWebHeadLook.yaw < 0, 'head glances to the opposite side');
+  near(Array.from(lookingLeft.weaponAttachmentMatrix),
+    Array.from(control(.21).weaponAttachmentMatrix));
+
+  const above = draw(.33, 0, 5, {}, 4.5);
+  assert.ok(above.actorWebHeadLook.pitch > .1, 'head looks up toward a higher player');
+  assert.ok(above.boneModelMatrices[2*16 + 9] > .1,
+    'the original Head branch pitches up without an additional GPU draw');
+  near(Array.from(above.weaponAttachmentMatrix),
+    Array.from(control(.33).weaponAttachmentMatrix));
+  const frozenAbove = draw(.33, 0, 5, {}, -3);
+  assert.equal(frozenAbove.actorWebHeadLook.pitch, above.actorWebHeadLook.pitch,
+    'frozen world-time pose ignores player altitude changes');
+  near(Array.from(frozenAbove.boneModelMatrices), Array.from(above.boneModelMatrices));
+  const below = draw(.46, 0, 5, {}, -3);
+  assert.ok(below.actorWebHeadLook.pitch < 0, 'head follows a player below the enemy');
+  assert.ok(below.boneModelMatrices[2*16 + 9] < 0);
+  near(Array.from(below.weaponAttachmentMatrix),
+    Array.from(control(.46).weaponAttachmentMatrix));
+
+  const dead = draw(.50, 5, 5, {solvedPose:{
+    rig:pass.rig, provenance:'authored solved pose',
+    boneModelMatrices:new Float32Array([
+      ...identity(), ...moved(0,1,0), ...moved(0,1.4,0), ...moved(1,0,0),
+    ]),
+  }});
+  assert.equal(dead.webHeadLookApplied, false, 'externally solved death remains authoritative');
+  assert.equal(dead.actorWebHeadLook, null);
+
+  // An accepted real hit state may add a secondary, Web-only head whiplash.
+  // It must never move weapon attachments, shoulders or the root independently.
+  const hit = (time, origin, solvedPose = null) => actors.drawActor({
+    actorId:'hit-watchman',
+    pose:{state:'hit', time, hitOrigin:origin, hitEventId:'bullet-1', solvedPose},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:[-5, 1.4, 0], shaderTime:1 + time,
+    color:[.8,.1,.2,1],
+  });
+  const initialHit = hit(0, {x:5,y:1,z:0});
+  assert.equal(initialHit.actorWebHeadLook, null, 'firing/contact edge does not snap the head');
+  const stagger = hit(.12, {x:5,y:1,z:0});
+  assert.equal(stagger.actorWebHeadLook?.design, 'Web-only secondary hit head whiplash');
+  assert.ok(stagger.actorWebHeadLook.roll < -.08, 'head bends away from a right-side impact');
+  assert.equal(stagger.webHeadLookApplied, true);
+
+  const torsoOnly = pass.draw({
+    instance:pass.createStateInstance('hit'), time:.12,
+    modelMatrix:identity(), viewProjection:identity(),
+    color:[.8,.1,.2,1], webPoseLean:stagger.actorWebPoseReaction,
+  });
+  for (const bone of [0,1,3]) {
+    near(Array.from(stagger.boneModelMatrices.slice(bone*16,(bone+1)*16)),
+      Array.from(torsoOnly.boneModelMatrices.slice(bone*16,(bone+1)*16)));
+  }
+  near(Array.from(stagger.weaponAttachmentMatrix),
+    Array.from(torsoOnly.weaponAttachmentMatrix));
+  assert.ok(Math.abs(stagger.boneModelMatrices[2*16] - torsoOnly.boneModelMatrices[2*16]) > .02,
+    'only the existing Head subtree receives the second deformation');
+  const hitPaletteCalls = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]');
+  assert.ok(hitPaletteCalls.length > 0, 'head whiplash uses the existing GPU palette');
+  pass.dispose();
+});
+
+
+test('Dojo source-named neck chain actually animates the GPU head with no Head bone', () => {
+  // Independent, noncommercial rig fixture using ONLY the published source
+  // joint NAMES/ancestry, not source vertices, bind poses or animation bytes.
+  // The real 62-joint Dojo rig has no literal Head: neck 01 is parent of
+  // neck Top and both are skinned. The previous regex disabled this feature.
+  const translated = (x, y, z) => {
+    const m = identity();
+    m[12] = x; m[13] = y; m[14] = z;
+    return m;
+  };
+  const rest = {
+    positions: [0,0,0, 0,1,0, 0,.4,0, 1,0,0],
+    rotations: Array.from({length:4}, () => [0,0,0,1]).flat(),
+    scales: Array.from({length:4}, () => [1,1,1]).flat(),
+  };
+  const base = sourcePackage();
+  const pkg = sourcePackage({
+    bones: [
+      {name:'root',parent:-1,position:[0,0,0],rotation:[0,0,0,1],scale:[1,1,1]},
+      {name:'jnt_Neck_01',parent:0,position:[0,1,0],rotation:[0,0,0,1],scale:[1,1,1]},
+      {name:'jnt_Neck_Top',parent:1,position:[0,.4,0],rotation:[0,0,0,1],scale:[1,1,1]},
+      {name:'hand',parent:0,position:[1,0,0],rotation:[0,0,0,1],scale:[1,1,1]},
+    ],
+    mesh: {
+      ...base.mesh,
+      positions: [0,1,0, .4,1.4,0, 0,2,0],
+      jointIndices: [1,0,0,0, 2,0,0,0, 2,0,0,0],
+      inverseBindMatrices: [
+        ...identity(), ...translated(0,-1,0),
+        ...translated(0,-1.4,0), ...translated(-1,0,0),
+      ],
+    },
+    clips: {idle:{duration:1,sampleRate:1,frames:[rest,rest]}},
+    states: {idle:{clip:'idle',playback:'loop',speed:1}},
+    weaponAttachment: {
+      bone:'hand',localMatrix:identity(),
+      source:'synthetic neck-branch fixture',coordinates:'authored rig',
+    },
+  });
+  const {gl,calls} = mockGl();
+  const pass = createNativeSkinPass(gl,pkg);
+  assert.equal(pass.webHeadTrackingAvailable,true);
+  assert.equal(pass.webHeadPivotBone,1);
+  assert.equal(pass.webHeadSampleBone,2);
+  assert.equal(pass.webHeadPivotIdentity,'source jnt_Neck_01 -> jnt_Neck_Top');
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (time, cameraPosition) => actors.drawActor({
+    actorId:'dojo-neck-test',pose:{state:'idle',time},
+    modelMatrix:identity(),viewProjection:identity(),
+    cameraPosition,shaderTime:time*10,color:[.8,.1,.2,1],
+  });
+  const initial = draw(0,{x:5,y:4,z:5});
+  assert.equal(initial.actorWebHeadLook,null);
+  const moving = draw(.12,{x:5,y:4,z:5});
+  // Equal source clip + equal Web idle weight shift, but NO camera gaze:
+  // weapon and other body branches must remain exactly synchronized.
+  const neutral = createNativeActorSkinRuntime(pass).drawActor({
+    actorId:'dojo-neck-test',pose:{state:'idle',time:.12},
+    modelMatrix:identity(),viewProjection:identity(),
+    cameraPosition:null,shaderTime:1.2,color:[.8,.1,.2,1],
+  });
+  assert.equal(moving.webHeadLookApplied,true,
+    'Dojo neck chain must no longer disable all Web head motion');
+  assert.ok(moving.actorWebHeadLook.yaw>.1);
+  assert.ok(moving.actorWebHeadLook.pitch>.05);
+  assert.ok(Math.abs(moving.boneModelMatrices[2*16+8] -
+    neutral.boneModelMatrices[2*16+8])>.05,
+    'the source-neutral weighted terminal neck joint turns in GPU pose');
+  near(Array.from(moving.weaponAttachmentMatrix),Array.from(neutral.weaponAttachmentMatrix));
+  near(Array.from(moving.boneModelMatrices.slice(3*16,4*16)),
+    Array.from(neutral.boneModelMatrices.slice(3*16,4*16)));
+  assert.equal(calls.filter(c=>c[0]==='draw').length,3,
+    'do not add a second draw or material pass for Dojo head motion');
+  pass.dispose();
+
+  const noChain={...pkg,bones:pkg.bones.map((bone,i)=>
+    i===2?{...bone,name:'not-an-authored-neck-tip'}:bone)};
+  const unknown=createNativeSkinPass(mockGl().gl,noChain);
+  assert.equal(unknown.webHeadTrackingAvailable,false,
+    'unrecognized rig identities must remain unchanged instead of guessed');
+  unknown.dispose();
+});
+
+test('Web stun anchors its contact side through player movement and resets on a new event', () => {
+  const pkg = transitionPackage();
+  pkg.clips.hit = { duration: 1, sampleRate: 1, frames: [frame(0), frame(0)] };
+  pkg.states.hit = { clip: 'hit', playback: 'clamp', speed: 1 };
+  pkg.weaponAttachment = {
+    bone: 'child', localMatrix: identity(),
+    source: 'authored socket fixture', coordinates: 'authored model frame',
+  };
+  const { gl, calls } = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const actors = createNativeActorSkinRuntime(pass);
+  const draw = (actorId, time, shaderTime, cameraPosition, extra = {}) =>
+    actors.drawActor({
+      actorId, pose: {state: 'hit', time, ...extra}, shaderTime,
+      cameraPosition, modelMatrix: identity(), viewProjection: identity(),
+      color: [.8, .1, .2, 1],
+    });
+
+  const start = draw('stunned-A', 0, 1, [4, 1, 0], {hitEventId: 'impact-1'});
+  assert.equal(start.actorWebPoseReaction, null, 'zero hit time keeps source weapon pose');
+  const right = draw('stunned-A', .11, 1.11, [4, 1, 0], {hitEventId: 'impact-1'});
+  const movingPlayer = draw('stunned-A', .18, 1.18, [-4, 1, 0],
+    {hitEventId: 'impact-1'});
+  assert.ok(right.actorWebPoseReaction.roll > .1);
+  assert.ok(movingPlayer.actorWebPoseReaction.roll > .1,
+    'a moving camera cannot reverse an already accepted stun impulse');
+  assert.equal(movingPlayer.actorWebPoseReaction.hitDirectionProvenance,
+    'Web camera-facing proxy, not contact origin');
+  assert.ok(movingPlayer.weaponAttachmentMatrix[8] < 0,
+    'the actual weapon socket follows the locked skinned recoil');
+
+  const other = draw('stunned-B', .11, 1.18, [-4, 1, 0], {hitEventId:'impact-1'});
+  assert.ok(other.actorWebPoseReaction.roll < -.1,
+    'another enemy has independent impact history');
+
+  const trueContact = draw('stunned-A', .21, 1.21, [4, 1, 0], {
+    hitEventId: 'impact-2', hitOrigin: {x:-4, y:1, z:0},
+  });
+  assert.ok(trueContact.actorWebPoseReaction.roll < -.1,
+    'new accepted contact overrides a camera on the opposite side');
+  assert.equal(trueContact.actorWebPoseReaction.hitDirectionProvenance,
+    'Web gameplay contact origin, not native MCD impulse');
+  const continued = draw('stunned-A', .27, 1.27, [4, 1, 0],
+    {hitEventId:'impact-2'});
+  assert.ok(continued.actorWebPoseReaction.roll < 0,
+    'contact origin remains fixed across later frames without repeated payload');
+
+  const beforeInvalid = calls.filter(call => call[0] === 'draw').length;
+  assert.throws(() => draw('stunned-A', .3, 1.3, [4, 1, 0],
+    {hitEventId:'invalid',hitOrigin:{x:NaN,y:1,z:0}}),
+  /hitOrigin requires finite world-space/);
+  assert.equal(calls.filter(call => call[0] === 'draw').length, beforeInvalid,
+    'invalid external contact never produces a GPU draw or poisons the history');
+  const afterFailure = draw('stunned-A', .31, 1.31, [4, 1, 0],
+    {hitEventId:'impact-2'});
+  assert.ok(afterFailure.actorWebPoseReaction.roll < 0);
+
+  const replay = draw('stunned-A', .03, .01, [4, 1, 0],
+    {hitEventId:'impact-1'});
+  assert.ok(replay.actorWebPoseReaction.roll > 0,
+    'world-clock rewind clears the previous stun source');
+  pass.dispose();
+});
+
+test('Web Dojo hip-to-spine recoil plants both legs while bending weighted torso and weapon', () => {
+  // Entirely authored six-bone fixture with the Dojo parent structure, but
+  // no recovered transforms, clips, geometry or other proprietary bytes.
+  const b = (name, parent, position) => ({
+    name, parent, position, rotation: [0, 0, 0, 1], scale: [1, 1, 1],
+  });
+  const inverse = (x, y, z) => {
+    const m = identity();
+    m[12] = -x; m[13] = -y; m[14] = -z;
+    return m;
+  };
+  const bones = [
+    b('jnt_Root', -1, [0, 0, 0]),
+    b('jnt_Hips', 0, [0, 1, 0]),
+    b('jnt_L_Leg_Hip', 1, [-.5, -.5, 0]),
+    b('jnt_R_Leg_Hip', 1, [.5, -.5, 0]),
+    b('jnt_Spine_01', 1, [0, .5, 0]),
+    b('jnt_R_Arm_Wrist', 4, [.5, .3, .2]),
+  ];
+  const pose = {
+    positions: bones.flatMap(bone => bone.position),
+    rotations: bones.flatMap(() => [0, 0, 0, 1]),
+    scales: bones.flatMap(() => [1, 1, 1]),
+  };
+  const pkg = sourcePackage({
+    bones,
+    mesh: {
+      ...sourcePackage().mesh,
+      jointIndices: [2,0,0,0, 3,0,0,0, 5,0,0,0],
+      inverseBindMatrices: [
+        ...inverse(0,0,0), ...inverse(0,1,0),
+        ...inverse(-.5,.5,0), ...inverse(.5,.5,0),
+        ...inverse(0,1.5,0), ...inverse(.5,1.8,.2),
+      ],
+    },
+    clips: {idle: {duration:1, sampleRate:1, frames:[pose,pose]}},
+    weaponAttachment: {
+      bone: 'jnt_R_Arm_Wrist', localMatrix: identity(),
+      source: 'authored-test', coordinates: 'source-neutral test',
+    },
+  });
+  const {gl, calls} = mockGl();
+  const pass = createNativeSkinPass(gl, pkg);
+  const instance = pass.createInstance({clip:'idle',playback:'loop'});
+  const params = {instance, time:.2, modelMatrix:identity(),
+    viewProjection:identity(), color:[.8,.1,.2,1]};
+  const baseline = pass.draw(params);
+  const before = Array.from(baseline.boneModelMatrices);
+  const socketY = baseline.weaponAttachmentMatrix[13];
+  const bank = pass.draw({...params,
+    webPoseLean:{pitch:0,roll:.28,yaw:0}});
+  const after = Array.from(bank.boneModelMatrices);
+  for (const bone of [0,1,2,3]) {
+    near(after.slice(bone*16,(bone+1)*16),
+      before.slice(bone*16,(bone+1)*16));
+  }
+  assert.ok(Math.abs(after[4*16+12] - before[4*16+12]) > .1,
+    'source spine should visibly lean while hips remain planted');
+  assert.ok(bank.weaponAttachmentMatrix[13] > socketY + .1,
+    'the weapon socket follows the upper-body lean');
+  assert.equal(bank.webPoseLeanApplied,true);
+  const uploaded = calls.filter(call => call[0]==='matrix' && call[1]==='uJoints[0]');
+  assert.equal(uploaded.length,2);
+  near(uploaded[0][2].slice(0,32),uploaded[1][2].slice(0,32));
+  assert.notDeepEqual(uploaded[0][2].slice(32),uploaded[1][2].slice(32));
+  assert.equal(calls.filter(call => call[0]==='draw').length,2);
   pass.dispose();
 });

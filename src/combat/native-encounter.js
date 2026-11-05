@@ -18,26 +18,353 @@ const WEB_STRAFE = Object.freeze({
   warmupSeconds: 1.2,
   cycleSeconds: 3.4,
   activeSeconds: 1.35,
+  peekSeconds: 2.4, // Web-only: allow longer side search when muzzle is occluded.
   speedFraction: 0.8,
 });
+
+// J3 Web behavior, not MCD: armed enemies give ground when the player rushes
+// into their personal space. Prefer actual retreat; use diagonals only when
+// the navmesh/capsule or another actor blocks the direct escape.
+const WEB_DISENGAGE = Object.freeze({
+  stopRadiusFraction: 0.8,
+  maximumBodyRadii: 5,
+  speedFraction: 0.85,
+  diagonalBias: 0.6,
+});
+
+// Web-authored finite cover search: after a genuine sighting, scan safe lanes
+// around the last-known feet, without using the player's occluded position.
+// This is Web AI design, NOT a recovered MCD timing or perception contract.
+const WEB_LAST_SEEN_SWEEP = Object.freeze({
+  seconds:1.8,
+  maxBodyRadii:3.5,
+  speedFraction:0.75,
+});
+
+// J3 Web-only witnessed-loss reaction: a nearby enemy that actually sees an
+// ally fall briefly retreats from the impact location. There is no global
+// death alarm, target reveal, invulnerability or native MCD behavior claim.
+const WEB_WITNESSED_LOSS = Object.freeze({
+  witnessBodyRadii:14,
+  retreatSeconds:0.55,
+});
+
+// J3 Web-authored paired pressure: one armed squadmate closes the gap while
+// others hold their firing distance. Pick by stable actor identity, not array
+// iteration or frame timing; an ally's death ends the push immediately.
+// This is a navigation goal only and does not authorize an attack or bypass
+// capsule collisions. No native MCD tactical claim.
+// J3 Web-only squad callouts: a LIVE, unstunned ally with actual line of sight
+// can update a nearby hunter's remembered position, even across cover.
+// Sight is measured for all actors BEFORE movement, so list order cannot make
+// a teammate clairvoyant. Neither the caller nor the recipient gains a shot.
+const WEB_SQUAD_SIGHTING = Object.freeze({
+  rangeBodyRadii: 18,
+  newContactBodyRadii: 1,
+});
+const WEB_SQUAD_PUSH = Object.freeze({
+  stopDistanceFraction: 0.67,
+  minimumStopBodyRadii: 3.2,
+  disengageFraction: 0.62,
+  relaySeconds: 4.8, // Web-only readable leapfrog: swap the assault lead every few seconds.
+});
+
+// J3 Web-original readable crossfire: nearby gunners with ACTUALLY clear
+// muzzles take alternating windows for new shots, rather than opening fire
+// simultaneously. Solo combat and already committed shots are unchanged.
+// This is Web balancing, not recovered MCD timings or squad coordination.
+const WEB_SQUAD_VOLLEY = Object.freeze({
+  beatSeconds: 0.75,
+  rangeBodyRadii: 18,
+});
+// A distant armed actor is not a squadmate. Keep each connected local group
+// independent, including A-B-C chains, so another room cannot elect our point
+// man or force a lone gunner into a needless assault/flanking lane.
+function webLocalArmedSquads(runtime, enemies) {
+  const armed=enemies.filter(actor => participating(actor) &&
+    actor.reaction?.hasWeapon===true && actor.encounter);
+  const range=runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii;
+  const unassigned=new Set(armed), squads=new Map();
+  // Snapshot the entire partition BEFORE the movement loop. Otherwise an
+  // early-moving actor could change which teammates exist for later actors.
+  for (const first of armed) {
+    if (!unassigned.has(first))continue;
+    const squad=[first];
+    unassigned.delete(first);
+    for (let i=0;i<squad.length;i++) {
+      const member=squad[i];
+      for (const candidate of armed) {
+        if (!unassigned.has(candidate) ||
+            Math.hypot(member.x-candidate.x,member.z-candidate.z)>range)continue;
+        // Nearby enemies in separate rooms are NOT one communicating squad.
+        // A real wall between their eye positions splits Web fireteams even
+        // when both independently see the player. Keep the same sight collision
+        // authority as attacks; never infer squad membership through cover.
+        const memberEye={x:member.x,y:member.y+runtime.aimHeight,z:member.z};
+        const candidateEye={x:candidate.x,y:candidate.y+runtime.aimHeight,z:candidate.z};
+        if(nativeSegmentHit(runtime.sightCollision,memberEye,candidateEye)!==null)continue;
+        unassigned.delete(candidate);
+        squad.push(candidate);
+      }
+    }
+    for (const member of squad)squads.set(member,squad);
+  }
+  return squads;
+}
+/** Snapshot the local squad's single breaching leader before ANY actor moves.
+ * A moving or recovering ally must not re-elect the leader midway through
+ * the same encounter frame. Relay the advance between eligible squadmates
+ * on a Web-authored clock so one gunner does not permanently lead every push.
+ * This only selects movement: actual sight, nav, muzzle and weapon gates stay.
+ * @param {object} runtime Current encounter clock and settings.
+ * @param {Map<object,object[]>} localSquads Full non-overlapping armed squads.
+ * @param {Set<object>} observingAllies Actual pre-movement sight witnesses.
+ * @returns {Set<object>} Leaders, at most one per connected local squad.
+ */
+function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
+  const leaders=new Set(), visited=new Set();
+  for (const squad of localSquads.values()) {
+    if (visited.has(squad)) continue;
+    visited.add(squad);
+    if (squad.length<2) continue;
+    const candidates=squad.filter(candidate => {
+      if (!observingAllies.has(candidate)) return false;
+      // An interrupted actor retains squad membership but cannot lead.
+      return !(candidate.reaction.stunRemaining>0 ||
+        candidate.reaction.stunnedThisFrame ||
+        candidate.encounter.webDodgeRemaining>0 ||
+        candidate.encounter.webSuppressionRemaining>0 ||
+        candidate.encounter.webLossRemaining>0 ||
+        candidate.runtime?.pendingShot);
+    });
+    if (!candidates.length) continue;
+    candidates.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+    const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_PUSH.relaySeconds)%candidates.length;
+    leaders.add(candidates[index]);
+  }
+  return leaders;
+}
+
+// J3 Web-only last-stand pressure: the final armed opponent must not become
+// passive simply because the squad breacher lost its covering wingman. Only
+// start the closer pursuit ring after the ACTUAL encounter death receipts
+// leave exactly one active actor and the kill quota is one away. Any new
+// arrival immediately restores ordinary squad/solo spacing; no forced shot.
+function webFinalSurvivorBreacher(runtime, enemy, enemies) {
+  if (runtime.killTarget<2 || runtime.killed<runtime.killTarget-1 ||
+      enemy.reaction?.hasWeapon!==true || !participating(enemy)) return false;
+  let alive=0;
+  for (const actor of enemies) if (participating(actor)) {
+    alive++;
+    if (actor!==enemy || alive>1) return false;
+  }
+  return alive===1;
+}
 
 /** Keep the native collision/navmesh as the authority even for Web-only
  * tactics. Never teleport an actor or cross a blocking actor/player.
  * Blocked lanes reverse once, then the enemy simply holds its position.
  */
-function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
+function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
+  {sideOverride=null, maxDistance=Infinity}={}) {
   const start=position(enemy), state=enemy.encounter;
   const dx=playerFeet.x-start.x, dz=playerFeet.z-start.z, d=Math.hypot(dx,dz);
-  if (d<=EPSILON || !Number.isFinite(d)) return false;
+  if (!Number.isFinite(d) || (d<=EPSILON && sideOverride===null)) return false;
+  // If feet exactly match the last sighting, use actor facing for the search
+  // tangent. Never infer a direction from the currently hidden player.
+  const forwardX=d>EPSILON ? dx/d : Math.sin(enemy.face);
+  const forwardZ=d>EPSILON ? dz/d : -Math.cos(enemy.face);
   const cycle=Math.floor((enemy.clock-WEB_STRAFE.warmupSeconds)/WEB_STRAFE.cycleSeconds);
-  const direction=state.webTacticalSide*(cycle%2===0 ? 1 : -1);
+  const direction=sideOverride ?? state.webTacticalSide*(cycle%2===0 ? 1 : -1);
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_STRAFE.speedFraction;
   if (travel<=EPSILON) return false;
   // Face stays toward the player while the feet move sideways. All movement
   // is done by the existing capsule mover and checked against baked nav data.
   for (const side of [direction,-direction]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
-      x:-dz/d*travel*side,y:0,z:dx/d*travel*side,
+      x:-forwardZ*travel*side,y:0,z:forwardX*travel*side,
+    },runtime.body).position;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON ||
+        distance(moved,playerFeet)>maxDistance+EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null; // A later chase must route from the actual new feet.
+    if(side!==direction && sideOverride===null)state.webTacticalSide=-state.webTacticalSide;
+    return true;
+  }
+  return false;
+}
+/** Retreat using the existing world capsule, navmesh and body-occupancy
+ * constraints. Fail closed near a wall or teammate; never teleport, bypass a
+ * collision or create permission to shoot. Returns true only when feet moved.
+ */
+function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime, {avoidApproaching=null}={}) {
+  const start=position(enemy), state=enemy.encounter;
+  const awayX=start.x-playerFeet.x, awayZ=start.z-playerFeet.z;
+  const length=Math.hypot(awayX,awayZ);
+  const travel=enemy.runtime.speed*scaledDeltaTime*WEB_DISENGAGE.speedFraction;
+  if(!Number.isFinite(length) || length<=EPSILON || travel<=EPSILON)return false;
+  const x=awayX/length, z=awayZ/length, side=state.webTacticalSide;
+  const candidates=[
+    {x,z},
+    {x:x-side*z*WEB_DISENGAGE.diagonalBias,z:z+side*x*WEB_DISENGAGE.diagonalBias},
+    {x:x+side*z*WEB_DISENGAGE.diagonalBias,z:z-side*x*WEB_DISENGAGE.diagonalBias},
+  ];
+  for(const candidate of candidates) {
+    const magnitude=Math.hypot(candidate.x,candidate.z);
+    const moved=moveNativeCharacter(runtime.collision,start,{
+      x:candidate.x/magnitude*travel,y:0,z:candidate.z/magnitude*travel,
+    },runtime.body).position;
+    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON ||
+        (avoidApproaching && distance(moved,avoidApproaching)<distance(start,avoidApproaching)-EPSILON))continue;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null;
+    return true;
+  }
+  return false;
+}
+
+// J3 Web-only active projectile awareness: an enemy may sidestep a real,
+// visible PLAYER projectile already in flight. This is not MCD AI parity and
+// never predicts a click or grants invulnerability. Only the existing swept
+// character mover decides whether the dodge can actually happen.
+const WEB_PROJECTILE_EVADE = Object.freeze({
+  lookaheadSeconds: 0.55,
+  warningBodyRadii: 2.3,
+  dodgeSeconds: 0.38,
+  recoverySeconds: 1.15,
+  speedFraction: 1.12,
+});
+
+// J3 Web-original near-miss suppression: a REAL player projectile passing near
+// (but not directly into) a visible gunner briefly forces a covered retreat.
+// No damage, aim information, native MCD reaction or invulnerability is inferred.
+const WEB_NEAR_MISS = Object.freeze({
+  lookaheadSeconds: 0.35,
+  outerBodyRadii: 5.5,
+  retreatSeconds: 0.55,
+  recoverySeconds: 2.4,
+});
+
+/**
+ * A shot scheduled to disappear before its projected closest pass cannot
+ * credibly provoke an evasive reaction. The shipped Dojo bullet object has
+ * a remaining world-time ttl; legacy synthetic callers without it retain
+ * their prior detection policy. This is Web AI fairness, not an MCD rule.
+ *
+ * @param {object} projectile Live browser projectile snapshot.
+ * @param {number} secondsToPass Predicted world seconds until closest passage.
+ * @returns {boolean} Whether the bullet can still exist at that instant.
+ */
+function webProjectileCanReach(projectile,secondsToPass) {
+  const ttl=projectile.ttl;
+  return ttl===undefined ||
+    (Number.isFinite(ttl) && ttl>0 && secondsToPass<=ttl+EPSILON);
+}
+
+/** Find the earliest observable player bullet that will pass near the body.
+ * @param {object} runtime Source collision/navmesh adapter.
+ * @param {object} enemy Current live enemy.
+ * @param {object[]} projectiles Live projectile snapshots from SH-05.
+ * @returns {{sideX:number,sideZ:number}|null} A safe-direction hint, not a hit.
+ */
+function webIncomingProjectile(runtime, enemy, projectiles) {
+  if (!Array.isArray(projectiles) || projectiles.length===0) return null;
+  let bestTime=Infinity, threat=null;
+  for (const projectile of projectiles) {
+    if (projectile?.friendly!==true || !projectile.pos) continue;
+    const origin=projectile.pos;
+    const v=projectile.velocity ?? {
+      x:projectile.direction?.x*projectile.speed,
+      y:projectile.direction?.y*projectile.speed,
+      z:projectile.direction?.z*projectile.speed,
+    };
+    if (![origin.x,origin.y,origin.z,v.x,v.y,v.z].every(Number.isFinite))continue;
+    const planarSpeedSquared=v.x*v.x+v.z*v.z;
+    if(planarSpeedSquared<=EPSILON)continue;
+    const dx=enemy.x-origin.x,dz=enemy.z-origin.z;
+    const until=(dx*v.x+dz*v.z)/planarSpeedSquared;
+    if(until<=0 || until>WEB_PROJECTILE_EVADE.lookaheadSeconds || until>=bestTime ||
+        !webProjectileCanReach(projectile,until))continue;
+    const closest={x:origin.x+v.x*until,y:origin.y+v.y*until,z:origin.z+v.z*until};
+    if(closest.y<enemy.y || closest.y>enemy.y+runtime.body.height)continue;
+    const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
+    if(separation>runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii)continue;
+    // A projectile hidden behind actual world cover should not trigger an
+    // omniscient sidestep. The trace is checked only for plausible threats.
+    if(nativeSegmentHit(runtime.sightCollision,origin,closest)!==null)continue;
+    const speed=Math.sqrt(planarSpeedSquared);
+    const cross=v.x*dz-v.z*dx;
+    const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
+    bestTime=until;
+    threat={sideX:-v.z/speed*side,sideZ:v.x/speed*side};
+  }
+  return threat;
+}
+
+/** Detect a nearby passing bullet, excluding direct threats handled by the
+ * existing dodge. Cover between the projectile path and the gunner prevents a
+ * supernatural warning; only already-launched player projectiles qualify.
+ * @param {object} runtime Collision and body adapter.
+ * @param {object} enemy Live source-space actor.
+ * @param {object[]} projectiles Actual projectile snapshots.
+ * @returns {{x:number,y:number,z:number}|null} Nearest visible passage point.
+ */
+function webNearMissProjectile(runtime, enemy, projectiles) {
+  if (!Array.isArray(projectiles)) return null;
+  let earliest=Infinity, passage=null;
+  for (const projectile of projectiles) {
+    if (projectile?.friendly!==true || !projectile.pos) continue;
+    const origin=projectile.pos;
+    const velocity=projectile.velocity ?? {
+      x:projectile.direction?.x*projectile.speed,
+      y:projectile.direction?.y*projectile.speed,
+      z:projectile.direction?.z*projectile.speed,
+    };
+    if (![origin.x,origin.y,origin.z,velocity.x,velocity.y,velocity.z].every(Number.isFinite)) continue;
+    const speedSquared=velocity.x**2+velocity.z**2;
+    if (speedSquared<=EPSILON) continue;
+    const until=((enemy.x-origin.x)*velocity.x+(enemy.z-origin.z)*velocity.z)/speedSquared;
+    if (until<=0 || until>WEB_NEAR_MISS.lookaheadSeconds || until>=earliest ||
+        !webProjectileCanReach(projectile,until)) continue;
+    const closest={x:origin.x+velocity.x*until,y:origin.y+velocity.y*until,z:origin.z+velocity.z*until};
+    if (closest.y<enemy.y || closest.y>enemy.y+runtime.body.height) continue;
+    const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
+    if (separation<=runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii ||
+        separation>runtime.body.radius*WEB_NEAR_MISS.outerBodyRadii) continue;
+    const eye={x:enemy.x,y:enemy.y+runtime.aimHeight*0.55,z:enemy.z};
+    if (nativeSegmentHit(runtime.sightCollision,origin,closest)!==null ||
+        nativeSegmentHit(runtime.sightCollision,closest,eye)!==null) continue;
+    earliest=until;
+    passage=closest;
+  }
+  return passage;
+}
+
+/** Shift feet laterally without tunneling, teleportation or fake shooting.
+ * @returns {boolean} Whether a real nav/capsule-approved step occurred.
+ */
+function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
+  const start=position(enemy),state=enemy.encounter;
+  const travel=enemy.runtime.speed*scaledDeltaTime*WEB_PROJECTILE_EVADE.speedFraction;
+  if(!Number.isFinite(travel) || travel<=EPSILON)return false;
+  // A teammate or wall can close the first evasion lane while the opposite
+  // perpendicular lane remains safe. Try both using the SAME swept capsule,
+  // navmesh and live-actor gates; never teleport through the blocker. Remember
+  // the successful side for the remainder of this dodge to avoid oscillation.
+  for(const direction of [1,-1]) {
+    const moved=moveNativeCharacter(runtime.collision,start,{
+      x:state.webDodgeSideX*travel*direction,y:0,z:state.webDodgeSideZ*travel*direction,
     },runtime.body).position;
     if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
@@ -46,12 +373,83 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime) {
         occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
     enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
     enemy.walking=true;
-    state.route=null; // A later chase must route from the actual new feet.
-    if(side!==direction)state.webTacticalSide=-state.webTacticalSide;
+    state.route=null;
+    state.webDodgeSideX*=direction;
+    state.webDodgeSideZ*=direction;
     return true;
   }
   return false;
 }
+
+/** Interrupt a live Web dodge instead of pausing its remaining time across a
+ * stun, despawn or committed shot. The recovery blocks repeated reactions to
+ * the same in-flight bullet after the interrupt ends.
+ * @param {object} state Live encounter state for an enemy.
+ * @returns {void}
+ */
+function cancelWebProjectileEvade(state) {
+  if (!(state.webDodgeRemaining>0)) return;
+  state.webDodgeRemaining=0;
+  state.webDodgeSideX=0;
+  state.webDodgeSideZ=0;
+  state.webDodgeCooldown=Math.max(state.webDodgeCooldown,WEB_PROJECTILE_EVADE.recoverySeconds);
+}
+
+// J3 Web-authored approach lanes: two armed enemies should not both march
+// directly toward the same point before they reach firing range. Route to
+// opposite, reachable positions near the player; never offset the player
+// hitbox, grant firing permission, or bypass the existing path/capsule checks.
+// This is tactical Web design, not a source MCD spawn or AI assignment.
+function webSquadApproachGoal(runtime, enemy, playerFeet, localSquads) {
+  const squad=localSquads.get(enemy);
+  if (!squad || squad.length<2) return null;
+  const dx=playerFeet.x-enemy.x, dz=playerFeet.z-enemy.z;
+  const length=Math.hypot(dx,dz);
+  const offset=Math.min(runtime.body.radius*3.5,runtime.armedStopDistance*0.7);
+  if(!Number.isFinite(length) || length<=EPSILON || offset<=EPSILON)return null;
+  // J3 Web-only fanout: with 3+ gunners, a binary left/right choice sends
+  // multiple allies into the SAME lane. Assign unique, stable lateral slots
+  // around the observed target instead. Keep the existing two-gunner behavior.
+  // This local squad is already snapshotted before movement, so list ordering
+  // cannot switch a route halfway through the encounter frame.
+  let side=enemy.encounter.webTacticalSide;
+  if(squad.length>2) {
+    const sorted=[...squad].sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+    side=Math.max(-2,Math.min(2,sorted.indexOf(enemy)-(sorted.length-1)/2));
+  }
+  // The central actor in an odd-numbered fireteam takes the ordinary direct
+  // route. No fake navigation point or extra movement is introduced.
+  if(side===0)return null;
+  const goal={x:playerFeet.x-dz/length*side*offset,
+    y:playerFeet.y,z:playerFeet.z+dx/length*side*offset};
+  const sample=sampleNativeNavigation(runtime.nav,goal,runtime.body.stepOffset+EPSILON);
+  if(!sample || Math.hypot(sample.position.x-goal.x,sample.position.z-goal.z)>EPSILON)return null;
+  return goal;
+}
+
+// J3 Web-only squad movement: a follower whose routed step is blocked by
+// another living actor briefly takes a swept sidestep instead of stacking up
+// behind them. This changes feet only; it cannot authorize a shot or hit.
+function tryWebSquadDetour(runtime, enemy, from, playerFeet, enemies, scaledDeltaTime) {
+  const dx=playerFeet.x-from.x, dz=playerFeet.z-from.z, length=Math.hypot(dx,dz);
+  const travel=Math.min(runtime.body.radius*0.8,enemy.runtime.speed*scaledDeltaTime*0.8);
+  if(!Number.isFinite(length) || length<=EPSILON || !Number.isFinite(travel) || travel<=EPSILON)return null;
+  const preferred=enemy.encounter.webTacticalSide;
+  for(const side of [preferred,-preferred]) {
+    const moved=moveNativeCharacter(runtime.collision,from,{
+      x:-dz/length*travel*side,y:0,z:dx/length*travel*side,
+    },runtime.body).position;
+    if(Math.hypot(moved.x-from.x,moved.z-from.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+       occupied(runtime,from,moved,enemies,enemy) ||
+       occupiedSegment(from,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.encounter.webTacticalSide=side;
+    return moved;
+  }
+  return null;
+}
+
 function scalar(value, name) {
   if (!Number.isFinite(value) || value < 0) throw new TypeError(name+' must be finite and nonnegative');
   return value;
@@ -132,7 +530,8 @@ export function createNativeEncounter(scene, collision, rng = Math.random, {
     collision, sightCollision, nav, body, maxSnapDistance, points, spawnerPosition, spawnerSettings, enemySettings,
     sourceFactoryPlan,
     spawner:createNativeSpawnerState(spawnerSettings, rng), rng, killTarget, killed:0,
-    actors:new Map(), countedDeaths:new Set(), arrivals:[], nextId:0,
+    actors:new Map(), countedDeaths:new Set(), webObservedDeaths:new Set(), arrivals:[], nextId:0,
+    webVolleyClock:0,
     stunTime:scalar(enemy.StunTime, 'StunTime'), aimHeight:scalar(enemy.AimHeight, 'AimHeight'),
     armedStopDistance:scalar(enemy.MinimumDistanceToPlayer, 'MinimumDistanceToPlayer'),
     unarmedStopDistance:scalar(enemy.MeleeAttackDistance, 'MeleeAttackDistance'),
@@ -173,6 +572,87 @@ function occupiedSegment(start, end, other, radius, height) {
 function occupied(runtime, start, end, enemies, except = null) {
   return enemies.some(other => other !== except && participating(other) &&
     occupiedSegment(start, end, position(other), runtime.body.radius*2, runtime.body.height));
+}
+// J3 Web crossfire: a living teammate between a proven muzzle and the player
+// blocks the fire order. Check the body at the shot's interpolated height;
+// an ally behind the shooter, beyond the target, or already dead is not cover.
+// This is gun permission, NOT a new projectile hitbox or friendly-fire damage.
+function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
+  const dx=target.x-muzzle.x, dz=target.z-muzzle.z;
+  const lengthSquared=dx*dx+dz*dz;
+  if(!Number.isFinite(lengthSquared) || lengthSquared<=EPSILON)return false;
+  const radiusSquared=runtime.body.radius*runtime.body.radius;
+  return enemies.some(other => {
+    if(other===shooter || !participating(other))return false;
+    const t=((other.x-muzzle.x)*dx+(other.z-muzzle.z)*dz)/lengthSquared;
+    if(t<=0 || t>=1)return false;
+    const y=muzzle.y+(target.y-muzzle.y)*t;
+    if(y<other.y || y>other.y+runtime.body.height)return false;
+    const sidewaysX=muzzle.x+dx*t-other.x, sidewaysZ=muzzle.z+dz*t-other.z;
+    return sidewaysX*sidewaysX+sidewaysZ*sidewaysZ<=radiusSquared;
+  });
+}
+/** Compute real muzzle clearance once before any enemy moves, then rotate
+ * fresh firing turns within local visible squads. Covered, unarmed, stunned
+ * and otherwise busy gunners cannot waste an available squad firing window.
+ * Stable IDs make decisions independent of the actors' iteration order.
+ * @param {object} runtime Current source-geometry encounter runtime.
+ * @param {object[]} enemies Actual live actor list.
+ * @param {Set<object>} observers Actors that see the player this frame.
+ * @param {{x:number,y:number,z:number}} target Actual visible target point.
+ * @param {number} scaledDeltaTime Current weapon Update tick, not wall time.
+ * @param {Map<object,object[]>} localSquads Full armed spatial groups, including temporarily busy links.
+ * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>,eligible:Set<object>}}
+ */
+function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime, localSquads) {
+  const clear=new Set(), allyBlocked=new Set(), ready=[];
+  for(const enemy of enemies) {
+    if(!participating(enemy) || !enemy.encounter || !enemy.reaction?.hasWeapon ||
+        !observers.has(enemy) || !enemy.muzzlePosition || !enemy.muzzleForward)continue;
+    if(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,target)!==null)continue;
+    clear.add(enemy);
+    if(webAllyShieldsMuzzle(runtime,enemy,enemy.muzzlePosition,target,enemies)) {
+      allyBlocked.add(enemy);
+      continue;
+    }
+    if(enemy.reaction.stunRemaining>0 || enemy.reaction.stunnedThisFrame ||
+        enemy.runtime?.pendingShot || enemy.encounter.webDodgeRemaining>0 ||
+        enemy.encounter.webSuppressionRemaining>0 || enemy.encounter.webLossRemaining>0)continue;
+    ready.push(enemy);
+  }
+  ready.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+  // Overlapping neighbor lists can each elect a different shooter (A-B-C
+  // chain). Partition the *eligible* gunners into disjoint connected squads;
+  // all members then agree on one stable firing turn, regardless of input order.
+  const turn=new Set(), eligibleSquads=new Map();
+  // Partition by the full armed fireteam, not only currently ready shooters.
+  // A suppressed, stunned or covered B still connects A-B-C spatially. If B
+  // temporarily disappears from eligibility, A and C must not each receive
+  // an independent firing turn in the same window.
+  for (const gunner of ready) {
+    const group=localSquads.get(gunner) ?? [gunner];
+    if(!eligibleSquads.has(group))eligibleSquads.set(group,[]);
+    eligibleSquads.get(group).push(gunner);
+  }
+  for(const squad of eligibleSquads.values()) {
+    squad.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
+    const index=Math.floor(runtime.webVolleyClock/WEB_SQUAD_VOLLEY.beatSeconds)%squad.length;
+    // A gunner that cannot finish its existing reload in this weapon Update
+    // must not consume the squad's entire firing window while a partner is
+    // already ready. Keep that gunner IN the component, though: removing it
+    // could split A-B-C into two firing squads and produce double volleys.
+    for (let offset=0;offset<squad.length;offset++) {
+      const candidate=squad[(index+offset)%squad.length];
+      const settings=candidate.activeWeaponSettings ?? runtime.enemySettings;
+      const nextTickCost=scaledDeltaTime*settings.weaponSpeedMultiplier*
+        settings.difficultyWeaponSpeedMultiplier;
+      if (candidate.runtime.attackDelayRemaining<nextTickCost) {
+        turn.add(candidate);
+        break;
+      }
+    }
+  }
+  return {clear,allyBlocked,turn,eligible:new Set(ready)};
 }
 function nearestEnemy(enemies, point) {
   let nearest=null, best=Infinity;
@@ -250,59 +730,316 @@ function spawnEnemy(runtime, point, order, population) {
       ? Object.freeze({status:'qualified',factoryId:activation.factoryId,
         family:activation.family,archetype:activation.archetype,prefabId:activation.prefabId})
       : Object.freeze({status:'web-pistol-fallback',reason:activation.reason}),
-    encounter:{route:null, target:null, visible:false, canAttack:false, spawnPointId:point.id,
-      webTacticalSide:runtime.nextId%2===0 ? 1 : -1},
+    encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
+      webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
+      webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
+      webSearchRemaining:null, webSearchComplete:false,
+      webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
+      webLossRemaining:0,webLossFeet:null,
+      webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
   return enemy;
 }
 
-function moveEnemy(runtime, enemy, input) {
-  const { scaledDeltaTime, playerFeet, playerPosition, enemies } = input;
+// Sample new actual death receipts before moving the squad. Keep a separate
+// seen set from kill accounting: main may call readyForVictory earlier in the
+// frame, and an old corpse must never re-trigger an endless evasive loop.
+// The collider ray from witness eye to the fallen body prevents wallhack panic.
+function applyWebWitnessedLoss(runtime,enemies) {
+  const recent=[];
+  for(const [id,actor] of runtime.actors) {
+    if(living(actor) || runtime.webObservedDeaths.has(id))continue;
+    runtime.webObservedDeaths.add(id);
+    recent.push(actor);
+  }
+  if(recent.length===0)return;
+  for(const enemy of enemies) {
+    if(!participating(enemy) || !enemy.encounter || !enemy.runtime ||
+        enemy.reaction?.stunRemaining>0 || enemy.reaction?.stunnedThisFrame ||
+        enemy.runtime.pendingShot)continue;
+    const eye={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+    let nearest=null,nearestDistance=Infinity;
+    for(const fallen of recent) {
+      if(fallen===enemy)continue;
+      const d=Math.hypot(enemy.x-fallen.x,enemy.z-fallen.z);
+      if(d>=nearestDistance || d>runtime.body.radius*WEB_WITNESSED_LOSS.witnessBodyRadii)continue;
+      const body={x:fallen.x,y:fallen.y+runtime.aimHeight*0.55,z:fallen.z};
+      if(nativeSphereHit(runtime.sightCollision,eye,body,.2)!==null)continue;
+      nearest=fallen;
+      nearestDistance=d;
+    }
+    if(nearest) {
+      enemy.encounter.webLossRemaining=WEB_WITNESSED_LOSS.retreatSeconds;
+      enemy.encounter.webLossFeet=position(nearest);
+    }
+  }
+}
+
+function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquads, breachingLeaders) {
+  const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
   state.canAttack=false;
+  state.webAllyBlockingShot=false;
   enemy.walking=false;
+  state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
+    cancelWebProjectileEvade(state);
+    state.webLossRemaining=0;
+    state.webLossFeet=null;
+    state.webSuppressionRemaining=0;
+    state.webSuppressionFrom=null;
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
   }
   const armed=enemy.reaction.hasWeapon;
-  if (!armed) enemy.runtime.pendingShot=null;
+  if (!armed) {
+    enemy.runtime.pendingShot=null;
+    state.webSuppressionRemaining=0;
+    state.webSuppressionFrom=null;
+  }
+  if (enemy.runtime.pendingShot) {
+    cancelWebProjectileEvade(state);
+    state.webLossRemaining=0;
+    state.webLossFeet=null;
+    state.webSuppressionRemaining=0;
+    state.webSuppressionFrom=null;
+  }
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
   // native eye/AimTarget bone, and cannot authorize firing.
-  const sightOrigin={x:start.x,y:start.y+runtime.aimHeight,z:start.z};
-  state.visible=nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2) === null;
-  state.canAttack=armed && Boolean(enemy.muzzlePosition && enemy.muzzleForward) &&
-    nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,playerPosition) === null;
-  const stopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
-  const stop=state.visible && distance(start,playerFeet) <= stopDistance;
-  // Deliberately Web-only J3 behavior: a visible, muzzle-qualified armed actor
-  // briefly circles the player instead of remaining a stationary firing target.
-  // Per-actor side staggering and periodic reversal are deterministic; no new
-  // attack, projectile or damage is introduced. No movement without nav/capsule
-  // acceptance, and missing muzzle evidence preserves existing behavior.
+  // Measured once for the whole squad at the start of the frame; otherwise
+  // update order would change who has legitimately spotted the player.
+  state.visible=observingAllies.has(enemy);
+  // Web-authored fairness: once an enemy has REALLY observed the player,
+  // losing body sight freezes its last known feet instead of letting it track
+  // live coordinates through walls. Actors that have never seen the player
+  // keep the established Dojo pursuit fallback; no new source AI claim.
+  if(state.visible) {
+    state.webLastSeenFeet={...playerFeet};
+    state.webSearchRemaining=null;
+    state.webSearchComplete=false;
+  } else {
+    // A nearby observer may call out a CURRENTLY witnessed location. Neither
+    // stale ally memories nor the player's hidden position can refresh it.
+    // An unchanged sighting cannot restart a finished cover investigation.
+    let allyWitnessed=false;
+    for(const ally of observingAllies) {
+      if(ally===enemy)continue;
+      if(Math.hypot(ally.x-start.x,ally.z-start.z)<=
+          runtime.body.radius*WEB_SQUAD_SIGHTING.rangeBodyRadii) {
+        allyWitnessed=true;
+        break;
+      }
+    }
+    if(allyWitnessed && (!state.webLastSeenFeet ||
+        Math.hypot(state.webLastSeenFeet.x-playerFeet.x,
+          state.webLastSeenFeet.z-playerFeet.z)>
+          runtime.body.radius*WEB_SQUAD_SIGHTING.newContactBodyRadii)) {
+      state.webLastSeenFeet={...playerFeet};
+      state.webSearchRemaining=null;
+      state.webSearchComplete=false;
+      state.route=null;
+    }
+  }
+  const pursuitFeet=!state.visible && state.webLastSeenFeet
+    ? state.webLastSeenFeet : playerFeet;
+  const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
+  const worldMuzzleClear=fireTurns.clear.has(enemy);
+  // Keep real eye/muzzle/ally authorization intact during a Web squad's
+  // off-turn: GunAttack uses this flag for ALERTNESS and aiming as well as
+  // firing. Dropping it on every second beat would leave both guns permanently
+  // unalert and unable to shoot. Only delay the next UNCOMMITTED shot.
+  state.webAllyBlockingShot=fireTurns.allyBlocked.has(enemy);
+  state.canAttack=state.visible && worldMuzzleClear && !state.webAllyBlockingShot;
+  if(state.canAttack && fireTurns.eligible.has(enemy) && !fireTurns.turn.has(enemy)) {
+    const settings=enemy.activeWeaponSettings ?? runtime.enemySettings;
+    const nextTickCost=scaledDeltaTime*settings.weaponSpeedMultiplier*
+      settings.difficultyWeaponSpeedMultiplier;
+    // main.js advances this cooldown once AFTER the encounter step. Leave a
+    // positive remainder without resetting the real aim/alertness pipeline.
+    enemy.runtime.attackDelayRemaining=Math.max(
+      enemy.runtime.attackDelayRemaining,nextTickCost+EPSILON);
+  }
+  // An actual incoming player projectile may provoke a short tactical dodge
+  // even while chasing. Original MCD enemy AI is not claimed here. No change
+  // to existing tactics when the SH-05 projectile snapshot is absent.
+  state.webDodgeCooldown=Math.max(0,state.webDodgeCooldown-scaledDeltaTime);
+  if(state.visible && !enemy.runtime.pendingShot &&
+      state.webDodgeRemaining<=0 && state.webDodgeCooldown<=EPSILON) {
+    const threat=webIncomingProjectile(runtime,enemy,playerProjectiles);
+    if(threat) {
+      state.webDodgeRemaining=WEB_PROJECTILE_EVADE.dodgeSeconds;
+      state.webDodgeSideX=threat.sideX;
+      state.webDodgeSideZ=threat.sideZ;
+    }
+  }
+  // A moving dodge is an evasive action, not a simultaneous firing stance.
+  // Block a NEW gun attack even when the muzzle was clear before side-stepping;
+  // an already committed pending shot has cancelled the dodge above.
+  if(state.webDodgeRemaining>0) state.canAttack=false;
+  if(state.webDodgeRemaining>0 && !enemy.runtime.pendingShot && scaledDeltaTime>0) {
+    advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+      'running',scaledDeltaTime);
+    const moved=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime);
+    state.webDodgeRemaining=Math.max(0,state.webDodgeRemaining-scaledDeltaTime);
+    if(!moved || state.webDodgeRemaining===0) {
+      state.webDodgeCooldown=WEB_PROJECTILE_EVADE.recoverySeconds;
+      if(!moved)state.webDodgeRemaining=0;
+    }
+    if(moved)return;
+  }
+  // Witnessed teammate losses produce one brief, geometry-constrained retreat
+  // away from the ACTUAL corpse, not the player's hidden/current location.
+  // No gun permission is granted during this evasive beat.
+  if(state.webLossRemaining>0 && state.webLossFeet && scaledDeltaTime>0 &&
+      !enemy.runtime.pendingShot) {
+    advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+      'running',scaledDeltaTime);
+    const moved=tryWebDisengage(runtime,enemy,state.webLossFeet,enemies,scaledDeltaTime);
+    state.webLossRemaining=Math.max(0,state.webLossRemaining-scaledDeltaTime);
+    state.canAttack=false;
+    if(!moved || state.webLossRemaining<=EPSILON) {
+      state.webLossRemaining=0;
+      state.webLossFeet=null;
+    }
+    if(moved)return;
+  }
+  // Genuine near-misses create a brief opportunity to reposition, but direct
+  // threats retain priority in the existing dodge. Preserve committed shots.
+  // Shooting permission is withheld during movement, not permanently disabled.
+  // A near-miss is physical evidence of danger even when the shooter is
+  // hidden. It may move an enemy, but must not reveal the hidden player or
+  // authorize a shot; the world/bullet visibility casts remain mandatory.
+  if (armed && scaledDeltaTime>0 && !enemy.runtime.pendingShot &&
+      state.webDodgeRemaining<=0 && state.webSuppressionRemaining<=0 &&
+      state.webSuppressionCooldown<=EPSILON) {
+    const passage=webNearMissProjectile(runtime,enemy,playerProjectiles);
+    if (passage) {
+      state.webSuppressionFrom=passage;
+      state.webSuppressionRemaining=WEB_NEAR_MISS.retreatSeconds;
+    }
+  }
+  if (state.webSuppressionRemaining>0 && state.webSuppressionFrom && scaledDeltaTime>0 &&
+      !enemy.runtime.pendingShot) {
+    advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+      'running',scaledDeltaTime);
+    // A shot from behind must not make a suppressed gunner rush the player.
+    // Side-step instead if every safe retreat vector shortens that gap.
+    // Never steer a blind response using the player's CURRENT hidden feet.
+    // The bullet passage is real evidence; last-known sightings do not grant
+    // any attack permission or fresh target location.
+    const safeReference=state.visible ? playerFeet : state.webSuppressionFrom;
+    const moved=tryWebDisengage(runtime,enemy,state.webSuppressionFrom,enemies,scaledDeltaTime,
+      {avoidApproaching:state.visible ? playerFeet : null}) ||
+      tryWebStrafe(runtime,enemy,safeReference,enemies,scaledDeltaTime,
+        {sideOverride:state.webTacticalSide});
+    state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
+    state.canAttack=false;
+    if (!moved || state.webSuppressionRemaining<=EPSILON) {
+      state.webSuppressionRemaining=0;
+      state.webSuppressionFrom=null;
+      state.webSuppressionCooldown=WEB_NEAR_MISS.recoverySeconds;
+    }
+    if (moved) return;
+  }
+  // A single, stable armed squadmate pressures the player while its allies
+  // maintain their normal firing ring. No assigned partner, blocked line of
+  // sight or deferred shot means the ordinary chase/stop behavior applies.
+  const breaching=armed && state.visible && !enemy.runtime.pendingShot &&
+    (breachingLeaders.has(enemy) ||
+      webFinalSurvivorBreacher(runtime,enemy,enemies));
+  const normalStopDistance=armed ? runtime.armedStopDistance : runtime.unarmedStopDistance;
+  const stopDistance=breaching
+    ? Math.min(normalStopDistance,Math.max(
+        runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
+        normalStopDistance*WEB_SQUAD_PUSH.stopDistanceFraction))
+    : normalStopDistance;
+  const playerDistance=distance(start,playerFeet);
+  const stop=state.visible && playerDistance <= stopDistance;
+  // Search starts only after genuinely reaching previously seen feet. Once
+  // started it stays in search mode even when strafing away from that point.
+  // After a bounded sweep, hold there until REAL line of sight reacquires.
+  if(!state.visible && state.webLastSeenFeet &&
+      (state.webSearchRemaining!==null || state.webSearchComplete ||
+        distance(start,pursuitFeet)<=runtime.body.radius*0.8)) {
+    if(state.webSearchRemaining===null && !state.webSearchComplete)
+      state.webSearchRemaining=WEB_LAST_SEEN_SWEEP.seconds;
+    state.route=null;
+    state.target={...pursuitFeet};
+    const sx=pursuitFeet.x-start.x, sz=pursuitFeet.z-start.z;
+    if(sx || sz)enemy.face=Math.atan2(sx,-sz);
+    enemy.runtime.speed=0;
+    if(state.webSearchRemaining>0 && scaledDeltaTime>0 && !enemy.runtime.pendingShot) {
+      advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+        'walking',scaledDeltaTime);
+      const elapsed=WEB_LAST_SEEN_SWEEP.seconds-state.webSearchRemaining;
+      const side=elapsed<WEB_LAST_SEEN_SWEEP.seconds/2
+        ? state.webTacticalSide : -state.webTacticalSide;
+      const moved=tryWebStrafe(runtime,enemy,pursuitFeet,enemies,
+        scaledDeltaTime*WEB_LAST_SEEN_SWEEP.speedFraction,{
+          sideOverride:side,maxDistance:runtime.body.radius*WEB_LAST_SEEN_SWEEP.maxBodyRadii,
+        });
+      if(!moved)enemy.runtime.speed=0;
+      state.webSearchRemaining=Math.max(0,state.webSearchRemaining-scaledDeltaTime);
+      if(state.webSearchRemaining<=EPSILON)state.webSearchComplete=true;
+    }
+    return;
+  }
+  // The pushing actor's close-contact retreat must not cancel the shorter
+  // approach ring. Everyone else retains the original Web retreat distance.
+  const disengageDistance=Math.min(stopDistance*(breaching
+    ? WEB_SQUAD_PUSH.disengageFraction : WEB_DISENGAGE.stopRadiusFraction),
+    runtime.body.radius*WEB_DISENGAGE.maximumBodyRadii);
+  const disengaging=stop && armed && !enemy.runtime.pendingShot &&
+    playerDistance<disengageDistance;
+  // J3 Web-only tactics: a body-visible enemy whose *known* muzzle is
+  // obstructed must not freeze at its stop radius. Seek a lateral firing lane
+  // with the same nav/capsule/occupancy gates as ordinary strafing. A missing
+  // muzzle is not evidence of an obstructed shot and must not trigger peeking.
+  // Longer peek bursts make it possible to move past low cover; short shooting
+  // pauses remain once the muzzle line opens. No shot/damage gate is bypassed.
+  const needsFiringLane=stop && armed && state.visible &&
+    Boolean(enemy.muzzlePosition && enemy.muzzleForward) &&
+    (!worldMuzzleClear || state.webAllyBlockingShot) && !enemy.runtime.pendingShot;
   const tacticalTime=enemy.clock-WEB_STRAFE.warmupSeconds;
-  const tactical=stop && armed && state.canAttack && !enemy.runtime.pendingShot &&
-    Number.isFinite(tacticalTime) && tacticalTime>=0 &&
-    tacticalTime%WEB_STRAFE.cycleSeconds<WEB_STRAFE.activeSeconds;
+  const tactical=stop && armed && (state.canAttack || needsFiringLane) &&
+    !enemy.runtime.pendingShot && Number.isFinite(tacticalTime) && tacticalTime>=0 &&
+    tacticalTime%WEB_STRAFE.cycleSeconds<
+      (needsFiringLane ? WEB_STRAFE.peekSeconds : WEB_STRAFE.activeSeconds);
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
-    tactical ? 'walking' : stop ? 'standing' : armed ? 'walking' : 'running',scaledDeltaTime);
-  const dx=playerPosition.x-start.x, dz=playerPosition.z-start.z;
+    (disengaging || tactical) ? 'walking' : stop ? 'standing'
+      : armed && !breaching ? 'walking' : 'running',scaledDeltaTime);
+  const facing=state.visible || !state.webLastSeenFeet ? playerPosition : pursuitFeet;
+  const dx=facing.x-start.x, dz=facing.z-start.z;
   if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   if (stop) {
-    if(tactical && scaledDeltaTime>0 &&
+    if(disengaging && scaledDeltaTime>0) {
+      if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
+    } else if(tactical && scaledDeltaTime>0 &&
         !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
     return;
   }
   if (scaledDeltaTime === 0) return;
-  if (!state.route || !state.target || distance(state.target,playerFeet) > runtime.body.radius ||
+  // When armed allies are pursuing together, seek opposite safe approach
+  // lanes before resuming the normal stop-radius strafe / retreat behavior.
+  // An unreachable offset is never substituted for the direct source route.
+  const flankGoal=armed && state.visible &&
+      playerDistance>stopDistance+runtime.body.radius*2
+    ? webSquadApproachGoal(runtime,enemy,playerFeet,localSquads) : null;
+  const desiredTarget=flankGoal ?? pursuitFeet;
+  if (!state.route || !state.target || distance(state.target,desiredTarget) > runtime.body.radius ||
       state.route.cursor >= state.route.points.length) {
-    state.route=findNativeRoute(runtime.nav,start,playerFeet,{maxSnapDistance:runtime.maxSnapDistance});
-    state.target={...playerFeet};
+    let destination=desiredTarget;
+    state.route=findNativeRoute(runtime.nav,start,destination,{maxSnapDistance:runtime.maxSnapDistance});
+    if(!state.route && flankGoal) {
+      destination=playerFeet;
+      state.route=findNativeRoute(runtime.nav,start,destination,{maxSnapDistance:runtime.maxSnapDistance});
+    }
+    state.target={...destination};
   }
   if (!state.route) { enemy.runtime.speed=0; return; }
   // Navigation uses its baked surface; the body follows the actual collider
@@ -317,10 +1054,17 @@ function moveEnemy(runtime, enemy, input) {
       x:segment.to.x-actual.x,y:Math.min(0,segment.to.y-actual.y),z:segment.to.z-actual.z,
     },runtime.body).position;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    const allyBlocked=occupied(runtime,actual,moved,enemies,enemy);
     if (!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z) > EPSILON ||
-        occupied(runtime,actual,moved,enemies,enemy) ||
+        allyBlocked ||
         occupiedSegment(actual,moved,playerFeet,runtime.body.radius*2,runtime.body.height)) {
       state.route=null;
+      // Only an actor blockage triggers the detour: a wall, disconnected
+      // navmesh, unknown muzzle, or the player's capsule is never bypassed.
+      if(allyBlocked && !enemy.runtime.pendingShot) {
+        const sidestep=tryWebSquadDetour(runtime,enemy,actual,playerFeet,enemies,scaledDeltaTime);
+        if(sidestep)actual=sidestep;
+      }
       break;
     }
     actual=moved;
@@ -340,7 +1084,52 @@ export function advanceNativeEncounter(runtime, input) {
   const { scaledDeltaTime, unscaledDeltaTime, playerPosition, playerForward, playerFeet, enemies } = input;
   scalar(scaledDeltaTime,'scaledDeltaTime'); scalar(unscaledDeltaTime,'unscaledDeltaTime');
   if (readyForVictory(runtime,enemies)) return [];
-  for (const enemy of enemies) moveEnemy(runtime,enemy,input);
+  applyWebWitnessedLoss(runtime,enemies);
+  // Compute actual sightings before anyone moves: a nearby squad callout is
+  // valid only if its sender sees the player at THIS frame's original feet.
+  const observingAllies=new Set();
+  for(const enemy of enemies) {
+    if(!participating(enemy) || !enemy.encounter ||
+        enemy.reaction?.stunRemaining>0 || enemy.reaction?.stunnedThisFrame)continue;
+    const sightOrigin={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+    if(nativeSphereHit(runtime.sightCollision,sightOrigin,playerPosition,.2)===null)
+      observingAllies.add(enemy);
+  }
+  // Progress the Web volley phase ONCE per gameplay step. No separate clock,
+  // RNG draw, native claim or shared-file wiring is required.
+  runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
+    (WEB_SQUAD_VOLLEY.beatSeconds*60);
+  const localSquads=webLocalArmedSquads(runtime,enemies);
+  const breachingLeaders=webSquadBreachingLeaders(runtime,localSquads,observingAllies);
+  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime,localSquads);
+  // Cover and crossfire may CHANGE as bodies move. Snapshot original feet so a
+  // cached, previous-render muzzle can be translated to the new actor feet for
+  // one conservative post-movement check. The true posed muzzle is still only
+  // available in main's Late phase; this does not replace projectile collision.
+  const originalFeet=new Map(enemies.map(enemy=>[enemy,position(enemy)]));
+  for (const enemy of enemies) moveEnemy(runtime,enemy,input,observingAllies,fireTurns,localSquads,breachingLeaders);
+  const anyoneMoved=enemies.some(enemy=>distance(position(enemy),originalFeet.get(enemy))>EPSILON);
+  if (anyoneMoved) for (const enemy of enemies) {
+    if (!participating(enemy) || !enemy.encounter?.canAttack || !enemy.muzzlePosition)continue;
+    const before=originalFeet.get(enemy);
+    const muzzle={
+      x:enemy.muzzlePosition.x+enemy.x-before.x,
+      y:enemy.muzzlePosition.y+enemy.y-before.y,
+      z:enemy.muzzlePosition.z+enemy.z-before.z,
+    };
+    const eye={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+    if(nativeSphereHit(runtime.sightCollision,eye,playerPosition,.2)!==null) {
+      enemy.encounter.visible=false;
+      enemy.encounter.canAttack=false;
+      continue;
+    }
+    if(nativeSegmentHit(runtime.sightCollision,muzzle,playerPosition)!==null ||
+        webAllyShieldsMuzzle(runtime,enemy,muzzle,playerPosition,enemies)) {
+      enemy.encounter.canAttack=false;
+      enemy.encounter.webAllyBlockingShot=
+        webAllyShieldsMuzzle(runtime,enemy,muzzle,playerPosition,enemies);
+    }
+  }
   const commands=advanceNativeSpawner(runtime.spawner,runtime.spawnerSettings,{
     scaledDeltaTime,unscaledDeltaTime,enabled:true,spawningAreaInitialized:true,
     currentEnemyCount:enemies.filter(participating).length+runtime.arrivals.length,

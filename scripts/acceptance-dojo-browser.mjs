@@ -117,7 +117,12 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
     inputActions.push({kind,frameId:snapshot.frameId,activeScreen:'playing'});
   };
   const onDown = event => {
-    if (MOVEMENT_KEYS.has(event.code)) pressed.add(event.code);
+    // #374 blocks movement keys during Dojo preview. A W held before Start
+    // must not falsely label the first sampled combat frames as movement.
+    // A post-Start key repeat is accepted even before the interval sampler
+    // marks `ready`, exactly like the runtime's post-preview keydown path.
+    if (MOVEMENT_KEYS.has(event.code) &&
+        (ready || inspectDojoCaptureReadiness().ready)) pressed.add(event.code);
     const target = event.target;
     const editable = target?.isContentEditable ||
       ['INPUT','SELECT','TEXTAREA'].includes(target?.tagName);
@@ -151,10 +156,30 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
       activeScreen:current.activeScreen});
   };
   const onMouseDown = event => {
-    // The first click merely requests pointer lock in src/main.js; not a shot.
-    if (event.isTrusted !== true || event.button !== 0 ||
-        document.pointerLockElement !== document.getElementById?.('scene')) return;
-    recordInput('fire');
+    if (event.isTrusted !== true || event.button !== 0 || stopped) return;
+    const scene = document.getElementById?.('scene');
+    if (document.pointerLockElement === scene) {
+      // Once locked, a primary press is a fire ATTEMPT, not a proven hit.
+      recordInput('fire');
+      return;
+    }
+    // src/main.js also starts the real Dojo encounter from a first primary
+    // mousedown on the canvas during its rendered preview. A button-only
+    // recorder missed this legitimate route and falsely failed the 7/7 gate.
+    // Require the real canvas target, source scene, pre-start controls and
+    // a trusted gesture; never count a scene-mode/control-panel click.
+    if (ready || !scene || event.target !== scene ||
+        document.getElementById?.('scene-controls')?.hidden !== false) return;
+    let frame;
+    try { frame = window.__superhotGetRenderedFrameSnapshot?.(); }
+    catch { return; }
+    const source = frame?.nativeScene?.source;
+    if (frame?.activeScreen !== 'playing' ||
+        !Number.isSafeInteger(frame.frameId) || frame.frameId < 0 ||
+        source?.sceneBuildIndex !== 10 || source?.serializedOwner !== 'level10' ||
+        !/(?:^|[\\/])SHRL_Dojo2\.unity$/i.test(source?.scenePath ?? '')) return;
+    uiActions.push({type:'start',buttonId:'scene',
+      frameId:frame.frameId,activeScreen:'playing'});
   };
   const onUp = event => pressed.delete(event.code);
   const onBlur = () => pressed.clear();
@@ -222,6 +247,9 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
           warningEventStatus: enumerated(g.doorWarning?.lastEventStatus, WARNING_EVENT_STATUS),
           warningActiveEnvelopes: nonnegativeInt(g.doorWarning?.activeEnvelopes),
           warningRenderedSpotlights: nonnegativeInt(g.doorWarning?.renderedSpotlights),
+          // #340/#355: actual WebGL world draws carrying doorway red-wash uniforms.
+          // No shader pixels or native projector source are captured.
+          warningWebFalseLightDrawCalls: nonnegativeInt(snapshot.generatedManifest?.warningWebFalseLightDrawCalls),
         },
       },
     });

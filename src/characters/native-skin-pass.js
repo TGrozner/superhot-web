@@ -67,6 +67,7 @@ in vec3 vCameraForward;
 in vec3 vObjectCameraForward;
 uniform vec4 uColor;
 uniform vec4 uRedCrystalControl;
+uniform vec4 uWebHitFlash;
 uniform vec3 uCameraPosition;
 uniform vec3 uSourceLightDirection;
 out vec4 fragColor;
@@ -80,10 +81,17 @@ void main() {
       vObjectCameraForward, screenUv, uRedCrystalControl.z,
       uRedCrystalControl.y, uCameraPosition, uSourceLightDirection
     );
-    return;
+  } else {
+    vec3 webProceduralRgb = uColor.rgb * vLight;
+    fragColor = nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0));
   }
-  vec3 webProceduralRgb = uColor.rgb * vLight;
-  fragColor = nativeRedCrystalFinalOutput(webProceduralRgb, vec4(0.0), vec3(0.0));
+  // WEB-only material cues after source shading; no extra draw/geometry.
+  // Warm discharge afterglow is distinct from white-hot damage.
+  fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.44, 0.08),
+    clamp(uWebHitFlash.y, 0.0, 1.0) * 0.78);
+  // Damage retains visual priority when both events overlap.
+  fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.96, 0.83),
+    clamp(uWebHitFlash.x, 0.0, 1.0));
 }`;
 
 function numericArray(value, length, label) {
@@ -636,6 +644,87 @@ function multiplyInto(a, aOffset, b, bOffset, output, outputOffset) {
   }
 }
 
+/**
+ * Web-only hit/melee readability layer, applied AFTER sampled source clips.
+ * A source-identified hip -> spine hierarchy lets the upper body recoil
+ * while planted hips and legs retain their sampled world poses. Other rigs
+ * retain the previous whole-body fallback; no unnamed joint is guessed.
+ * GPU palette, socket and hit shapes use the same final matrices.
+ * No new keyframes, source claims or GPU draws.
+ */
+function applyWebPoseLean(loaded, scratch, pivotBone, pitch, roll, yaw = 0, affected = null) {
+  const globals = scratch.globals;
+  const pivot = pivotBone * 16;
+  const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  for (let bone = 0; bone < loaded.jointCount; bone++) {
+    if (affected !== null && !affected.includes(bone)) continue;
+    const offset = bone * 16;
+    for (let column = 0; column < 4; column++) {
+      const entry = offset + column * 4;
+      const translation = column === 3;
+      const x = globals[entry] - (translation ? px : 0);
+      const y = globals[entry + 1] - (translation ? py : 0);
+      const z = globals[entry + 2] - (translation ? pz : 0);
+      const pitchedY = cp * y - sp * z;
+      const pitchedZ = sp * y + cp * z;
+      // Compose Rz(roll) * Ry(yaw) * Rx(pitch) around sampled hips.
+      const yawedX = cy * x + sy * pitchedZ;
+      const yawedZ = -sy * x + cy * pitchedZ;
+      globals[entry] = cr * yawedX - sr * pitchedY + (translation ? px : 0);
+      globals[entry + 1] = sr * yawedX + cr * pitchedY + (translation ? py : 0);
+      globals[entry + 2] = yawedZ + (translation ? pz : 0);
+    }
+  }
+  // A model-space bone matrix is NOT the GPU palette. Rebuild after the lean.
+  for (let index = 0; index < loaded.weightedBoneIndices.length; index++) {
+    const bone = loaded.weightedBoneIndices[index];
+    multiplyInto(globals, bone * 16, loaded.mesh.inverseBindMatrices, bone * 16,
+      scratch.palette, index * 16);
+  }
+}
+
+
+/**
+ * Web-only independent head gaze on the existing sampled skeleton.
+ * Rotate only the head descendants in model space, never the hips, arms or
+ * weapon socket. This is NOT an Animator/IK claim or an additional draw.
+ */
+function applyWebSubtreeRotation(loaded, scratch, head, affected, yaw, pitch = 0, roll = 0) {
+  const globals = scratch.globals;
+  const pivot = head * 16;
+  const px = globals[pivot + 12], py = globals[pivot + 13], pz = globals[pivot + 14];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  for (const bone of affected) {
+    const offset = bone * 16;
+    for (let column = 0; column < 4; column++) {
+      const entry = offset + column * 4;
+      const translation = column === 3;
+      const x = globals[entry] - (translation ? px : 0);
+      const y = globals[entry + 1] - (translation ? py : 0);
+      const z = globals[entry + 2] - (translation ? pz : 0);
+      // Positive pitch raises the forward axis; yaw preserves its old sign.
+      const pitchedY = cp * y + sp * z;
+      const pitchedZ = -sp * y + cp * z;
+      const yawedX = cy * x + sy * pitchedZ;
+      globals[entry] = cr * yawedX - sr * pitchedY + (translation ? px : 0);
+      globals[entry + 1] = sr * yawedX + cr * pitchedY + (translation ? py : 0);
+      globals[entry + 2] = -sy * x + cy * pitchedZ + (translation ? pz : 0);
+    }
+  }
+  // The GPU palette must receive the same head transforms as the CPU hit pose.
+  for (let index = 0; index < loaded.weightedBoneIndices.length; index++) {
+    const bone = loaded.weightedBoneIndices[index];
+    if (!affected.includes(bone)) continue;
+    multiplyInto(globals, bone * 16, loaded.mesh.inverseBindMatrices, bone * 16,
+      scratch.palette, index * 16);
+  }
+}
+
 function composeInto(position, rotation, scale, output) {
   const x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3];
   const xx = x*x, yy = y*y, zz = z*z, xy = x*y, xz = x*z, yz = y*z;
@@ -1160,7 +1249,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
   }
   attributes.aUV0 = 4;
   for (const name of ['uModel', 'uViewProjection', 'uJoints[0]', 'uLightDirection',
-    'uLightCoefficients', 'uColor', 'uRedCrystalControl', 'uCameraPosition',
+    'uLightCoefficients', 'uColor', 'uRedCrystalControl', 'uWebHitFlash', 'uCameraPosition',
     'uSourceLightDirection']) {
     uniforms[name] = gl.getUniformLocation(program, name);
     if (uniforms[name] == null) {
@@ -1217,6 +1306,87 @@ export function createNativeSkinPass(gl, sourcePackage, {
     boneOrder: Object.freeze(loaded.bones.map(bone => bone.name)),
     parents: Object.freeze(loaded.bones.map(bone => bone.parent)),
   });
+  // The Web-only reaction pivot stays attached to source hips where present.
+  // Older validated rigs without a named pelvis/spine use their root bone.
+  const hip = loaded.bones.findIndex(bone => /hip|pelvis/i.test(bone.name));
+  const spine = loaded.bones.findIndex(bone => /spine/i.test(bone.name));
+  const webLeanPivot = hip >= 0 ? hip : spine >= 0 ? spine : 0;
+  // Dojo: jnt_Hips -> jnt_Spine_01 is a proven branch distinct from
+  // both leg chains. Do not rotate the feet during a gunshot or hit.
+  // Unidentified rigs use the old whole-body behavior, never an
+  // approximate spine guessed from joint order.
+  const webLeanUpperBones = hip >= 0 && spine >= 0 &&
+    loaded.bones[spine].parent === hip
+    ? loaded.bones.flatMap((_bone, index) => {
+        for (let ancestor = index; ancestor >= 0;
+          ancestor = loaded.bones[ancestor].parent) {
+          if (ancestor === spine) return [index];
+        }
+        return [];
+      }) : null;
+  // The published Dojo EnemyMerged rig has NO Head-named bone. Its
+  // source-named jnt_Neck_01 -> jnt_Neck_Top branch carries the upper-neck
+  // and head surface (both joints have positive source skin weights). Using
+  // only a literal Head match silently disabled every Web head animation
+  // on the REAL Dojo. Resolve that exact authored chain, not a generic
+  // "last spine bone" or fabricated humanoid joint. Other rigs still use
+  // their explicit Head, or fail closed when neither identity is present.
+  const namedHeadIndex = loaded.bones.findIndex(bone =>
+    /(?:^|[^a-zA-Z])head$/i.test(bone.name));
+  const neckBase = loaded.bones.findIndex(bone => bone.name === 'jnt_Neck_01');
+  const neckTip = loaded.bones.findIndex(bone => bone.name === 'jnt_Neck_Top');
+  const sourceNeckChain = neckBase >= 0 && neckTip >= 0 &&
+    loaded.bones[neckTip].parent === neckBase;
+  const webHeadIndex = namedHeadIndex >= 0 ? namedHeadIndex
+    : sourceNeckChain ? neckBase : -1;
+  const webHeadPivotIdentity = namedHeadIndex >= 0 ? 'named Head'
+    : sourceNeckChain ? 'source jnt_Neck_01 -> jnt_Neck_Top' : null;
+  const webHeadBones = [];
+  if (webHeadIndex >= 0) {
+    for (let bone = 0; bone < loaded.jointCount; bone++) {
+      for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
+        if (ancestor === webHeadIndex) {
+          webHeadBones.push(bone);
+          break;
+        }
+      }
+    }
+  }
+  // Protect every hand/weapon socket even on unfamiliar source hierarchies.
+  const webHeadTrackingAvailable = webHeadIndex >= 0 &&
+    !webHeadBones.includes(loaded.weaponAttachment?.bone);
+  // Apply the post-shot arm kick only to an evidenced right shoulder/weapon
+  // hierarchy. Other avatars remain unchanged, not procedurally guessed.
+  const shoulder = loaded.bones.findIndex(b => b.name === 'jnt_R_Arm_Shoulder');
+  const elbow = loaded.bones.findIndex(b => b.name === 'jnt_R_Arm_Elbow');
+  const wrist = loaded.bones.findIndex(b => b.name === 'jnt_R_Arm_Wrist');
+  const fireArm = shoulder >= 0 && elbow >= 0 && wrist >= 0 &&
+    loaded.bones[elbow].parent === shoulder && loaded.bones[wrist].parent === elbow
+    ? shoulder : -1;
+  const fireArmBones = [];
+  if (fireArm >= 0) {
+    for (let bone = 0; bone < loaded.jointCount; bone++) {
+      for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
+        if (ancestor === fireArm) { fireArmBones.push(bone); break; }
+      }
+    }
+  }
+  const webFireArmKickAvailable = fireArm >= 0 && loaded.weaponAttachment != null &&
+    fireArmBones.includes(loaded.weaponAttachment.bone);
+  // A shoulder-only kick moves the whole forearm like a rigid lever.
+  // The Dojo's authored elbow -> wrist chain permits a smaller counter-bend:
+  // the upper arm rises after fire while the forearm absorbs part of the kick.
+  // Never apply it when the actual weapon socket is outside that subtree.
+  const fireElbowBones = [];
+  if (webFireArmKickAvailable) {
+    for (let bone = 0; bone < loaded.jointCount; bone++) {
+      for (let ancestor = bone; ancestor >= 0; ancestor = loaded.bones[ancestor].parent) {
+        if (ancestor === elbow) { fireElbowBones.push(bone); break; }
+      }
+    }
+  }
+  const webFireElbowCounterKickAvailable = webFireArmKickAvailable &&
+    fireElbowBones.includes(loaded.weaponAttachment.bone);
   const instances = new WeakSet();
   let disposed = false;
   function loadInstance({ clip, playback } = {}) {
@@ -1245,7 +1415,9 @@ export function createNativeSkinPass(gl, sourcePackage, {
   const camera = new Float32Array(3);
   function draw({ instance, modelMatrix, viewProjection, time, shaderTime,
                   cameraPosition = null, sourceLighting = RED_CRYSTAL_SOURCE,
-                  color, transition = null, action = null, solvedPose = null } = {}) {
+                  color, transition = null, action = null, solvedPose = null,
+                  webPoseLean = null, webHeadLook = null, webFireArmKick = null,
+                  webHitFlash = 0, webFireGlow = 0 } = {}) {
     if (disposed) throw new Error('Cannot draw a disposed native skin pass');
     if (!instances.has(instance)) throw new TypeError('draw requires an instance created by this pass');
     const mirrored = affineDeterminant(modelMatrix, 'modelMatrix') < 0;
@@ -1288,6 +1460,42 @@ export function createNativeSkinPass(gl, sourcePackage, {
     }
     if (solvedPose !== null && (action !== null || transition !== null)) {
       throw new TypeError('solvedPose already contains the final pose: no clip transition or action overlay');
+    }
+    if (webPoseLean !== null) {
+      if (!webPoseLean || typeof webPoseLean !== 'object' ||
+          !Number.isFinite(webPoseLean.pitch) || !Number.isFinite(webPoseLean.roll) ||
+          !Number.isFinite(webPoseLean.yaw ?? 0) ||
+          Math.abs(webPoseLean.pitch) > .32 || Math.abs(webPoseLean.roll) > .32 ||
+          Math.abs(webPoseLean.yaw ?? 0) > .32) {
+        throw new RangeError('Web-only pose lean requires bounded pitch/roll/yaw radians');
+      }
+      if (solvedPose !== null) {
+        throw new TypeError('A solved death pose cannot also receive a Web-only animation lean');
+      }
+    }
+    if (webHeadLook !== null) {
+      if (!webHeadTrackingAvailable || !webHeadLook || typeof webHeadLook !== 'object' ||
+          !Number.isFinite(webHeadLook.yaw) || Math.abs(webHeadLook.yaw) > .38 ||
+          !Number.isFinite(webHeadLook.pitch ?? 0) || Math.abs(webHeadLook.pitch ?? 0) > .38 ||
+          !Number.isFinite(webHeadLook.roll ?? 0) || Math.abs(webHeadLook.roll ?? 0) > .28 ||
+          solvedPose !== null) {
+        throw new RangeError('Web head movement requires a live, independent Head bone and bounded yaw/pitch/roll');
+      }
+    }
+    if (webFireArmKick !== null && (
+        !webFireArmKickAvailable || typeof webFireArmKick !== 'object' ||
+        !Number.isFinite(webFireArmKick.pitch) || Math.abs(webFireArmKick.pitch) > .28 ||
+        !Number.isFinite(webFireArmKick.yaw) || Math.abs(webFireArmKick.yaw) > .18 ||
+        !Number.isFinite(webFireArmKick.roll) || Math.abs(webFireArmKick.roll) > .18 ||
+        solvedPose !== null)) {
+      throw new RangeError('Web gun kick requires source right-arm weapon chain and bounded angles');
+    }
+    if (!Number.isFinite(webHitFlash) || webHitFlash < 0 || webHitFlash > 1) {
+      throw new RangeError('Web-only hit flash must be a finite intensity in [0,1]');
+    }
+    if (!Number.isFinite(webFireGlow) || webFireGlow < 0 || webFireGlow > 1 ||
+        (solvedPose !== null && webFireGlow !== 0)) {
+      throw new RangeError('Web-only fire glow must be a finite intensity in [0,1] on a live actor');
     }
     let palette;
     let actionLayer = null;
@@ -1352,6 +1560,55 @@ export function createNativeSkinPass(gl, sourcePackage, {
       palette = evaluatePalette(loaded, loaded.clips[instance.clip], time, instance.playback, scratch,
         actionLayer ? actionPose : null, actionLayer?.mask, actionWeight);
     }
+    if (webPoseLean !== null) {
+      applyWebPoseLean(loaded, scratch, webLeanPivot,
+        webPoseLean.pitch, webPoseLean.roll, webPoseLean.yaw ?? 0,
+        webLeanUpperBones);
+    }
+    if (webHeadLook !== null &&
+        (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
+         (webHeadLook.roll ?? 0) !== 0)) {
+      applyWebSubtreeRotation(loaded, scratch, webHeadIndex, webHeadBones,
+        webHeadLook.yaw, webHeadLook.pitch ?? 0, webHeadLook.roll ?? 0);
+    }
+    // Lift the actually sampled shoulder-to-elbow segment, not a hardcoded
+    // model axis. The Dojo bind arm extends along +X, while test/other rigs
+    // may extend along +Z: Rx alone twists the Dojo arm without raising it.
+    // Keep the accepted source action pose, then add this WEB-only recoil.
+    let webFireArmKickApplied = false;
+    let webFireElbowCounterKickApplied = false;
+    if (webFireArmKick !== null &&
+        (webFireArmKick.pitch !== 0 || webFireArmKick.yaw !== 0 || webFireArmKick.roll !== 0)) {
+      const shoulderOffset = fireArm * 16;
+      const elbowOffset = elbow * 16;
+      const dx = scratch.globals[elbowOffset + 12] - scratch.globals[shoulderOffset + 12];
+      const dz = scratch.globals[elbowOffset + 14] - scratch.globals[shoulderOffset + 14];
+      const horizontal = Math.hypot(dx, dz);
+      // Vertical/degenerate arm: skip rather than twist on an arbitrary axis.
+      if (horizontal > 1e-5) {
+        const lift = webFireArmKick.pitch;
+        applyWebSubtreeRotation(loaded, scratch, fireArm, fireArmBones,
+          webFireArmKick.yaw, lift * dz / horizontal,
+          webFireArmKick.roll + lift * dx / horizontal);
+        webFireArmKickApplied = true;
+        // Sample the elbow->wrist axis AFTER the shoulder recoil. An opposite
+        // flex bends the forearm relative to the upper arm, preserving the
+        // final GPU palette, CPU hit pose and weapon socket on the same pose.
+        if (webFireElbowCounterKickAvailable && lift > 0) {
+          const wristOffset = wrist * 16;
+          const forearmDx = scratch.globals[wristOffset + 12] - scratch.globals[elbowOffset + 12];
+          const forearmDz = scratch.globals[wristOffset + 14] - scratch.globals[elbowOffset + 14];
+          const forearmHorizontal = Math.hypot(forearmDx, forearmDz);
+          if (forearmHorizontal > 1e-5) {
+            const flex = -Math.min(.14, lift * .58);
+            applyWebSubtreeRotation(loaded, scratch, elbow, fireElbowBones, 0,
+              flex * forearmDz / forearmHorizontal,
+              flex * forearmDx / forearmHorizontal);
+            webFireElbowCounterKickApplied = true;
+          }
+        }
+      }
+    }
     if (loaded.weaponAttachment) {
       // Use globals, not the inverse-bind skin palette: every transition and
       // precomposed fire path has already composed the same final hand pose here.
@@ -1378,6 +1635,7 @@ export function createNativeSkinPass(gl, sourcePackage, {
         ? width / height : 1;
       gl.uniform4f(uniforms.uRedCrystalControl,
         loaded.mesh.hasSourceUV0 ? 1 : 0, shaderTime, viewportAspect, 0);
+      gl.uniform4f(uniforms.uWebHitFlash, webHitFlash, webFireGlow, 0, 0);
       gl.uniform3f(uniforms.uCameraPosition, camera[0], camera[1], camera[2]);
       gl.uniform3f(uniforms.uSourceLightDirection, ...sourceLighting.directionToLight);
       if (culling) gl.frontFace(mirrored ? gl.CW : gl.CCW);
@@ -1394,6 +1652,19 @@ export function createNativeSkinPass(gl, sourcePackage, {
       nativeClipSampled: solvedPose === null, runtimeEnemyInstanceVerified: false,
       solvedPoseApplied: solvedPose !== null,
       solvedPoseProvenance: solvedPose?.provenance ?? null,
+      webHeadLookApplied: webHeadLook !== null &&
+        (webHeadLook.yaw !== 0 || (webHeadLook.pitch ?? 0) !== 0 ||
+         (webHeadLook.roll ?? 0) !== 0),
+      webHeadLookDesign: webHeadLook === null ? null :
+        (webHeadLook.design ?? 'Web-only independent head gaze'),
+      webFireArmKickApplied,
+      webFireElbowCounterKickApplied,
+      webPoseLeanApplied: webPoseLean !== null,
+      webPoseLeanDesign: webPoseLean === null ? null : 'Web-only reactive hit/melee lean',
+      webHitFlashIntensity: webHitFlash,
+      webHitFlashDesign: webHitFlash > 0 ? 'Web-only white-hot damage pulse' : null,
+      webFireGlowIntensity: webFireGlow,
+      webFireGlowDesign: webFireGlow > 0 ? 'Web-only warm discharge afterglow' : null,
       materialParity: false, redCrystalFinalCompositor: true,
       redCrystalNativeInputsVerified: false, lightingProvenance: light.source,
       weaponAttachmentMatrix,
@@ -1457,6 +1728,17 @@ export function createNativeSkinPass(gl, sourcePackage, {
     actionLayers: loaded.actionLayers, actionPrecompositions: loaded.actionPrecompositions,
     availableActions: loaded.availableActions,
     availableTransitions: loaded.availableTransitions,
+    webHeadTrackingAvailable,
+    webFireArmKickAvailable,
+    webFireArmPivotBone: webFireArmKickAvailable ? fireArm : null,
+    webFireElbowCounterKickAvailable,
+    webFireElbowPivotBone: webFireElbowCounterKickAvailable ? elbow : null,
+    webHeadPivotBone: webHeadTrackingAvailable ? webHeadIndex : null,
+    // Gaze height reads the authored terminal neck/head joint. The actual
+    // deformation still pivots the whole source neck branch at neckBase.
+    webHeadSampleBone: webHeadTrackingAvailable
+      ? (namedHeadIndex >= 0 ? namedHeadIndex : neckTip) : null,
+    webHeadPivotIdentity: webHeadTrackingAvailable ? webHeadPivotIdentity : null,
     rig,
     createInstance, createStateInstance, loadInstance, draw, dispose,
   });

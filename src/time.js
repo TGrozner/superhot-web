@@ -171,6 +171,40 @@ export function sampleFrameDelta(previousTimestampMs, timestampMs) {
   };
 }
 
+
+/**
+ * Split elapsed PLAYING time from the capped physics-simulation step.
+ *
+ * WEB-ONLY fairness fix. The old main.js applied the 50ms RAF simulation
+ * cap to its score clock and to the explicitly real-time unarmed cooldown:
+ * at 10 FPS, a real second counted as only half a second in those systems.
+ *
+ * The caller supplies the timestamp of its most recent start/resume, not a
+ * guessed duration. Only the portion of this frame after that timestamp can
+ * be charged to active gameplay. On a long frame the simulation still uses
+ * the existing 50ms cap, but the score/cooldown can use activeRealDt.
+ *
+ * Browser ownership, including setting activeSinceTimestampMs on resume and
+ * ONLY calling update while playing, stays with SH-05 in src/main.js.
+ * Native MCD timing/cadence is not inferred by this Web helper.
+ *
+ * @param {number} previousTimestampMs Previous requestAnimationFrame timestamp.
+ * @param {number} timestampMs Current requestAnimationFrame timestamp.
+ * @param {number} activeSinceTimestampMs Last entered-playing timestamp.
+ * @returns {{simulationDt:number,activeRealDt:number,nextTimestampMs:number}}
+ */
+export function sampleActiveFrameDeltas(previousTimestampMs, timestampMs, activeSinceTimestampMs) {
+  const frame = sampleFrameDelta(previousTimestampMs, timestampMs);
+  requireFinite(activeSinceTimestampMs, 'activeSinceTimestampMs');
+  const elapsedMs = Math.max(0, timestampMs - Math.max(previousTimestampMs, activeSinceTimestampMs));
+  const activeRealDt = requireFinite(elapsedMs / 1000, 'activeRealDt');
+  return {
+    simulationDt: Math.min(PROTOTYPE_FRAME_RULES.maximumDeltaSeconds, activeRealDt),
+    activeRealDt,
+    nextTimestampMs: frame.nextTimestampMs,
+  };
+}
+
 /**
  * Source-qualified TimeControl model, isolated from the Web prototype rules.
  *
@@ -356,6 +390,52 @@ export function mcdSourcePlayerTimeTargets({
 }
 
 /**
+ * WEB-ONLY camera recovery tuning, not a delivered MCD constant.
+ * The fallback look-time estimator is used by the playable Dojo until the
+ * real CameraAngle/world-rotation source can be bound.  A quick turn used to
+ * queue many .3-scale measurements and kept time fast long after aiming
+ * stopped. Retain at most TWO pending look measurements to keep the initial
+ * turn responsive but return to slow motion promptly when the mouse stops.
+ *
+ * Do not apply this limit to advanceMcdSourceLookTimeshift: that separate
+ * source-qualified model intentionally preserves the native buffer semantics.
+ */
+const WEB_LOOK_BUFFER_CAP = Math.fround(0.6);
+// Creative Web sampler: account for a full 60 Hz window in float32 terms.
+// A JS 1/60 dt is slightly below Math.fround(1/60), so `>` missed it.
+const WEB_LOOK_SAMPLE_SECONDS = Math.fround(1 / 60);
+// WEB comfort budget: keep at most one residual camera pulse when two
+// 60 Hz windows have elapsed since it was actually delivered. This is
+// measured in active wall time, not in rendered frames or native MCD ticks.
+const WEB_LOOK_RESIDUAL_MAX_AGE_SECONDS = Math.fround(2 * WEB_LOOK_SAMPLE_SECONDS);
+const WEB_LOOK_GAIN = Math.fround(0.03);
+export const WEB_LOOK_ANGLE_CAP = WEB_LOOK_BUFFER_CAP / WEB_LOOK_GAIN;
+
+/**
+ * Creative Web angle estimate for one *applied* change in yaw/pitch.
+ * The same estimate is used for the legacy once-per-frame path and for
+ * optional pointer-event path accumulation. It is not a native MCD camera
+ * transform. The caller must pass post-clamp pitch, not raw mouse movement.
+ *
+ * @param {number} fromYaw Current yaw before the movement (radians).
+ * @param {number} fromPitch Current pitch before the movement (radians).
+ * @param {number} toYaw Resulting yaw after the movement (radians).
+ * @param {number} toPitch Resulting pitch after the movement (radians).
+ * @returns {number} Estimated angular travel, degrees.
+ */
+export function webLookDeltaDegrees(fromYaw, fromPitch, toYaw, toPitch) {
+  if (![fromYaw, fromPitch, toYaw, toPitch].every(Number.isFinite)) {
+    throw new RangeError('Web look angles must be finite');
+  }
+  const dot = Math.abs(
+    Math.cos((toYaw - fromYaw) / 2) * Math.cos((toPitch - fromPitch) / 2),
+  );
+  const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
+  if (!Number.isFinite(degrees)) throw new RangeError('Web look travel must be finite');
+  return degrees;
+}
+
+/**
  * Default Containers runtime composition, without POWER/SlomoJump modifiers.
  * PlayerController, CameraLookTimeControl and SimplifiedTimeShifter supply the
  * three source time domains here; collision/Unity callback ordering remain Web.
@@ -367,7 +447,12 @@ export function createMcdGameplayClock({ yaw = 0, pitch = 0 } = {}) {
   }));
   return {
     source, timeScale: 1, aggregate: 0, realTime: 0, worldTime: 0,
-    lookBuffer: 0, lookMeasuredAt: 0, lookWarmup: 10, yaw, pitch,
+    // Web-only: start with the caller's actual view as the comparison anchor.
+    // Do not discard the first ten simulation frames after start/replay.
+    lookBuffer: 0, lookPendingDegrees: 0, lookMeasuredAt: 0,
+    // null until a writable time tick actually receives a look modifier.
+    // Preserve flicks accumulated during the source's two startup delays.
+    lookLastDeliveredAt: null, lookMode: 'web', yaw, pitch,
   };
 }
 
@@ -390,19 +475,57 @@ export function addMcdGameplayPulse(clock, duration, amount) {
  * PRIVATE provenance research #148 (artifact 13175262864); #162/#163/#174
  * only qualify the initial serialized Dojo hierarchy, not a runtime binding.
  * Without sourceLookSample, the existing Web yaw/pitch preview is unchanged.
+ *
+ * Optional lookPathDegrees is a WEB-ONLY camera path measured from actual
+ * pointer events since the previous frame. It fixes full aim reversals inside
+ * one RAF frame that disappear when only the final yaw/pitch are compared.
+ * When omitted, the legacy frame-angle estimate remains unchanged.
+ * Never combine the two (that would double-count the same rotation).
+ *
+ * `dt` is capped Web simulation time (movement/physics/worldDelta). The
+ * optional `unscaledDt` is actual active browser elapsed time for the source-
+ * shaped input shifter rates and Web look-sampling clock. At low FPS, using
+ * capped physics dt for both made a 0.5s WASD acceleration take ~1s at 10 FPS.
+ * Omission preserves the existing behavior for callers without active wall dt.
+ * This is a WEB playability fix, NOT a claim about Unity's frame scheduler.
  */
 export function stepMcdGameplayClock(clock, {
-  dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
-  sourceLookSample,
+  dt, unscaledDt = dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
+  sourceLookSample, lookPathDegrees,
 }) {
   if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
     throw new RangeError('Gameplay time input must be finite with nonnegative dt');
   }
-  clock.realTime += dt;
+  if (!Number.isFinite(unscaledDt) || unscaledDt < 0) {
+    throw new RangeError('unscaledDt must be finite and nonnegative');
+  }
+  if (lookPathDegrees !== undefined &&
+      (!Number.isFinite(lookPathDegrees) || lookPathDegrees < 0)) {
+    throw new RangeError('lookPathDegrees must be finite and nonnegative');
+  }
   if (paused) {
+    // WEB comfort behavior, not a native pause/CameraLookTimeControl claim:
+    // pointer-lock loss must not replay a buffered flick after resume.
+    // Do not advance realTime or the world while interrupted.
+    clock.lookPendingDegrees = 0;
     clock.yaw = yaw; clock.pitch = pitch;
+    if (clock.lookMode !== 'source') {
+      clock.lookBuffer = 0;
+      clock.lookMeasuredAt = clock.realTime;
+      clock.lookLastDeliveredAt = null;
+      clock.source.shifters[2].currentTimeModifier = 0;
+      if (clock.source.delayedUpdates === 0) {
+        // Snapshot the already-registered non-look contributions without
+        // advancing a synthetic LateUpdate: retain movement, jump, pulses
+        // and forced override, but drop the stale look-only next-frame scale.
+        const projection = advanceMcdSourceTime(clock.source);
+        clock.timeScale = projection.timeScale;
+        clock.aggregate = projection.aggregate;
+      }
+    }
     return { worldDelta: 0, appliedTimeScale: 0, timeScale: 0, aggregate: clock.aggregate };
   }
+  clock.realTime += unscaledDt;
   // Update consumes the previously applied scale; LateUpdate writes the next.
   const appliedTimeScale = clock.timeScale;
   const worldDelta = Math.fround(Math.fround(dt) * appliedTimeScale);
@@ -415,18 +538,19 @@ export function stepMcdGameplayClock(clock, {
   movement.currentTimeModifier = advanceMcdSourceLinearShifter({
     ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.movement,
     currentTimeModifier: movement.currentTimeModifier,
-    targetTimeModifier: targets.movementTarget, unscaledDeltaTime: dt,
+    targetTimeModifier: targets.movementTarget, unscaledDeltaTime: unscaledDt,
   });
   jump.currentTimeModifier = advanceMcdSourceLinearShifter({
     ...MCD_SOURCE_PLAYER_TIME_SHIFTERS.jump,
     currentTimeModifier: jump.currentTimeModifier,
-    targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: dt,
+    targetTimeModifier: targets.jumpTarget, unscaledDeltaTime: unscaledDt,
   });
   let lookSourceResult = null;
   if (sourceLookSample !== undefined) {
     if (sourceLookSample === null || typeof sourceLookSample !== 'object') {
       throw new TypeError('sourceLookSample must provide source state and guards');
     }
+    clock.lookMode = 'source';
     // Reuse the original source-model Update: WORLD rotation, explicit gates,
     // warmup, delayed samples and buffered drain. Never invent a source camera.
     lookSourceResult = advanceMcdSourceLookTimeshift(
@@ -435,19 +559,45 @@ export function stepMcdGameplayClock(clock, {
     // The registered shifter retains its current value even on a skipped
     // measurement or a locked source Update (which performs no write).
     look.currentTimeModifier = lookSourceResult.state.currentTimeModifier;
+    clock.lookPendingDegrees = 0;
     clock.yaw = yaw; clock.pitch = pitch; // keep the Web-only fallback anchored
   } else {
-    if (clock.lookWarmup > 0) {
-      clock.yaw = yaw; clock.pitch = pitch; clock.lookWarmup--;
-    }
-    if (clock.realTime > clock.lookMeasuredAt + Math.fround(1 / 60)) {
-      // PROVISIONAL Web look estimate, not the native CameraAngle transform.
-      const dot = Math.abs(Math.cos((yaw - clock.yaw) / 2) * Math.cos((pitch - clock.pitch) / 2));
-      const degrees = Math.acos(Math.min(1, dot)) * 360 / Math.PI;
-      clock.lookBuffer = Math.fround(clock.lookBuffer + Math.fround(degrees * Math.fround(.03)));
+    clock.lookMode = 'web';
+    // Count the path between *simulation* frames, not just the net angle
+    // from the last ~60 Hz sample. On 120+ Hz displays a quick aim reversal
+    // otherwise cancels out before the next time-shifter measurement.
+    // This is a creative WEB-only estimator, never the native quaternion path.
+    const degrees = lookPathDegrees === undefined
+      ? webLookDeltaDegrees(clock.yaw, clock.pitch, yaw, pitch)
+      : lookPathDegrees;
+    clock.lookPendingDegrees = Math.min(WEB_LOOK_ANGLE_CAP, clock.lookPendingDegrees + degrees);
+    clock.yaw = yaw; clock.pitch = pitch;
+    if (Math.fround(clock.realTime - clock.lookMeasuredAt) >= WEB_LOOK_SAMPLE_SECONDS) {
+      // The #281 cap is in samples, not seconds. At 10 FPS, its second
+      // buffered pulse could otherwise keep the world fast for another
+      // 100ms after the player stopped aiming (vs ~17ms at 60 FPS).
+      // Do not age out undelivered startup flicks or fresh pointer input.
+      if (clock.lookLastDeliveredAt !== null && clock.lookPendingDegrees === 0
+          && Math.fround(clock.realTime - clock.lookLastDeliveredAt)
+            >= WEB_LOOK_RESIDUAL_MAX_AGE_SECONDS) {
+        clock.lookBuffer = 0;
+      }
+      // Keep the #281 Web anti-linger cap: two short samples maximum.
+      clock.lookBuffer = Math.min(
+        WEB_LOOK_BUFFER_CAP,
+        Math.fround(clock.lookBuffer + Math.fround(clock.lookPendingDegrees * WEB_LOOK_GAIN)),
+      );
+      clock.lookPendingDegrees = 0;
       look.currentTimeModifier = Math.min(Math.fround(.3), Math.max(0, clock.lookBuffer));
-      clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
-      clock.yaw = yaw; clock.pitch = pitch; clock.lookMeasuredAt = clock.realTime;
+      // Web-only start/replay responsiveness: TimeControl's first two
+      // delayed writes cannot apply this look impulse. Keep it pending until
+      // the first writable tick instead of consuming a real camera turn
+      // invisibly during startup. Source-qualified models are unchanged.
+      if (clock.source.delayedUpdates === 0) {
+        if (look.currentTimeModifier > 0) clock.lookLastDeliveredAt = clock.realTime;
+        clock.lookBuffer = Math.max(0, Math.fround(clock.lookBuffer - look.currentTimeModifier));
+      }
+      clock.lookMeasuredAt = clock.realTime;
     }
   }
   for (const pulse of clock.source.shifters) {

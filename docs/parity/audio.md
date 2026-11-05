@@ -1073,3 +1073,72 @@ is **not** proof that a current or future deployment serves this WAV.
 Do not republish proprietary media until redistribution rights are
 verified. Missing media must remain an explicit failure, never a
 synthetic substitute.
+
+## SH-07 — Web-only katana swing air sweep (2026-11-04)
+
+**Web source, not native reproduction.** The playable Dojo already dispatches
+`audio.itemCue('swing')` from the melee-input path in `src/main.js`; the
+SH-05-owned `itemCue` bridge currently adds Web synthesis for `slice`,
+`throw`, and `pickup`, **not** `swing`. The source-qualified Katana
+reference (`src/sound/mcd-katana-event-intent.ts`, private research
+#185/#188/#186/#189/#192-193; Assembly-CSharp SHA-256
+`ecf928a3f773ad4a258022fe570f72ec97a13d77bf586cf113fd291b73d2b257`)
+distinguishes serialized swing-clip references from qualified contact/slice
+events; it does not establish that any swing WAV is loaded or audible in Dojo.
+
+`createWebImpactMix.emit('katana-swing')` now schedules an original Web
+noise-band sweep with a 240ms descending envelope, **distinct** from the
+existing `katana` contact transient. It uses the same two source nodes,
+spatial output, priority budget and gain trim as existing Web accents.
+All numbers are creative Web values, not Unity data.
+
+**Integration boundary:** SH-05 may extend `withItemAccent` inside its owned
+`src/audio.js` to select `'katana-swing'` **only** for the existing
+`action === 'swing'` event (keep the old `slice` mapping unchanged).
+If native playback is unavailable, the already-existing `webCombatAccent`
+fallback can schedule the Web replacement without inventing a native WAV.
+This PR alone does **not** change the live bridge, so it makes no claim
+of browser audibility or deployed speaker output. A `started` receipt
+means a graph event was scheduled, not that someone heard it.
+No commercial audio or private corpus bytes are included.
+
+## SH-07 — Web-only player damage ear ring (2026-11-04)
+
+**PROUVÉ (Web wiring only):** at public `main@2b4c953538114aef4df14c3e88c0be6a909d254d`, `src/audio.js` `hit()` plays its source-qualified `playerHit` buffer request then calls `webCombatAccent('player-hit', ...)`. This module was already connected on the Dojo path; SH-05 retains ownership of the bridge. Its source-qualified original binding remains `resources.assets:1720` (`AC_Player_Hit`), separately described above. The existing private inventory and static Unity method evidence do **not** establish audible output on a speaker.
+
+**New original Web design:** `src/sound/web-impact-mix.ts` overlays a quiet, falling sine (970→570 Hz over 420 ms, peak weight 0.115 × the cue's Web volume) after damage. The hit's original WAV, onset, source identity, scene mixer routing and existing transient remain untouched. The tail adds one scheduled oscillator **inside the same priority-6 voice**, not another voice; the voice remains active until the tail ends, with existing 24-voice admission and disposal. These exact values are Web-authored, **not** recovered Unity parameters. A targeted fake-AudioContext test verifies source count, completion, voice priority and subsequent shot admission.
+
+**OBSERVÉ:** static Web call graph and test behavior only. No native paired playback, speaker measurement, perceptual listening, GitHub Pages smoke or FPS measurement is claimed. After SH-05 merges, a real browser listening check during player damage is still required. No commercial asset, extracted waveform or raw private source is added.
+
+## SH-07 — unarmed punch Web audio slice (2026-11-04)
+
+**PROUVÉ (Web source only):** in public `main@8743f3cd32aceffd2e3c28e4800b5789d7c2e810`,
+`src/main.js` accepts an unarmed left click, invokes its hand attack and
+`findMeleeTarget()`, then invokes `audio.empty()` **only when there is no hit**.
+Consequently the current miss has a pistol-empty cue rather than an explicit
+fist swing, and no punch-specific Web mix event exists. These are source-code
+observations, not a browser listening result.
+
+**New Web-original synthesis (creative, NOT MCD):**
+`createWebImpactMix.emit('punch-swing')` produces a short filtered air sweep
+(160 ms) on an accepted bare-hand attack;
+`emit('punch-contact')` adds a low knock and a brief bright crack (140 ms)
+**only** after a resolved contact. Each cue uses the existing two scheduled
+sources and one existing mix voice, with HRTF when given a position. Contact
+is prioritized above footfalls; an empty-air swing does not pretend a hit.
+These frequencies, gains, timing and routing are Web authored and have no
+claim to Unity equivalence. No original WAV, decoded PCM or new asset.
+
+**Integration reserved to SH-05:** from the existing `!state.weapon`
+branch in `src/main.js`, request a new `audio.punch({hit: Boolean(hit),
+position: state.camera})` after `findMeleeTarget()`, replacing the
+`else audio.empty()` path for misses. In SH-05-owned `src/audio.js`,
+use the existing gesture-unlocked Web mixer to emit `punch-swing` for every
+accepted attack and `punch-contact` only when `hit` is truthy. Keep native
+punch source unbound unless a specific resource and trigger are proved. This
+PR by itself does not alter shared files or change the deployed Dojo.
+
+**OBSERVÉ:** JS fake-AudioContext tests exercise cue separation, spatial
+routing and the voice cap. No real browser listener, native positive/negative
+audio trace, latency measurement or FPS recording has been performed. A
+scheduled source does not imply output-device audibility.

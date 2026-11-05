@@ -17,6 +17,55 @@ const SOURCE = Object.freeze({
   disappearDuration: 0.125,
 });
 
+// Visual-only Web spin for the already authored shard meshes. The recovered
+// AddTorque vector is a direction/impulse, NOT a known angular velocity:
+// translating it into one revolution/second at unit magnitude is creative.
+const WEB_SHARD_SPIN_RADIANS_PER_SECOND = 2 * Math.PI;
+// On first confirmed static-scene contact, preserve the current angular pose
+// and smoothly bleed visual spin instead of revolving forever inside the floor.
+// 12/s is Web-authored polish, NOT a recovered PhysX angular damping value.
+const WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND = 12;
+
+function webShardSpinTime(shard, elapsed) {
+  const contactAt = shard.firstWebImpactAt ?? shard.firstStaticContactAt;
+  if (contactAt === undefined) return elapsed;
+  const sinceContact = Math.max(0, elapsed - contactAt);
+  return contactAt -
+    Math.expm1(-WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND * sinceContact) /
+      WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND;
+}
+
+function applyWebShardSpin(shard, elapsed, ratio, anchorCollisionCenter) {
+  const {x,y,z} = shard.torque;
+  const strength = Math.hypot(x,y,z);
+  if (strength < 1e-9 || !shard.visible) return;
+  const axisX=x/strength, axisY=y/strength, axisZ=z/strength;
+  const angle=WEB_SHARD_SPIN_RADIANS_PER_SECOND*strength*webShardSpinTime(shard,elapsed);
+  const c=Math.cos(angle), sn=Math.sin(angle), t=1-c;
+  // Rodrigues rotation, column-major. Rotate the ORIGINAL 3x3 each frame,
+  // never accumulate orientation error or depend on framerate/hitch size.
+  const rot=[
+    c+axisX*axisX*t, axisY*axisX*t+axisZ*sn, axisZ*axisX*t-axisY*sn,
+    axisX*axisY*t-axisZ*sn, c+axisY*axisY*t, axisZ*axisY*t+axisX*sn,
+    axisX*axisZ*t+axisY*sn, axisY*axisZ*t-axisX*sn, c+axisZ*axisZ*t,
+  ];
+  const matrix=shard.modelMatrix;
+  for(let col=0;col<3;col++) {
+    const index=col*4,x0=matrix[index],y0=matrix[index+1],z0=matrix[index+2];
+    matrix[index]=rot[0]*x0+rot[3]*y0+rot[6]*z0;
+    matrix[index+1]=rot[1]*x0+rot[4]*y0+rot[7]*z0;
+    matrix[index+2]=rot[2]*x0+rot[5]*y0+rot[8]*z0;
+  }
+  if (anchorCollisionCenter) {
+    // A source collider can be offset from the mesh origin. Keep its world
+    // centre on the same collision-solved trajectory when the mesh spins.
+    const offset=shard.centerOffset;
+    matrix[12]=shard.position.x-ratio*(rot[0]*offset.x+rot[3]*offset.y+rot[6]*offset.z);
+    matrix[13]=shard.position.y-ratio*(rot[1]*offset.x+rot[4]*offset.y+rot[7]*offset.z);
+    matrix[14]=shard.position.z-ratio*(rot[2]*offset.x+rot[5]*offset.y+rot[8]*offset.z);
+  }
+}
+
 function finiteNumber(value, name) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new TypeError(`${name} must be finite`);
@@ -271,8 +320,23 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
       }
     }
     if (runtime.physicsContext) {
-      // Swept source-shaped sphere contacts; never claim this solves native PhysX.
-      shard.contacts = advanceNativeFragmentBody(shard, scaledDelta, runtime.physicsContext);
+      // An already invisible HDR shard requires no further collision work.
+      // Frame-budgeting preserves swept contact without stalling the Dojo on
+      // long frames or after a browser tab resumes (creative Web policy).
+      shard.contacts = shard.visible
+        ? advanceNativeFragmentBody(shard, scaledDelta, {
+          ...runtime.physicsContext, limitWebFrameWork: true,
+        }) : [];
+      // Only physically confirmed source-scene contacts start the Web-only
+      // angular settling. Pure ballistic shards retain absolute-time spin.
+      if (shard.firstStaticContactAt === undefined && shard.contacts.length > 0) {
+        shard.firstStaticContactAt = elapsed;
+        // Keep the observed frame boundary for existing diagnostics, but
+        // drive visible spin from the first real swept collider contact.
+        const inFrame=shard.contacts.reduce((first,contact)=>
+          Math.min(first,contact.webImpactTimeInFrame ?? scaledDelta),scaledDelta);
+        shard.firstWebImpactAt=runtime.elapsed+inFrame;
+      }
       for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
         shard.modelMatrix[index] = shard.position[axis] - shard.centerOffset[axis] * ratio;
       }
@@ -286,6 +350,9 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
         shard.modelMatrix[index] = position;
       }
     }
+    // Live authored shards now visibly tumble under their existing sampled
+    // torque. No extra mesh, particle, collider query or native claim.
+    applyWebShardSpin(shard, elapsed, ratio, !!runtime.physicsContext);
   }
   runtime.elapsed = elapsed;
   return runtime.shards;
