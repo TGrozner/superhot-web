@@ -463,6 +463,46 @@ function webSquadApproachGoal(runtime, enemy, playerFeet, localSquads) {
   return goal;
 }
 
+// J3 Web-original disarmed rush: a foe without a gun is otherwise an easy
+// straight-line target during its long approach to melee range. At visible,
+// short-to-medium distance it alternates diagonal advances while *continuing*
+// to close the gap. This changes movement only: melee damage is still gated
+// by the actual animation/contact event, never by this approach decision.
+// A swept body, baked navmesh and other live characters remain authoritative.
+const WEB_UNARMED_WEAVE=Object.freeze({
+  switchSeconds:0.65,
+  rangeBodyRadii:20,
+  lateralBias:0.65,
+});
+function tryWebUnarmedWeave(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
+  const start=position(enemy),state=enemy.encounter;
+  const dx=playerFeet.x-start.x,dz=playerFeet.z-start.z;
+  const planar=Math.hypot(dx,dz);
+  const remaining=planar-runtime.unarmedStopDistance-runtime.body.radius*0.5;
+  const travel=Math.min(enemy.runtime.speed*scaledDeltaTime,remaining);
+  if(!Number.isFinite(travel) || travel<=EPSILON || planar<=EPSILON)return false;
+  const forwardX=dx/planar,forwardZ=dz/planar;
+  const phase=Math.floor(runtime.webVolleyClock/WEB_UNARMED_WEAVE.switchSeconds);
+  const preferred=state.webTacticalSide*(phase%2===0?1:-1);
+  const normalizer=Math.hypot(1,WEB_UNARMED_WEAVE.lateralBias);
+  for(const side of [preferred,-preferred]) {
+    const offsetX=(forwardX-forwardZ*side*WEB_UNARMED_WEAVE.lateralBias)/normalizer*travel;
+    const offsetZ=(forwardZ+forwardX*side*WEB_UNARMED_WEAVE.lateralBias)/normalizer*travel;
+    const moved=moveNativeCharacter(runtime.collision,start,
+      {x:offsetX,y:0,z:offsetZ},runtime.body).position;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null;
+    return true;
+  }
+  return false;
+}
+
 // J3 Web-only squad movement: a follower whose routed step is blocked by
 // another living actor briefly takes a swept sidestep instead of stacking up
 // behind them. This changes feet only; it cannot authorize a shot or hit.
@@ -1112,6 +1152,13 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     return;
   }
   if (scaledDeltaTime === 0) return;
+  // A disarmed visible attacker can vary its APPROACH to the real player,
+  // without changing the source-style melee event, the win count or hitboxes.
+  // Outside this close-range weave, retain the existing routed pursuit.
+  if (!armed && state.visible && !enemy.runtime.pendingShot &&
+      playerDistance>stopDistance+runtime.body.radius*2 &&
+      playerDistance<=runtime.body.radius*WEB_UNARMED_WEAVE.rangeBodyRadii &&
+      tryWebUnarmedWeave(runtime,enemy,playerFeet,enemies,scaledDeltaTime))return;
   // When armed allies are pursuing together, seek opposite safe approach
   // lanes before resuming the normal stop-radius strafe / retreat behavior.
   // An unreachable offset is never substituted for the direct source route.
