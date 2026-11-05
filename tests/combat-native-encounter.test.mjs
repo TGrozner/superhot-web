@@ -457,6 +457,33 @@ test('J3 Web crossfire: living allies block muzzle shots and trigger safe flanki
   ally.x=4;ally.z=3;
   advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
   assert.equal(shooter.encounter.canAttack,true,'ally outside the capsule radius does not occlude');
+
+  // J2 browser gun safety: the posed muzzle extends through the nearest ally
+  // and begins its projectile INSIDE their body. Its center lies behind the
+  // start of the ray, so a (0,1)-only projection wrongly allows an attack.
+  // Synthetic positions, not native gun lengths or hitbox measurements.
+  ally.x=3;ally.z=2;shooter.muzzlePosition=p(3.18,1.4,2);
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
+  assert.equal(shooter.encounter.visible,true);
+  assert.equal(shooter.encounter.webAllyBlockingShot,true,
+    'the muzzle overlapping an allied body must block a new shot');
+  assert.equal(shooter.encounter.canAttack,false);
+  shooter.runtime.attackDelayRemaining=-1;shooter.runtime.alertness=2;
+  const attack=runNativeEnemyGunAttack(shooter.runtime,{...runtime.enemySettings,family:'Pistol'},{
+    scaledDeltaTime:0,unscaledDeltaTime:0,targetSight:shooter.encounter.visible,
+    sightMode:'all-directions',aimTargetInSight:shooter.encounter.canAttack,
+    aimReady:true,weaponInRightPosition:shooter.encounter.canAttack,
+    allowAttacking:true,canShot:true,active:true,animationTarget:near.playerPosition,
+  },()=>0);
+  assert.equal(attack.shot,false,'no Attack intent or ghost bullet from inside an ally');
+  ally.x=4; // A teammate beyond the muzzle capsule and before the player.
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
+  assert.equal(shooter.encounter.webAllyBlockingShot,true,
+    'the original interior-of-segment crossfire gate stays intact');
+  ally.x=2.5; // Fully behind the muzzle, at least one capsule radius away.
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:0}));
+  assert.equal(shooter.encounter.canAttack,true,
+    'a non-overlapping ally behind the muzzle does not suppress fire');
 });
 
 test('J3 Web close-range pressure: armed enemies backpedal safely when rushed, never while shot-locked or stunned',()=>{
