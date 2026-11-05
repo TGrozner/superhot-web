@@ -913,3 +913,74 @@ export function splitWebActiveWorldFrame({
     discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
   };
 }
+
+
+/**
+ * WEB-ONLY clock-consistent Dojo catch-up scheduler for SH-05 integration.
+ *
+ * The legacy slice helper above is post-clock and CANNOT safely be connected
+ * on its own: it can advance actor movement more than clock.worldTime. This
+ * adapter runs the existing MCD-shaped WEB clock exactly ONCE with the bounded
+ * amount of active time that will actually be simulated, then partitions that
+ * SAME worldDelta into short collision/world steps. Thus:
+ *   sum(worldSteps) === tick.worldDelta === clock.worldTime increment
+ * for a live frame, up to floating-point accumulation.
+ *
+ * This is a WEB feel correction for the 50ms capped frame-time at low FPS,
+ * NOT a recovered Unity fixed-step scheduler. maximumSteps is an explicit
+ * Web performance budget, not an inferred MCD constant. SH-05 must arrange
+ * input edges and active-time effects once/RAF, with world systems sharing
+ * the slices; the ragdoll bridge ALREADY compensates capped frame time and
+ * must never be compensated a second time.
+ *
+ * @param {ReturnType<typeof createMcdGameplayClock>} clock Mutable Web clock.
+ * @param {{simulationDt:number,activeRealDt:number,maximumSteps:number,
+ *   paused?:boolean,x?:number,y?:number,grounded?:boolean,yaw?:number,
+ *   pitch?:number,lookPathDegrees?:number}} frame
+ * @returns {{worldSteps:number[],chargedActiveDt:number,
+ *   discardedActiveDt:number,worldDelta:number,appliedTimeScale:number,
+ *   timeScale:number,aggregate:number}}
+ */
+export function stepWebMcdGameplayFrame(clock, {
+  simulationDt, activeRealDt, maximumSteps, paused = false, ...clockInputs
+} = {}) {
+  for (const [label, value] of Object.entries({simulationDt, activeRealDt})) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new RangeError(`${label} must be finite and nonnegative`);
+    }
+  }
+  if (activeRealDt < simulationDt) {
+    throw new RangeError('activeRealDt must cover simulationDt');
+  }
+  if (!Number.isSafeInteger(maximumSteps) || maximumSteps < 1 || maximumSteps > 16) {
+    throw new RangeError('maximumSteps must be an integer from 1 to 16');
+  }
+  if (typeof paused !== 'boolean') throw new TypeError('paused must be boolean');
+
+  // No accumulated debt: a very long hitch can discard excess world time,
+  // while the clock's unscaled input/aim shifters still see actual active dt.
+  const chargedActiveDt = paused ? 0 : Math.min(activeRealDt, simulationDt * maximumSteps);
+  const tick = stepMcdGameplayClock(clock, {
+    ...clockInputs, dt: chargedActiveDt, unscaledDt: paused ? 0 : activeRealDt, paused,
+  });
+  const worldSteps = [];
+  if (chargedActiveDt > 0 && tick.worldDelta > 0) {
+    const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
+    let previousActive = 0;
+    let previousWorld = 0;
+    for (let i = 0; i < count; i++) {
+      const nextActive = Math.min(chargedActiveDt, (i + 1) * simulationDt);
+      const step = i === count - 1
+        ? tick.worldDelta - previousWorld
+        : tick.worldDelta * ((nextActive - previousActive) / chargedActiveDt);
+      if (!Number.isFinite(step) || step < 0) throw new RangeError('invalid world slice');
+      worldSteps.push(step);
+      previousActive = nextActive;
+      previousWorld += step;
+    }
+  }
+  return {
+    ...tick, worldSteps, chargedActiveDt,
+    discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
+  };
+}
