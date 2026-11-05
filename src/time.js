@@ -847,3 +847,62 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
     clock: qualification.sourceQualified ? createMcdGameplayClock({ yaw, pitch }) : null,
   });
 }
+
+/**
+ * WEB-ONLY active-time catch-up slices for collision-aware Dojo integration.
+ *
+ * At 10 FPS, sampleActiveFrameDeltas reports 100ms active time but only 50ms
+ * simulation time. The current Dojo player movement consumes tick.worldDelta,
+ * so continuous walking loses half its distance per active second. This pure
+ * adapter retains the EXACT scale already applied by stepMcdGameplayClock:
+ * worldDelta / simulationDt. It splits only the additional active time into
+ * chunks no larger than the existing capped simulation step.
+ *
+ * This does not advance clock.worldTime, resolve collisions, update gravity,
+ * or change main.js. SH-05 must coordinate ALL affected world systems if
+ * enabling the slices; applying them to the player alone can desynchronize
+ * enemy positions, bullets and collision/grounding. The caller explicitly
+ * chooses a bounded maximumSteps after measuring performance and stepping
+ * behaviour in the Dojo; this is NOT a native MCD scheduler or a 1:1 claim.
+ *
+ * @param {{simulationDt:number,activeRealDt:number,worldDelta:number,maximumSteps:number}} frame
+ * @returns {{worldSteps:number[],chargedActiveDt:number,discardedActiveDt:number}}
+ */
+export function splitWebActiveWorldFrame({
+  simulationDt, activeRealDt, worldDelta, maximumSteps,
+} = {}) {
+  for (const [name, value] of Object.entries({simulationDt, activeRealDt, worldDelta})) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new RangeError(`${name} must be finite and nonnegative`);
+    }
+  }
+  // WEB-only resource budget: at most sixteen collision/world slices per RAF.
+  // No guessed native frame rate, time-scale, or automatic catch-up debt.
+  if (!Number.isSafeInteger(maximumSteps) || maximumSteps < 1 || maximumSteps > 16) {
+    throw new RangeError('maximumSteps must be an integer from 1 to 16');
+  }
+  if (simulationDt === 0) {
+    if (worldDelta !== 0) {
+      throw new RangeError('worldDelta requires a nonzero simulationDt');
+    }
+    return {worldSteps: [], chargedActiveDt: 0, discardedActiveDt: activeRealDt};
+  }
+  if (activeRealDt < simulationDt) {
+    throw new RangeError('activeRealDt must cover the simulation step');
+  }
+  const chargedActiveDt = Math.min(activeRealDt, simulationDt * maximumSteps);
+  const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
+  const worldSteps = [];
+  let consumed = 0;
+  for (let i = 0; i < count; i++) {
+    const next = Math.min(chargedActiveDt, (i + 1) * simulationDt);
+    const step = worldDelta * ((next - consumed) / simulationDt);
+    if (!Number.isFinite(step)) throw new RangeError('world slice must be finite');
+    worldSteps.push(step);
+    consumed = next;
+  }
+  return {
+    worldSteps, chargedActiveDt,
+    discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
+  };
+}
