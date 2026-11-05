@@ -1598,6 +1598,7 @@ function update(dt, activeRealDt) {
       const frame=advanceDojoDeathSkinFrame({
         runtime:enemy.deathRuntime, rig:enemy.deathRig,
         sourceBoneOrder:enemy.deathBoneOrder, scaledDelta:worldDt,
+        frameTiming:{simulationDelta:dt,activeRealDelta},
         provenance:enemy.deathPhysicsProvenance,
       });
       enemy.deathSolvedPose=frame.solvedPose;
