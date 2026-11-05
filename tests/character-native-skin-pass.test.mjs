@@ -1187,6 +1187,36 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   near(Array.from(below.weaponAttachmentMatrix),
     Array.from(control(.46).weaponAttachmentMatrix));
 
+  // The Web head used to track the camera even after the encounter lost LOS:
+  // visible: false must settle the SAME sampled Head, not follow an unseen
+  // player's new world position through an occluder or rotate the gun socket.
+  const hiddenActors = createNativeActorSkinRuntime(pass);
+  const visibility = (time, x, y, sight) => hiddenActors.drawActor({
+    actorId:'los-watchman', pose:{state:'idle', time, targetSight:sight},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:{x,y,z:5}, shaderTime:time*10, color:[.8,.1,.2,1],
+  });
+  assert.equal(visibility(0, 5, 4.5, true).actorWebHeadLook, null);
+  const seen = visibility(.1, 5, 4.5, true);
+  assert.ok(seen.actorWebHeadLook.yaw > .1 && seen.actorWebHeadLook.pitch > .1);
+  const occluded = visibility(.2, -5, -3, false);
+  assert.ok(occluded.actorWebHeadLook.yaw > 0 &&
+    occluded.actorWebHeadLook.yaw < seen.actorWebHeadLook.yaw,
+    'the head must ease to neutral, not turn toward the unseen opposite camera');
+  assert.ok(occluded.actorWebHeadLook.pitch > 0 &&
+    occluded.actorWebHeadLook.pitch < seen.actorWebHeadLook.pitch,
+    'unseen camera height must not drive a new head pitch');
+  near(Array.from(occluded.weaponAttachmentMatrix),
+    Array.from(seen.weaponAttachmentMatrix));
+  const pausedHidden = visibility(.2, 40, 40, false);
+  assert.equal(pausedHidden.actorWebHeadLook.yaw, occluded.actorWebHeadLook.yaw,
+    'world-time pause must freeze gaze recovery too');
+  assert.equal(pausedHidden.actorWebHeadLook.pitch, occluded.actorWebHeadLook.pitch);
+  const reacquired = visibility(.3, -5, 1.5, true);
+  assert.ok(reacquired.actorWebHeadLook.yaw < 0,
+    'only restored gameplay LOS may turn the head toward the opposite side');
+  assert.throws(() => visibility(.4, 5, 1.5, 'unknown'), /actual boolean AI sight/);
+
   const dead = draw(.50, 5, 5, {solvedPose:{
     rig:pass.rig, provenance:'authored solved pose',
     boneModelMatrices:new Float32Array([
