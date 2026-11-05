@@ -348,19 +348,19 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // source and voice as the existing pickup accent. This is not a recovered
         // Unity pickup recording or timing; the published source WAV stays distinct.
         if (cue === 'pickup') {
-          const latchBand = track(context.createBiquadFilter());
-          latchBand.type = 'bandpass';
-          latchBand.frequency.value = Math.min(2300, context.sampleRate * 0.42);
-          const latch = track(context.createGain());
-          latch.gain.setValueAtTime(0.0001, at);
-          latch.gain.linearRampToValueAtTime(volume * 0.50, at + 0.004);
-          latch.gain.exponentialRampToValueAtTime(0.0001, at + 0.019);
-          latch.gain.setValueAtTime(0.0001, at + 0.046);
-          latch.gain.linearRampToValueAtTime(volume * 0.36, at + 0.052);
-          latch.gain.exponentialRampToValueAtTime(0.0001, at + 0.077);
-          noise.connect(latchBand);
-          latchBand.connect(latch);
-          latch.connect(out);
+            const latchBand = track(context.createBiquadFilter());
+            latchBand.type = 'bandpass';
+            latchBand.frequency.value = Math.min(2300, context.sampleRate * 0.42);
+            const latch = track(context.createGain());
+            latch.gain.setValueAtTime(0.0001, at);
+            latch.gain.linearRampToValueAtTime(volume * 0.50, at + 0.004);
+            latch.gain.exponentialRampToValueAtTime(0.0001, at + 0.019);
+            latch.gain.setValueAtTime(0.0001, at + 0.046);
+            latch.gain.linearRampToValueAtTime(volume * 0.36, at + 0.052);
+            latch.gain.exponentialRampToValueAtTime(0.0001, at + 0.077);
+            noise.connect(latchBand);
+            latchBand.connect(latch);
+            latch.connect(out);
         }
         // Web-original airborne weapon swish, NOT a recovered MCD throw sample.
         // A descending band of the existing noise buffer follows the release.
