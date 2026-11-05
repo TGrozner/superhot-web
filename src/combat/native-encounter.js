@@ -616,8 +616,12 @@ function webAllyShieldsMuzzle(runtime, shooter, muzzle, target, enemies) {
   const radiusSquared=runtime.body.radius*runtime.body.radius;
   return enemies.some(other => {
     if(other===shooter || !participating(other))return false;
-    const t=((other.x-muzzle.x)*dx+(other.z-muzzle.z)*dz)/lengthSquared;
-    if(t<=0 || t>=1)return false;
+    // An animated muzzle may overlap a teammate's capsule even when that
+    // teammate's CENTER falls behind the muzzle. The old open-segment test
+    // authorized a shot starting inside a friendly body. Test the two end caps
+    // as well as the interior; a distant ally behind the gun still clears.
+    const projection=((other.x-muzzle.x)*dx+(other.z-muzzle.z)*dz)/lengthSquared;
+    const t=Math.max(0,Math.min(1,projection));
     const y=muzzle.y+(target.y-muzzle.y)*t;
     if(y<other.y || y>other.y+runtime.body.height)return false;
     const sidewaysX=muzzle.x+dx*t-other.x, sidewaysZ=muzzle.z+dz*t-other.z;
