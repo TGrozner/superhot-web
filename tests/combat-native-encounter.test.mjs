@@ -1446,3 +1446,53 @@ test('J3 Web fireteams: solid cover separates nearby squads without silencing ei
   assert.equal(simulate(true),2,
     'two wall-separated fireteams independently shoot in the same window');
 });
+
+test('J3 Web fireteams skip unalerted and re-aiming gunners without wasting a live volley',()=>{
+  // A newly spawned gunner can be clear and reload-ready without being allowed
+  // to shoot yet. The other gunner must not lose the team's real Attack tick.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(data),lead=firstSpawn(runtime,target);
+  const wing={
+    ...lead,id:'z-newly-arrived',z:4,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+  };
+  lead.muzzlePosition=p(2,1.4,2);lead.muzzleForward=p(1,0,0);
+  wing.muzzlePosition=p(2,1.4,4);wing.muzzleForward=p(1,0,0);
+  const settings={...runtime.enemySettings,family:'Pistol'};
+  const fire=(wingAlertness,wingReroll,actors=[lead,wing])=>{
+    for(const actor of [lead,wing]) {
+      actor.runtime.pendingShot=null;
+      actor.runtime.targetNeedsReroll=false;
+      actor.runtime.targetRerollWait=0;
+      actor.runtime.attackDelayRemaining=-1;
+      actor.runtime.alertness=2;
+      actor.runtime.reloaded=false;
+    }
+    wing.runtime.alertness=wingAlertness;
+    wing.runtime.targetNeedsReroll=wingReroll;
+    wing.runtime.targetRerollWait=.2;
+    runtime.webVolleyClock=.7; // next window prefers z-newly-arrived.
+    advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:.1}));
+    return actors.filter(actor=>{
+      assert.equal(actor.encounter.canAttack,true,
+        'the off-turn gunner remains able to see, aim and build alertness');
+      advanceNativeEnemyWeapon(actor.runtime,settings,.1);
+      return runNativeEnemyGunAttack(actor.runtime,settings,{
+        scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+        sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+        aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+        allowAttacking:true,canShot:true,active:true,
+        animationTarget:target.playerPosition,
+      },()=>0).shot;
+    }).map(actor=>actor.id);
+  };
+  assert.deepEqual(fire(-.5,false),[lead.id],
+    'a still-unalerted newcomer cannot steal the ready partner\'s live shot');
+  assert.deepEqual(fire(2,true),[lead.id],
+    'an outstanding AimTarget reroll cannot waste the shared firing beat');
+  assert.deepEqual(fire(2,false,[wing,lead]),[wing.id],
+    'once both are really ready, the scheduled wing can fire regardless of actor iteration');
+});
