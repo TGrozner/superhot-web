@@ -105,7 +105,7 @@ export function runNativeEnemyGunAttack(state,settings,{
     if (aimTargetInSight!==true) actions.refreshAimTarget=true;
     else if (state.targetNeedsReroll) {
       state.targetRerollWait-=scaledDeltaTime;
-      if (state.targetRerollWait<0) { state.targetNeedsReroll=false; actions.rerollAimTarget=true; actions.refreshAimTarget=true; }
+      if (scaledDeltaTime>0 && state.targetRerollWait<0) { state.targetNeedsReroll=false; actions.rerollAimTarget=true; actions.refreshAimTarget=true; }
       // Source returns false on the reroll-completion tick too.
     } else {
       actions.aim=true;
@@ -115,7 +115,10 @@ export function runNativeEnemyGunAttack(state,settings,{
       // before the animated muzzle pose is available. Preserve its pending
       // target and avoid additional audio-only Attack intents until LateUpdate
       // has actually emitted the original shot.
-      const ready=!state.pendingShot && state.attackDelayRemaining<0 &&
+      // J2 Web-only world-freeze guard: a ready weapon cannot create a NEW
+      // attack/shot sound when the world clock has not advanced. An already
+      // committed pendingShot remains available to the existing Late phase.
+      const ready=scaledDeltaTime>0 && !state.pendingShot && state.attackDelayRemaining<0 &&
         state.alertness>settings.alertDelay*1.05 && allowAttacking && canShot &&
         (settings.family!=='SniperRifle' || state.sniperCanShot);
       if (ready && weaponInRightPosition===true) {
@@ -142,7 +145,7 @@ export function runNativeEnemyGunAttack(state,settings,{
           state.targetNeedsReroll=true; state.targetRerollWait=.05;
           actions.shot=true;
         }
-      } else if (!state.pendingShot && state.attackDelayRemaining<.1 && !state.reloaded) {
+      } else if (scaledDeltaTime>0 && !state.pendingShot && state.attackDelayRemaining<.1 && !state.reloaded) {
         state.reloaded=true;
         if (!state.firstShotWarningSoundPlayed) { state.firstShotWarningSoundPlayed=true; actions.reloadWarning=true; }
       }
