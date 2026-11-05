@@ -159,3 +159,41 @@ test('higher genuine falls increase landing weight, while a vertical respawn sta
     timeSeconds:1.15}), null, 'one-frame vertical teleport is not a landing');
   assert.equal(recorded.length, 2);
 });
+
+test('midair teleports never turn into a fake landing thud after normal-looking final contact', () => {
+  const cues = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, ...request});
+    return {status: 'started', source: 'web-original-synthesis', at: 1, spatial: true};
+  });
+  const tick = (x, y, timeSeconds, grounded) =>
+    gait.advance({position: p(x, y), timeSeconds, grounded});
+
+  // The old check looked only at the final air -> ground displacement:
+  // a mid-flight horizontal snap followed by two quiet frames was audible.
+  tick(0, 1.6, 0, true);
+  tick(0, 1.8, 0.05, false);
+  tick(7, 1.8, 0.1, false); // 7 metres in one 50ms sample: a reset/teleport.
+  tick(7, 1.7, 0.15, false);
+  assert.equal(tick(7, 1.6, 0.2, true), null);
+  assert.equal(cues.length, 0);
+
+  // Vertical snaps can fake a dramatic fall even if each later sample is
+  // physically plausible and the final landing passes its existing gate.
+  gait.reset();
+  tick(0, 1.6, 1, true);
+  tick(0, 1.7, 1.05, false);
+  tick(0, 7, 1.1, false); // Sudden 5.3 metre rise.
+  tick(0, 6, 1.15, false);
+  tick(0, 4.5, 1.2, false);
+  tick(0, 3, 1.25, false);
+  assert.equal(tick(0, 1.6, 1.3, true), null);
+  assert.equal(cues.length, 0);
+
+  // A subsequent legitimate jump is not suppressed after landing/rebaseline.
+  tick(0, 1.6, 2, true);
+  tick(0, 1.8, 2.05, false);
+  tick(0, 1.9, 2.1, false);
+  assert.equal(tick(0, 1.6, 2.2, true)?.status, 'started');
+  assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
+});

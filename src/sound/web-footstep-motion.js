@@ -69,11 +69,23 @@ export function createWebFootstepMotion(emit) {
         if (timeSeconds === previousTime)
             return null;
         if (!grounded) {
-            if (groundedBaseline && airborneSince === null) {
+            // Web-only continuity gate: respawns can relocate the camera mid-air.
+            // Check every airborne sample, not just the last frame of a landing.
+            // An interrupted flight cannot re-arm until a new grounded baseline.
+            const lastPosition = lastAirPosition ?? previous;
+            const elapsed = timeSeconds - previousTime;
+            const discontinuity = lastPosition !== null && (Math.hypot(current.x - lastPosition.x, current.z - lastPosition.z) > maxAllowedTravel(elapsed) ||
+                Math.abs(current.y - lastPosition.y) > Math.min(maxFrameTravel, Math.max(0.05, elapsed * maxLandingVerticalMetresPerSecond)));
+            if (discontinuity) {
+                airborneSince = null;
+                airborneFrames = 0;
+                highestAirY = null;
+            }
+            if (!discontinuity && groundedBaseline && airborneSince === null) {
                 airborneSince = timeSeconds;
                 highestAirY = previous?.y ?? current.y;
             }
-            if (airborneSince !== null) {
+            if (!discontinuity && airborneSince !== null) {
                 airborneFrames++;
                 highestAirY = Math.max(highestAirY ?? current.y, current.y);
             }
