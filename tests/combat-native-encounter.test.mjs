@@ -1966,3 +1966,69 @@ test('J3 Web shoot-and-scoot: a gunner sidesteps after firing and settles before
   assert.deepEqual(p(blocked.enemy.x,blocked.enemy.y,blocked.enemy.z),p(2,0,2),
     'blocked muzzle never activates a fake reload dodge before tactical peeking');
 });
+
+test('J3 Web hit recovery: confirmed nonlethal stun triggers one swept lateral recovery only after stun',()=>{
+  // Entirely synthetic scene. A real admitted hit in main.js sets the same
+  // reactionRevision and hitIncomingDirection; neither is a native AI source.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const make=()=>{
+    const runtime=setup(data),enemy=firstSpawn(runtime,target);
+    enemy.clock=0;
+    enemy.muzzlePosition=p(2,1.4,2);
+    enemy.muzzleForward=p(1,0,0);
+    return {runtime,enemy};
+  };
+  const tick=({runtime,enemy},dt)=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  }));
+  const victim=make();
+  victim.enemy.hitIncomingDirection=p(1,0,0);
+  victim.enemy.hitEventId=1;
+  victim.enemy.reaction.reactionRevision=1;
+  victim.enemy.reaction.stunRemaining=.75;
+  victim.enemy.reaction.stunnedThisFrame=true;
+  victim.enemy.reaction.hasWeapon=false;
+  tick(victim,0);
+  assert.equal(victim.enemy.encounter.webHitPending,true);
+  tick(victim,.1);
+  assert.deepEqual(p(victim.enemy.x,victim.enemy.y,victim.enemy.z),p(2,0,2),
+    'stun must hold actor at its actual location, never trigger premature dodge');
+  assert.equal(victim.enemy.reaction.stunRemaining,.75,'encounter does not advance stun');
+  advanceEnemyReaction(victim.enemy.reaction,.75);
+  tick(victim,.15);
+  assert.ok(Math.abs(victim.enemy.z-2)>.04,
+    'recovery moves across actual incoming hit direction instead of tracking player');
+  assert.ok(Math.abs(victim.enemy.x-2)<.01);
+  assert.equal(victim.enemy.encounter.canAttack,false);
+  assert.equal(victim.enemy.walking,true);
+  const after=p(victim.enemy.x,victim.enemy.y,victim.enemy.z);
+  tick(victim,0);
+  assert.deepEqual(p(victim.enemy.x,victim.enemy.y,victim.enemy.z),after,
+    'frozen world time cannot progress recovery');
+  tick(victim,.35);
+  assert.equal(victim.enemy.encounter.webHitRemaining,0,
+    'the reaction is bounded and cannot re-trigger without a new hit receipt');
+
+  const unknown=make();
+  unknown.enemy.reaction.reactionRevision=1;
+  unknown.enemy.reaction.stunRemaining=.75;
+  unknown.enemy.reaction.stunnedThisFrame=true;
+  tick(unknown,0);
+  advanceEnemyReaction(unknown.enemy.reaction,.75);
+  tick(unknown,.15);
+  assert.equal(unknown.enemy.encounter.webHitRemaining,0,
+    'missing hit direction cannot be replaced by guessed source position');
+  assert.equal(unknown.enemy.z,2);
+
+  const dead=make();
+  dead.enemy.hitIncomingDirection=p(1,0,0);
+  dead.enemy.reaction.reactionRevision=1;
+  dead.enemy.reaction.dead=true;
+  dead.enemy.alive=false;
+  tick(dead,.15);
+  assert.equal(dead.enemy.encounter.webHitPending,false);
+  assert.deepEqual(p(dead.enemy.x,dead.enemy.y,dead.enemy.z),p(2,0,2),
+    'lethal hits do not create recovering living actors');
+});
