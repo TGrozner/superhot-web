@@ -851,6 +851,50 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
 });
 
+test('J3 Web bullets intercepted by a living ally cannot panic a downstream gunner',()=>{
+  // Web-only projectile prediction on fabricated actor capsules, not native MCD AI.
+  const direct={friendly:true,type:'normal',pos:p(15,1,2),
+    direction:p(-1,0,0),speed:35,ttl:.6};
+  const near={friendly:true,type:'normal',pos:p(7,1,3.4),
+    direction:p(-1,0,0),speed:22,ttl:.6};
+  function advance(mode,{blocker=false,dead=false,reverse=false}={}) {
+    const data=scene();
+    const player=mode==='near'
+      ? {playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)} : {};
+    if(mode==='near') data.gameplay.enemy.MinimumDistanceToPlayer=8;
+    const runtime=setup(data),back=firstSpawn(runtime,player);
+    back.muzzlePosition=p(back.x,1.4,back.z);
+    back.muzzleForward=p(1,0,0);
+    const enemies=[back];
+    if(blocker) {
+      const front={...back,id:'front-shield',x:mode==='near'?5:8,
+        z:mode==='near'?3.4:2,alive:!dead,
+        reaction:{...back.reaction,dead,stunRemaining:1,stunnedThisFrame:true},
+        encounter:{...back.encounter},runtime:{...back.runtime,pendingShot:null}};
+      if(reverse) enemies.unshift(front);
+      else enemies.push(front);
+    }
+    advanceNativeEncounter(runtime,input(enemies,{
+      ...player,scaledDeltaTime:.12,playerProjectiles:[mode==='near'?near:direct],
+    }));
+    return back.encounter;
+  }
+  assert.ok(advance('direct').webDodgeRemaining>0,
+    'unobstructed incoming bullet still causes a real sidestep');
+  assert.equal(advance('direct',{blocker:true}).webDodgeRemaining,0,
+    'living front teammate absorbs the bullet before rear awareness');
+  assert.equal(advance('direct',{blocker:true,reverse:true}).webDodgeRemaining,0,
+    'actor iteration order cannot reintroduce fake dodges');
+  assert.ok(advance('direct',{blocker:true,dead:true}).webDodgeRemaining>0,
+    'dead teammates must not cast a phantom threat shadow');
+  assert.ok(advance('near').webSuppressionRemaining>0,
+    'unobstructed passing bullet still suppresses the rear gunner');
+  assert.equal(advance('near',{blocker:true}).webSuppressionRemaining,0,
+    'intercepted bullet cannot trigger downstream near-miss suppression');
+  assert.equal(advance('near',{blocker:true,reverse:true}).webSuppressionRemaining,0);
+  assert.ok(advance('near',{blocker:true,dead:true}).webSuppressionRemaining>0);
+});
+
 test('J3 active projectile horizon: enemies react only when a shot survives until its closest pass',()=>{
   // Web-only flight-time fairness using the real Dojo projectile.ttl field.
   // No native MCD prediction or asset is used. The encounter is fully synthetic.
