@@ -1206,7 +1206,8 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     color:[.8,.1,.2,1],
   });
   const initialHit = hit(0, {x:5,y:1,z:0});
-  assert.equal(initialHit.actorWebHeadLook, null, 'firing/contact edge does not snap the head');
+  assert.equal(initialHit.actorWebHeadLook?.design, 'Web-only secondary hit head whiplash',
+    'accepted collision already gives the source neck a Web-only first-frame response');
   const stagger = hit(.12, {x:5,y:1,z:0});
   assert.equal(stagger.actorWebHeadLook?.design, 'Web-only secondary hit head whiplash');
   assert.ok(stagger.actorWebHeadLook.roll < -.08, 'head bends away from a right-side impact');
@@ -1333,7 +1334,9 @@ test('Web stun anchors its contact side through player movement and resets on a 
     });
 
   const start = draw('stunned-A', 0, 1, [4, 1, 0], {hitEventId: 'impact-1'});
-  assert.equal(start.actorWebPoseReaction, null, 'zero hit time keeps source weapon pose');
+  assert.equal(start.actorWebPoseReaction?.kind, 'hit',
+    'accepted hitEventId immediately leans the sampled GPU pose, not the source clip clock');
+  assert.ok(start.actorWebPoseReaction.roll > .25);
   const right = draw('stunned-A', .11, 1.11, [4, 1, 0], {hitEventId: 'impact-1'});
   const movingPlayer = draw('stunned-A', .18, 1.18, [-4, 1, 0],
     {hitEventId: 'impact-1'});
