@@ -1549,8 +1549,8 @@ test('J3 Web sustained player aim provokes one visible, nav-safe gunner sidestep
   const invalid=setup(data), blind=firstSpawn(invalid,near);
   blind.clock=0;
   for(let i=0;i<5;i++)advanceNativeEncounter(invalid,input([blind],{
-    ...near,playerForward:{x:NaN,y:0,z:0},scaledDeltaTime:.1,unscaledDeltaTime:.1,
+    ...near,playerForward:p(0,0,0),scaledDeltaTime:.1,unscaledDeltaTime:.1,
   }));
   assert.equal(blind.encounter.webAimRemaining,0,
-    'unknown camera geometry fails closed rather than inventing aim pressure');
+    'zero camera direction fails closed rather than inventing aim pressure');
 });
