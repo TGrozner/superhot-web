@@ -824,6 +824,49 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
 });
 
+test('J3 active projectile horizon: enemies react only when a shot survives until its closest pass',()=>{
+  // Web-only flight-time fairness using the real Dojo projectile.ttl field.
+  // No native MCD prediction or asset is used. The encounter is fully synthetic.
+  const dodge=(ttl)=>{
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const approaching={friendly:true,type:'normal',pos:p(15,1,2),
+      direction:p(-1,0,0),speed:35,ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:[approaching],
+    }));
+    return enemy.encounter;
+  };
+  assert.equal(dodge(.05).webDodgeRemaining,0,
+    'shot expires before reaching the enemy, so no false sidestep');
+  assert.equal(dodge(0).webDodgeRemaining,0,
+    'already expired bullet cannot cause another dodge');
+  assert.equal(dodge(NaN).webDodgeRemaining,0,
+    'invalid lifetime cannot authorize predictive awareness');
+  assert.ok(dodge(.5).webDodgeRemaining>0,
+    'a real live bullet that can reach the enemy still triggers the dodge');
+
+  const nearMiss=(ttl)=>{
+    const data=scene();
+    data.gameplay.enemy.MinimumDistanceToPlayer=8;
+    const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+    const runtime=setup(data),enemy=firstSpawn(runtime,player);
+    enemy.muzzlePosition=p(2,1.4,2);
+    enemy.muzzleForward=p(1,0,0);
+    const passing={friendly:true,type:'normal',pos:p(7,1,3.4),
+      direction:p(-1,0,0),speed:22,ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...player,scaledDeltaTime:.12,playerProjectiles:[passing],
+    }));
+    return enemy.encounter;
+  };
+  assert.equal(nearMiss(.05).webSuppressionRemaining,0,
+    'an expiring bullet cannot cause suppression before it passes');
+  assert.ok(nearMiss(.3).webSuppressionRemaining>0,
+    'an unexpired passage still produces cover-constrained suppression');
+});
+
 test('J3 Web projectile dodge takes a free perpendicular lane if a teammate blocks the first one',()=>{
   // Fabricated live projectile and actor capsules, never original MCD geometry.
   // The approaching bullet travels along +Z: either +/-X is a valid dodge.
