@@ -173,6 +173,7 @@ function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
         candidate.encounter.webDodgeRemaining>0 ||
         candidate.encounter.webSuppressionRemaining>0 ||
         candidate.encounter.webLossRemaining>0 ||
+        candidate.encounter.webHitPending || candidate.encounter.webHitRemaining>0 ||
         candidate.runtime?.pendingShot);
     });
     if (!available.length) continue;
@@ -283,6 +284,11 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime, {
 // visible PLAYER projectile already in flight. This is not MCD AI parity and
 // never predicts a click or grants invulnerability. Only the existing swept
 // character mover decides whether the dodge can actually happen.
+// J3 Web-authored post-contact footwork: only a CONFIRMED nonlethal
+// stun earns a short sidestep after recovery, using the incoming hit vector.
+// This does not grant immunity, a new weapon, vision or attack permission.
+const WEB_HIT_RECOVERY=Object.freeze({seconds:0.42,speedFraction:0.85});
+
 const WEB_PROJECTILE_EVADE = Object.freeze({
   lookaheadSeconds: 0.55,
   warningBodyRadii: 2.3,
@@ -428,6 +434,33 @@ function webNearMissProjectile(runtime, enemy, projectiles, enemies) {
     passage=closest;
   }
   return passage;
+}
+
+/** Post-stun sidestep by the stored incoming hit trajectory, NOT by the
+ * player's new or unseen location. Try either perpendicular lane without
+ * bypassing the existing capsule, navigation or crowd collision.
+ * @returns {boolean} Whether approved feet movement took place.
+ */
+function tryWebHitSidestep(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
+  const start=position(enemy),state=enemy.encounter;
+  const travel=enemy.runtime.speed*scaledDeltaTime*WEB_HIT_RECOVERY.speedFraction;
+  if(!Number.isFinite(travel) || travel<=EPSILON)return false;
+  for(const sign of [1,-1]) {
+    const moved=moveNativeCharacter(runtime.collision,start,{
+      x:state.webHitSideX*travel*sign,y:0,z:state.webHitSideZ*travel*sign,
+    },runtime.body).position;
+    if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
+    const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
+    if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
+        occupied(runtime,start,moved,enemies,enemy) ||
+        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
+    enemy.walking=true;
+    state.route=null;
+    state.webHitSideX*=sign;state.webHitSideZ*=sign;
+    return true;
+  }
+  return false;
 }
 
 /** Shift feet laterally without tunneling, teleportation or fake shooting.
@@ -740,7 +773,8 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime,
     }
     if(enemy.reaction.stunRemaining>0 || enemy.reaction.stunnedThisFrame ||
         enemy.runtime?.pendingShot || enemy.encounter.webDodgeRemaining>0 ||
-        enemy.encounter.webSuppressionRemaining>0 || enemy.encounter.webLossRemaining>0)continue;
+        enemy.encounter.webSuppressionRemaining>0 || enemy.encounter.webLossRemaining>0 ||
+        enemy.encounter.webHitPending || enemy.encounter.webHitRemaining>0)continue;
     ready.push(enemy);
   }
   ready.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
@@ -865,6 +899,7 @@ function spawnEnemy(runtime, point, order, population) {
       webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
       webSearchRemaining:null, webSearchComplete:false,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
+      webHitRevision:0,webHitPending:false,webHitRemaining:0,webHitSideX:0,webHitSideZ:0,
       webLossRemaining:0,webLossFeet:null,
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
       webAimLock:0,webAimRemaining:0,webAimCooldown:0},
@@ -917,11 +952,32 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
+  // An accepted hit increments the existing contact reaction revision. Save
+  // that hit's delivered direction while stunned. No native post-stun behavior
+  // is inferred from these Web-only recovery rules.
+  const revision=enemy.reaction?.reactionRevision;
+  if(Number.isSafeInteger(revision) && revision>state.webHitRevision) {
+    state.webHitRevision=revision;
+    state.webHitPending=false;state.webHitRemaining=0;
+    const hit=enemy.hitIncomingDirection;
+    const length=Math.hypot(hit?.x??NaN,hit?.z??NaN);
+    if(participating(enemy) &&
+        (enemy.reaction.stunRemaining>0 || enemy.reaction.stunnedThisFrame) &&
+        Number.isFinite(length) && length>EPSILON) {
+      state.webHitSideX=-hit.z/length*state.webTacticalSide;
+      state.webHitSideZ=hit.x/length*state.webTacticalSide;
+      state.webHitPending=true;
+    }
+  }
   // SH-03 Web game-feel: time is world-scaled in this FPS. Holding the camera
   // on a frozen enemy must not charge a delayed dodge or refill its cooldown.
   // Unscaled wall time is reserved for genuine real-time UI/spawn concerns.
   state.webAimCooldown=Math.max(0,state.webAimCooldown-scaledDeltaTime);
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
+    if(!participating(enemy)) {
+      state.webHitPending=false;
+      state.webHitRemaining=0;
+    }
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
@@ -932,6 +988,23 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
+  }
+  // Nonlethal stun has ENDED. Reposition once before the ordinary pursuit or
+  // reload behavior resumes. World-time pause freezes motion and recovery.
+  if(state.webHitPending) {
+    state.webHitPending=false;
+    state.webHitRemaining=WEB_HIT_RECOVERY.seconds;
+  }
+  if(state.webHitRemaining>0) {
+    state.canAttack=false;
+    if(scaledDeltaTime>0) {
+      advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings??runtime.enemySettings,
+        'running',scaledDeltaTime);
+      const moved=tryWebHitSidestep(runtime,enemy,playerFeet,enemies,scaledDeltaTime);
+      state.webHitRemaining=Math.max(0,state.webHitRemaining-scaledDeltaTime);
+      if(!moved)state.webHitRemaining=0;
+      if(moved)return;
+    } else return;
   }
   const armed=enemy.reaction.hasWeapon;
   if (!armed) {
