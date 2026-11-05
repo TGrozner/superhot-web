@@ -82,6 +82,9 @@ function webHitSource(hitOrigin, cameraPosition, hitIncomingDirection = null) {
     const horizontal = Math.hypot(x, z);
     return Object.freeze({
       point: null,
+      // Keep the FULL accepted 3D travel direction. Steep shots should
+      // visibly pitch the torso/head even with no usable planar bearing.
+      verticalComponent: y / magnitude,
       incomingDirection: horizontal < 1e-6 ? null
         : Object.freeze({x: x / horizontal, z: z / horizontal}),
       provenance: horizontal < 1e-6
@@ -165,15 +168,24 @@ function webPoseReaction(actorId, pose, identity, solvedPose, modelMatrix, hitSo
     ? {x: modelMatrix[12] - incoming.x, z: modelMatrix[14] - incoming.z}
     : hitSource?.point;
   const direction = hit ? webCameraHitDirection(modelMatrix, directionalPoint) : null;
+  const vertical = hitSource?.verticalComponent ?? 0;
+  const hasVertical = hit && Math.abs(vertical) > 1e-6;
+  // WEB-authored impact elevation response. Purely vertical accepted shots
+  // have NO lateral attacker: neither a moving camera nor actor-id parity
+  // should make the crystal enemy jerk sideways at this contact.
+  const impactPitch = Math.max(-.32, Math.min(.32,
+    (direction?.pitch ?? (hasVertical ? 0 : .08)) - .18 * vertical));
+  const impactRoll = direction?.roll ?? (Math.abs(vertical) >= 1 - 1e-9
+    ? 0 : side * .22 * (1 - Math.abs(vertical)));
   return Object.freeze({
     kind: fire ? 'fire' : identity.name,
-    pitch: (hit ? (direction?.pitch ?? .08) : fire ? .12 : -.14) * envelope,
-    roll: (hit ? (direction?.roll ?? side * .22) : side * (fire ? .05 : .035)) * envelope,
+    pitch: (hit ? impactPitch : fire ? .12 : -.14) * envelope,
+    roll: (hit ? impactRoll : side * (fire ? .05 : .035)) * envelope,
     // Web-only shoulder twist: a single GPU pose drives bones, hitboxes and
     // the weapon socket. Externally solved death poses never receive it.
     yaw: hit && direction ? direction.yaw * envelope : 0,
     hitDirectionProvenance: hit
-      ? (direction ? hitSource.provenance : 'actor-id fallback')
+      ? (direction || hasVertical ? hitSource.provenance : 'actor-id fallback')
       : null,
     design: 'Web-only reactive animation accent',
   });
