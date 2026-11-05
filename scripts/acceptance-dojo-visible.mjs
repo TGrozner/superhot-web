@@ -38,6 +38,7 @@ const readinessValues=new Set([
 const ragdollInitializationFailures=new Set([
   'unqualified-source-rig-or-definition','invalid-observed-web-velocity',
   'source-physics-construction-rejected','skin-rig-replaced',
+  'no-timestamped-skinned-pose',
 ]);
 
 /** Diagnose one real, owner-supplied Web trace without asserting a native comparison. */

@@ -59,7 +59,8 @@ test('SH10 reports dead-enemy PBD initialization failures as Web gaps, not succe
   assert.equal(report.nativeReferenceMatched,false);
   assert.equal(report.nativeParityVerdict,'UNKNOWN');
   for (const reason of ['unqualified-source-rig-or-definition',
-    'invalid-observed-web-velocity','skin-rig-replaced']) {
+    'invalid-observed-web-velocity','skin-rig-replaced',
+    'no-timestamped-skinned-pose']) {
     t.frames[0].gameplay.encounter.enemies[0].deathPhysics=reason;
     t.frames[1].gameplay.encounter.enemies[0].deathPhysics=reason;
     assert.equal(assessDojoVisibleIntegrations(t).status,DOJO_VISIBLE_STATUS.RAGDOLL_INIT_GAP);
