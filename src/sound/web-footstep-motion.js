@@ -74,14 +74,12 @@ export function createWebFootstepMotion(emit) {
             // An interrupted flight cannot re-arm until a new grounded baseline.
             const lastPosition = lastAirPosition ?? previous;
             const elapsed = timeSeconds - previousTime;
-            const discontinuity = lastPosition !== null && (
-              Math.hypot(current.x - lastPosition.x, current.z - lastPosition.z) > maxAllowedTravel(elapsed) ||
-              Math.abs(current.y - lastPosition.y) > Math.min(maxFrameTravel,
-                Math.max(0.05, elapsed * maxLandingVerticalMetresPerSecond)));
+            const discontinuity = lastPosition !== null && (Math.hypot(current.x - lastPosition.x, current.z - lastPosition.z) > maxAllowedTravel(elapsed) ||
+                Math.abs(current.y - lastPosition.y) > Math.min(maxFrameTravel, Math.max(0.05, elapsed * maxLandingVerticalMetresPerSecond)));
             if (discontinuity) {
-              airborneSince = null;
-              airborneFrames = 0;
-              highestAirY = null;
+                airborneSince = null;
+                airborneFrames = 0;
+                highestAirY = null;
             }
             if (!discontinuity && groundedBaseline && airborneSince === null) {
                 airborneSince = timeSeconds;
