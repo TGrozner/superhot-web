@@ -108,6 +108,24 @@ test('Web shatter chain rises on rapid confirmed cues and resets after a gap', (
   mix.dispose();
 });
 
+test('Web kill shatter adds a bass debris pulse without another audio source or voice', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 2);
+  assert.equal(mix.emit('shatter').status, 'started');
+  assert.equal(nodes.length, 4); // Existing noise + pitched body + two glass rings.
+  const debris = filters.find(filter => filter.type === 'lowpass' && filter.frequency.value === 390);
+  assert.ok(debris);
+  assert.ok(nodes[0].connections.includes(debris)); // Shared shatter noise source.
+  const pulse = gains.find(gain => debris.connections.includes(gain));
+  assert.ok(pulse);
+  assert.ok(pulse.connections.includes(gains[7])); // Same shatter output / bus.
+  assert.equal(pulse.gain.value, 0.0001); // The pulse has a scheduled fade to silence.
+  assert.equal(mix.getActiveVoices(), 1);
+  mix.emit('player-shot');
+  assert.equal(filters.filter(filter => filter.type === 'lowpass' && filter.frequency.value === 390).length, 1);
+  mix.dispose();
+});
+
 test('Web accents can be trimmed beside original-mode buffers without scheduling muted voices', () => {
   const {ctx, nodes, gains} = fakeAudio();
   const layer = createWebImpactMix(ctx);
