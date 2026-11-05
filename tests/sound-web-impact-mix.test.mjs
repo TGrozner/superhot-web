@@ -854,3 +854,25 @@ test('walking footfalls carry a bright shoe-contact snap on the existing voice',
   assert.equal(shoe.disconnected, true);
   mix.dispose();
 });
+
+test('Web fist contact adds a compressed bass thump without another source or voice', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  const result = mix.emit('punch-contact', {position: {x: 1, y: 1, z: 0}});
+  assert.equal(result.status, 'started'); // Scheduling is not speaker audition.
+  assert.equal(result.spatial, true);
+  assert.equal(nodes.length, 2); // Existing noise + pitched body.
+  const low = filters.find(filter => filter.type === 'lowpass' && filter.frequency.value === 340);
+  assert.ok(low);
+  assert.ok(nodes[0].connections.includes(low));
+  const thump = gains.find(gain => low.connections.includes(gain));
+  assert.ok(thump);
+  const sharedOutput = nodes[1].connections[0].connections[0];
+  assert.ok(thump.connections.includes(sharedOutput)); // Same spatial voice.
+  assert.equal(thump.gain.value, 0.0001); // Scheduled to decay to silence.
+  assert.equal(mix.getActiveVoices(), 1);
+  for (const node of nodes) node.onended();
+  assert.equal(mix.getActiveVoices(), 0);
+  assert.equal(low.disconnected, true);
+  mix.dispose();
+});
