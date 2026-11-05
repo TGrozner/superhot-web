@@ -257,7 +257,7 @@ export function createGunPickupShardRuntime({
       const collisionRadius = finiteNumber(shard.collisionRadius, 'collisionRadius');
       if (collisionRadius <= 0) throw new RangeError('Geometry-derived collision radius required');
       const center = finiteVector(shard.collisionCenter ?? {x:m[12],y:m[13],z:m[14]}, 'collisionCenter');
-      Object.assign(result, { collisionRadius, position:center,
+      Object.assign(result, { collisionRadius, authoredCollisionRadius:collisionRadius, position:center,
         centerOffset:{x:center.x-m[12],y:center.y-m[13],z:center.z-m[14]} });
     }
     return result;
@@ -325,6 +325,19 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
       }
     }
     if (runtime.physicsContext) {
+      // The authored mesh is shrinking in HDR; keep the proxy contact sphere
+      // matched to the VISIBLE mesh instead of leaving a full-size invisible
+      // collider holding the fading shard above the Dojo floor. Web behavior,
+      // not a recovered Unity collider-disable or PhysX scaling contract.
+      const newRadius = shard.authoredCollisionRadius * ratio;
+      if (newRadius !== shard.collisionRadius) {
+        shard.collisionRadius = newRadius;
+        // A previously sleeping contact was solved for the OLD sphere.
+        // Wake it so gravity and the real swept floor can support the new one.
+        shard.webShardResting = false;
+        shard.webShardRestSeconds = 0;
+        shard.webShardSupport = null;
+      }
       // An already invisible HDR shard requires no further collision work.
       // Frame-budgeting preserves swept contact without stalling the Dojo on
       // long frames or after a browser tab resumes (creative Web policy).
