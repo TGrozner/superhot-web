@@ -86,6 +86,39 @@ test('unaccepted attack has no fire cue; unsupported family and missing native p
   assert.throws(() => nativeEnemyFireLateRequests({}, settings, null), /pendingShot/);
 });
 
+test('collapsed animated gun pose waits instead of releasing stationary or random-direction bullets', () => {
+  const pistol = config('Pistol'), pistolState = acceptedShot(pistol).state;
+  // The accepted target may coincide with the late animated muzzle at point-blank range.
+  assert.deepEqual(nativeEnemyFireLateRequests(pistolState, pistol, {
+    muzzlePosition: p(10),
+  }), { status: 'awaiting-late-pose', requests: [] });
+  assert.deepEqual(pistolState.pendingShot.target, p(10));
+  const pistolShot = nativeEnemyFireLateRequests(pistolState, pistol, {
+    muzzlePosition: p(9),
+  });
+  assert.equal(pistolShot.requests.length, 1);
+  assert.deepEqual(pistolShot.requests[0].direction, p(1));
+  assert.equal(pistolState.pendingShot, null);
+
+  const shotgun = config('Shotgun'), shotgunState = acceptedShot(shotgun).state;
+  // A zero weapon-forward vector previously produced an arbitrary pellet spray
+  // entirely from RNG, even though the gun's animation had no usable direction.
+  let samples = 0;
+  const random = () => { samples++; return 0.5; };
+  assert.deepEqual(nativeEnemyFireLateRequests(shotgunState, shotgun, {
+    muzzlePosition: p(), weaponForward: p(),
+  }, random), { status: 'awaiting-late-pose', requests: [] });
+  assert.equal(samples, 0, 'no RNG consumption for an invalid animation frame');
+  assert.deepEqual(shotgunState.pendingShot.target, p(10));
+  const volley = nativeEnemyFireLateRequests(shotgunState, shotgun, {
+    muzzlePosition: p(), weaponForward: p(1),
+  }, random);
+  assert.equal(volley.status, 'spawn-requests');
+  assert.equal(volley.requests.length, 6);
+  assert.ok(volley.requests.every(request => request.direction.x > 0));
+  assert.equal(shotgunState.pendingShot, null);
+});
+
 test('pending pistol/shotgun volley survives late-pose loss without phantom follow-up fire cues', () => {
   for (const family of ['Pistol', 'Shotgun']) {
     const settings = config(family);
