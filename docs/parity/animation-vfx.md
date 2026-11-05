@@ -754,3 +754,14 @@ corpus privé #11 (`spec/animation/verification.json`) et #12
 (`link-verification.json`) inventorie clips, transitions et marqueurs
 mais ne prouve toujours pas les 404 liaisons de destinataires d'événements
 ni la cadence d'exécution Unity/PhysX. Aucun PhysX 1:1 revendiqué.
+
+
+### SH-06 — continuité de taille des éclats déjà sourcés (Web, 05/11/2026)
+
+**Défaut dans le chemin Dojo actif :** `native-items → createGunPickupShardRuntime → advanceGunPickupShardRuntime` charge chaque fragment avec un `modelMatrix` qui contient déjà son échelle d'origine. L'ancien effacement HDR interprétait cependant un facteur de disparition normalisé `[0,1]` comme une échelle absolue. Pour `originalScale>1`, le mesh rétrécissait immédiatement au premier dessin (`dt=0`); pour `originalScale<1`, il gardait sa taille trop longtemps avant de disparaître. **Correction Web :** appliquer le facteur de disparition à `originalScale`, puis calculer la matrice depuis `sourceMatrix` comme avant. Les fragments avec `originalScale=1`, la trajectoire physique, les colliders, la durée HDR, la rotation et les IDs de meshes ne changent pas. Aucun nouveau rendu/asset ni raccord `main.js`.
+
+**Preuve :** comportement et invariant de `src/vfx/gun-pickup-shatter.js`, testé avec deux échelles d'origine non unitaires dans `tests/vfx-native-fragment-physics.test.mjs` (taille initiale et atténuation à 150 ms, sans modification de la matrice native fournie). La normalisation est un **choix visuel Web**, non un profil de `Transform.localScale` Unity prouvé par le corpus privé `GunPickup` (#76). La présence de fragments non unitaires dans le pack Dojo servi, leur perceptibilité réelle et les FPS doivent être vérifiés en navigateur après intégration ; le test Node ne constitue pas un smoke Pages.
+
+## SH-06 — rétrécissement des collisions d'éclats (05/11/2026)
+
+**Correctif Web de présentation, non natif.** Le chemin actif `GunPickup → advanceGunPickupShardRuntime → advanceNativeFragmentBody` rétrécit déjà les matrices des fragments pendant le fondu HDR. Leur sphère de contact restait pourtant à la taille initiale : un petit éclat pouvait sembler suspendu au-dessus du sol après sa réduction visuelle, surtout si le sommeil physique avait commencé. Le runtime conserve maintenant le rayon autorisé de l'asset d'origine et applique le même ratio de réduction à la sphère proxy ; une réduction réveille le fragment endormi afin de retrouver les contacts balayés du vrai décor. Aucune nouvelle géométrie, texture, collision inventée ou requête réseau. **Inconnue :** aucune preuve que Unity/PhysX réduise ses colliders selon cette même loi HDR. Les preuves natives de timings/fractures restent celles référencées ci-dessus ; le résultat esthétique sur Pages doit être observé après fusion, notamment au sol et après REJOUER.

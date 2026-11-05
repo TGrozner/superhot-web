@@ -651,3 +651,20 @@ test('distant spatial enemy shots keep local footsteps audible but close fire st
   assert.deepEqual(duckTargets, [0.10, 0.3]); // Unknown distance retains existing fallback.
   mix.dispose();
 });
+
+test('Web dry-fire has two brief mechanical ticks on one source voice, never a gunshot', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  const receipt = mix.emit('dry-fire');
+  assert.deepEqual(receipt, {status:'started', source:'web-original-synthesis',
+    at:2.25, spatial:false});
+  assert.equal(nodes.length, 2, 'a Web click reuses noise and oscillator only');
+  const actionBand = filters.find(filter =>
+    filter.type === 'bandpass' && filter.frequency.value === 2800);
+  assert.ok(actionBand, 'a dry mechanical click has its own band-limited path');
+  assert.ok(gains.find(gain => actionBand.connections.includes(gain)));
+  assert.equal(nodes[0].connections.length, 2, 'base transient + staggered mechanical ticks');
+  assert.equal(mix.emit('step').status, 'blocked', 'an accepted empty trigger outranks footsteps');
+  assert.equal(mix.getActiveVoices(), 1);
+  mix.dispose();
+});

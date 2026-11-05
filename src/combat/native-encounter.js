@@ -256,6 +256,38 @@ const WEB_NEAR_MISS = Object.freeze({
   recoverySeconds: 2.4,
 });
 
+// J3 original Web tactics (not MCD): a gunner who can ACTUALLY see the
+// player deliberately aiming at its torso may briefly leave that firing lane.
+// Aim must persist in active real time, not a single noisy pointer frame;
+// motion still runs on the slowed world clock and through the native nav/capsule.
+// This is no warning about unseen bullets and grants no evasive invulnerability.
+const WEB_AIM_PRESSURE = Object.freeze({
+  lockSeconds: 0.28,
+  evadeSeconds: 0.44,
+  cooldownSeconds: 2.4,
+  maxBodyRadii: 30,
+  aimDot: 0.986,
+});
+
+/** React only to the actual camera ray, after eye visibility and current
+ * world cover have been checked. Invalid/missing camera vectors fail closed.
+ * Aimed movement is Web-original and never stands in for a native bullet hit.
+ */
+function webPlayerIsAimingAt(runtime, enemy, playerPosition, playerForward) {
+  if (!playerForward || !playerPosition ||
+      ![playerForward.x,playerForward.y,playerForward.z,
+        playerPosition.x,playerPosition.y,playerPosition.z].every(Number.isFinite))return false;
+  const body={x:enemy.x,y:enemy.y+runtime.aimHeight*0.75,z:enemy.z};
+  const dx=body.x-playerPosition.x,dy=body.y-playerPosition.y,dz=body.z-playerPosition.z;
+  const range=Math.hypot(dx,dy,dz);
+  const forwardLength=Math.hypot(playerForward.x,playerForward.y,playerForward.z);
+  if (range<=EPSILON || range>runtime.body.radius*WEB_AIM_PRESSURE.maxBodyRadii ||
+      forwardLength<=EPSILON)return false;
+  const facing=(dx*playerForward.x+dy*playerForward.y+dz*playerForward.z)/(range*forwardLength);
+  return facing>=WEB_AIM_PRESSURE.aimDot &&
+    nativeSegmentHit(runtime.sightCollision,playerPosition,body)===null;
+}
+
 /**
  * A shot scheduled to disappear before its projected closest pass cannot
  * credibly provoke an evasive reaction. The shipped Dojo bullet object has
@@ -646,6 +678,13 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime,
       const settings=candidate.activeWeaponSettings ?? runtime.enemySettings;
       const nextTickCost=scaledDeltaTime*settings.weaponSpeedMultiplier*
         settings.difficultyWeaponSpeedMultiplier;
+      // A newly alerted or re-aiming squadmate cannot fire on this actual
+      // GunAttack tick even with an expired reload. Do not waste the whole
+      // team's beat: let a genuinely ready partner use it. This tests the
+      // existing weapon runtime gates, not an invented native squad rule.
+      if (!(candidate.runtime.alertness>settings.alertDelay*1.05) ||
+          candidate.runtime.targetNeedsReroll ||
+          (settings.family==='SniperRifle' && !candidate.runtime.sniperCanShot))continue;
       if (candidate.runtime.attackDelayRemaining<nextTickCost) {
         turn.add(candidate);
         break;
@@ -736,7 +775,8 @@ function spawnEnemy(runtime, point, order, population) {
       webSearchRemaining:null, webSearchComplete:false,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
       webLossRemaining:0,webLossFeet:null,
-      webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null},
+      webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
+      webAimLock:0,webAimRemaining:0,webAimCooldown:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
@@ -778,19 +818,23 @@ function applyWebWitnessedLoss(runtime,enemies) {
 }
 
 function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquads, breachingLeaders) {
-  const { scaledDeltaTime, playerFeet, playerPosition, enemies, playerProjectiles=[] } = input;
+  const { scaledDeltaTime, unscaledDeltaTime, playerFeet, playerPosition,
+    playerForward, enemies, playerProjectiles=[] } = input;
   const state=enemy.encounter;
   if (!state) return;
   state.canAttack=false;
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
+  state.webAimCooldown=Math.max(0,state.webAimCooldown-unscaledDeltaTime);
   if (!participating(enemy) || enemy.reaction.stunRemaining > 0 || enemy.reaction.stunnedThisFrame) {
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
     state.webSuppressionRemaining=0;
     state.webSuppressionFrom=null;
+    state.webAimLock=0;
+    state.webAimRemaining=0;
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
@@ -945,6 +989,37 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       state.webSuppressionCooldown=WEB_NEAR_MISS.recoverySeconds;
     }
     if (moved) return;
+  }
+  // A real sustained camera aim at a VISIBLE gunner creates a short, readable
+  // side-step. This adds gunfight motion before the first bullet, but does not
+  // infer player intent through walls or consume world time while frozen.
+  // A committed shot, actual projectile dodge, near-miss or witnessed loss has
+  // priority. Even when aim time advances, only swept, nav-approved feet move.
+  if (!armed || enemy.runtime.pendingShot || state.webDodgeRemaining>0 ||
+      state.webSuppressionRemaining>0 || state.webLossRemaining>0) {
+    state.webAimLock=0;
+    state.webAimRemaining=0;
+  } else if (state.webAimRemaining<=0 && state.webAimCooldown<=EPSILON) {
+    const threatened=state.visible &&
+      webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward);
+    state.webAimLock=threatened ? state.webAimLock+unscaledDeltaTime : 0;
+    if(state.webAimLock>=WEB_AIM_PRESSURE.lockSeconds) {
+      state.webAimLock=0;
+      state.webAimRemaining=WEB_AIM_PRESSURE.evadeSeconds;
+      state.webAimCooldown=WEB_AIM_PRESSURE.cooldownSeconds;
+    }
+  }
+  if(state.webAimRemaining>0) {
+    state.canAttack=false;
+    if(scaledDeltaTime>0) {
+      advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+        'running',scaledDeltaTime);
+      const moved=tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+        {sideOverride:state.webTacticalSide});
+      state.webAimRemaining=Math.max(0,state.webAimRemaining-scaledDeltaTime);
+      if(!moved)state.webAimRemaining=0;
+      if(moved)return;
+    }
   }
   // A single, stable armed squadmate pressures the player while its allies
   // maintain their normal firing ring. No assigned partner, blocked line of

@@ -367,3 +367,57 @@ test('many distant Dojo boxes are pruned from shard sweeps without changing exac
   scene.setEnabled('floor',false);
   assert.deepEqual(run(scene).hits,[],'a cached index must respect a disabled source support');
 });
+
+test('shattering preserves each authored mesh scale from first draw through HDR fading',()=>{
+  for (const originalScale of [0.25, 2]) {
+    // The fragment source matrix already carries the visible authored scale.
+    // Native HDR easing is not asserted; the Web visual must not pop at t=0.
+    const modelMatrix=matrix(0,0,0);
+    for (const index of [0,5,10]) modelMatrix[index]=originalScale;
+    const runtime=createGunPickupShardRuntime({
+      shards:[{id:'authored-scale-'+originalScale,modelMatrix,originalScale}],
+      parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+      torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[0],
+      gravity:{x:0,y:0,z:0},
+    });
+    const [shard]=advanceGunPickupShardRuntime(runtime,0);
+    assert.equal(shard.localScale,originalScale);
+    assert.equal(shard.modelMatrix[0],originalScale,
+      'the very first rendered frame must retain the authored scale');
+    advanceGunPickupShardRuntime(runtime,0.15);
+    assert.ok(Math.abs(shard.localScale-originalScale*0.75)<1e-10);
+    assert.ok(Math.abs(shard.modelMatrix[0]-originalScale*0.75)<1e-10,
+      'HDR shrink must apply consistently to small and large source shards');
+    assert.equal(shard.sourceMatrix[0],originalScale,'source transforms are immutable');
+  }
+});
+
+test('authored fading weapon fragments shrink swept floor contacts instead of hovering on a full-size sphere',()=>{
+  const physics=context();
+  physics.material={...physics.material,bounciness:0,staticFriction:2};
+  const runtime=createGunPickupShardRuntime({
+    shards:[{id:'fading-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,collisionRadius:0.2}],
+    parentVelocity:{x:0,y:0,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:0}],fadeDelays:[0],
+    gravity:physics.gravity,physics,
+  });
+  const shard=runtime.shards[0];
+  // Simulate a legitimate old-radius support that would otherwise keep the
+  // visibly shrinking shard asleep above the ground for the rest of its fade.
+  shard.webShardResting=true;
+  shard.webShardRestPosition={...shard.position};
+  shard.webShardSupport=physics.collisionScene.boxes.find(b=>b.collider?.id==='floor')?.collider;
+  const [fading]=advanceGunPickupShardRuntime(runtime,0.15);
+  assert.ok(Math.abs(fading.localScale-0.75)<1e-10);
+  assert.ok(Math.abs(fading.collisionRadius-0.15)<1e-10,
+    'source shape proxy must follow the visible HDR shrink ratio');
+  assert.equal(fading.webShardResting,false,'old-radius sleep must be revoked');
+  assert.ok(fading.position.y<0.19,
+    'gravity must bring the shrinking shard down toward its new floor contact');
+  assert.ok(fading.position.y>=fading.collisionRadius-1e-5,
+    'the new collider must still keep the visible shard above the source floor');
+  // An exact-touch boundary may not produce an impact *event* in this frame:
+  // the source sphere sweep only reports actual crossings, not proximity.
+  assert.ok(fading.position.y-fading.collisionRadius<0.05,
+    'reduced proxy and visible shard must stay near the real floor surface');
+});

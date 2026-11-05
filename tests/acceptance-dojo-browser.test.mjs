@@ -5,7 +5,7 @@ import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS, dojo
 function mockBrowser() {
   const listeners = new Map();
   let seq=1, intervalCallback=null, cleared=false, screen='playing';
-  let controlsHidden=true, killed=0, pointerLocked=false;
+  let controlsHidden=true, killed=0, pointerLocked=false, deathPhysics=null;
   const sceneCanvas = {id:'scene'};
   const documentListeners = new Map();
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
@@ -17,7 +17,10 @@ function mockBrowser() {
     gameplay:{doorWarning:{readiness:'source-catalog-present',
       lastEventStatus:'triggered',activeEnvelopes:1,renderedSpotlights:0,
       privateDoorKey:'DO_NOT_SERIALIZE'},
-      encounter:{killed,killTarget:6,enemies:[]},
+      encounter:{killed,killTarget:6,enemies:deathPhysics===null?[]:[{
+        id:'native-encounter-0',alive:false,deathPhysics,
+        privateSourcePath:'DO_NOT_SERIALIZE',
+      }]},
       weapon:true,ammo:6,heldItem:null,items:[{id:'cup-1',name:'PRIVATE_NAME',state:'static'},
         {id:'cup-2',name:'PRIVATE_NAME',state:'held'}],originalFragmentCount:2,
       audio:{sceneAmbienceSources:3,assets:{PRIVATE:'not serialized'}},
@@ -42,6 +45,7 @@ function mockBrowser() {
   return {
     setFrame(n){seq=n;}, setScreen(value){screen=value;},
     setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
+    setDeathPhysics(value){deathPhysics=value;},
     setPointerLock(value){pointerLocked=value;},
     mouse(button=0,trusted=true,target=sceneCanvas){
       documentListeners.get('mousedown')?.({button,isTrusted:trusted,target});
@@ -57,6 +61,22 @@ function mockBrowser() {
     teardown(){delete globalThis.window;delete globalThis.document;},
   };
 }
+
+test('SH10 captures existing host PBD failure status but strips unknown fields and private paths',()=>{
+  const mock=mockBrowser();
+  try {
+    const recorder=startDojoCapture();
+    mock.setDeathPhysics('web-pbd-step-rejected'); mock.setFrame(2); mock.tick();
+    mock.setDeathPhysics('PRIVATE_RIG_ID_404'); mock.setFrame(3); mock.tick();
+    const data=recorder.stop();
+    assert.deepEqual(data.frames[1].gameplay.encounter.enemies,[{
+      id:'native-encounter-0',alive:false,deathPhysics:'web-pbd-step-rejected',
+    }]);
+    assert.equal(data.frames[2].gameplay.encounter.enemies[0].deathPhysics,null);
+    assert.equal(JSON.stringify(data).includes('DO_NOT_SERIALIZE'),false);
+    assert.equal(JSON.stringify(data).includes('PRIVATE_RIG_ID_404'),false);
+  } finally {mock.teardown();}
+});
 
 test('SH10 browser recorder samples rendered frame telemetry without private item names/audio buffers',()=>{
   const mock=mockBrowser();
