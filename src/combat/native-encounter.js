@@ -54,6 +54,8 @@ const WEB_LAST_SEEN_SWEEP = Object.freeze({
 const WEB_WITNESSED_LOSS = Object.freeze({
   witnessBodyRadii:14,
   retreatSeconds:0.55,
+  counterPushSeconds:2.8, // Web authored: surviving witnesses close the firing ring after the shock.
+  counterPushStopFraction:0.65,
 });
 
 // J3 Web-authored paired pressure: one armed squadmate closes the gap while
@@ -900,7 +902,7 @@ function spawnEnemy(runtime, point, order, population) {
       webSearchRemaining:null, webSearchComplete:false,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
       webHitRevision:0,webHitPending:false,webHitRemaining:0,webHitSideX:0,webHitSideZ:0,
-      webLossRemaining:0,webLossFeet:null,
+      webLossRemaining:0,webLossFeet:null,webCounterPushRemaining:0,
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
       webAimLock:0,webAimRemaining:0,webAimCooldown:0},
   };
@@ -939,6 +941,11 @@ function applyWebWitnessedLoss(runtime,enemies) {
     if(nearest) {
       enemy.encounter.webLossRemaining=WEB_WITNESSED_LOSS.retreatSeconds;
       enemy.encounter.webLossFeet=position(nearest);
+      // A witnessed loss is a real local combat event. After the brief retreat,
+      // an armed witness may counter-push while it can actually SEE the player.
+      // No shared aggro, extra shot, blind pursuit or MCD behavior is inferred.
+      if(enemy.reaction.hasWeapon)
+        enemy.encounter.webCounterPushRemaining=WEB_WITNESSED_LOSS.counterPushSeconds;
     }
   }
 }
@@ -952,6 +959,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
+  state.webCounterPushRemaining=Math.max(0,
+    (state.webCounterPushRemaining??0)-scaledDeltaTime);
   // An accepted hit increments the existing contact reaction revision. Save
   // that hit's delivered direction while stunned. No native post-stun behavior
   // is inferred from these Web-only recovery rules.
@@ -978,6 +987,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       state.webHitPending=false;
       state.webHitRemaining=0;
     }
+    // Being stunned again cancels the counterattack, rather than preserving
+    // aggression through an unrelated hit or a death.
+    state.webCounterPushRemaining=0;
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
@@ -1206,10 +1218,19 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const unwatchedAdvance=armed && state.visible && !enemy.runtime.pendingShot &&
     !weaponRole?.holdRange && (localSquads.get(enemy)?.length ?? 1)===1 &&
     webPlayerLookingAway(playerPosition,playerForward,start);
+  // Web-original counter-pressure: a gunner who personally witnessed a kill
+  // first retreats, then briefly advances INSIDE their normal pistol ring.
+  // This is only a navigation goal with real sight. Never bypass gun gates,
+  // player/ally capsules, route, or cover. Snipers keep their long-range role.
+  const counterPush=armed && state.visible && !enemy.runtime.pendingShot &&
+    state.webLossRemaining<=EPSILON &&
+    state.webCounterPushRemaining>EPSILON && !weaponRole?.holdRange;
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(
         runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
         normalStopDistance*WEB_SQUAD_PUSH.stopDistanceFraction))
+    : counterPush ? Math.min(normalStopDistance,
+        Math.max(runtime.body.radius*3.2,normalStopDistance*WEB_WITNESSED_LOSS.counterPushStopFraction))
     : unwatchedAdvance ? normalStopDistance*WEB_UNWATCHED_APPROACH.stopFraction
       : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
