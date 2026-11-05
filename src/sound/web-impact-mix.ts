@@ -116,6 +116,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     katana: [3200, 0.32, 0.065],
     'punch-contact': [2400, 0.44, 0.018],
     landing: [1800, 0.21, 0.022],
+    // WEB-ORIGINAL shoe-contact snap: adds definition above the muffled
+    // footfall without a third source or Unity marker/clip claim.
+    step: [1650, 0.45, 0.029],
   };
 
   function release(voice: Voice): void {

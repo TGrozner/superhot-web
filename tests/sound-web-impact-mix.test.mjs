@@ -832,3 +832,24 @@ test('resolved Web wall ricochet survives close-range enemy fire at the voice ca
   capped.dispose();
   mix.dispose();
 });
+
+// A deliberate original Web timbre layered onto confirmed ground strides.
+// This probes the scheduled graph only, not speaker audibility or Unity MCD.
+test('walking footfalls carry a bright shoe-contact snap on the existing voice', () => {
+  const {ctx, nodes, filters, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  assert.equal(mix.emit('step', {position: {x: 1, y: 0, z: -2}}).status, 'started');
+  assert.equal(nodes.length, 2); // One noise and one body oscillator; no extra source.
+  const shoe = filters.find(filter => filter.type === 'highpass' && filter.frequency.value === 1650);
+  assert.ok(shoe);
+  assert.ok(nodes[0].connections.includes(shoe));
+  const snap = gains.find(gain => shoe.connections.includes(gain));
+  assert.ok(snap);
+  assert.ok(snap.connections.includes(gains[7])); // Shared spatial output.
+  assert.ok(gains[7].connections[0].connections.includes(gains[3])); // Footstep bus.
+  assert.equal(mix.getActiveVoices(), 1);
+  for (const node of nodes) node.onended();
+  assert.equal(mix.getActiveVoices(), 0);
+  assert.equal(shoe.disconnected, true);
+  mix.dispose();
+});
