@@ -403,12 +403,26 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
     voice.sources.push(noise);
     noise.start(at, textureIndex * 0.025, duration);
     const osc = context.createOscillator();
-    osc.type = cue === 'player-shot' || cue === 'enemy-shot' ? 'sawtooth' : 'triangle';
-    osc.frequency.setValueAtTime(startHz * texturePitch, at);
-    osc.frequency.exponentialRampToValueAtTime(endHz * texturePitch, at + duration);
+    osc.type = cue === 'player-shot' || cue === 'enemy-shot' ? 'sawtooth' :
+      cue === 'katana' ? 'sine' : 'triangle';
     const body = track(context.createGain());
-    body.gain.setValueAtTime(volume * 0.48, at);
-    body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    if (cue === 'katana') {
+      // WEB-ORIGINAL steel contact: a bright attack settles into a short
+      // metallic tail. The confirmed slice uses its existing oscillator,
+      // HRTF output and voice; this is NOT native MCD clip equalization.
+      osc.frequency.setValueAtTime(1850 * texturePitch, at);
+      osc.frequency.exponentialRampToValueAtTime(1340 * texturePitch, at + 0.07);
+      osc.frequency.exponentialRampToValueAtTime(610 * texturePitch, at + duration);
+      body.gain.setValueAtTime(0.0001, at);
+      body.gain.linearRampToValueAtTime(volume * 0.68, at + 0.008);
+      body.gain.exponentialRampToValueAtTime(volume * 0.18, at + 0.065);
+      body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    } else {
+      osc.frequency.setValueAtTime(startHz * texturePitch, at);
+      osc.frequency.exponentialRampToValueAtTime(endHz * texturePitch, at + duration);
+      body.gain.setValueAtTime(volume * 0.48, at);
+      body.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    }
     osc.connect(body);
     body.connect(out);
     osc.onended = ended;
