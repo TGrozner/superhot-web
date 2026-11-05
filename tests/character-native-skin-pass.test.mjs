@@ -1206,8 +1206,15 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   assert.ok(occluded.actorWebHeadLook.pitch > 0 &&
     occluded.actorWebHeadLook.pitch < seen.actorWebHeadLook.pitch,
     'unseen camera height must not drive a new head pitch');
+  const unlooked = createNativeActorSkinRuntime(pass).drawActor({
+    actorId:'los-watchman', pose:{state:'idle',time:.2,targetSight:false},
+    modelMatrix:identity(), viewProjection:identity(), cameraPosition:null,
+    shaderTime:2, color:[.8,.1,.2,1],
+  });
+  // Compare at the SAME sampled world time: the authored idle weight shift
+  // legitimately moves the shoulder/socket over time independently of gaze.
   near(Array.from(occluded.weaponAttachmentMatrix),
-    Array.from(seen.weaponAttachmentMatrix));
+    Array.from(unlooked.weaponAttachmentMatrix));
   const pausedHidden = visibility(.2, 40, 40, false);
   assert.equal(pausedHidden.actorWebHeadLook.yaw, occluded.actorWebHeadLook.yaw,
     'world-time pause must freeze gaze recovery too');
