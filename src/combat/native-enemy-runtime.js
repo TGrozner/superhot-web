@@ -139,8 +139,6 @@ export function runNativeEnemyGunAttack(state,settings,{
             family:settings.family,shooterHaveBeenSeen:state.haveBeenSeen,
             webMovingYawRange:mobileGun?WEB_MOVING_SHOT_MAX_YAW*speedFraction:0,
             webPistolBloomYaw:settings.family==='Pistol'?state.webPistolHeat:0};
-          if(settings.family==='Pistol')state.webPistolHeat=Math.min(WEB_PISTOL_BLOOM.max,
-            state.webPistolHeat+WEB_PISTOL_BLOOM.perShot);
           let delay=settings.attackDelay;
           let completed=true;
           if (settings.family==='MachineGun' || settings.family==='SniperRifle') {
@@ -196,6 +194,8 @@ export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponFor
       (state.pendingShot.webMovingYawRange??0)+(state.pendingShot.webPistolBloomYaw??0));
     const yaw=range>0 ? (sample(random)*2-1)*range : 0;
     const shot=consumeNativeEnemyShot(state,muzzlePosition);
+    if(settings.family==='Pistol')state.webPistolHeat=Math.min(WEB_PISTOL_BLOOM.max,
+      state.webPistolHeat+WEB_PISTOL_BLOOM.perShot);
     let direction=shot.direction;
     if(yaw!==0) {
       const cosine=Math.cos(yaw),sine=Math.sin(yaw);
