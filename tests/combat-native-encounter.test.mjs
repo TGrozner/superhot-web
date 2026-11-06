@@ -2792,3 +2792,55 @@ test('J3 Web blind search preserves real player body even while steering by an o
     'searching cannot tunnel farther into the actual player capsule');
   assert.equal(enemy.encounter.canAttack,false,'avoiding a body must not grant a blind shot');
 });
+
+test('J3 Web disarmed aim jukes: a visible aimed melee rush breaks the sightline but still closes',()=>{
+  // Synthetic navmesh/camera only: no native melee timing, dodge immunity or asset.
+  const data=scene();data.gameplay.enemy.MeleeAttackDistance=.8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const spawn=(colliders=[])=>{
+    const runtime=setup(data,colliders),enemy=firstSpawn(runtime,player);
+    enemy.reaction.hasWeapon=false;
+    return {runtime,enemy};
+  };
+  const tick=(fight,forward,dt=.05)=>advanceNativeEncounter(fight.runtime,input([fight.enemy],{
+    ...player,playerForward:forward,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  }));
+  const aimed=spawn(),ignored=spawn();
+  for(let frame=0;frame<7;frame++) {
+    tick(aimed,p(-1,0,0));
+    tick(ignored,p(0,0,1));
+  }
+  assert.ok(aimed.enemy.encounter.webUnarmedJukeRemaining>0,
+    'four+ actual world-time aim observations trigger a brief disarmed juke');
+  assert.equal(ignored.enemy.encounter.webUnarmedJukeRemaining,0,
+    'looking away never predicts a melee dodge');
+  assert.ok(aimed.enemy.z>ignored.enemy.z+.35,
+    'targeted disarmed foe reverses and sharpens its real swept lateral approach');
+  assert.ok(aimed.enemy.x>2.2 && ignored.enemy.x>2.2,
+    'both melee runners continue closing instead of dodging in place');
+  assert.equal(aimed.enemy.encounter.canAttack,false,
+    'aim-pressure movement does not create a punch or gun permission');
+  assert.equal(aimed.enemy.reaction.hasWeapon,false,'movement cannot grant a gun');
+  assert.ok(Math.hypot(aimed.enemy.x-player.playerFeet.x,
+    aimed.enemy.z-player.playerFeet.z)>=aimed.runtime.body.radius*2,
+    'the stronger weave still cannot cross the real player capsule');
+
+  const covered=spawn([box(5,1,2,.2,2,4)]);
+  for(let frame=0;frame<8;frame++)tick(covered,p(-1,0,0));
+  assert.equal(covered.enemy.encounter.visible,false,'real wall blocks personal sight');
+  assert.equal(covered.enemy.encounter.webUnarmedJukeRemaining,0,
+    'a hidden melee attacker never reacts to a camera ray through solid geometry');
+
+  const frozen=spawn();
+  for(let frame=0;frame<8;frame++)tick(frozen,p(-1,0,0),0);
+  assert.equal(frozen.enemy.encounter.webUnarmedAimLock,0,
+    'frozen world time cannot charge a new aim response');
+  assert.equal(frozen.enemy.encounter.webUnarmedJukeRemaining,0);
+  for(let frame=0;frame<4;frame++)tick(frozen,p(-1,0,0));
+  assert.ok(frozen.enemy.encounter.webUnarmedJukeCooldown>0,
+    'a juke uses a bounded world-time cooldown, not infinite weaving');
+  frozen.enemy.reaction.hasWeapon=true;
+  tick(frozen,p(-1,0,0));
+  assert.equal(frozen.enemy.encounter.webUnarmedJukeRemaining,0,
+    'rearming restores existing gunner behavior immediately');
+});
