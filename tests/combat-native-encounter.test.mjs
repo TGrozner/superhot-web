@@ -2282,3 +2282,38 @@ test('J3 Web post-stun cover recovery: armed witnesses choose sheltered swept la
   assert.ok(hidden.enemy.z>5.05,
     'cover selection never follows the hidden player through solid walls');
 });
+
+test('J2 Web angled crossfire: a teammate on lower stairs blocks a rising muzzle ray',()=>{
+  // Synthetic upward shot: horizontal closest approach x=3 crosses above the
+  // ally's 1.8m body, but the bullet ENTERS its cylinder at x≈2.6, y≈1.76.
+  // The old closest-horizontal-point test falsely authorized that shot.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,3.4,2),playerPosition:p(8,5,2)};
+  const runtime=setup(data),shooter=firstSpawn(runtime,target);
+  const ally={id:'web-stair-ally',x:3,y:0,z:2,alive:true,active:true};
+  shooter.muzzlePosition=p(2,1.4,2);
+  shooter.muzzleForward=p(1,0,0);
+  const actors=[shooter,ally];
+  const frame=()=>advanceNativeEncounter(runtime,input(actors,{...target,scaledDeltaTime:0}));
+  frame();
+  assert.equal(shooter.encounter.visible,true,'real eye ray has no world obstacle');
+  assert.equal(shooter.encounter.webAllyBlockingShot,true,
+    'the full 3D bullet segment crosses the live teammate at its near edge');
+  assert.equal(shooter.encounter.canAttack,false,'do not authorize a ghost shot through that body');
+  shooter.runtime.alertness=2;
+  shooter.runtime.attackDelayRemaining=-1;
+  assert.equal(runNativeEnemyGunAttack(shooter.runtime,{...runtime.enemySettings,family:'Pistol'},{
+    scaledDeltaTime:0,unscaledDeltaTime:0,targetSight:shooter.encounter.visible,
+    sightMode:'all-directions',aimTargetInSight:shooter.encounter.canAttack,
+    aimReady:true,weaponInRightPosition:shooter.encounter.canAttack,
+    allowAttacking:true,canShot:true,active:true,animationTarget:target.playerPosition,
+  },()=>0).shot,false,'GunAttack cannot create a new bullet through the ally');
+  ally.z=2.6;
+  frame();
+  assert.equal(shooter.encounter.canAttack,true,
+    'the exact same rising ray fires normally when the ally stands outside its radius');
+  ally.z=2;ally.x=9;
+  frame();
+  assert.equal(shooter.encounter.canAttack,true,
+    'an ally beyond the target never blocks the shot');
+});
