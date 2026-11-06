@@ -18,7 +18,12 @@ const flat=v=>({x:v.x,y:0,z:v.z});
 // Capture movement at ATTACK time; animated muzzle delivery may happen later.
 const WEB_MOVING_SHOT_MAX_YAW=0.075; // radians, at full running speed
 // Web-designed consecutive-shot spread; never asserted as an MCD value.
-const WEB_PISTOL_BLOOM={perShot:0.045,decayPerSecond:0.012,max:0.075,totalYaw:0.11};
+const WEB_PISTOL_BLOOM={
+  perShot:0.045,decayPerSecond:0.012,max:0.075,totalYaw:0.11,
+  // Web-original: sustained pistol fire climbs slightly upward as the gun
+  // heats. Coupled to CONFIRMED late shots; no recoil on an interrupted shot.
+  recoilPitchFraction:0.3,maxRecoilPitch:0.022,
+};
 function nonnegative(value,name) {
   if (!Number.isFinite(value)||value<0) throw new TypeError(name+' must be finite and nonnegative');
 }
@@ -193,6 +198,10 @@ export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponFor
     const range=Math.min(WEB_PISTOL_BLOOM.totalYaw,
       (state.pendingShot.webMovingYawRange??0)+(state.pendingShot.webPistolBloomYaw??0));
     const yaw=range>0 ? (sample(random)*2-1)*range : 0;
+    const recoilPitch=settings.family==='Pistol'
+      ? Math.min(WEB_PISTOL_BLOOM.maxRecoilPitch,
+        (state.pendingShot.webPistolBloomYaw??0)*WEB_PISTOL_BLOOM.recoilPitchFraction)
+      : 0;
     const shot=consumeNativeEnemyShot(state,muzzlePosition);
     if(settings.family==='Pistol')state.webPistolHeat=Math.min(WEB_PISTOL_BLOOM.max,
       state.webPistolHeat+WEB_PISTOL_BLOOM.perShot);
@@ -202,6 +211,19 @@ export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponFor
       direction={x:shot.direction.x*cosine-shot.direction.z*sine,
         y:shot.direction.y,
         z:shot.direction.x*sine+shot.direction.z*cosine};
+    }
+    // Web J2: pitch the emitted projectile, not the original accepted target.
+    // A single horizontal yaw sample still drives the lateral spread. Preserve
+    // speed and direction length, including uphill/downhill target vectors.
+    // Near-vertical rays have no stable horizontal recoil axis: leave them.
+    if(recoilPitch>0) {
+      const horizontal=Math.hypot(direction.x,direction.z);
+      if(horizontal>1e-6) {
+        const elevation=Math.atan2(direction.y,horizontal)+recoilPitch;
+        const horizontalScale=Math.cos(elevation)/horizontal;
+        direction={x:direction.x*horizontalScale,y:Math.sin(elevation),
+          z:direction.z*horizontalScale};
+      }
     }
     return [{...shot,direction,
       velocity:addScaled({x:0,y:0,z:0},direction,shot.speed),
