@@ -1873,6 +1873,56 @@ test('J3 Web fireteams skip unalerted and re-aiming gunners without wasting a li
     'once both are really ready, the scheduled wing can fire regardless of actor iteration');
 });
 
+test('J3 Web fireteam keeps shooting while its scheduled gunner is changing lanes',()=>{
+  // Synthetic J3 firefight: a gunner dodging the aimed camera ray or moving
+  // after a confirmed ally hit cannot fire, but remains a squad member. The
+  // available covering partner should get the next real GunAttack shot.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const run=(movement,reverse)=>{
+    const runtime=setup(data),lead=firstSpawn(runtime,player);
+    lead.clock=0;
+    lead.muzzlePosition=p(2,1.4,2);lead.muzzleForward=p(1,0,0);
+    const wing={
+      ...lead,id:'z-moving-wing',z:4,clock:0,
+      reaction:{...lead.reaction},runtime:{...lead.runtime},
+      encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+      muzzlePosition:p(2,1.4,4),muzzleForward:p(1,0,0),
+    };
+    for(const actor of [lead,wing]) {
+      actor.runtime.pendingShot=null;
+      actor.runtime.targetNeedsReroll=false;
+      actor.runtime.attackDelayRemaining=-1;
+      actor.runtime.alertness=2;
+    }
+    wing.encounter[movement]=.4;
+    const actors=reverse?[wing,lead]:[lead,wing];
+    runtime.webVolleyClock=.7; // Normally selects the wing this beat.
+    advanceNativeEncounter(runtime,input(actors,{...player,scaledDeltaTime:.1}));
+    assert.equal(wing.encounter.canAttack,false,
+      'a real active evasive/support move must still withhold gun permission');
+    assert.ok(wing.encounter[movement]<.4,'movement consumes only real world time');
+    assert.equal(lead.encounter.canAttack,true,'covering gunner still has genuine eye and muzzle LOS');
+    const weapon={...runtime.enemySettings,family:'Pistol'};
+    const fired=actors.filter(actor=>{
+      advanceNativeEnemyWeapon(actor.runtime,weapon,.1);
+      return runNativeEnemyGunAttack(actor.runtime,weapon,{
+        scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+        sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+        aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+        allowAttacking:true,canShot:true,active:true,
+        animationTarget:player.playerPosition,
+      },()=>0).shot;
+    });
+    assert.deepEqual(fired,[lead],
+      'the only available gunner gets the actual deferred shot, not a wasted firing beat');
+    assert.ok(lead.runtime.pendingShot,'the covering gunner reaches the existing late muzzle phase');
+    assert.equal(wing.runtime.pendingShot,null,'movement never manufactures a second projectile');
+  };
+  for(const movement of ['webAimRemaining','webSupportRemaining'])
+    for(const reverse of [false,true])run(movement,reverse);
+});
+
 test('J3 Web aim-pressure follows the first live actor on the player camera ray',()=>{
   // Synthetic actors/geometry. A rear gunner can see the player but is NOT
   // itself being aimed at when its living squadmate stands in that line.
