@@ -63,6 +63,11 @@ export function createWebImpactMix(context, maxVoices = 24) {
         returnGain.connect(dynamics);
         roomReflections.push(send, delay, tone, lateDelay, lateTone, returnGain);
     }
+    // WEB-ORIGINAL distant muzzles bypass the listener's local 90/165ms
+    // reflections. One shared direct bus, no new voices or native claim.
+    const distantWeapons = context.createGain();
+    distantWeapons.gain.value = 0.9;
+    distantWeapons.connect(dynamics);
     const noiseBed = context.createBuffer(1, Math.ceil(context.sampleRate * 0.5), context.sampleRate);
     const samples = noiseBed.getChannelData(0);
     let seed = 0x3ad9f12;
@@ -293,7 +298,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
                 distanceFilter.connect(panner);
             }
             out.connect(distanceFilter ?? panner);
-            panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
+            if (remoteEnemyShot)
+                panner.connect(distantWeapons);
+            else
+                panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
         }
         else {
             out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
@@ -659,9 +667,11 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // The native hit clip, original WAVs and their mixer routing are untouched.
         // No Unity ducking parameter, new source or extra node is implied.
         if (cue === 'player-hit') {
-            weapons.gain.cancelScheduledValues(at);
-            weapons.gain.setTargetAtTime(0.4, at, 0.008);
-            weapons.gain.setTargetAtTime(0.9, at + 0.17, 0.14);
+            for (const bus of [weapons, distantWeapons]) {
+                bus.gain.cancelScheduledValues(at);
+                bus.gain.setTargetAtTime(0.4, at, 0.008);
+                bus.gain.setTargetAtTime(0.9, at + 0.17, 0.14);
+            }
         }
         // WEB-ORIGINAL: a distant enemy muzzle should not pump the listener's ambient drone.
         if (cue !== 'step' && cue !== 'landing' && !remoteEnemyShot) {
@@ -719,7 +729,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             release(voice);
         for (const node of roomReflections)
             node.disconnect();
-        for (const bus of [weapons, impacts, footsteps, ambient])
+        for (const bus of [weapons, distantWeapons, impacts, footsteps, ambient])
             bus.disconnect();
         dynamics.disconnect();
         master.disconnect();

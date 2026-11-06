@@ -118,7 +118,7 @@ test('Web kill shatter adds a bass debris pulse without another audio source or 
   assert.ok(nodes[0].connections.includes(debris)); // Shared shatter noise source.
   const pulse = gains.find(gain => debris.connections.includes(gain));
   assert.ok(pulse);
-  assert.ok(pulse.connections.includes(gains[7])); // Same shatter output / bus.
+  assert.ok(pulse.connections.includes(gains[8])); // Same shatter output / bus.
   assert.equal(pulse.gain.value, 0.0001); // The pulse has a scheduled fade to silence.
   assert.equal(mix.getActiveVoices(), 1);
   mix.emit('player-shot');
@@ -273,7 +273,7 @@ test('a Web landing thud routes through footsteps, not room reflections or comba
   assert.equal(result.status, 'started');
   assert.equal(nodes.length, 2); // No extra sources or voice pressure.
   const footsteps = gains[3];
-  const output = gains[7];
+  const output = gains[8];
   // Spatialized landing goes from the voice output to HRTF, then the step bus.
   const panner = output.connections[0];
   assert.ok(panner.connections.includes(footsteps));
@@ -448,7 +448,7 @@ test('katana miss has a Web-only air sweep distinct from the blade-contact cue',
   assert.ok(sweep);
   const air = gains.find(node => sweep.connections.includes(node));
   assert.ok(air);
-  assert.ok(air.connections.includes(gains[7])); // Existing spatialized output.
+  assert.ok(air.connections.includes(gains[8])); // Existing spatialized output.
   ctx.currentTime += 0.1; // Delayed unrelated contact must not cancel a missed swing.
   assert.equal(mix.emit('katana').status, 'started');
   assert.equal(nodes.length, 4);
@@ -621,7 +621,7 @@ test('clean dodge schedules a spatial Web-only descending zip and ducks footstep
     sweeps.some(entry => entry.filter === filter && entry.value === 1050 &&
       Math.abs(entry.time - (ctx.currentTime + 0.18)) < 1e-12));
   assert.ok(zip, 'Web-authored 180ms descending air zip');
-  const output = gains[7];
+  const output = gains[8];
   assert.ok(output.connections[0].connections.includes(gains[1])); // HRTF -> weapons.
   assert.ok(duckTargets.some(entry => entry.value === 0.10));
   assert.equal(mix.emit('step').status, 'blocked'); // Dodge outranks a footfall.
@@ -650,7 +650,7 @@ test('a confirmed Web landing has two weighted floor contacts without adding sou
   assert.ok(weightFilter);
   const heelToe = gains.find(gain => weightFilter.connections.includes(gain));
   assert.ok(heelToe);
-  assert.ok(heelToe.connections.includes(gains[7])); // Same spatial output.
+  assert.ok(heelToe.connections.includes(gains[8])); // Same spatial output.
   assert.deepEqual(pulses.filter(pulse => pulse.node === heelToe).map(pulse =>
     [pulse.level, pulse.at]), [
       [0.4 * 0.36, ctx.currentTime + 0.013],
@@ -677,7 +677,7 @@ test('confirmed bullet wall contacts have a short spatial Web grit, not a shatte
   assert.equal(nodes.length, 2); // One existing noise plus one pitched body.
   assert.equal(mix.getActiveVoices(), 1);
   assert.ok(filters.some(f => f.type === 'bandpass' && f.frequency.value === 1050));
-  assert.ok(gains[7].connections[0].connections.includes(gains[2])); // HRTF to impacts.
+  assert.ok(gains[8].connections[0].connections.includes(gains[2])); // HRTF to impacts.
   assert.ok(duck.some(entry => entry.value === 0.10)); // Keep contact audible over steps.
   assert.equal(mix.emit('step').status, 'blocked'); // Wall hit outranks a footstep.
   for (const source of nodes) source.onended();
@@ -857,8 +857,8 @@ test('walking footfalls carry a bright shoe-contact snap on the existing voice',
   assert.ok(nodes[0].connections.includes(shoe));
   const snap = gains.find(gain => shoe.connections.includes(gain));
   assert.ok(snap);
-  assert.ok(snap.connections.includes(gains[7])); // Shared spatial output.
-  assert.ok(gains[7].connections[0].connections.includes(gains[3])); // Footstep bus.
+  assert.ok(snap.connections.includes(gains[8])); // Shared spatial output.
+  assert.ok(gains[8].connections[0].connections.includes(gains[3])); // Footstep bus.
   assert.equal(mix.getActiveVoices(), 1);
   for (const node of nodes) node.onended();
   assert.equal(mix.getActiveVoices(), 0);
@@ -1002,4 +1002,32 @@ test('confirmed player damage briefly makes room for hit feedback in the Web wea
   assert.equal(mix.emit('enemy-shot').status, 'started');
   assert.equal(weaponBus.gain.targets.length, 2, 'enemy fire does not retrigger player-damage focus');
   mix.dispose();
+});
+
+// Web-original acoustic policy, not recovered Unity playback or observed ears.
+test('distant enemy gunfire bypasses local echoes but still ducks for player damage', () => {
+  const {ctx, gains, nodes} = fakeAudio();
+  ctx.listener = {positionX: {value: 0}, positionY: {value: 0}, positionZ: {value: 0}};
+  const mix = createWebImpactMix(ctx, 2);
+  const [master, weapons, , , , send, , distant] = gains;
+  assert.ok(master);
+  assert.equal(distant.gain.value, weapons.gain.value);
+  assert.ok(!distant.connections.includes(send));
+  assert.ok(distant.connections.includes(weapons.connections[0]));
+
+  assert.equal(mix.emit('enemy-shot', {position: {x: 2, y: 0, z: 0}}).status, 'started');
+  const nearPanner = gains[8].connections[0].connections[0];
+  assert.ok(nearPanner.connections.includes(weapons));
+  const before = gains.length;
+  assert.equal(mix.emit('enemy-shot', {position: {x: 24, y: 0, z: 0}}).status, 'started');
+  const farPanner = gains[before].connections[0].connections[0];
+  assert.ok(farPanner.connections.includes(distant));
+  assert.ok(!farPanner.connections.includes(weapons));
+  assert.equal(nodes.length, 4); // Same 2 source nodes per transient.
+
+  assert.equal(mix.emit('player-hit').status, 'started');
+  assert.deepEqual(distant.gain.targets.slice(-2).map(entry => entry[0]), [0.4, 0.9]);
+  assert.deepEqual(weapons.gain.targets.slice(-2).map(entry => entry[0]), [0.4, 0.9]);
+  mix.dispose();
+  assert.equal(distant.disconnected, true);
 });
