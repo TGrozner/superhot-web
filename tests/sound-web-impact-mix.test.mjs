@@ -449,7 +449,8 @@ test('katana miss has a Web-only air sweep distinct from the blade-contact cue',
   const air = gains.find(node => sweep.connections.includes(node));
   assert.ok(air);
   assert.ok(air.connections.includes(gains[7])); // Existing spatialized output.
-  assert.equal(mix.emit('katana').status, 'started'); // Contact is independent.
+  ctx.currentTime += 0.1; // Delayed unrelated contact must not cancel a missed swing.
+  assert.equal(mix.emit('katana').status, 'started');
   assert.equal(nodes.length, 4);
   assert.equal(mix.emit('step').status, 'blocked'); // Priority budget unchanged.
   assert.equal(mix.getActiveVoices(), 2);
@@ -589,7 +590,7 @@ test('Web gunfire and confirmed impacts temporarily duck footsteps, not native a
       {value: 0.3, at: ctx.currentTime + 0.14, constant: 0.18},
     ]);
   }
-  assert.equal(mix.getActiveVoices(), 12); // Overlapping punch swish retired on contact.
+  assert.equal(mix.getActiveVoices(), 11); // Katana and punch air swishes retired on contact.
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
 });
