@@ -1031,3 +1031,27 @@ test('distant enemy gunfire bypasses local echoes but still ducks for player dam
   mix.dispose();
   assert.equal(distant.disconnected, true);
 });
+
+
+test('Web-original kill shatter survives a saturated enemy volley without masking player damage', () => {
+  // A confirmed death should not lose its glass accent to a later enemy muzzle.
+  // This is an authored Web voice policy; scheduled sources are not speaker proof.
+  const {ctx, nodes} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 1);
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.equal(mix.emit('shatter').status, 'started');
+  assert.deepEqual(nodes[0].stopArgs, [ctx.currentTime + 0.008],
+    'the kill shatter replaces the lower-priority gunshot');
+
+  const shatterNoise = nodes[2];
+  const sourceCount = nodes.length;
+  assert.equal(mix.emit('enemy-shot').status, 'blocked',
+    'ordinary enemy fire cannot interrupt confirmed death feedback');
+  assert.equal(nodes.length, sourceCount, 'rejected gunfire allocates no WebAudio sources');
+  assert.equal(shatterNoise.stopped, undefined);
+
+  assert.equal(mix.emit('player-hit').status, 'started',
+    'player damage still takes precedence over all kill feedback');
+  assert.deepEqual(shatterNoise.stopArgs, [ctx.currentTime + 0.008]);
+  mix.dispose();
+});

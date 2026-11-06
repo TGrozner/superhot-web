@@ -124,7 +124,7 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
   }
   const priorityByCue: Record<WebImpactCue, number> = {
     // Creative Web mix priorities: damage feedback survives even shot bursts.
-    'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 4, shatter: 4,
+    'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 4, shatter: 5,
     'player-hit': 6,
     katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5, stun: 5,
         step: 1, landing: 2, pickup: 4, throw: 4, dodge: 4, 'dry-fire': 5,
