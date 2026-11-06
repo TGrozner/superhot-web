@@ -77,3 +77,38 @@ test('replanning while approaching a portal does not retreat to the polygon cent
     position=next;
   }
 });
+
+test('long Dojo-like route and equal-cost portals remain deterministic',()=>{
+  // Synthetic Web graph (not a native Detour/FPS measurement).
+  const length=384;
+  const nodes=Array.from({length},(_,i)=>({
+    index:i,center:p(i+.5,0,.5),
+    vertices:[p(i,0,0),p(i+1,0,0),p(i+1,0,1),p(i,0,1)],
+    links:i===length-1?[]:[{to:i+1,point:p(i+1,0,.5),cost:1}],
+  }));
+  const start=p(.25,0,.5),goal=p(length-.25,0,.5);
+  const route=findNativeRoute({nodes,source:{owner:'synthetic',pathId:1}},
+    start,goal,{maxSnapDistance:0});
+  assert.ok(route);
+  assert.equal(route.points.length,length+1);
+  assert.deepEqual(advanceNativeRoute(route,start,length).position,goal);
+  assert.equal(route.cursor,route.points.length);
+
+  const centers=[p(0,0,0),p(1,0,1),p(1,0,-1),p(2,0,0)];
+  const branches=centers.map((c,i)=>({
+    index:i,center:c,
+    vertices:[p(c.x-.2,0,c.z-.2),p(c.x+.2,0,c.z-.2),
+      p(c.x+.2,0,c.z+.2),p(c.x-.2,0,c.z+.2)],
+    links:[],
+  }));
+  // Reverse insertion order must not change the lower-index winner.
+  branches[0].links=[{to:2,point:p(.5,0,-.5),cost:1},
+    {to:1,point:p(.5,0,.5),cost:1}];
+  branches[1].links=[{to:3,point:p(1.5,0,.5),cost:1}];
+  branches[2].links=[{to:3,point:p(1.5,0,-.5),cost:1}];
+  const chosen=findNativeRoute({nodes:branches,source:null},
+    centers[0],centers[3],{maxSnapDistance:1e-8});
+  assert.ok(chosen);
+  assert.deepEqual(chosen.points[1],p(.5,0,.5));
+  assert.equal(chosen.points.length,4);
+});
