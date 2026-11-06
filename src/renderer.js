@@ -440,13 +440,16 @@ export function createRenderer(canvas) {
   function drawNativeActorSkin(actorId, modelMatrix, clip, time, {
     statePlayback = false, transition = null, action = null, solvedPose = null,
     shaderTime = 0, cameraPosition = currentCamera,
-    hitIncomingDirection = null, hitEventId = null,
+    hitIncomingDirection = null, hitEventId = null, targetSight = null,
   } = {}) {
     if (!actorSkinRuntime) return null;
     const selection = (name, elapsed) => statePlayback
       ? {state: name, time: elapsed}
       : {clip: name, playback: ['idle', 'walk', 'run'].includes(name) ? 'loop' : 'clamp', time: elapsed};
     const pose = selection(clip, time);
+    // Feed SH-14 only the actual encounter LOS verdict; a null/unknown signal
+    // leaves the current authored/Web pose alone (e.g. a dead actor).
+    if (targetSight !== null) pose.targetSight = targetSight;
     if (transition) pose.transition = {
       from: selection(transition.from, transition.fromTime),
       elapsed: transition.elapsed,
