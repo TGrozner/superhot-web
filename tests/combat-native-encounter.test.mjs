@@ -2394,3 +2394,34 @@ test('J3 Web gunner shelters through reload, then re-peeks its last witnessed fi
   assert.equal(enemy.runtime.attackDelayRemaining,.02,
     'the maneuver does not advance or refill the native weapon runtime');
 });
+
+test('J3 Web 3 FPS reticle sampling requires consecutive actual sightings before an aim dodge',()=>{
+  // Web-only camera sampling; all collision, nav and character inputs are synthetic.
+  // A single low-FPS frame cannot prove a continuous .28s camera hold.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const runtime=setup(data),enemy=firstSpawn(runtime,target);
+  enemy.clock=0; // no unrelated warmup strafe
+  const aimed=p(-1,0,0),away=p(0,0,-1);
+  const start=p(enemy.x,enemy.y,enemy.z);
+  const tick=(forward,dt=1/3)=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,playerForward:forward,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  }));
+  tick(aimed);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start,
+    'one 3 FPS camera sample is not a sustained aim and cannot provoke a dodge');
+  assert.ok(enemy.encounter.webAimLock>0 && enemy.encounter.webAimLock<.28);
+  assert.equal(enemy.encounter.webAimRemaining,0);
+  tick(away);
+  assert.equal(enemy.encounter.webAimLock,0,
+    'looking away erases the partial sighting instead of banking a reaction');
+  tick(aimed);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start,
+    'the first fresh sample still cannot provoke a new move');
+  tick(aimed);
+  assert.ok(Math.abs(enemy.z-start.z)>.05,
+    'genuine consecutive sightings still trigger a collision/nav-approved dodge');
+  assert.equal(enemy.encounter.canAttack,false,
+    'evasive movement does not grant a new shot or change weapon timing');
+  assert.equal(enemy.runtime.pendingShot,null);
+});
