@@ -249,7 +249,9 @@ function webFinalSurvivorBreacher(runtime, enemy, enemies) {
 // posed muzzle, line of sight and ally clearance must pass again).
 function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
   {sideOverride=null, maxDistance=Infinity, preferClearMuzzle=false,
-    preferCover=false, firingTarget=null}={}) {
+    preferCover=false, firingTarget=null, playerBodyFeet=playerFeet}={}) {
+  // Movement may follow a remembered bullet, corpse or last-seen location;
+  // the CURRENT player feet are used only for physical body occupancy.
   const start=position(enemy), state=enemy.encounter;
   const dx=playerFeet.x-start.x, dz=playerFeet.z-start.z, d=Math.hypot(dx,dz);
   if (!Number.isFinite(d) || (d<=EPSILON && sideOverride===null)) return false;
@@ -269,7 +271,7 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
         occupied(runtime,start,moved,enemies,enemy) ||
-        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+        occupiedSegment(start,moved,playerBodyFeet,runtime.body.radius*2,runtime.body.height))continue;
     const candidate={moved,side};
     if (preferClearMuzzle && enemy.muzzlePosition && firingTarget) {
       const muzzle={x:enemy.muzzlePosition.x+moved.x-start.x,
@@ -317,7 +319,8 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
  * constraints. Fail closed near a wall or teammate; never teleport, bypass a
  * collision or create permission to shoot. Returns true only when feet moved.
  */
-function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime, {avoidApproaching=null}={}) {
+function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
+  {avoidApproaching=null,playerBodyFeet=playerFeet}={}) {
   const start=position(enemy), state=enemy.encounter;
   const awayX=start.x-playerFeet.x, awayZ=start.z-playerFeet.z;
   const length=Math.hypot(awayX,awayZ);
@@ -340,7 +343,7 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime, {
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
         occupied(runtime,start,moved,enemies,enemy) ||
-        occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
+        occupiedSegment(start,moved,playerBodyFeet,runtime.body.radius*2,runtime.body.height))continue;
     enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
     enemy.walking=true;
     state.route=null;
@@ -1445,7 +1448,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     if(state.webReloadCoverRemaining>EPSILON) {
       advanceNativeEnemySpeed(enemy.runtime,settings,'walking',scaledDeltaTime);
       if(tryWebStrafe(runtime,enemy,state.webReloadCoverFeet,enemies,
-        scaledDeltaTime,{sideOverride:-state.webReloadCoverSide}))return;
+        scaledDeltaTime,{sideOverride:-state.webReloadCoverSide,playerBodyFeet:playerFeet}))return;
     }
     // A blocked return lane cannot trap the actor: resume remembered pursuit.
     state.webReloadCoverRemaining=0;
@@ -1515,7 +1518,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       !enemy.runtime.pendingShot) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'running',scaledDeltaTime);
-    const moved=tryWebDisengage(runtime,enemy,state.webLossFeet,enemies,scaledDeltaTime);
+    const moved=tryWebDisengage(runtime,enemy,state.webLossFeet,enemies,scaledDeltaTime,
+      {playerBodyFeet:playerFeet});
     state.webLossRemaining=Math.max(0,state.webLossRemaining-scaledDeltaTime);
     state.canAttack=false;
     if(!moved || state.webLossRemaining<=EPSILON) {
@@ -1550,9 +1554,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     // any attack permission or fresh target location.
     const safeReference=state.visible ? playerFeet : state.webSuppressionFrom;
     const moved=tryWebDisengage(runtime,enemy,state.webSuppressionFrom,enemies,scaledDeltaTime,
-      {avoidApproaching:state.visible ? playerFeet : null}) ||
+      {avoidApproaching:state.visible ? playerFeet : null,playerBodyFeet:playerFeet}) ||
       tryWebStrafe(runtime,enemy,safeReference,enemies,scaledDeltaTime,
-        {sideOverride:state.webTacticalSide});
+        {sideOverride:state.webTacticalSide,playerBodyFeet:playerFeet});
     state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
     state.canAttack=false;
     if (!moved || state.webSuppressionRemaining<=EPSILON) {
@@ -1682,6 +1686,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       const moved=tryWebStrafe(runtime,enemy,pursuitFeet,enemies,
         scaledDeltaTime*WEB_LAST_SEEN_SWEEP.speedFraction,{
           sideOverride:side,maxDistance:runtime.body.radius*WEB_LAST_SEEN_SWEEP.maxBodyRadii,
+           playerBodyFeet:playerFeet,
         });
       if(!moved)enemy.runtime.speed=0;
       state.webSearchRemaining=Math.max(0,state.webSearchRemaining-scaledDeltaTime);
