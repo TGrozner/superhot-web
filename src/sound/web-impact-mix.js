@@ -109,7 +109,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // Creative Web mix priorities: damage feedback survives even shot bursts.
         'player-shot': 5, 'enemy-shot': 4, impact: 3, 'wall-impact': 4, shatter: 4,
         'player-hit': 6,
-        katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5,
+        katana: 5, 'katana-swing': 4, 'punch-swing': 3, 'punch-contact': 5, stun: 5,
         step: 1, landing: 2, pickup: 4, throw: 4, dodge: 4, 'dry-fire': 5,
     };
     const attackByCue = {
@@ -121,6 +121,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
         impact: [2800, 0.48, 0.014],
         'wall-impact': [3600, 0.26, 0.015],
         'player-hit': [2600, 0.34, 0.032],
+        stun: [2400, 0.44, 0.023], // Web-original snap, not MCD sound EQ.
         shatter: [4800, 0.31, 0.043],
         katana: [3200, 0.32, 0.065],
         'punch-contact': [2400, 0.44, 0.018],
@@ -195,6 +196,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
             'katana-swing': [0.24, 1800, 490, 210, 0.33],
             'punch-swing': [0.16, 1200, 360, 130, 0.30],
             'punch-contact': [0.14, -850, 165, 56, 0.48],
+            // Web-authored recoil snap/fall, never a recovered MCD stun clip.
+            stun: [0.14, 1500, 720, 120, 0.38],
             step: [0.075, -360, 108, 58, 0.22],
             landing: [0.15, -650, 145, 54, 0.40],
             pickup: [0.08, 1400, 510, 880, 0.23],
@@ -301,10 +304,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
             if (remoteEnemyShot)
                 panner.connect(distantWeapons);
             else
-                panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
+                panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' || cue === 'stun' ? impacts : weapons);
         }
         else {
-            out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
+            out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' || cue === 'stun' ? impacts : weapons);
         }
         const voice = { sources: [], effects: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority };
         voices.add(voice);
@@ -687,7 +690,7 @@ export function createWebImpactMix(context, maxVoices = 24) {
             if ((cue !== 'enemy-shot' || enemyShotDistanceMetres === null || enemyShotDistanceMetres <= 14) &&
                 (cue === 'player-shot' || cue === 'enemy-shot' || cue === 'player-hit' ||
                     cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana' ||
-                    cue === 'punch-contact' || cue === 'dodge' || cue === 'dry-fire')) {
+                    cue === 'punch-contact' || cue === 'stun' || cue === 'dodge' || cue === 'dry-fire')) {
                 footsteps.gain.cancelScheduledValues(at);
                 footsteps.gain.setTargetAtTime(0.10, at, 0.012);
                 footsteps.gain.setTargetAtTime(0.3, at + 0.14, 0.18);
