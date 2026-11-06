@@ -1054,10 +1054,15 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime,
       allyBlocked.add(enemy);
       continue;
     }
+    // Active aim-evasion and confirmed-hit support are MOVEMENT phases: they
+    // withdraw shooting permission in moveEnemy. Do not let either consume
+    // the team's sole firing turn while a ready squadmate can actually shoot.
+    // webLocalArmedSquads still keeps these actors as spatial squad bridges.
     if(enemy.reaction.stunRemaining>0 || enemy.reaction.stunnedThisFrame ||
         enemy.runtime?.pendingShot || enemy.encounter.webDodgeRemaining>0 ||
         enemy.encounter.webSuppressionRemaining>0 || enemy.encounter.webLossRemaining>0 ||
-        enemy.encounter.webHitPending || enemy.encounter.webHitRemaining>0)continue;
+        enemy.encounter.webHitPending || enemy.encounter.webHitRemaining>0 ||
+        enemy.encounter.webAimRemaining>0 || enemy.encounter.webSupportRemaining>0)continue;
     ready.push(enemy);
   }
   ready.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
