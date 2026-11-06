@@ -125,8 +125,7 @@ export function createWebFootstepMotion(emit) {
             timeSeconds - groundFlicker.time <= 0.12 && lastAirPosition !== null &&
             Math.abs(lastAirPosition.y - groundFlicker.position.y) <= 0.08 &&
             Math.abs(current.y - groundFlicker.position.y) <= 0.08 &&
-            Math.hypot(current.x - groundFlicker.position.x,
-                current.z - groundFlicker.position.z) <= maxAllowedTravel(timeSeconds - groundFlicker.time)) {
+            Math.hypot(current.x - groundFlicker.position.x, current.z - groundFlicker.position.z) <= maxAllowedTravel(timeSeconds - groundFlicker.time)) {
             previous = groundFlicker.position;
             previousTime = groundFlicker.time;
             pendingMetres = groundFlicker.pending;
