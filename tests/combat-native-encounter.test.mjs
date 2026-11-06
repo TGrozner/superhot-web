@@ -2288,7 +2288,7 @@ test('J2 Web angled crossfire: a teammate on lower stairs blocks a rising muzzle
   // ally's 1.8m body, but the bullet ENTERS its cylinder at x≈2.6, y≈1.76.
   // The old closest-horizontal-point test falsely authorized that shot.
   const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
-  const target={playerFeet:p(8,3.4,2),playerPosition:p(8,5,2)};
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,5,2)};
   const runtime=setup(data),shooter=firstSpawn(runtime,target);
   const ally={id:'web-stair-ally',x:3,y:0,z:2,alive:true,active:true};
   shooter.muzzlePosition=p(2,1.4,2);
