@@ -2718,3 +2718,39 @@ test('J3 Web gunshot investigation: one observed projectile becomes a reachable 
   assert.equal(enemy.encounter.webBulletClueFeet,null);
   assert.deepEqual(enemy.encounter.webLastSeenFeet,p(10,0,5));
 });
+
+test('J3 Web spawn dispatch: a never-sighted gunner searches its order, not hidden live player feet',()=>{
+  // Entirely synthetic: a full divider blocks initial and relocated player sight.
+  // This freezes only the spawner-provided target; no MCD AI timing is implied.
+  const initial={playerFeet:p(10,0,2),playerPosition:p(10,1.6,2)};
+  const runtime=setup(scene(),[box(6,1,5,.3,2,10)]);
+  const enemy=firstSpawn(runtime,initial);
+  assert.deepEqual(enemy.encounter.webDispatchFeet,initial.playerFeet);
+  assert.equal(enemy.encounter.webLastSeenFeet,null);
+  const moved={playerFeet:p(12,0,9),playerPosition:p(12,1.6,9)};
+  for(let frame=0;frame<5;frame++) {
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...moved,scaledDeltaTime:.05,unscaledDeltaTime:.05,
+    }));
+    assert.equal(enemy.encounter.visible,false);
+    assert.equal(enemy.encounter.canAttack,false);
+    assert.deepEqual(enemy.encounter.target,initial.playerFeet,
+      'a hidden relocated player must not steer this gunner toward live coordinates');
+    assert.deepEqual(enemy.encounter.webDispatchFeet,initial.playerFeet,
+      'the spawn order remains an immutable navigation clue across encounter ticks');
+    assert.equal(enemy.encounter.webLastSeenFeet,null);
+  }
+  assert.ok(Math.abs(enemy.face-Math.PI/2)<1e-6,
+    'blind facing uses the original eastward dispatch, not the hidden player to its southeast');
+  const before=p(enemy.x,enemy.y,enemy.z);
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...moved,scaledDeltaTime:0,unscaledDeltaTime:.05,
+  }));
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),before,
+    'world freeze cannot move a hunter or refresh its dispatch');
+  const revealed={playerFeet:p(4,0,2),playerPosition:p(4,1.6,2)};
+  advanceNativeEncounter(runtime,input([enemy],{...revealed,scaledDeltaTime:.05}));
+  assert.equal(enemy.encounter.visible,true);
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,revealed.playerFeet,
+    'a genuine personal sighting takes priority over the initial dispatch');
+});
