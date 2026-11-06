@@ -517,3 +517,23 @@ test('J4 warning spotlights respect Concrete/Crystal surface orientation without
   assert.equal((DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.match(
     /\* dojoWebWarningSurfaceFacing\(offset, radius\)/g) ?? []).length, 2);
 });
+
+// GPU shader-only optimization: angular reject must precede costly sqrt.
+// Numeric CPU cone preview coverage lives above; no browser FPS implied.
+test('J4 cookie and procedural red-warning spot reject off-axis pixels before sqrt', () => {
+  for (const [start, stop] of [
+    ['vec3 dojoDoorWarningSpotWebPreview(', 'vec3 dojoDoorWarningSpotWebGlow('],
+    ['vec3 dojoDoorWarningSpotWebGlow(', 'vec3 dojoDoorFalseLightWashWeb('],
+  ]) {
+    const from = DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.indexOf(start);
+    const to = DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.indexOf(stop, from + start.length);
+    assert.ok(from >= 0 && to > from, 'warning GPU function is present');
+    const body = DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL.slice(from, to);
+    const cone = body.indexOf('along * along < distanceSquared * cosHalfAngle * cosHalfAngle');
+    const root = body.indexOf('float radius = sqrt(distanceSquared)');
+    assert.ok(cone >= 0 && root > cone,
+      'squared cone check saves a sqrt on rejected fragments');
+    assert.ok(body.indexOf('if (along <= 0.0) return vec3(0.0)') < cone,
+      'back-facing cone is rejected before squaring');
+  }
+});
