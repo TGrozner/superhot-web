@@ -129,3 +129,37 @@ test('Dojo collision slices expose world-clock boundaries before synthetic TTL e
   assert.ok(frameStart + tick.worldStepOffsets[1] >= expiresAt);
   assert.ok(Math.abs(frameStart + tick.worldStepOffsets.at(-1) - clock.worldTime) < 1e-8);
 });
+
+
+test('Dojo multi-slice AI never counts the same frame unscaled time twice', () => {
+  // The real Dojo main.js passes activeRealDt as unscaledDeltaTime to both
+  // encounter and gun-attack updates. A future per-slice hookup must pass
+  // per-slice deltas, not the full frame duration on EVERY collision slice.
+  for (const [activeRealDt, expectedSteps] of [[0.1, 2], [0.8, 4]]) {
+    const clock = createMcdGameplayClock();
+    clock.source.delayedUpdates = 0;
+    clock.source.forcedTimeScale = 1;
+    clock.timeScale = 1;
+    const tick = stepWebMcdGameplayFrame(clock, {
+      simulationDt: .05, activeRealDt, maximumSteps: 4,
+    });
+    assert.equal(tick.worldSteps.length, expectedSteps);
+    assert.equal(tick.simulationStepDeltas.length, expectedSteps);
+    assert.equal(tick.unscaledStepDeltas.length, expectedSteps);
+    assert.ok(tick.unscaledStepDeltas.every(dt => dt >= 0 && Number.isFinite(dt)));
+    const simulationTotal = tick.simulationStepDeltas.reduce((sum, dt) => sum + dt, 0);
+    const unscaledTotal = tick.unscaledStepDeltas.reduce((sum, dt) => sum + dt, 0);
+    assert.ok(Math.abs(simulationTotal - tick.chargedActiveDt) < 1e-10);
+    assert.ok(Math.abs(unscaledTotal - activeRealDt) < 1e-10,
+      'enemy unscaled time must advance only once per rendered frame');
+    assert.ok(activeRealDt * expectedSteps > unscaledTotal,
+      'reusing the full frame activeRealDt per slice would overcharge AI timers');
+  }
+
+  const clock = createMcdGameplayClock();
+  const paused = stepWebMcdGameplayFrame(clock, {
+    simulationDt: 0, activeRealDt: 0, maximumSteps: 4, paused: true,
+  });
+  assert.deepEqual(paused.simulationStepDeltas, []);
+  assert.deepEqual(paused.unscaledStepDeltas, []);
+});
