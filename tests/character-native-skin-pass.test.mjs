@@ -1080,7 +1080,19 @@ test('Web J4 slow-motion locomotion banks on world time, not unrelated crystal s
   const replay = draw('slow-guard', .126, .01, .1);
   assert.equal(replay.actorWebPoseReaction, null,
     'replayed actor ID must not inherit movement through either clock rewind');
-  assert.equal(calls.filter(call => call[0] === 'draw').length, 6,
+  // At five WORLD frames per second the previous 150 ms cutoff silently
+  // removed all Web locomotion banking, even for continuous normal movement.
+  assert.equal(draw('five-fps', 0, .2, 1).actorWebPoseReaction, null);
+  const fiveFps = draw('five-fps', .4, .4, 1.2);
+  assert.equal(fiveFps.actorWebPoseReaction?.kind, 'locomotion',
+    '5 FPS must keep a bounded bank on the existing GPU rig');
+  assert.ok(fiveFps.actorWebPoseReaction.roll < -.05);
+  const frozenFiveFps = draw('five-fps', .4, .4, 1.4);
+  assert.deepEqual(Array.from(frozenFiveFps.boneModelMatrices),
+    Array.from(fiveFps.boneModelMatrices), 'paused world pose remains frozen');
+  assert.equal(draw('five-fps', .5, .75, 1.75).actorWebPoseReaction, null,
+    'a 350 ms scheduling gap must still discard stale locomotion history');
+  assert.equal(calls.filter(call => call[0] === 'draw').length, 10,
     'the slow-motion fix adds no extra indexed GPU draws');
   pass.dispose();
 });
@@ -1161,6 +1173,27 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     Array.from(sourceAtRight.weaponAttachmentMatrix));
   const palette = calls.filter(call => call[0] === 'matrix' && call[1] === 'uJoints[0]').at(-1)[2];
   assert.ok(palette[8] > .1, 'GPU palette receives the same head turn');
+
+  // Five active world FPS used to reset Web gaze every frame, leaving the
+  // head looking straight ahead until the scene regained >6.7 FPS.
+  const fiveFpsActors = createNativeActorSkinRuntime(pass);
+  const fiveFpsLook = (time, x, sight) => fiveFpsActors.drawActor({
+    actorId:'five-fps-head', pose:{state:'idle',time,targetSight:sight},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:{x,y:1.5,z:5}, shaderTime:time,
+    color:[.8,.1,.2,1],
+  });
+  assert.equal(fiveFpsLook(0, 5, true).actorWebHeadLook, null);
+  const lowFpsRight = fiveFpsLook(.2, 5, true);
+  assert.ok(lowFpsRight.actorWebHeadLook?.yaw > .1,
+    'five FPS must still rotate the sampled head palette toward visible target');
+  const lowFpsLeft = fiveFpsLook(.4, -5, true);
+  assert.ok(lowFpsLeft.actorWebHeadLook?.yaw < 0,
+    'five FPS must not reset the head before its turn can reach the left');
+  const lowFpsHidden = fiveFpsLook(.6, 5, false);
+  assert.ok(Math.abs(lowFpsHidden.actorWebHeadLook?.yaw ?? 0) <
+    Math.abs(lowFpsLeft.actorWebHeadLook.yaw),
+    'five FPS occlusion must ease the head back without tracking unseen camera');
 
   const paused = draw(.1, -5, 5);
   assert.equal(paused.actorWebHeadLook.yaw, lookingRight.actorWebHeadLook.yaw,
