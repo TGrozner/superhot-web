@@ -85,6 +85,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
     // WEB-ORIGINAL: a landed punch should not hide behind its simultaneous air swish.
     let lastPunchSwing = null;
     let lastPunchSwingAt = -Infinity;
+    // Web-only katana hits follow the swing in the same Dojo attack frame.
+    // Fade its overlapping air sweep so the confirmed steel contact reads clearly.
+    let lastKatanaSwing = null;
+    let lastKatanaSwingAt = -Infinity;
     /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
     function setMixLevel(level) {
         if (!Number.isFinite(level) || level < 0 || level > 1)
@@ -124,6 +128,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
         voices.delete(voice);
         if (lastPunchSwing === voice)
             lastPunchSwing = null;
+        if (lastKatanaSwing === voice)
+            lastKatanaSwing = null;
         retired.delete(voice);
         for (const src of voice.sources) {
             src.onended = null;
@@ -306,6 +312,16 @@ export function createWebImpactMix(context, maxVoices = 24) {
             voices.has(lastPunchSwing)) {
             retire(lastPunchSwing);
             lastPunchSwing = null;
+        }
+        if (cue === 'katana-swing') {
+            lastKatanaSwing = voice;
+            lastKatanaSwingAt = at;
+        }
+        else if (cue === 'katana' && lastKatanaSwing !== null &&
+            at >= lastKatanaSwingAt && at - lastKatanaSwingAt <= 0.08 &&
+            voices.has(lastKatanaSwing)) {
+            retire(lastKatanaSwing);
+            lastKatanaSwing = null;
         }
         const track = (node) => {
             voice.effects.push(node);
