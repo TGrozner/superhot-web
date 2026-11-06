@@ -298,8 +298,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
                 distanceFilter.connect(panner);
             }
             out.connect(distanceFilter ?? panner);
-            if (remoteEnemyShot) panner.connect(distantWeapons);
-            else panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
+            if (remoteEnemyShot)
+                panner.connect(distantWeapons);
+            else
+                panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
         }
         else {
             out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' ? impacts : weapons);
