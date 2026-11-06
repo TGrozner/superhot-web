@@ -1027,12 +1027,13 @@ test('Web inertial bank eases to idle, freezes on paused time and yields to sour
     'held source pose, weapon socket and hitboxes must freeze together');
   const settling = draw('guard', 'idle', .28, .15, 1.2);
   assert.equal(settling.actorWebPoseReaction.kind, 'turn');
-  assert.ok(Math.abs(settling.actorWebPoseReaction.roll) > .012 &&
-    Math.abs(settling.actorWebPoseReaction.roll) < Math.abs(moving.actorWebPoseReaction.roll),
-  'standing still should smoothly shed the inherited locomotion bank');
+  assert.equal(settling.actorWebPoseReaction.roll, moving.actorWebPoseReaction.roll,
+    'a gait state change cannot consume unscaled shader seconds as world time');
   const settled = draw('guard', 'idle', .28, .15, 1.3);
-  assert.equal(settled.actorWebPoseReaction.kind, 'idle',
-    'ordinary breathing resumes once inertial banking has faded');
+  assert.equal(settled.actorWebPoseReaction.kind, 'turn');
+  assert.ok(Math.abs(settled.actorWebPoseReaction.roll) <
+    Math.abs(settling.actorWebPoseReaction.roll),
+  'the following frame settles the bank using actual source-world pose seconds');
   const transitioning = draw('guard', 'run', .48, .15, 1.4,
     { from: { state: 'idle', time: .4 }, elapsed: .05 });
   assert.equal(transitioning.actorWebPoseReaction, null,
@@ -1117,10 +1118,12 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     },
     clips: {
       idle: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
+      run: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
       hit: {duration: 1, sampleRate: 1, frames: [idleFrame,idleFrame]},
     },
     states: {
       idle: {clip:'idle', playback:'loop', speed:1},
+      run: {clip:'run', playback:'loop', speed:1},
       hit: {clip:'hit', playback:'clamp', speed:1},
     },
     weaponAttachment: {
@@ -1186,6 +1189,38 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   assert.ok(below.boneModelMatrices[2*16 + 9] < 0);
   near(Array.from(below.weaponAttachmentMatrix),
     Array.from(control(.46).weaponAttachmentMatrix));
+
+  // The live Dojo changes idle/walk/run source states when AI starts or
+  // stops moving. Their pose.time restarts, while shaderTime advances on
+  // the separate REAL clock. A Web head lock must neither snap to zero nor
+  // incorrectly update from 100ms of shader time during a 0ms world step.
+  const gaitActors = createNativeActorSkinRuntime(pass);
+  const gait = (state, poseTime, shaderTime, worldX = 0) => {
+    const model = identity();
+    model[12] = worldX;
+    return gaitActors.drawActor({
+      actorId: 'gait-watchman',
+      pose: {state, time: poseTime, targetSight: true},
+      modelMatrix: model, viewProjection: identity(),
+      cameraPosition:{x:5,y:4.5,z:5}, shaderTime,
+      color:[.8,.1,.2,1],
+    });
+  };
+  assert.equal(gait('idle', .4, 1).actorWebHeadLook, null);
+  const heldGaze = gait('idle', .5, 1.1);
+  assert.ok(heldGaze.actorWebHeadLook.yaw > .1);
+  const newRun = gait('run', 0, 1.2);
+  assert.equal(newRun.actorWebHeadLook.yaw, heldGaze.actorWebHeadLook.yaw,
+    'state-clock restart must preserve the existing real GPU head orientation');
+  assert.equal(newRun.actorWebHeadLook.pitch, heldGaze.actorWebHeadLook.pitch);
+  const resumedGaze = gait('run', .025, 1.3);
+  assert.ok(resumedGaze.actorWebHeadLook.yaw >= newRun.actorWebHeadLook.y,
+    'world-time resume must progress the visible tracking on the new source clip');
+  const teleported = gait('idle', 0, 1.4, 4);
+  assert.equal(teleported.actorWebHeadLook, null,
+    'a real actor teleport cannot carry the old target gaze into a new location');
+  assert.equal(gait('idle', .025, .1).actorWebHeadLook, null,
+    'REJOUER clock rewind may not resurrect a prior run gaze');
 
   // The Web head used to track the camera even after the encounter lost LOS:
   // visible: false must settle the SAME sampled Head, not follow an unseen
