@@ -2724,10 +2724,18 @@ test('J3 Web spawn dispatch: a never-sighted gunner searches its order, not hidd
   // This freezes only the spawner-provided target; no MCD AI timing is implied.
   const initial={playerFeet:p(10,0,2),playerPosition:p(10,1.6,2)};
   const runtime=setup(scene(),[box(6,1,5,.3,2,10)]);
-  const enemy=firstSpawn(runtime,initial);
-  assert.deepEqual(enemy.encounter.webDispatchFeet,initial.playerFeet);
-  assert.equal(enemy.encounter.webLastSeenFeet,null);
+  const warning=advanceNativeEncounter(runtime,input([],initial));
+  assert.equal(warning[0].type,'door-warning');
   const moved={playerFeet:p(12,0,9),playerPosition:p(12,1.6,9)};
+  // Move behind cover BEFORE the delayed arrival; the warning-time order is
+  // fixed and must not receive the latest hidden-player coordinates.
+  const events=advanceNativeEncounter(runtime,input([],{...moved,unscaledDeltaTime:2}));
+  const enemy=events.find(event=>event.type==='spawn')?.enemy;
+  assert.ok(enemy);
+  assert.deepEqual(enemy.encounter.webDispatchFeet,initial.playerFeet,
+    'a delayed spawn cannot learn an unseen relocation after its door warning');
+  assert.equal(enemy.encounter.webLastSeenFeet,null);
+  assert.equal(runtime.webDoorDispatch.size,0,'consumed warning must not leak a second dispatch');
   for(let frame=0;frame<5;frame++) {
     advanceNativeEncounter(runtime,input([enemy],{
       ...moved,scaledDeltaTime:.05,unscaledDeltaTime:.05,

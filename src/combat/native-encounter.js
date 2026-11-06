@@ -938,7 +938,7 @@ export function createNativeEncounter(scene, collision, rng = Math.random, {
     sourceFactoryPlan,
     spawner:createNativeSpawnerState(spawnerSettings, rng), rng, killTarget, killed:0,
     actors:new Map(), countedDeaths:new Set(), webObservedDeaths:new Set(),
-    webObservedHitRevisions:new Map(), arrivals:[], nextId:0,
+    webObservedHitRevisions:new Map(), webDoorDispatch:new Map(), arrivals:[], nextId:0,
     webVolleyClock:0,
     stunTime:scalar(enemy.StunTime, 'StunTime'), aimHeight:scalar(enemy.AimHeight, 'AimHeight'),
     armedStopDistance:scalar(enemy.MinimumDistanceToPlayer, 'MinimumDistanceToPlayer'),
@@ -961,6 +961,7 @@ export function readyForVictory(runtime, enemies) {
   if (runtime.killed < runtime.killTarget) return false;
   runtime.spawner.pending.length = 0;
   runtime.arrivals.length = 0;
+  runtime.webDoorDispatch.clear();
   runtime.spawner.enemiesLeft = 0;
   return true;
 }
@@ -1165,7 +1166,7 @@ function spawnEnemy(runtime, point, order, population, playerFeet) {
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
       webLastSeenFeet:null, // Personally observed player feet, never inferred from a bullet.
-      webDispatchFeet:{...playerFeet}, // Web-only initial order: snapshot once, never track hidden player.
+      webDispatchFeet:{...playerFeet}, // Web clue captured at DOOR WARNING, not hidden-player position at arrival.
       webBulletClueFeet:null, // Accessible location where a real bullet was seen.
       webObservedProjectiles:new Set(), // Bounded, structured-clone-safe browser identities.
       webSearchRemaining:null, webSearchComplete:false,
@@ -1879,8 +1880,20 @@ export function advanceNativeEncounter(runtime, input) {
   },runtime.rng);
   const events=[];
   for (const command of commands) {
-    if (command.type === 'spawn') runtime.arrivals.push(command);
-    else events.push(command);
+    if (command.type === 'door-warning') {
+      // Web-original arcade dispatch, not an MCD AI claim: snapshot the clue
+      // when the warning begins. A concealed player can change position before
+      // arrival without redirecting the enemy. FIFO supports repeated doors.
+      const queued=runtime.webDoorDispatch.get(command.point.id) ?? [];
+      queued.push({...playerFeet});
+      runtime.webDoorDispatch.set(command.point.id,queued);
+      events.push(command);
+    } else if (command.type === 'spawn') {
+      const queued=runtime.webDoorDispatch.get(command.point.id);
+      const webDispatchFeet=queued?.shift() ?? {...playerFeet};
+      if (!queued?.length) runtime.webDoorDispatch.delete(command.point.id);
+      runtime.arrivals.push({...command,webDispatchFeet});
+    } else events.push(command);
   }
   const population=enemies.slice();
   for (let i=0;i<runtime.arrivals.length;) {
@@ -1890,7 +1903,7 @@ export function advanceNativeEncounter(runtime, input) {
     if (occupied(runtime,feet,feet,population) ||
         occupiedSegment(feet,feet,playerFeet,runtime.body.radius*2,runtime.body.height) ||
         nativeCapsuleHit(runtime.collision,feet,ceiling,runtime.body)) { i++; continue; }
-    const enemy=spawnEnemy(runtime,order.point,order,population,playerFeet);
+    const enemy=spawnEnemy(runtime,order.point,order,population,order.webDispatchFeet);
     population.push(enemy);
     events.push({type:'spawn',point:order.point,enemy,activation:enemy.sourceActivation});
     runtime.arrivals.splice(i,1);
