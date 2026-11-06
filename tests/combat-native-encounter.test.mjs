@@ -2395,33 +2395,36 @@ test('J3 Web gunner shelters through reload, then re-peeks its last witnessed fi
     'the maneuver does not advance or refill the native weapon runtime');
 });
 
-test('J3 Web 3 FPS reticle sampling requires consecutive actual sightings before an aim dodge',()=>{
-  // Web-only camera sampling; all collision, nav and character inputs are synthetic.
-  // A single low-FPS frame cannot prove a continuous .28s camera hold.
+test('J3 Web aim-pressure dodge only reacts to a ray that really enters the body',()=>{
+  // This is reachable from main's capped <= .05s world timestep. The old
+  // 9.6-degree aim cone could trigger an evasive move after a shot would miss
+  // by more than one full enemy body radius at a normal Dojo distance.
   const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
   const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
   const runtime=setup(data),enemy=firstSpawn(runtime,target);
-  enemy.clock=0; // no unrelated warmup strafe
-  const aimed=p(-1,0,0),away=p(0,0,-1);
+  enemy.clock=0; // no unrelated warmup tactical strafe
   const start=p(enemy.x,enemy.y,enemy.z);
-  const tick=(forward,dt=1/3)=>advanceNativeEncounter(runtime,input([enemy],{
-    ...target,playerForward:forward,scaledDeltaTime:dt,unscaledDeltaTime:dt,
+  const tick=forward=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,playerForward:forward,scaledDeltaTime:.05,unscaledDeltaTime:.05,
   }));
-  tick(aimed);
+  const horizontalMiss=p(-1,0,.12),verticalMiss=p(-1,.12,0);
+  const oldConeFacing=6/(Math.hypot(6,.4)*Math.hypot(1,.12));
+  assert.ok(oldConeFacing>.986,'the old angular cone would react to these misses');
+  for (const miss of [horizontalMiss,verticalMiss]) {
+    for(let frame=0;frame<7;frame++)tick(miss);
+    assert.equal(enemy.encounter.webAimLock,0,
+      'sustained miss outside the true cylinder must never accrue evasive pressure');
+    assert.equal(enemy.encounter.webAimRemaining,0);
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start);
+  }
+  const centered=p(-1,0,0);
+  for(let frame=0;frame<5;frame++)tick(centered);
   assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start,
-    'one 3 FPS camera sample is not a sustained aim and cannot provoke a dodge');
-  assert.ok(enemy.encounter.webAimLock>0 && enemy.encounter.webAimLock<.28);
-  assert.equal(enemy.encounter.webAimRemaining,0);
-  tick(away);
-  assert.equal(enemy.encounter.webAimLock,0,
-    'looking away erases the partial sighting instead of banking a reaction');
-  tick(aimed);
-  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start,
-    'the first fresh sample still cannot provoke a new move');
-  tick(aimed);
-  assert.ok(Math.abs(enemy.z-start.z)>.05,
-    'genuine consecutive sightings still trigger a collision/nav-approved dodge');
+    'one-to-five actual 50ms world observations are still below 280ms');
+  tick(centered);
+  assert.ok(Math.abs(enemy.z-start.z)>.005,
+    'a true camera-ray body intersection permits the existing swept sidestep');
   assert.equal(enemy.encounter.canAttack,false,
-    'evasive movement does not grant a new shot or change weapon timing');
+    'the dodge cannot grant an attack while the gunner is evading');
   assert.equal(enemy.runtime.pendingShot,null);
 });
