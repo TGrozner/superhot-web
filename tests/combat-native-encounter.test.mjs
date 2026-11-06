@@ -2661,3 +2661,50 @@ test('J3 Web ally-hit support: an actual witnessed hit changes a gunner lane onc
   assert.ok(committed.witness.runtime.pendingShot,
     'existing pursuit may move normally, but its already committed shot stays intact');
 });
+
+
+test('J3 Web fair investigation: hidden player movement is not tracked, visible bullets give one reachable clue',()=>{
+  const runtime=setup(scene(),[box(15,1,5,.2,2,10)]);
+  const enemy=firstSpawn(runtime);
+  // A director dispatch records the player's feet ONCE at spawn, not live
+  // omniscience. Real sight through this wall is impossible.
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,p(25,0,5));
+  const hidden={playerPosition:p(27,1.6,7),playerFeet:p(27,0,7)};
+  advanceNativeEncounter(runtime,input([enemy],{...hidden,scaledDeltaTime:.05}));
+  assert.equal(enemy.encounter.visible,false);
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,p(25,0,5),
+    'walking unseen across the wall never refreshes a live player position');
+
+  const shot={pos:p(6,1.6,5),direction:p(1,0,0),
+    speed:37,ttl:4,age:.02,friendly:true,type:'gun'};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:.05,playerProjectiles:[shot],
+  }));
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,p(6,0,5),
+    'gunner investigates the actual seen bullet, not the hidden shooter');
+  assert.equal(enemy.encounter.canAttack,false);
+  const observed=enemy.encounter.webLastSeenFeet;
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:.05,playerProjectiles:[shot],
+  }));
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,observed,
+    'the same in-flight bullet must not refresh investigation every frame');
+
+  const blocked={...shot,pos:p(23,1.6,5)};
+  const throwObject={...shot,pos:p(7,1.6,5),type:'throw'};
+  const enemyRound={...shot,pos:p(8,1.6,5),friendly:false};
+  const expired={...shot,pos:p(9,1.6,5),ttl:0};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:.05,
+    playerProjectiles:[blocked,throwObject,enemyRound,expired],
+  }));
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,observed,
+    'occluded, thrown, hostile and expired projectiles are not sight clues');
+  const frozen={...shot,pos:p(10,1.6,5)};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:0,unscaledDeltaTime:.05,
+    playerProjectiles:[frozen],
+  }));
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,observed,
+    'a frozen world cannot update Web tactical information');
+});
