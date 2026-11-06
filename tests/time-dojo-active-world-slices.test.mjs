@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createMcdGameplayClock, mcdSourcePlayerPreConstraintMove,
+  addMcdGameplayPulse, createMcdGameplayClock, mcdSourcePlayerPreConstraintMove,
   sampleActiveFrameDeltas, stepMcdGameplayClock, stepWebMcdGameplayFrame,
 } from '../src/time.js';
 
@@ -162,4 +162,35 @@ test('Dojo multi-slice AI never counts the same frame unscaled time twice', () =
   });
   assert.deepEqual(paused.simulationStepDeltas, []);
   assert.deepEqual(paused.unscaledStepDeltas, []);
+});
+
+
+test('Dojo low-FPS catch-up does not discard a shot pulse before one LateUpdate', () => {
+  // WEB behavior regression: shooting just after releasing movement can leave
+  // the previous scale near 1. A 100ms RAF then crosses a 50ms world pulse;
+  // the old end-of-frame expiry dropped it BEFORE it affected the next scale.
+  // This is not a claim about the executed native Unity frame order.
+  for (const activeRealDt of [0.1, 1 / 60]) {
+    const clock = createMcdGameplayClock();
+    clock.source.delayedUpdates = 0;
+    clock.timeScale = .98;
+    addMcdGameplayPulse(clock, .05, .2);
+    const tick = stepWebMcdGameplayFrame(clock, {
+      simulationDt: Math.min(.05, activeRealDt), activeRealDt,
+      maximumSteps: 4, x: 0, y: 0, grounded: true,
+    });
+    assert.ok(Math.abs(tick.timeScale - Math.fround(.2)) < 1e-7,
+      'a fresh shot pulse must influence the next Web time-scale even at 10 FPS');
+    assert.ok(tick.worldSteps.every(dt => dt <= .050001));
+    if (activeRealDt === .1) {
+      // The extra contribution lasts one RAF, not indefinitely: by the next
+      // start the world clock has crossed this pulse's world-time deadline.
+      const followup = stepWebMcdGameplayFrame(clock, {
+        simulationDt: .05, activeRealDt: .05, maximumSteps: 4,
+      });
+      assert.ok(Math.abs(followup.appliedTimeScale - Math.fround(.2)) < 1e-7);
+      assert.ok(followup.timeScale < .2, 'expired pulse must leave the registry');
+      assert.equal(clock.source.shifters.filter(s => s.expiresAt !== undefined).length, 0);
+    }
+  }
 });
