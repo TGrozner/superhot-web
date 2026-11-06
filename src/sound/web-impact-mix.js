@@ -201,8 +201,9 @@ export function createWebImpactMix(context, maxVoices = 24) {
             typeof ly === 'number' && Number.isFinite(ly) &&
             typeof lz === 'number' && Number.isFinite(lz)
             ? Math.hypot(position.x - lx, position.y - ly, position.z - lz) : null;
-        const priority = cue === 'enemy-shot' && listenerDistance !== null &&
-            listenerDistance > 14 ? 0 : priorityByCue[cue];
+        const remoteEnemyShot = cue === 'enemy-shot' && listenerDistance !== null &&
+            listenerDistance > 14;
+        const priority = remoteEnemyShot ? 0 : priorityByCue[cue];
         if (voices.size >= maxVoices) {
             let victim = null;
             for (const voice of voices) {
@@ -217,7 +218,10 @@ export function createWebImpactMix(context, maxVoices = 24) {
         // WEB-ORIGINAL combat clarity: avoid muddy reflections under sustained
         // gunfire/impacts. One shared send, no new sources or per-shot nodes.
         // This is a creative Web duck/recovery envelope, NOT a Unity mixer curve.
-        if (roomSend && (cue === 'player-shot' || cue === 'enemy-shot' ||
+        // Distant muzzles keep their spatial sound, but must not suppress
+        // local room tails or prolong a close-range gunfight burst.
+        // This 14m distinction is a creative Web policy, not Unity data.
+        if (roomSend && !remoteEnemyShot && (cue === 'player-shot' || cue === 'enemy-shot' ||
             cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'katana')) {
             const gap = at - lastRoomTransientAt;
             roomBurstCount = gap >= 0 && gap <= 0.28 ? Math.min(4, roomBurstCount + 1) : 0;
