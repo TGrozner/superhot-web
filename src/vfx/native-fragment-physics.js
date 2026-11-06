@@ -156,6 +156,10 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
   recoverPenetration(scene,position,velocity,radius,contacts);
   const planes=[];
   let remaining = { ...displacement };
+  // Contact.t belongs to the CURRENT residual sweep, not the whole Web
+  // substep. Preserve that local fraction for the death PBD adapter, while
+  // tracking a separate chronological fraction for shard VFX and rest gates.
+  let consumedFraction = 0;
   // Web iteration bound, not a source solver parameter. Never advance an
   // unchecked remainder if a corner exhausts this budget.
   for (let iteration = 0; iteration < 4; iteration++) {
@@ -163,6 +167,8 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
     const hit = nativeSphereHit(nearbyFragmentBoxes(scene, position, end, radius), position, end, radius);
     if (!hit) { Object.assign(position, end); break; }
     for (const axis of axes) position[axis] += remaining[axis] * hit.t;
+    hit.webSweptFraction = consumedFraction + (1-consumedFraction)*hit.t;
+    consumedFraction = hit.webSweptFraction;
     contacts.push(hit);
     planes.push(hit.normal);
     const inward = dot(velocity, hit.normal);
@@ -252,7 +258,10 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
     const stepContacts = moveNativeFragmentSphere(collisionScene, body.position, body.velocity,
       displacement, body.collisionRadius, material);
     for (const contact of stepContacts) {
-      contact.webImpactTimeInFrame = stepStart + dt * Math.max(0, Math.min(1, contact.t));
+      // Secondary contacts report t relative to the first hit's residual
+      // sweep. Use the cumulative Web fraction for chronological impact VFX.
+      const fraction = contact.webSweptFraction ?? contact.t;
+      contact.webImpactTimeInFrame = stepStart + dt * Math.max(0, Math.min(1, fraction));
     }
     contacts.push(...stepContacts);
     if (limitWebFrameWork) {
@@ -264,7 +273,8 @@ export function advanceNativeFragmentBody(body, scaledDelta, {
       if (floor && speed < WEB_SHARD_REST_SPEED) {
         // A first contact halfway through a long swept substep has NOT been
         // supported for the whole substep. Use the actual collision fraction.
-        const supportedDt = dt * Math.max(0, Math.min(1, 1 - floor.t));
+        const supportedDt = dt * Math.max(0, Math.min(1,
+          1 - (floor.webSweptFraction ?? floor.t)));
         body.webShardRestSeconds = (body.webShardSupport === floor.collider
           ? (body.webShardRestSeconds ?? 0) : 0) + supportedDt;
         body.webShardSupport = floor.collider;
