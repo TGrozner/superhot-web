@@ -445,6 +445,38 @@ function webProjectileCanReach(projectile,secondsToPass) {
     (Number.isFinite(ttl) && ttl>0 && secondsToPass<=ttl+EPSILON);
 }
 
+/** Web-only 3D threat window: intersect the projectile's forward path with
+ * the existing movement body's horizontal warning radius AND vertical height.
+ * Sampling only the planar closest point can miss steep shots whose height
+ * crosses the enemy while they are still approaching its feet on stairs.
+ * This is predictive AI geometry, not a native hitbox or damage authority.
+ */
+function webIncomingWarningEntry(runtime,enemy,origin,velocity,planarSpeedSquared) {
+  const rx=origin.x-enemy.x,rz=origin.z-enemy.z;
+  const approach=rx*velocity.x+rz*velocity.z;
+  const warningRadius=runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii;
+  const discriminant=approach*approach-planarSpeedSquared*
+    (rx*rx+rz*rz-warningRadius*warningRadius);
+  if(discriminant<0)return null;
+  const root=Math.sqrt(discriminant);
+  let first=Math.max(0,(-approach-root)/planarSpeedSquared);
+  let last=Math.min(WEB_PROJECTILE_EVADE.lookaheadSeconds,
+    (-approach+root)/planarSpeedSquared);
+  if(Math.abs(velocity.y)>EPSILON) {
+    const bottom=(enemy.y-origin.y)/velocity.y;
+    const top=(enemy.y+runtime.body.height-origin.y)/velocity.y;
+    first=Math.max(first,Math.min(bottom,top));
+    last=Math.min(last,Math.max(bottom,top));
+  } else if(origin.y<enemy.y || origin.y>enemy.y+runtime.body.height)return null;
+  if(last<Math.max(first,EPSILON))return null;
+  const time=Math.max(first,EPSILON);
+  return {time,point:{
+    x:origin.x+velocity.x*time,
+    y:origin.y+velocity.y*time,
+    z:origin.z+velocity.z*time,
+  }};
+}
+
 /** Find the earliest observable player bullet that will pass near the body.
  * @param {object} runtime Source collision/navmesh adapter.
  * @param {object} enemy Current live enemy.
@@ -467,12 +499,11 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     if(planarSpeedSquared<=EPSILON)continue;
     const dx=enemy.x-origin.x,dz=enemy.z-origin.z;
     const until=(dx*v.x+dz*v.z)/planarSpeedSquared;
-    if(until<=0 || until>WEB_PROJECTILE_EVADE.lookaheadSeconds || until>=bestTime ||
-        !webProjectileCanReach(projectile,until))continue;
-    const closest={x:origin.x+v.x*until,y:origin.y+v.y*until,z:origin.z+v.z*until};
-    if(closest.y<enemy.y || closest.y>enemy.y+runtime.body.height)continue;
-    const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
-    if(separation>runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii)continue;
+    if(until<=0)continue; // A passing bullet moving away is no longer a threat.
+    const entry=webIncomingWarningEntry(runtime,enemy,origin,v,planarSpeedSquared);
+    if(!entry || entry.time>=bestTime ||
+        !webProjectileCanReach(projectile,entry.time))continue;
+    const closest=entry.point;
     // A bullet stopped by real cover or an intercepting living teammate
     // cannot warn enemies farther downrange. Web prediction, not native MCD AI.
     if(nativeSegmentHit(runtime.sightCollision,origin,closest)!==null ||
@@ -480,7 +511,7 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     const speed=Math.sqrt(planarSpeedSquared);
     const cross=v.x*dz-v.z*dx;
     const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
-    bestTime=until;
+    bestTime=entry.time;
     threat={sideX:-v.z/speed*side,sideZ:v.x/speed*side};
   }
   return threat;

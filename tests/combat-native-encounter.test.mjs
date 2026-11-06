@@ -874,6 +874,33 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
 });
 
+test('J3 Web steep incoming shots cross the body-height window before their planar closest pass',()=>{
+  // Entirely synthetic staircase-like ballistics: no recovered MCD AI values.
+  // At planar closest pass (t=0.4), y=-0.2 is below the feet. At t~0.36,
+  // the same live shot still crosses the near-body lane at a valid height.
+  const scan=(velocity,ttl=.6)=>{
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const projectile={friendly:true,pos:p(10,5,2),velocity,ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:[projectile],
+    }));
+    return enemy;
+  };
+  const threatened=scan(p(-20,-13,0));
+  assert.ok(threatened.encounter.webDodgeRemaining>0,
+    'a live elevated shot entering the 3D warning body triggers evasive movement');
+  assert.equal(threatened.encounter.canAttack,false,
+    'the dodge must never authorize simultaneous new fire');
+  assert.ok(Math.hypot(threatened.x-2,threatened.z-2)>.005,
+    'the enemy uses its actual swept collision and navmesh move');
+  assert.equal(scan(p(-20,0,0)).encounter.webDodgeRemaining,0,
+    'a shot travelling entirely above this floor must not warn the enemy');
+  assert.equal(scan(p(-20,-13,0),.2).encounter.webDodgeRemaining,0,
+    'an expiring shot cannot warn the enemy before reaching the lane');
+});
+
 test('J3 Web bullets intercepted by a living ally cannot panic a downstream gunner',()=>{
   // Web-only projectile prediction on fabricated actor capsules, not native MCD AI.
   const direct={friendly:true,type:'normal',pos:p(15,1,2),
