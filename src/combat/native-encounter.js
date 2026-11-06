@@ -20,6 +20,8 @@ const EPSILON = 1e-6;
 const WEB_RELOAD_SCOOT = Object.freeze({
   beginDelayFraction: 0.45,
   endDelayFraction: 1.2,
+  coverSeconds: 1.35, // Web-only: bounded shelter and re-peek after the real cooldown.
+  readyFraction: 0.2,
 });
 const WEB_STRAFE = Object.freeze({
   warmupSeconds: 1.2,
@@ -286,6 +288,15 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
   }
   chosen ??= fallback;
   if (!chosen)return false;
+  if (preferCover && firingTarget) {
+    const eye={x:chosen.moved.x,y:chosen.moved.y+runtime.aimHeight,z:chosen.moved.z};
+    if(nativeSphereHit(runtime.sightCollision,eye,firingTarget,.2)!==null) {
+      // Remember only the player's personally witnessed position before cover.
+      state.webReloadCoverFeet={...playerFeet};
+      state.webReloadCoverSide=chosen.side;
+      state.webReloadCoverRemaining=WEB_RELOAD_SCOOT.coverSeconds;
+    }
+  }
   enemy.x=chosen.moved.x;enemy.y=chosen.moved.y;enemy.z=chosen.moved.z;
   enemy.walking=true;
   state.route=null;
@@ -987,7 +998,8 @@ function spawnEnemy(runtime, point, order, population) {
       webHitRevision:0,webHitPending:false,webHitRemaining:0,webHitSideX:0,webHitSideZ:0,
       webLossRemaining:0,webLossFeet:null,webCounterPushRemaining:0,
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
-      webAimLock:0,webAimRemaining:0,webAimCooldown:0},
+      webAimLock:0,webAimRemaining:0,webAimCooldown:0,
+      webReloadCoverRemaining:0,webReloadCoverFeet:null,webReloadCoverSide:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
@@ -1070,6 +1082,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       state.webHitPending=false;
       state.webHitRemaining=0;
     }
+    state.webReloadCoverRemaining=0;
+    state.webReloadCoverFeet=null;
+    state.webReloadCoverSide=0;
     // Being stunned again cancels the counterattack, rather than preserving
     // aggression through an unrelated hit or a death.
     state.webCounterPushRemaining=0;
@@ -1104,11 +1119,17 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   }
   const armed=enemy.reaction.hasWeapon;
   if (!armed) {
+    state.webReloadCoverRemaining=0;
+    state.webReloadCoverFeet=null;
+    state.webReloadCoverSide=0;
     enemy.runtime.pendingShot=null;
     state.webSuppressionRemaining=0;
     state.webSuppressionFrom=null;
   }
   if (enemy.runtime.pendingShot) {
+    state.webReloadCoverRemaining=0;
+    state.webReloadCoverFeet=null;
+    state.webReloadCoverSide=0;
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
@@ -1161,6 +1182,35 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       state.webSearchPause=0;
       state.route=null;
     }
+  }
+  // J3 Web-only cover payoff: keep the gunner behind REAL geometry during
+  // its existing reload, then re-peek its last-seen lane. Blind pursuit cannot
+  // instantly undo the cover step or reveal the player's hidden location.
+  if(state.visible) {
+    state.webReloadCoverRemaining=0;
+    state.webReloadCoverFeet=null;
+    state.webReloadCoverSide=0;
+  } else if(armed && state.webReloadCoverRemaining>0 &&
+      state.webReloadCoverFeet && !enemy.runtime.pendingShot) {
+    state.canAttack=false;
+    state.webReloadCoverRemaining=Math.max(0,
+      state.webReloadCoverRemaining-scaledDeltaTime);
+    const settings=enemy.activeWeaponSettings ?? runtime.enemySettings;
+    const almostReady=enemy.runtime.attackDelayRemaining<=
+      settings.attackDelay*WEB_RELOAD_SCOOT.readyFraction;
+    if(scaledDeltaTime===0 || (!almostReady && state.webReloadCoverRemaining>EPSILON)) {
+      enemy.runtime.speed=0;
+      return;
+    }
+    if(state.webReloadCoverRemaining>EPSILON) {
+      advanceNativeEnemySpeed(enemy.runtime,settings,'walking',scaledDeltaTime);
+      if(tryWebStrafe(runtime,enemy,state.webReloadCoverFeet,enemies,
+        scaledDeltaTime,{sideOverride:-state.webReloadCoverSide}))return;
+    }
+    // A blocked return lane cannot trap the actor: resume remembered pursuit.
+    state.webReloadCoverRemaining=0;
+    state.webReloadCoverFeet=null;
+    state.webReloadCoverSide=0;
   }
   const pursuitFeet=!state.visible && state.webLastSeenFeet
     ? state.webLastSeenFeet : playerFeet;
