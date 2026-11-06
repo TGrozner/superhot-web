@@ -124,6 +124,38 @@ test('a source-restitution hit rebounds during the remaining swept frame, not on
     'inelastic materials must not invent upward displacement');
 });
 
+test('secondary shard hit time follows the elapsed sweep, not its residual t',()=>{
+  const collisionScene=prepareNativeCollision([
+    {id:'floor',worldMatrix:matrix(0,-0.5,0),center:[0,0,0],size:[30,1,30]},
+    {id:'wall',worldMatrix:matrix(1.16,2,0),center:[0,0,0],size:[0.02,4,30]},
+  ]);
+  const material={bounciness:0,dynamicFriction:0,bounceThreshold:1};
+  const start=()=>({x:0,y:1,z:0});
+  const velocity=()=>({x:20,y:-18,z:0});
+  const hits=moveNativeFragmentSphere(collisionScene,start(),velocity(),
+    {x:2,y:-1.8,z:0},0.1,material);
+  const floorHit=hits.find(hit=>hit.collider.id==='floor'&&!hit.penetration);
+  const wallHit=hits.find(hit=>hit.collider.id==='wall'&&!hit.penetration);
+  assert.ok(floorHit&&wallHit,'the shard must touch floor then a nearby wall in one sweep');
+  assert.ok(wallHit.t<floorHit.t,'the second LOCAL t is smaller, but its impact is later');
+  assert.ok(Math.abs(floorHit.webSweptFraction-floorHit.t)<1e-6);
+  assert.ok(Math.abs(wallHit.webSweptFraction-
+    (floorHit.t+(1-floorHit.t)*wallHit.t))<1e-6);
+  assert.ok(wallHit.webSweptFraction>floorHit.webSweptFraction,
+    'chronological swept fractions must not move backward at a second hit');
+
+  const shard={position:start(),velocity:velocity(),collisionRadius:0.1,drag:0};
+  const contacts=advanceNativeFragmentBody(shard,0.1,{
+    collisionScene,gravity:{x:0,y:0,z:0},fixedDelta:0.1,material,
+  });
+  const floorTime=contacts.find(hit=>hit.collider.id==='floor')?.webImpactTimeInFrame;
+  const wallTime=contacts.find(hit=>hit.collider.id==='wall')?.webImpactTimeInFrame;
+  assert.ok(Number.isFinite(floorTime)&&Number.isFinite(wallTime));
+  assert.ok(wallTime>floorTime,
+    'visible shard impact timing must not select the later wall as the first contact');
+  assert.ok(Math.abs(wallTime-0.1*wallHit.webSweptFraction)<1e-6);
+});
+
 test('resting contacts stop low-speed normal bounce and source friction stops sliding',()=>{
   const physics=context();physics.material.staticFriction=2;
   const shard=body();shard.position={x:0,y:0.1,z:0};shard.velocity={x:0.01,y:0,z:0};
