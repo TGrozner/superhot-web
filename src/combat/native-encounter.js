@@ -1280,13 +1280,18 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     // stale ally memories nor the player's hidden position can refresh it.
     // An unchanged sighting cannot restart a finished cover investigation.
     let allyWitnessed=false;
+    const receiverEye={x:start.x,y:start.y+runtime.aimHeight,z:start.z};
     for(const ally of observingAllies) {
-      if(ally===enemy)continue;
-      if(Math.hypot(ally.x-start.x,ally.z-start.z)<=
-          runtime.body.radius*WEB_SQUAD_SIGHTING.rangeBodyRadii) {
-        allyWitnessed=true;
-        break;
-      }
+      if(ally===enemy || Math.hypot(ally.x-start.x,ally.z-start.z)>
+          runtime.body.radius*WEB_SQUAD_SIGHTING.rangeBodyRadii)continue;
+      // Use the SAME real world divider as local fireteam membership. A
+      // spotter in another sealed room may see the player, but cannot pass a
+      // fresh position to a hunter through solid cover. Web-only tactical
+      // communication, not a native MCD hearing or radio model.
+      const spotterEye={x:ally.x,y:ally.y+runtime.aimHeight,z:ally.z};
+      if(nativeSegmentHit(runtime.sightCollision,receiverEye,spotterEye)!==null)continue;
+      allyWitnessed=true;
+      break;
     }
     if(allyWitnessed && (!state.webLastSeenFeet ||
         Math.hypot(state.webLastSeenFeet.x-playerFeet.x,
