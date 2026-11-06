@@ -1219,7 +1219,7 @@ test('J3 Web squad sighting: nearby real observers share only witnessed feet, in
     const runtime=setup(data,cover),hunter=firstSpawn(runtime,old);
     const spotter=firstSpawn(setup(data,cover),old);
     hunter.x=6;hunter.z=6;
-    spotter.id='squad-spotter';spotter.x=11;spotter.z=2;
+    spotter.id='squad-spotter';spotter.x=7;spotter.z=.2;
     advanceNativeEncounter(runtime,input([hunter],{...old}));
     assert.equal(hunter.encounter.visible,true,'hunter first witnesses the old position itself');
     assert.deepEqual(hunter.encounter.webLastSeenFeet,old.playerFeet);
@@ -1247,6 +1247,41 @@ test('J3 Web squad sighting: nearby real observers share only witnessed feet, in
     assert.equal(spotter.encounter.visible,true,'distant ally still has genuine sight');
     assert.deepEqual(hunter.encounter.webLastSeenFeet,spotted.playerFeet,
       'far-away sightings do not grant infinite-radius squad tracking');
+  }
+});
+
+test('J3 Web squad callouts cannot transmit hidden-player coordinates across solid room dividers',()=>{
+  // Both eyes and the opaque divider are synthetic; this is Web-only combat
+  // fairness, not a recovered MCD hearing or squad-radio contract.
+  const cover=[box(8,1,5,.4,2,5)];
+  const old={playerFeet:p(6,0,2),playerPosition:p(6,1.6,2)};
+  const spotted={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
+  for(const reverse of [false,true]) {
+    const runtime=setup(scene(),cover),hunter=firstSpawn(runtime,old);
+    const spotter=firstSpawn(setup(scene(),cover),old);
+    hunter.x=6;hunter.z=6;
+    spotter.id='other-room-spotter';spotter.x=11;spotter.z=2;
+    // They are WITHIN callout range, but cannot see each other across the
+    // same solid wall that splits Web local fireteams.
+    assert.ok(Math.hypot(hunter.x-spotter.x,hunter.z-spotter.z)<
+      runtime.body.radius*18);
+    assert.notEqual(nativeSegmentHit(runtime.sightCollision,
+      p(hunter.x,1.6,hunter.z),p(spotter.x,1.6,spotter.z)),null);
+    advanceNativeEncounter(runtime,input([hunter],old));
+    assert.deepEqual(hunter.encounter.webLastSeenFeet,old.playerFeet);
+    hunter.encounter.webSearchComplete=true;
+    const actors=reverse?[spotter,hunter]:[hunter,spotter];
+    advanceNativeEncounter(runtime,input(actors,{...spotted,scaledDeltaTime:.05}));
+    assert.equal(hunter.encounter.visible,false,
+      'the hunter cannot see the target behind solid cover');
+    assert.equal(spotter.encounter.visible,true,
+      'a real observer on the other side sees the new player location');
+    assert.deepEqual(hunter.encounter.webLastSeenFeet,old.playerFeet,
+      'another-room vision cannot refresh the hidden player position');
+    assert.deepEqual(hunter.encounter.target,old.playerFeet,
+      'the hunter investigates its own witnessed feet instead of wallhacking');
+    assert.equal(hunter.encounter.canAttack,false,
+      'the blocked squad channel never authorizes a blind shot');
   }
 });
 
