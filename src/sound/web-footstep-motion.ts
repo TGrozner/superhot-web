@@ -58,6 +58,9 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
   let airborneFrames = 0;
   let lastAirPosition: WebImpactPoint | null = null;
   let highestAirY: number | null = null;
+  // Web-original contact-seam correction; no native step/clip inference.
+  let groundFlicker: {readonly position: WebImpactPoint; readonly time: number;
+    readonly pending: number; readonly awaitingFirst: boolean} | null = null;
 
   function reset(): void {
     previous = null;
@@ -71,6 +74,7 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
     lastAirPosition = null;
     highestAirY = null;
     footSide = -1;
+    groundFlicker = null;
   }
 
   function advance({position, grounded, timeSeconds}: WebFootstepFrame): WebImpactResult | null {
@@ -97,6 +101,7 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
       airborneFrames = 0;
       lastAirPosition = null;
       highestAirY = null;
+      groundFlicker = null;
       return null;
     }
     if (timeSeconds === previousTime) return null;
@@ -114,6 +119,10 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
         airborneSince = null;
         airborneFrames = 0;
         highestAirY = null;
+        groundFlicker = null;
+      } else if (groundedBaseline && previous !== null) {
+        groundFlicker = {position: previous, time: previousTime,
+          pending: pendingMetres, awaitingFirst: awaitingFirstContact};
       }
       if (!discontinuity && groundedBaseline && airborneSince === null) {
         airborneSince = timeSeconds;
@@ -132,6 +141,24 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
       idleSeconds = 0;
       return null;
     }
+    // One near-flat false-air sample across a floor seam preserves walking
+    // phase, while actual jumps, respawns and long gaps keep their gates.
+    if (airborneSince !== null && groundFlicker !== null && airborneFrames === 1 &&
+        timeSeconds - groundFlicker.time <= 0.12 && lastAirPosition !== null &&
+        Math.abs(lastAirPosition.y - groundFlicker.position.y) <= 0.08 &&
+        Math.abs(current.y - groundFlicker.position.y) <= 0.08 &&
+        Math.hypot(current.x - groundFlicker.position.x,
+          current.z - groundFlicker.position.z) <= maxAllowedTravel(timeSeconds - groundFlicker.time)) {
+      previous = groundFlicker.position;
+      previousTime = groundFlicker.time;
+      pendingMetres = groundFlicker.pending;
+      awaitingFirstContact = groundFlicker.awaitingFirst;
+      airborneSince = null;
+      airborneFrames = 0;
+      lastAirPosition = null;
+      highestAirY = null;
+    }
+    groundFlicker = null;
     if (airborneSince !== null) {
       const airtime = timeSeconds - airborneSince;
       const finalTravel = lastAirPosition === null ? Infinity :
