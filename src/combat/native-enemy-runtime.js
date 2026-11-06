@@ -17,6 +17,8 @@ const flat=v=>({x:v.x,y:0,z:v.z});
 // pistols/burst gunners should not track the player with stationary precision.
 // Capture movement at ATTACK time; animated muzzle delivery may happen later.
 const WEB_MOVING_SHOT_MAX_YAW=0.075; // radians, at full running speed
+// Web-designed consecutive-shot spread; never asserted as an MCD value.
+const WEB_PISTOL_BLOOM={perShot:0.045,decayPerSecond:0.012,max:0.075,totalYaw:0.11};
 function nonnegative(value,name) {
   if (!Number.isFinite(value)||value<0) throw new TypeError(name+' must be finite and nonnegative');
 }
@@ -52,7 +54,7 @@ export function createNativeEnemyState(settings) {
   return { speed:0, attackDelayRemaining:settings.attackDelay, alertness:-settings.alertDelay,
     afterglowRemaining:-1000.5, targetNeedsReroll:false, targetRerollWait:0,
     reloaded:false, firstShotWarningSoundPlayed:false, haveBeenSeen:false, pendingShot:null,
-    seriesRemaining:settings.seriesLength, sniperDelay:0, sniperCanShot:false };
+    seriesRemaining:settings.seriesLength, sniperDelay:0, sniperCanShot:false, webPistolHeat:0 };
 }
 
 /** Source scalar acceleration; route/collision adapter supplies direction. */
@@ -70,6 +72,7 @@ export function advanceNativeEnemySpeed(state,settings,movement,scaledDeltaTime)
 export function advanceNativeEnemyWeapon(state,settings,scaledDeltaTime) {
   nonnegative(scaledDeltaTime,'scaledDeltaTime');
   state.attackDelayRemaining-=scaledDeltaTime*settings.weaponSpeedMultiplier*settings.difficultyWeaponSpeedMultiplier;
+  state.webPistolHeat=Math.max(0,state.webPistolHeat-scaledDeltaTime*WEB_PISTOL_BLOOM.decayPerSecond);
   if (settings.family==='SniperRifle') {
     if (state.alertness>settings.alertDelay) {
       state.sniperDelay+=scaledDeltaTime;
@@ -134,7 +137,10 @@ export function runNativeEnemyGunAttack(state,settings,{
             ? clamp(state.speed/settings.runningSpeed,0,1) : 0;
           state.pendingShot={target:{...animationTarget},speed:settings.projectileSpeed,
             family:settings.family,shooterHaveBeenSeen:state.haveBeenSeen,
-            webMovingYawRange:mobileGun?WEB_MOVING_SHOT_MAX_YAW*speedFraction:0};
+            webMovingYawRange:mobileGun?WEB_MOVING_SHOT_MAX_YAW*speedFraction:0,
+            webPistolBloomYaw:settings.family==='Pistol'?state.webPistolHeat:0};
+          if(settings.family==='Pistol')state.webPistolHeat=Math.min(WEB_PISTOL_BLOOM.max,
+            state.webPistolHeat+WEB_PISTOL_BLOOM.perShot);
           let delay=settings.attackDelay;
           let completed=true;
           if (settings.family==='MachineGun' || settings.family==='SniperRifle') {
@@ -186,7 +192,8 @@ export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponFor
     // Roll only when the ATTACK snapshot recorded actual weapon movement.
     // Keep idle accuracy exact and leave native shotgun dispersion untouched.
     // Invalid RNG must not consume the pending shot.
-    const range=state.pendingShot.webMovingYawRange ?? 0;
+    const range=Math.min(WEB_PISTOL_BLOOM.totalYaw,
+      (state.pendingShot.webMovingYawRange??0)+(state.pendingShot.webPistolBloomYaw??0));
     const yaw=range>0 ? (sample(random)*2-1)*range : 0;
     const shot=consumeNativeEnemyShot(state,muzzlePosition);
     let direction=shot.direction;
