@@ -1696,6 +1696,39 @@ test('J3 Web fireteams skip unalerted and re-aiming gunners without wasting a li
     'once both are really ready, the scheduled wing can fire regardless of actor iteration');
 });
 
+test('J3 Web aim-pressure follows the first live actor on the player camera ray',()=>{
+  // Synthetic actors/geometry. A rear gunner can see the player but is NOT
+  // itself being aimed at when its living squadmate stands in that line.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2),
+    playerForward:p(-1,0,0)};
+  const runtime=setup(data), rear=firstSpawn(runtime,target);
+  const blocker=structuredClone(rear);
+  blocker.id='synthetic-front-ally';blocker.x=4;blocker.z=2;
+  blocker.reaction.stunRemaining=10;
+  blocker.reaction.stunnedThisFrame=true; // real body, no independent sidestep
+  rear.clock=0;
+  const actors=[rear,blocker];
+  const tick=()=>advanceNativeEncounter(runtime,input(actors,{
+    ...target,scaledDeltaTime:.1,unscaledDeltaTime:.1,
+  }));
+  const start=p(rear.x,rear.y,rear.z);
+  for(let i=0;i<4;i++)tick();
+  assert.equal(rear.encounter.visible,true,'world sight remains real and clear');
+  assert.equal(rear.encounter.webAimLock,0,
+    'camera aim at an intervening live teammate never charges a rear dodge');
+  assert.equal(rear.encounter.webAimRemaining,0);
+  assert.deepEqual(p(rear.x,rear.y,rear.z),start,
+    'rear actor does not fake a reaction to being aimed at through a teammate');
+  blocker.z=5; // The same real actor leaves the camera ray but remains alive.
+  for(let i=0;i<3;i++)tick();
+  assert.ok(rear.encounter.webAimCooldown>0,
+    'a genuinely unobstructed sustained aim re-enables the existing evasive beat');
+  assert.ok(Math.abs(rear.z-start.z)>.01,
+    'the normal swept/nav-approved dodge still moves the now-exposed gunner');
+});
+
 test('J3 Web sustained player aim provokes one visible, nav-safe gunner sidestep without wallhacks',()=>{
   // Web-authored aim pressure; synthetic Dojo/nav mesh, not a recovered
   // MCD perception or timing rule. This exercises the live encounter loop.
