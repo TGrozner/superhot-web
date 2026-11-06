@@ -487,11 +487,15 @@ export function addMcdGameplayPulse(clock, duration, amount) {
  * shaped input shifter rates and Web look-sampling clock. At low FPS, using
  * capped physics dt for both made a 0.5s WASD acceleration take ~1s at 10 FPS.
  * Omission preserves the existing behavior for callers without active wall dt.
+ * `pulseExpiryAtFrameStart` is a WEB-only opt-in for bounded low-FPS catch-up:
+ * a hit/shot pulse posted between RAFs gets one LateUpdate contribution if
+ * live at RAF start, even when the charged collision budget crosses its TTL.
+ * Regular/source-shaped ticks still evaluate expiry at frame end.
  * This is a WEB playability fix, NOT a claim about Unity's frame scheduler.
  */
 export function stepMcdGameplayClock(clock, {
   dt, unscaledDt = dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
-  sourceLookSample, lookPathDegrees,
+  sourceLookSample, lookPathDegrees, pulseExpiryAtFrameStart = false,
 }) {
   if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
     throw new RangeError('Gameplay time input must be finite with nonnegative dt');
@@ -529,6 +533,7 @@ export function stepMcdGameplayClock(clock, {
   // Update consumes the previously applied scale; LateUpdate writes the next.
   const appliedTimeScale = clock.timeScale;
   const worldDelta = Math.fround(Math.fround(dt) * appliedTimeScale);
+  const worldTimeAtFrameStart = clock.worldTime;
   clock.worldTime += worldDelta;
   const targets = mcdSourcePlayerTimeTargets({
     processedX: x, processedY: y, isGrounded: grounded,
@@ -601,7 +606,8 @@ export function stepMcdGameplayClock(clock, {
     }
   }
   for (const pulse of clock.source.shifters) {
-    if (pulse.expiresAt !== undefined) pulse.terminated = clock.worldTime > pulse.expiresAt;
+    if (pulse.expiresAt !== undefined) pulse.terminated =
+      (pulseExpiryAtFrameStart ? worldTimeAtFrameStart : clock.worldTime) > pulse.expiresAt;
   }
   const next = advanceMcdSourceTime(clock.source);
   clock.source = next.state;
@@ -863,7 +869,9 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
  *
  * This is a WEB feel correction for the 50ms capped frame-time at low FPS,
  * NOT a recovered Unity fixed-step scheduler. maximumSteps is an explicit
- * Web performance budget, not an inferred MCD constant. SH-05 must arrange
+ * Web performance budget, not an inferred MCD constant.
+ * Input pulses already present at RAF start retain one Web LateUpdate
+ * contribution across a long catch-up tick; no native TTL cadence is inferred. SH-05 must arrange
  * input edges and active-time effects once/RAF, with world systems sharing
  * the slices; the ragdoll bridge ALREADY compensates capped frame time and
  * must never be compensated a second time.
@@ -903,6 +911,7 @@ export function stepWebMcdGameplayFrame(clock, {
   const chargedActiveDt = paused ? 0 : Math.min(activeRealDt, simulationDt * maximumSteps);
   const tick = stepMcdGameplayClock(clock, {
     ...clockInputs, dt: chargedActiveDt, unscaledDt: paused ? 0 : activeRealDt, paused,
+    pulseExpiryAtFrameStart: true,
   });
   const worldSteps = [];
   const worldStepOffsets = [];
