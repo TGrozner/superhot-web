@@ -2394,3 +2394,37 @@ test('J3 Web gunner shelters through reload, then re-peeks its last witnessed fi
   assert.equal(enemy.runtime.attackDelayRemaining,.02,
     'the maneuver does not advance or refill the native weapon runtime');
 });
+
+test('J3 Web aim-pressure dodge only reacts to a ray that really enters the body',()=>{
+  // This is reachable from main's capped <= .05s world timestep. The old
+  // 9.6-degree aim cone could trigger an evasive move after a shot would miss
+  // by more than one full enemy body radius at a normal Dojo distance.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,2),playerPosition:p(8,1.6,2)};
+  const runtime=setup(data),enemy=firstSpawn(runtime,target);
+  enemy.clock=0; // no unrelated warmup tactical strafe
+  const start=p(enemy.x,enemy.y,enemy.z);
+  const tick=forward=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,playerForward:forward,scaledDeltaTime:.05,unscaledDeltaTime:.05,
+  }));
+  const horizontalMiss=p(-1,0,.12),verticalMiss=p(-1,.12,0);
+  const oldConeFacing=6/(Math.hypot(6,.4)*Math.hypot(1,.12));
+  assert.ok(oldConeFacing>.986,'the old angular cone would react to these misses');
+  for (const miss of [horizontalMiss,verticalMiss]) {
+    for(let frame=0;frame<7;frame++)tick(miss);
+    assert.equal(enemy.encounter.webAimLock,0,
+      'sustained miss outside the true cylinder must never accrue evasive pressure');
+    assert.equal(enemy.encounter.webAimRemaining,0);
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start);
+  }
+  const centered=p(-1,0,0);
+  for(let frame=0;frame<5;frame++)tick(centered);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),start,
+    'one-to-five actual 50ms world observations are still below 280ms');
+  tick(centered);
+  assert.ok(Math.abs(enemy.z-start.z)>.005,
+    'a true camera-ray body intersection permits the existing swept sidestep');
+  assert.equal(enemy.encounter.canAttack,false,
+    'the dodge cannot grant an attack while the gunner is evading');
+  assert.equal(enemy.runtime.pendingShot,null);
+});
