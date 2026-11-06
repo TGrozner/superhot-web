@@ -1397,6 +1397,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     // Incoming gunfire behind cover is a clue only when the actual projectile
     // is within view. A wall, expired bullet, throw or inaccessible nav tile
     // cannot reveal the shooter. Callouts from an actual ally take priority.
+    if(allyWitnessed)state.webBulletClueFeet=null; // Actual player sight outranks bullet evidence.
     const shotClue=scaledDeltaTime>0 && !allyWitnessed
       ? webVisibleShotClue(runtime,enemy,playerProjectiles) : null;
     if(shotClue && (!state.webBulletClueFeet ||
