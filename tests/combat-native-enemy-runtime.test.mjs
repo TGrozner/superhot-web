@@ -183,3 +183,44 @@ test('J2 Web gunfeel: failed moving-shot RNG does not erase deferred attack',()=
   assert.deepEqual(shot.direction,p(1));
   assert.equal(state.pendingShot,null);
 });
+
+
+test('J2 Web pistol follow-up spread rises after confirmed shots and cools only with world time',()=>{
+  // Gameplay policy authored for the Web FPS; no native recoil value implied.
+  const pistol={...settings,family:'Pistol'};
+  const state=ready();
+  const attack=()=>runNativeEnemyGunAttack(state,pistol,input(),()=>.5);
+  assert.equal(attack().shot,true);
+  assert.equal(state.pendingShot.webPistolBloomYaw,0,'first stationary round stays precise');
+  let samples=0;
+  const first=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>{
+    samples++;return .75;
+  })[0];
+  assert.deepEqual(first.direction,p(1));
+  assert.equal(samples,0,'no RNG required for a precise first shot');
+  assert.equal(state.webPistolHeat,.045);
+  advanceNativeEnemyWeapon(state,pistol,0);
+  assert.equal(state.webPistolHeat,.045,'freezing world time cannot cool bloom');
+  advanceNativeEnemyWeapon(state,pistol,.6);
+  assert.ok(state.webPistolHeat>0 && state.webPistolHeat<.045);
+  // Complete the actual target-reroll gate before another accepted attack.
+  let rerolled=false;
+  for(let i=0;i<8;i++) {
+    const action=attack();
+    if(action.rerollAimTarget){rerolled=true;break;}
+  }
+  assert.equal(rerolled,true);
+  assert.equal(attack().shot,true);
+  assert.ok(state.pendingShot.webPistolBloomYaw>0);
+  const second=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>{
+    samples++;return .75;
+  })[0];
+  assert.ok(second.direction.z>.01,'second stationary round has bounded lateral drift');
+  assert.ok(second.direction.x<1);
+  assert.equal(samples,1,'exactly one random draw for the follow-up direction');
+  assert.equal(state.pendingShot,null,'late pose consumes the accepted shot once');
+  const warmed=state.webPistolHeat;
+  advanceNativeEnemyWeapon(state,pistol,10);
+  assert.equal(state.webPistolHeat,0,'world-time recovery restores stationary precision');
+  assert.ok(warmed>0);
+});
