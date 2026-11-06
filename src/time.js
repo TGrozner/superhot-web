@@ -939,7 +939,13 @@ export function stepWebMcdGameplayFrame(clock, {
   const simulationStepDeltas = [];
   const unscaledStepDeltas = [];
   if (chargedActiveDt > 0 && tick.worldDelta > 0) {
-    const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
+    // The Web clock rounds its charged dt to float32. At an exact 50ms RAF
+    // boundary, a double-precision timestamp difference can exceed 50ms by
+    // mere picoseconds; ceil(double ratio) then invents a near-zero second
+    // collision slice and repeats collision/AI work. Round the ratio to the
+    // same float32 precision as the tick before counting its collision slices.
+    // This is numeric scheduler hygiene, not a new MCD cadence constant.
+    const count = Math.min(maximumSteps, Math.ceil(Math.fround(chargedActiveDt / simulationDt)));
     let previousActive = 0;
     let previousWorld = 0;
     let previousUnscaled = 0;
