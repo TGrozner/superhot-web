@@ -585,25 +585,35 @@ function webNearMissProjectile(runtime, enemy, projectiles, enemies) {
     };
     if (![origin.x,origin.y,origin.z,velocity.x,velocity.y,velocity.z].every(Number.isFinite)) continue;
     const speedSquared=velocity.x**2+velocity.z**2;
+    // J3 Web-only: on stairs, a descending bullet can pass nearest in XZ
+    // while still ABOVE the gunner, yet graze it a moment later at body height.
+    // Search the closest XZ point DURING the real vertical overlap, never
+    // using an impossible future frame or the projectile's expired lifetime.
+    let first=EPSILON,last=WEB_NEAR_MISS.lookaheadSeconds;
+    if(Math.abs(velocity.y)>EPSILON) {
+      const bottom=(enemy.y-origin.y)/velocity.y;
+      const top=(enemy.y+runtime.body.height-origin.y)/velocity.y;
+      first=Math.max(first,Math.min(bottom,top));
+      last=Math.min(last,Math.max(bottom,top));
+    } else if(origin.y<enemy.y || origin.y>enemy.y+runtime.body.height)continue;
+    if(projectile.ttl!==undefined) {
+      if(!Number.isFinite(projectile.ttl) || projectile.ttl<=0)continue;
+      last=Math.min(last,projectile.ttl);
+    }
+    if(last<first)continue;
     let until;
     if(speedSquared<=EPSILON) {
-      // A vertical projectile can suppress a nearby gunner without horizontal
-      // motion, but only when approaching the character's actual body height.
-      if(velocity.y< -EPSILON && origin.y>enemy.y+runtime.body.height)
-        until=(enemy.y+runtime.body.height-origin.y)/velocity.y;
-      else if(velocity.y>EPSILON && origin.y<enemy.y)
-        until=(enemy.y-origin.y)/velocity.y;
-      else if(Math.abs(velocity.y)>EPSILON &&
-          origin.y>=enemy.y && origin.y<=enemy.y+runtime.body.height)
-        until=EPSILON;
-      else continue;
+      // The path is vertical: its XZ separation is constant.
+      if(Math.abs(velocity.y)<=EPSILON)continue;
+      until=first;
     } else {
-      until=((enemy.x-origin.x)*velocity.x+(enemy.z-origin.z)*velocity.z)/speedSquared;
+      const planarClosest=((enemy.x-origin.x)*velocity.x+
+        (enemy.z-origin.z)*velocity.z)/speedSquared;
+      if(planarClosest<=0 || planarClosest>WEB_NEAR_MISS.lookaheadSeconds)continue;
+      until=Math.max(first,Math.min(last,planarClosest));
     }
-    if (until<=0 || until>WEB_NEAR_MISS.lookaheadSeconds || until>=earliest ||
-        !webProjectileCanReach(projectile,until)) continue;
+    if(until>=earliest)continue;
     const closest={x:origin.x+velocity.x*until,y:origin.y+velocity.y*until,z:origin.z+velocity.z*until};
-    if (closest.y<enemy.y || closest.y>enemy.y+runtime.body.height) continue;
     const separation=Math.hypot(closest.x-enemy.x,closest.z-enemy.z);
     if (separation<=runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii ||
         separation>runtime.body.radius*WEB_NEAR_MISS.outerBodyRadii) continue;

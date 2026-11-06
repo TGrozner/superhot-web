@@ -1425,6 +1425,39 @@ test('J3 Web near-miss suppression: actual passing player bullet interrupts gunf
 });
 
 
+test('J3 Web steep near-miss uses actual body-height passage and respects cover and TTL',()=>{
+  // Fabricated Dojo stair-angle shot: the XZ closest point is still above the
+  // head, but the bullet grazes the gunner after descending into body height.
+  // This is new Web suppression geometry, not original MCD collision parity.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const passing={friendly:true,pos:p(2.6,4.5,3.4),velocity:p(-3,-10,0),ttl:.6};
+  const simulate=(colliders=[],ttl=.6)=>{
+    const runtime=setup(data,colliders),enemy=firstSpawn(runtime,player);
+    enemy.muzzlePosition=p(2,1.4,2);enemy.muzzleForward=p(1,0,0);
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...player,scaledDeltaTime:.05,playerProjectiles:[{...passing,ttl}],
+    }));
+    return enemy;
+  };
+  const exposed=simulate();
+  assert.ok(exposed.encounter.webSuppressionRemaining>0,
+    'descending shot suppresses when its body-height segment genuinely grazes');
+  assert.ok(exposed.z<2,
+    'suppression makes a real swept step away from the passing shot');
+  assert.equal(exposed.encounter.webDodgeRemaining,0,
+    'a near-miss remains separate from a direct projectile threat');
+
+  const covered=simulate([box(2.2,3.1,3.4,.18,2.3,.35)]);
+  assert.equal(covered.encounter.webSuppressionRemaining,0,
+    'an actual wall on the descent blocks the warning');
+  assert.equal(covered.encounter.visible,true,
+    'this wall blocks the bullet, not eye sight of the player');
+  assert.equal(simulate([], .23).encounter.webSuppressionRemaining,0,
+    'a projectile that expires above the body cannot suppress');
+});
+
 test('J3 Web rear near-miss: suppression breaks laterally instead of charging the shooter',()=>{
   // Player is ahead to the east; a legitimate projectile passes the enemy
   // from behind to its west. Retreating from that line would move TOWARD the
