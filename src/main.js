@@ -595,7 +595,7 @@ function loadLevel(index) {
       // Source spawner events, not inferred Web proxies. Keep unsupported
       // warning packets from interrupting the owner-validated Dojo round.
       try {
-        nativeDoorWarningBridge = createDojoDoorWarningBridge(nativeScene);
+        nativeDoorWarningBridge = createDojoDoorWarningBridge(nativeScene, nativeCollision);
         nativeDoorWarningStatus = nativeDoorWarningBridge.readiness;
       } catch {
         nativeDoorWarningBridge = null;
