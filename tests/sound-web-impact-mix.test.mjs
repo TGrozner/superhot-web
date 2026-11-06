@@ -952,3 +952,30 @@ test('distant enemy fire keeps its spatial sound without pumping the local ambie
   assert.equal(ambient.gain.targets.length, before + 2, 'player fire still ducks ambience');
   mix.dispose();
 });
+
+test('immediate Web punch contact clears the swish while missed or late punches keep it', () => {
+  // These are synthetic WebAudio schedules, not evidence of Unity audio or speaker playback.
+  const {ctx, nodes} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 4);
+  assert.equal(mix.emit('punch-swing').status, 'started');
+  const fullSwishEnd = nodes[0].stopArgs[0];
+  assert.ok(fullSwishEnd > ctx.currentTime + 0.08);
+  assert.equal(mix.getActiveVoices(), 1, 'a whiff must keep its normal swish tail');
+  assert.equal(mix.emit('punch-contact').status, 'started');
+  assert.deepEqual(nodes[0].stopArgs, [ctx.currentTime + 0.008]);
+  assert.deepEqual(nodes[1].stopArgs, [ctx.currentTime + 0.008]);
+  assert.equal(mix.getActiveVoices(), 1, 'the confirmed thud replaces—not doubles—the swish');
+  assert.equal(nodes.length, 4, 'no extra oscillator or noise buffer was introduced');
+  mix.dispose();
+
+  const late = fakeAudio();
+  const lateMix = createWebImpactMix(late.ctx, 4);
+  assert.equal(lateMix.emit('punch-swing').status, 'started');
+  const originalStop = late.nodes[0].stopArgs[0];
+  late.ctx.currentTime += 0.081; // Outside the Web-only 80ms pairing window.
+  assert.equal(lateMix.emit('punch-contact').status, 'started');
+  assert.equal(late.nodes[0].stopArgs[0], originalStop,
+    'an unrelated delayed contact must not cut off the preceding whiff');
+  assert.equal(lateMix.getActiveVoices(), 2);
+  lateMix.dispose();
+});
