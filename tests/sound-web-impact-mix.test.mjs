@@ -495,7 +495,8 @@ test('Web unarmed punch distinguishes air swing from a contact crunch in one voi
   const impactBus = gains[2];
   assert.ok(gains.some(output => output.connections.some(node =>
     node?.connections?.includes(impactBus)))); // HRTF contact -> impacts, not footsteps.
-  assert.equal(mix.emit('step').status, 'blocked'); // Combat preserves the voice budget.
+  assert.equal(mix.getActiveVoices(), 1); // Confirmed contact retires overlapping fist swish.
+  assert.equal(mix.emit('step').status, 'started'); // Retired swish frees a voice slot.
   assert.equal(mix.getActiveVoices(), 2);
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
@@ -588,7 +589,7 @@ test('Web gunfire and confirmed impacts temporarily duck footsteps, not native a
       {value: 0.3, at: ctx.currentTime + 0.14, constant: 0.18},
     ]);
   }
-  assert.equal(mix.getActiveVoices(), 13);
+  assert.equal(mix.getActiveVoices(), 12); // Overlapping punch swish retired on contact.
   mix.dispose();
   assert.equal(mix.getActiveVoices(), 0);
 });
@@ -958,7 +959,7 @@ test('immediate Web punch contact clears the swish while missed or late punches 
   const {ctx, nodes} = fakeAudio();
   const mix = createWebImpactMix(ctx, 4);
   assert.equal(mix.emit('punch-swing').status, 'started');
-  const fullSwishEnd = nodes[0].stopArgs[0];
+  const fullSwishEnd = nodes[1].stopArgs[0]; // Oscillator schedules a stop; noise uses buffer duration.
   assert.ok(fullSwishEnd > ctx.currentTime + 0.08);
   assert.equal(mix.getActiveVoices(), 1, 'a whiff must keep its normal swish tail');
   assert.equal(mix.emit('punch-contact').status, 'started');
@@ -971,11 +972,12 @@ test('immediate Web punch contact clears the swish while missed or late punches 
   const late = fakeAudio();
   const lateMix = createWebImpactMix(late.ctx, 4);
   assert.equal(lateMix.emit('punch-swing').status, 'started');
-  const originalStop = late.nodes[0].stopArgs[0];
+  const originalStop = late.nodes[1].stopArgs[0];
   late.ctx.currentTime += 0.081; // Outside the Web-only 80ms pairing window.
   assert.equal(lateMix.emit('punch-contact').status, 'started');
-  assert.equal(late.nodes[0].stopArgs[0], originalStop,
+  assert.equal(late.nodes[1].stopArgs[0], originalStop,
     'an unrelated delayed contact must not cut off the preceding whiff');
+  assert.equal(late.nodes[0].stopArgs, undefined, 'original noise remains untouched');
   assert.equal(lateMix.getActiveVoices(), 2);
   lateMix.dispose();
 });
