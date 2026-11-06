@@ -470,11 +470,9 @@ function webIncomingWarningEntry(runtime,enemy,origin,velocity,planarSpeedSquare
   } else if(origin.y<enemy.y || origin.y>enemy.y+runtime.body.height)return null;
   if(last<Math.max(first,EPSILON))return null;
   const time=Math.max(first,EPSILON);
-  return {time,point:{
-    x:origin.x+velocity.x*time,
-    y:origin.y+velocity.y*time,
-    z:origin.z+velocity.z*time,
-  }};
+  // The whole 3D warning interval matters: a wall may lie *after* its
+  // entry face but before the projectile exits body-height range.
+  return {time,exitTime:last};
 }
 
 /** Find the earliest observable player bullet that will pass near the body.
@@ -503,11 +501,19 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     const entry=webIncomingWarningEntry(runtime,enemy,origin,v,planarSpeedSquared);
     if(!entry || entry.time>=bestTime ||
         !webProjectileCanReach(projectile,entry.time))continue;
-    const closest=entry.point;
-    // A bullet stopped by real cover or an intercepting living teammate
-    // cannot warn enemies farther downrange. Web prediction, not native MCD AI.
-    if(nativeSegmentHit(runtime.sightCollision,origin,closest)!==null ||
-        webLivingAllyIntersectsSegment(runtime,enemy,origin,closest,enemies))continue;
+    // Trace the FULL threatening window, not just its first cylinder
+    // contact. Otherwise a real wall just inside the warning ring is missed
+    // and the gunner dodges a bullet that cannot reach it. Never trace beyond
+    // the actual projectile TTL (which can expire before the window ends).
+    const horizon=Math.min(entry.exitTime,
+      Number.isFinite(projectile.ttl)?projectile.ttl:entry.exitTime);
+    const contactEnd={
+      x:origin.x+v.x*horizon,
+      y:origin.y+v.y*horizon,
+      z:origin.z+v.z*horizon,
+    };
+    if(nativeSegmentHit(runtime.sightCollision,origin,contactEnd)!==null ||
+        webLivingAllyIntersectsSegment(runtime,enemy,origin,contactEnd,enemies))continue;
     const speed=Math.sqrt(planarSpeedSquared);
     const cross=v.x*dz-v.z*dx;
     const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
