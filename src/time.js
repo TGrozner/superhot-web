@@ -606,8 +606,22 @@ export function stepMcdGameplayClock(clock, {
     }
   }
   for (const pulse of clock.source.shifters) {
-    if (pulse.expiresAt !== undefined) pulse.terminated =
-      (pulseExpiryAtFrameStart ? worldTimeAtFrameStart : clock.worldTime) > pulse.expiresAt;
+    if (pulse.expiresAt === undefined) continue;
+    // WEB-only startup protection: a source-delayed LateUpdate cannot
+    // consume a just-added shot pulse. Retain an eligible pulse until the
+    // first writable tick, even when low FPS crosses its world-time TTL.
+    // The default source-shaped expiry path remains untouched.
+    if (pulseExpiryAtFrameStart && clock.source.delayedUpdates > 0
+        && worldTimeAtFrameStart <= pulse.expiresAt) {
+      pulse.webDeferredFirstWrite = true;
+    }
+    if (pulseExpiryAtFrameStart && pulse.webDeferredFirstWrite) {
+      pulse.terminated = false;
+      if (clock.source.delayedUpdates === 0) delete pulse.webDeferredFirstWrite;
+    } else {
+      pulse.terminated =
+        (pulseExpiryAtFrameStart ? worldTimeAtFrameStart : clock.worldTime) > pulse.expiresAt;
+    }
   }
   const next = advanceMcdSourceTime(clock.source);
   clock.source = next.state;
