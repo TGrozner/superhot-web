@@ -982,3 +982,24 @@ test('immediate Web punch contact clears the swish while missed or late punches 
   assert.equal(lateMix.getActiveVoices(), 2);
   lateMix.dispose();
 });
+
+test('confirmed player damage briefly makes room for hit feedback in the Web weapon mix', () => {
+  // Web-only gain automation: native source WAVs and actual audibility are untested.
+  const {ctx, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 6);
+  const weaponBus = gains[1];
+  assert.equal(weaponBus.gain.value, 0.9);
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(mix.emit('punch-swing').status, 'started');
+  assert.deepEqual(weaponBus.gain.targets, [], 'attacks without damage do not suppress weapons');
+  assert.equal(mix.emit('player-hit').status, 'started');
+  assert.deepEqual(weaponBus.gain.targets, [
+    [0.4, ctx.currentTime, 0.008],
+    [0.9, ctx.currentTime + 0.17, 0.14],
+  ], 'damage gets a fast duck and smooth return of the original synthetic weapon gain');
+  assert.equal(mix.getActiveVoices(), 3, 'no extra source or voice is required');
+  ctx.currentTime += 0.4;
+  assert.equal(mix.emit('enemy-shot').status, 'started');
+  assert.equal(weaponBus.gain.targets.length, 2, 'enemy fire does not retrigger player-damage focus');
+  mix.dispose();
+});
