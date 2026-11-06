@@ -2709,4 +2709,12 @@ test('J3 Web gunshot investigation: one observed projectile becomes a reachable 
   }));
   assert.deepEqual(enemy.encounter.webBulletClueFeet,observed,
     'frozen simulation must not accrue new tactical evidence');
+
+  // A real, direct view of the player always supersedes a previous shot clue.
+  advanceNativeEncounter(runtime,input([enemy],{
+    playerPosition:p(10,1.6,5),playerFeet:p(10,0,5),scaledDeltaTime:.05,
+  }));
+  assert.equal(enemy.encounter.visible,true);
+  assert.equal(enemy.encounter.webBulletClueFeet,null);
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,p(10,0,5));
 });
