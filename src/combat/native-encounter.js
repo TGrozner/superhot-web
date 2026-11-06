@@ -808,6 +808,15 @@ const WEB_UNARMED_WEAVE=Object.freeze({
   rangeBodyRadii:20,
   lateralBias:0.65,
 });
+// J3 Web-original aim-response for a DISARMED attacker: sustained direct
+// camera aim briefly sharpens the existing forward-moving melee weave.
+// It is not a dodge animation, immunity, native MCD AI, or a punch receipt.
+const WEB_UNARMED_AIM_JUKE=Object.freeze({
+  lockSeconds:0.20,
+  durationSeconds:0.55,
+  cooldownSeconds:1.8,
+  lateralBias:1.5,
+});
 function tryWebUnarmedWeave(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
   const start=position(enemy),state=enemy.encounter;
   const dx=playerFeet.x-start.x,dz=playerFeet.z-start.z;
@@ -817,11 +826,14 @@ function tryWebUnarmedWeave(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
   if(!Number.isFinite(travel) || travel<=EPSILON || planar<=EPSILON)return false;
   const forwardX=dx/planar,forwardZ=dz/planar;
   const phase=Math.floor(runtime.webVolleyClock/WEB_UNARMED_WEAVE.switchSeconds);
-  const preferred=state.webTacticalSide*(phase%2===0?1:-1);
-  const normalizer=Math.hypot(1,WEB_UNARMED_WEAVE.lateralBias);
+  const pressured=state.webUnarmedJukeRemaining>EPSILON;
+  const lateralBias=pressured?WEB_UNARMED_AIM_JUKE.lateralBias:WEB_UNARMED_WEAVE.lateralBias;
+  const preferred=pressured ? -state.webTacticalSide
+    : state.webTacticalSide*(phase%2===0?1:-1);
+  const normalizer=Math.hypot(1,lateralBias);
   for(const side of [preferred,-preferred]) {
-    const offsetX=(forwardX-forwardZ*side*WEB_UNARMED_WEAVE.lateralBias)/normalizer*travel;
-    const offsetZ=(forwardZ+forwardX*side*WEB_UNARMED_WEAVE.lateralBias)/normalizer*travel;
+    const offsetX=(forwardX-forwardZ*side*lateralBias)/normalizer*travel;
+    const offsetZ=(forwardZ+forwardX*side*lateralBias)/normalizer*travel;
     const moved=moveNativeCharacter(runtime.collision,start,
       {x:offsetX,y:0,z:offsetZ},runtime.body).position;
     if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
@@ -1180,6 +1192,7 @@ function spawnEnemy(runtime, point, order, population, playerFeet) {
       webSupportRemaining:0,webSupportCooldown:0,
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
       webAimLock:0,webAimRemaining:0,webAimCooldown:0,
+      webUnarmedAimLock:0,webUnarmedJukeRemaining:0,webUnarmedJukeCooldown:0,
       webReloadCoverRemaining:0,webReloadCoverFeet:null,webReloadCoverSide:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
@@ -1316,6 +1329,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webSuppressionFrom=null;
     state.webAimLock=0;
     state.webAimRemaining=0;
+    state.webUnarmedAimLock=0;
+    state.webUnarmedJukeRemaining=0;
     enemy.runtime.pendingShot=null;
     enemy.runtime.speed=0;
     return;
@@ -1364,6 +1379,28 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // update order would change who has legitimately spotted the player.
   state.visible=observingAllies.has(enemy);
   if(!state.visible || !armed)state.webSupportRemaining=0;
+  // The camera must REALLY intersect the unarmed actor's body in a clear
+  // corridor for several world ticks. A disarmed foe then weaves harder while
+  // STILL closing melee distance. Occlusion, a stun or rearming cancels it;
+  // frozen world time never charges an aim reaction or spends its cooldown.
+  state.webUnarmedJukeCooldown=Math.max(0,
+    (state.webUnarmedJukeCooldown??0)-scaledDeltaTime);
+  if(armed || !state.visible) {
+    state.webUnarmedAimLock=0;
+    state.webUnarmedJukeRemaining=0;
+  } else if(state.webUnarmedJukeRemaining>0) {
+    state.webUnarmedJukeRemaining=Math.max(0,
+      state.webUnarmedJukeRemaining-scaledDeltaTime);
+  } else if(state.webUnarmedJukeCooldown<=EPSILON && scaledDeltaTime>0) {
+    const aimed=webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward,enemies);
+    state.webUnarmedAimLock=aimed
+      ? (state.webUnarmedAimLock??0)+scaledDeltaTime : 0;
+    if(state.webUnarmedAimLock>=WEB_UNARMED_AIM_JUKE.lockSeconds) {
+      state.webUnarmedAimLock=0;
+      state.webUnarmedJukeRemaining=WEB_UNARMED_AIM_JUKE.durationSeconds;
+      state.webUnarmedJukeCooldown=WEB_UNARMED_AIM_JUKE.cooldownSeconds;
+    }
+  }
   // Per-actor consecutive REAL sightings: losing sight or suffering a stun
   // discards the velocity baseline. Paused frames may refresh the observed
   // feet but cannot accrue a movement impulse or trigger a pursuit push.
