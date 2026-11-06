@@ -654,6 +654,15 @@ export function createWebImpactMix(context, maxVoices = 24) {
                 ring.stop(ringAt + tone.tail);
             }
         }
+        // WEB-ORIGINAL damage focus: briefly give the existing player-hit thud
+        // priority over the synthetic weapon bus during dense firefights.
+        // The native hit clip, original WAVs and their mixer routing are untouched.
+        // No Unity ducking parameter, new source or extra node is implied.
+        if (cue === 'player-hit') {
+            weapons.gain.cancelScheduledValues(at);
+            weapons.gain.setTargetAtTime(0.4, at, 0.008);
+            weapons.gain.setTargetAtTime(0.9, at + 0.17, 0.14);
+        }
         // WEB-ORIGINAL: a distant enemy muzzle should not pump the listener's ambient drone.
         if (cue !== 'step' && cue !== 'landing' && !remoteEnemyShot) {
             ambient.gain.cancelScheduledValues(at);
