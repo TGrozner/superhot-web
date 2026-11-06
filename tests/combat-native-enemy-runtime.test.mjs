@@ -250,3 +250,40 @@ test('J2 Web accuracy heat counts delivered requests, not interrupted attacks',(
   assert.equal(invalid.webPistolHeat,0,'missing animated socket cannot charge heat');
   assert.ok(invalid.pendingShot,'failed delivery remains retryable');
 });
+
+test('J2 Web sustained pistol recoil climbs only after delivered rounds, never during a freeze',()=>{
+  // Deliberately Web-authored recoil, not a recovered MCD trajectory value.
+  const pistol={...settings,family:'Pistol'};
+  const state=ready();
+  state.webPistolHeat=.06; // Prior successfully emitted rounds.
+  const attack=(target=p(10))=>runNativeEnemyGunAttack(
+    state,pistol,{...input(),animationTarget:target},()=>.5,
+  );
+  assert.equal(attack().shot,true);
+  const emitted=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>.5)[0];
+  assert.ok(emitted.direction.y>.017 && emitted.direction.y<.019,
+    'confirmed follow-up fire rises modestly instead of laser-tracking the feet');
+  assert.equal(emitted.direction.z,0,'a centered lateral sample adds no side bias');
+  assert.deepEqual(emitted.target,p(10),'aim target remains the accepted Attack snapshot');
+  assert.ok(Math.abs(Math.hypot(emitted.velocity.x,emitted.velocity.y,
+    emitted.velocity.z)-28)<1e-12,'vertical recoil preserves projectile speed');
+  const afterShot=state.webPistolHeat;
+  advanceNativeEnemyWeapon(state,pistol,0);
+  assert.equal(state.webPistolHeat,afterShot,'frozen world cannot recover recoil');
+  advanceNativeEnemyWeapon(state,pistol,10);
+  assert.equal(state.webPistolHeat,0,'world-time recovery returns first-shot accuracy');
+  state.attackDelayRemaining=-1;
+  state.targetNeedsReroll=false;
+  assert.equal(attack().shot,true);
+  const recovered=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>.5)[0];
+  assert.deepEqual(recovered.direction,p(1));
+
+  const vertical=ready();
+  vertical.webPistolHeat=.06;
+  assert.equal(runNativeEnemyGunAttack(vertical,pistol,{
+    ...input(),animationTarget:p(0,10,0),
+  },()=>.5).shot,true);
+  const straightUp=consumeNativeEnemyVolley(vertical,pistol,p(0),null,()=>.5)[0];
+  assert.deepEqual(straightUp.direction,p(0,1,0),
+    'recoil never invents a horizontal axis for a vertical muzzle vector');
+});
