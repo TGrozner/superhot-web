@@ -528,7 +528,9 @@ export function createAudio(options = {}) {
     const result = playScenePrefab(resource, soundPosition, commands);
     // Source advances the cooldown even when the pool/clip could not play.
     stunRest.set(bodyId, until);
-    return result;
+    // Web-authored spatial recoil only when a real stun has passed the native rest gate.
+    // Preserve the native playback receipt and its source-qualified prefab request.
+    return webCombatAccent('stun', result, soundPosition);
   }
 
   function itemCue(action, {itemId, position, realtimeSeconds} = {}) {
