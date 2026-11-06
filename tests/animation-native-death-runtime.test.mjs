@@ -593,3 +593,24 @@ test('source sticky force uses the same contact bone parent and never invents an
   assert.throws(()=>applyNativeThrownDeathReaction(create(),result,{impactBoneIndex:999}),
     /same-hit source bone/);
 });
+
+test('simultaneous ragdoll contacts remain isolated by source bone in the Dojo frame',()=>{
+  // Only the grounded source bone may receive collision/kinetic friction.
+  // Collision partitioning must not leak another limb's floor normal.
+  const def=definition();def.joints=[];def.gravity={x:0,y:0,z:0};
+  def.material={bounciness:0,dynamicFriction:0,staticFriction:0,bounceThreshold:2};
+  const runtime=createNativeDeathRuntime({
+    definition:def,collisionScene:floor(),
+    boneModelMatrices:new Float32Array([
+      ...matrix(0,0,0),...matrix(0,0.1,0),
+      ...matrix(0,1.8,0),...matrix(0.2,1.8,0),
+    ]),
+    modelMatrix:matrix(0,0,0),initialVelocity:{x:2,y:-0.5,z:0},
+  });
+  const frame=advanceNativeDeathRuntime(runtime,1/30,{limitWebFrameWork:true});
+  assert.ok(frame.contacts.some(c=>c.boneIndex===1 && c.collider?.id==='floor' && c.normal.y>0.55));
+  assert.equal(frame.contacts.some(c=>c.boneIndex===2 && c.collider?.id==='floor'),false);
+  assert.ok(runtime.byBone.get(1).velocity.x<2,'real grounded contact should damp this body');
+  near(runtime.byBone.get(2).velocity.x,2);
+  assert.ok(runtime.byBone.get(2).position.y>1.7,'airborne body stays clear of the floor');
+});
