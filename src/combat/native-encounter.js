@@ -758,6 +758,42 @@ function webSquadApproachGoal(runtime, enemy, playerFeet, localSquads) {
   return goal;
 }
 
+// J3 Web-original fair gunshot investigation: an unseen gunner can inspect a
+// real PLAYER bullet in its own unobstructed room and pursue that observed
+// position, not the shooter's CURRENT hidden coordinates. The spawn director
+// supplies a single initial dispatch position; later motion requires actual
+// personal sight, valid squad callout or visible gunfire. This is not a
+// recovered MCD hearing/AI rule and does not create attack permission.
+const WEB_VISIBLE_SHOT_CLUE=Object.freeze({rangeBodyRadii:18});
+function webVisibleShotClue(runtime,enemy,projectiles) {
+  const seen=enemy.encounter.webObservedProjectiles;
+  const eye={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+  let nearest=null,nearestDistance=Infinity;
+  for(const shot of projectiles) {
+    if(!shot || typeof shot!=='object' || seen.has(shot) ||
+        shot.friendly!==true || shot.type==='throw' ||
+        !(Number.isFinite(shot.ttl) && shot.ttl>0) ||
+        !(Number.isFinite(shot.speed) && shot.speed>0) ||
+        !shot.pos || ![shot.pos.x,shot.pos.y,shot.pos.z].every(Number.isFinite))continue;
+    const d=distance(eye,shot.pos);
+    if(d>runtime.body.radius*WEB_VISIBLE_SHOT_CLUE.rangeBodyRadii ||
+        nativeSegmentHit(runtime.sightCollision,eye,shot.pos)!==null)continue;
+    const navPoint=sampleNativeNavigation(runtime.nav,
+      {x:shot.pos.x,y:enemy.y,z:shot.pos.z},runtime.maxSnapDistance)?.position;
+    if(!navPoint || !findNativeRoute(runtime.nav,position(enemy),navPoint,
+      {maxSnapDistance:runtime.maxSnapDistance}))continue;
+    // Consume all currently visible bullets, including multiple pellets
+    // from one blast. A persistent in-flight object cannot repeatedly
+    // restart the bounded search across subsequent simulation frames.
+    seen.add(shot);
+    // Keep a clonable, bounded set rather than WeakSet: live actors are
+    // snapshotted by the existing test/game adapters via structuredClone.
+    if(seen.size>64)seen.delete(seen.values().next().value);
+    if(d<nearestDistance) {nearestDistance=d;nearest=navPoint;}
+  }
+  return nearest;
+}
+
 // J3 Web-original disarmed rush: a foe without a gun is otherwise an easy
 // straight-line target during its long approach to melee range. At visible,
 // short-to-medium distance it alternates diagonal advances while *continuing*
@@ -1128,7 +1164,9 @@ function spawnEnemy(runtime, point, order, population) {
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
-      webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
+      webLastSeenFeet:null, // Personally observed player feet, never inferred from a bullet.
+      webBulletClueFeet:null, // Accessible location where a real bullet was seen.
+      webObservedProjectiles:new Set(), // Bounded, structured-clone-safe browser identities.
       webSearchRemaining:null, webSearchComplete:false,
        webSearchPass:0, webSearchPause:0,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
@@ -1333,6 +1371,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // keep the established Dojo pursuit fallback; no new source AI claim.
   if(state.visible) {
     state.webLastSeenFeet={...playerFeet};
+    state.webBulletClueFeet=null;
     state.webSearchRemaining=null;
     state.webSearchComplete=false;
     state.webSearchPass=0;
@@ -1355,11 +1394,27 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       allyWitnessed=true;
       break;
     }
+    // Incoming gunfire behind cover is a clue only when the actual projectile
+    // is within view. A wall, expired bullet, throw or inaccessible nav tile
+    // cannot reveal the shooter. Callouts from an actual ally take priority.
+    if(allyWitnessed)state.webBulletClueFeet=null; // Actual player sight outranks bullet evidence.
+    const shotClue=scaledDeltaTime>0 && !allyWitnessed
+      ? webVisibleShotClue(runtime,enemy,playerProjectiles) : null;
+    if(shotClue && (!state.webBulletClueFeet ||
+        distance(state.webBulletClueFeet,shotClue)>runtime.body.radius*.7)) {
+      state.webBulletClueFeet={...shotClue};
+      state.webSearchRemaining=null;
+      state.webSearchComplete=false;
+      state.webSearchPass=0;
+      state.webSearchPause=0;
+      state.route=null;
+    }
     if(allyWitnessed && (!state.webLastSeenFeet ||
         Math.hypot(state.webLastSeenFeet.x-playerFeet.x,
           state.webLastSeenFeet.z-playerFeet.z)>
           runtime.body.radius*WEB_SQUAD_SIGHTING.newContactBodyRadii)) {
       state.webLastSeenFeet={...playerFeet};
+      state.webBulletClueFeet=null;
       state.webSearchRemaining=null;
       state.webSearchComplete=false;
       state.webSearchPass=0;
@@ -1396,8 +1451,12 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webReloadCoverFeet=null;
     state.webReloadCoverSide=0;
   }
-  const pursuitFeet=!state.visible && state.webLastSeenFeet
-    ? state.webLastSeenFeet : playerFeet;
+  // An actually visible projectile may direct an unseen hunter toward a
+  // reachable bullet location. This clue NEVER changes webLastSeenFeet or
+  // targetSight/attack permissions; existing never-seen fallback remains.
+  const pursuitFeet=!state.visible
+    ? state.webBulletClueFeet ?? state.webLastSeenFeet ?? playerFeet
+    : playerFeet;
   const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
   const worldMuzzleClear=fireTurns.clear.has(enemy);
   // Keep real eye/muzzle/ally authorization intact during a Web squad's
@@ -1588,7 +1647,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // Search starts only after genuinely reaching previously seen feet. Once
   // started it stays in search mode even when strafing away from that point.
   // After a bounded sweep, hold there until REAL line of sight reacquires.
-  if(!state.visible && state.webLastSeenFeet &&
+  if(!state.visible && (state.webLastSeenFeet || state.webBulletClueFeet) &&
       (state.webSearchRemaining!==null || state.webSearchComplete ||
         distance(start,pursuitFeet)<=runtime.body.radius*0.8)) {
     if(state.webSearchRemaining===null && !state.webSearchComplete)

@@ -2661,3 +2661,60 @@ test('J3 Web ally-hit support: an actual witnessed hit changes a gunner lane onc
   assert.ok(committed.witness.runtime.pendingShot,
     'existing pursuit may move normally, but its already committed shot stays intact');
 });
+
+
+
+test('J3 Web gunshot investigation: one observed projectile becomes a reachable search clue',()=>{
+  // Fabricated room: player is behind a full divider, but a real friendly
+  // bullet has already passed into the gunner's unobstructed corridor.
+  const runtime=setup(scene(),[box(15,1,5,.2,2,10)]);
+  const enemy=firstSpawn(runtime);
+  assert.equal(enemy.encounter.webLastSeenFeet,null,
+    'a spawn has not actually seen the player');
+  const hidden={playerPosition:p(27,1.6,7),playerFeet:p(27,0,7)};
+  const shot={pos:p(6,1.6,5),direction:p(1,0,0),
+    speed:37,ttl:4,age:.02,friendly:true,type:'gun'};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:.05,playerProjectiles:[shot],
+  }));
+  assert.equal(enemy.encounter.visible,false);
+  assert.deepEqual(enemy.encounter.webBulletClueFeet,p(6,0,5),
+    'search uses the seen bullet location, not the hidden shooter');
+  assert.equal(enemy.encounter.webLastSeenFeet,null,
+    'projectiles must not masquerade as a player sighting');
+  assert.deepEqual(enemy.encounter.target,p(6,0,5),
+    'ordinary route planner must really consume the investigation clue');
+  assert.equal(enemy.encounter.canAttack,false);
+  const observed=enemy.encounter.webBulletClueFeet;
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:.05,playerProjectiles:[shot],
+  }));
+  assert.deepEqual(enemy.encounter.webBulletClueFeet,observed,
+    'an existing in-flight bullet cannot restart search each frame');
+
+  const blocked={...shot,pos:p(23,1.6,5)};
+  const throwObject={...shot,pos:p(7,1.6,5),type:'throw'};
+  const enemyRound={...shot,pos:p(8,1.6,5),friendly:false};
+  const expired={...shot,pos:p(9,1.6,5),ttl:0};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:.05,
+    playerProjectiles:[blocked,throwObject,enemyRound,expired],
+  }));
+  assert.deepEqual(enemy.encounter.webBulletClueFeet,observed,
+    'wall, throw, hostile and expired projectiles never provide a clue');
+  const frozen={...shot,pos:p(10,1.6,5)};
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...hidden,scaledDeltaTime:0,unscaledDeltaTime:.05,
+    playerProjectiles:[frozen],
+  }));
+  assert.deepEqual(enemy.encounter.webBulletClueFeet,observed,
+    'frozen simulation must not accrue new tactical evidence');
+
+  // A real, direct view of the player always supersedes a previous shot clue.
+  advanceNativeEncounter(runtime,input([enemy],{
+    playerPosition:p(10,1.6,5),playerFeet:p(10,0,5),scaledDeltaTime:.05,
+  }));
+  assert.equal(enemy.encounter.visible,true);
+  assert.equal(enemy.encounter.webBulletClueFeet,null);
+  assert.deepEqual(enemy.encounter.webLastSeenFeet,p(10,0,5));
+});
