@@ -857,7 +857,9 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
  * amount of active time that will actually be simulated, then partitions that
  * SAME worldDelta into short collision/world steps. Thus:
  *   sum(worldSteps) === tick.worldDelta === clock.worldTime increment
- * for a live frame, up to floating-point accumulation.
+ * for a live frame, up to floating-point accumulation. worldStepOffsets are
+ * cumulative world-time offsets FROM THIS FRAME'S START for TTL checks during
+ * each collision slice; never use the final frame time for every slice.
  *
  * This is a WEB feel correction for the 50ms capped frame-time at low FPS,
  * NOT a recovered Unity fixed-step scheduler. maximumSteps is an explicit
@@ -870,7 +872,7 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
  * @param {{simulationDt:number,activeRealDt:number,maximumSteps:number,
  *   paused?:boolean,x?:number,y?:number,grounded?:boolean,yaw?:number,
  *   pitch?:number,lookPathDegrees?:number}} frame
- * @returns {{worldSteps:number[],chargedActiveDt:number,
+ * @returns {{worldSteps:number[],worldStepOffsets:number[],chargedActiveDt:number,
  *   discardedActiveDt:number,worldDelta:number,appliedTimeScale:number,
  *   timeScale:number,aggregate:number}}
  */
@@ -902,6 +904,7 @@ export function stepWebMcdGameplayFrame(clock, {
     ...clockInputs, dt: chargedActiveDt, unscaledDt: paused ? 0 : activeRealDt, paused,
   });
   const worldSteps = [];
+  const worldStepOffsets = [];
   if (chargedActiveDt > 0 && tick.worldDelta > 0) {
     const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
     let previousActive = 0;
@@ -915,10 +918,12 @@ export function stepWebMcdGameplayFrame(clock, {
       worldSteps.push(step);
       previousActive = nextActive;
       previousWorld += step;
+      // Last boundary uses the exact tick delta, avoiding accumulated drift.
+      worldStepOffsets.push(i === count - 1 ? tick.worldDelta : previousWorld);
     }
   }
   return {
-    ...tick, worldSteps, chargedActiveDt,
+    ...tick, worldSteps, worldStepOffsets, chargedActiveDt,
     discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
   };
 }
