@@ -872,7 +872,8 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
  * @param {{simulationDt:number,activeRealDt:number,maximumSteps:number,
  *   paused?:boolean,x?:number,y?:number,grounded?:boolean,yaw?:number,
  *   pitch?:number,lookPathDegrees?:number}} frame
- * @returns {{worldSteps:number[],worldStepOffsets:number[],chargedActiveDt:number,
+ * @returns {{worldSteps:number[],worldStepOffsets:number[],
+ *   simulationStepDeltas:number[],unscaledStepDeltas:number[],chargedActiveDt:number,
  *   discardedActiveDt:number,worldDelta:number,appliedTimeScale:number,
  *   timeScale:number,aggregate:number}}
  */
@@ -905,12 +906,32 @@ export function stepWebMcdGameplayFrame(clock, {
   });
   const worldSteps = [];
   const worldStepOffsets = [];
+  // Dojo caller currently passes unscaledDeltaTime: activeRealDt to both the
+  // encounter and enemy attack systems. When a future SH-05 hookup iterates
+  // worldSteps, repeating the FULL frame's activeRealDt for every slice would
+  // multiply these real-time timers. Keep the two independent domains explicit:
+  // simulationStepDeltas sum to chargedActiveDt (movement/damping budget),
+  // unscaledStepDeltas sum to activeRealDt (one RAF's active elapsed time).
+  // WEB-ONLY scheduling contract; not a native Unity fixed-step cadence.
+  const simulationStepDeltas = [];
+  const unscaledStepDeltas = [];
   if (chargedActiveDt > 0 && tick.worldDelta > 0) {
     const count = Math.min(maximumSteps, Math.ceil(chargedActiveDt / simulationDt));
     let previousActive = 0;
     let previousWorld = 0;
+    let previousUnscaled = 0;
     for (let i = 0; i < count; i++) {
       const nextActive = Math.min(chargedActiveDt, (i + 1) * simulationDt);
+      const simulationStep = nextActive - previousActive;
+      const nextUnscaled = i === count - 1
+        ? activeRealDt : activeRealDt * (nextActive / chargedActiveDt);
+      const unscaledStep = nextUnscaled - previousUnscaled;
+      if (!Number.isFinite(unscaledStep) || unscaledStep < 0) {
+        throw new RangeError('invalid unscaled slice');
+      }
+      simulationStepDeltas.push(simulationStep);
+      unscaledStepDeltas.push(unscaledStep);
+      previousUnscaled = nextUnscaled;
       const step = i === count - 1
         ? tick.worldDelta - previousWorld
         : tick.worldDelta * ((nextActive - previousActive) / chargedActiveDt);
@@ -923,7 +944,8 @@ export function stepWebMcdGameplayFrame(clock, {
     }
   }
   return {
-    ...tick, worldSteps, worldStepOffsets, chargedActiveDt,
+    ...tick, worldSteps, worldStepOffsets, simulationStepDeltas,
+    unscaledStepDeltas, chargedActiveDt,
     discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
   };
 }
