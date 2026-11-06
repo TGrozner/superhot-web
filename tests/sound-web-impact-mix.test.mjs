@@ -1055,3 +1055,23 @@ test('Web-original kill shatter survives a saturated enemy volley without maskin
   assert.deepEqual(shatterNoise.stopArgs, [ctx.currentTime + 0.008]);
   mix.dispose();
 });
+
+// WEB-ORIGINAL routing: a confirmed blade hit must not be muted by
+// player-damage sidechain, while a missed swing remains a weapon swish.
+test('confirmed katana contact routes to the impact bus, unlike its air sweep', () => {
+  const {ctx, gains} = fakeAudio();
+  const mix = createWebImpactMix(ctx, 4);
+  const weaponBus = gains[1];
+  const impactBus = gains[2];
+  const beforeSwing = gains.length;
+  assert.equal(mix.emit('katana-swing').status, 'started');
+  assert.ok(gains[beforeSwing].connections.includes(weaponBus));
+  const beforeContact = gains.length;
+  assert.equal(mix.emit('katana').status, 'started');
+  assert.ok(gains[beforeContact].connections.includes(impactBus));
+  assert.ok(!gains[beforeContact].connections.includes(weaponBus));
+  assert.equal(mix.emit('player-hit').status, 'started');
+  assert.equal(weaponBus.gain.targets[0][0], 0.4);
+  assert.deepEqual(impactBus.gain.targets, []);
+  mix.dispose();
+});

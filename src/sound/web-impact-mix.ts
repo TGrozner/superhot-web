@@ -310,9 +310,9 @@ export function createWebImpactMix(context: AudioContext, maxVoices = 24) {
       }
       out.connect(distanceFilter ?? panner);
       if (remoteEnemyShot) panner.connect(distantWeapons);
-      else panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' || cue === 'stun' ? impacts : weapons);
+      else panner.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' || cue === 'stun' || cue === 'katana' ? impacts : weapons);
     } else {
-      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' || cue === 'stun' ? impacts : weapons);
+      out.connect((cue === 'step' || cue === 'landing') ? footsteps : cue === 'impact' || cue === 'wall-impact' || cue === 'shatter' || cue === 'player-hit' || cue === 'punch-contact' || cue === 'stun' || cue === 'katana' ? impacts : weapons);
     }
     const voice: Voice = {sources: [], effects: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority};
     voices.add(voice);
