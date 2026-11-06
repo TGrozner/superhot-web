@@ -272,10 +272,22 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
   // barely moving, and a shader-only tick must not unfreeze a held pose.
   const shaderDt = shaderTime - previous.time;
   const sameState = identity.name === previous.state;
-  const dt = sameState ? poseTime - previous.poseTime : shaderDt;
+  // A new walk/idle/run state restarts pose.time. Shader time is unscaled:
+  // using it as a world-step would instantly unbank a slow-motion enemy.
+  // Carry the previous bank for ONE rendered state-switch frame, then use
+  // the new state's elapsed world seconds to settle it on later frames.
+  const dt = sameState ? poseTime - previous.poseTime : 0;
   if (shaderDt < 0 || dt < 0) return null; // REJOUER or state clock rewind
-  // Freeze the exact bank while the sampled GAME pose time is frozen.
   if (dt === 0) {
+    const dx = modelMatrix[12] - previous.x;
+    const dz = modelMatrix[14] - previous.z;
+    const forwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+    const heading = forwardLength > 1e-6 ? Math.atan2(
+      previous.fx * modelMatrix[10] - previous.fz * modelMatrix[8],
+      previous.fx * modelMatrix[8] + previous.fz * modelMatrix[10]) : NaN;
+    if (!Number.isFinite(dx) || !Number.isFinite(dz) ||
+        Math.hypot(dx, dz) > 1.5 || !Number.isFinite(heading) ||
+        Math.abs(heading) > .7 || (!sameState && shaderDt > .15)) return null;
     return Math.abs(previous.bankPitch) + Math.abs(previous.bankRoll) >= .012
       ? describe(previous.bankPitch, previous.bankRoll) : null;
   }
@@ -346,15 +358,37 @@ function webIdleReaction(actorId, pose, identity, solvedPose, action, transition
  * @returns {{yaw: number, design: string} | null}
  */
 function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPosition,
-                         action, transition, solvedPose, available) {
+                         shaderTime, action, transition, solvedPose, available) {
   if (!available || solvedPose !== null || action !== null || transition !== null ||
       !['idle', 'walk', 'run'].includes(identity.name) ||
       !Number.isFinite(pose.time) || !modelMatrix || modelMatrix.length !== 16 ||
       (!cameraPosition && pose.targetSight !== false)) return null;
   const previous = frames.get(actorId);
-  if (!previous || previous.state !== identity.name || pose.time < previous.poseTime) return null;
-  const dt = pose.time - previous.poseTime;
-  if (!Number.isFinite(dt) || dt > .15) return null;
+  if (!previous || !['idle', 'walk', 'run'].includes(previous.state)) return null;
+  const sameState = previous.state === identity.name;
+  if ((sameState && pose.time < previous.poseTime) ||
+      !Number.isFinite(shaderTime) || shaderTime < previous.time) return null;
+  const travel = Math.hypot(modelMatrix[12] - previous.x,
+    modelMatrix[14] - previous.z);
+  const currentForwardLength = Math.hypot(modelMatrix[8], modelMatrix[10]);
+  const heading = currentForwardLength > 1e-6 ? Math.atan2(
+    previous.fx * modelMatrix[10] - previous.fz * modelMatrix[8],
+    previous.fx * modelMatrix[8] + previous.fz * modelMatrix[10]) : NaN;
+  if (!Number.isFinite(travel) || travel > 1.5 ||
+      !Number.isFinite(heading) || Math.abs(heading) > .7) return null;
+  const dt = sameState ? pose.time - previous.poseTime : 0;
+  if (!Number.isFinite(dt) || dt > .15 ||
+      (!sameState && shaderTime - previous.time > .15)) return null;
+  // State-switch pose time restarts, but the target has not disappeared:
+  // retain the same Web head direction for this ONE frame. The following
+  // frame tracks or decays using the NEW state's game-world elapsed time.
+  if (!sameState) {
+    const yaw = previous.gazeYaw ?? 0;
+    const pitch = previous.gazePitch ?? 0;
+    return Math.abs(yaw) + Math.abs(pitch) >= .008
+      ? Object.freeze({yaw, pitch, design:'Web-only gait-switch gaze continuity'})
+      : null;
+  }
   // The gameplay AI knows whether the player is actually visible. When an
   // occluder breaks sight, the Web head must ease back to its source pose,
   // NOT keep looking through walls at the live camera's changing position.
@@ -597,7 +631,8 @@ export function createNativeActorSkinRuntime(skinPass) {
     const webHeadLook = webHitHeadWhiplash(reaction,
       skinPass.webHeadTrackingAvailable === true)
       ?? webHeadTracking(movementFrames, actorId, selected.identity,
-        pose, modelMatrix, cameraPosition, action, transitionDescriptor, solvedPose,
+        pose, modelMatrix, cameraPosition, shaderTime,
+        action, transitionDescriptor, solvedPose,
         skinPass.webHeadTrackingAvailable === true);
     const webFireArmKick = webFireRightArmKick(reaction,
       skinPass.webFireArmKickAvailable === true);
