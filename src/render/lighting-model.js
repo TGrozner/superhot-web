@@ -212,8 +212,11 @@ vec3 dojoDoorWarningSpotWebPreview(
     return vec3(0.0);
   float along = dot(offset, lightDirection);
   if (along <= 0.0) return vec3(0.0);
+  // Both source-qualified spot angles have cosHalfAngle > 0. Reject
+  // off-axis fragments before sqrt/division; Web GPU-only optimization.
+  if (along * along < distanceSquared * cosHalfAngle * cosHalfAngle)
+    return vec3(0.0);
   float radius = sqrt(distanceSquared);
-  if (along / radius < cosHalfAngle) return vec3(0.0);
   float aperture = 2.0 * along * tanHalfAngle;
   if (aperture <= 0.0) return vec3(0.0);
   vec2 cookieUv = vec2(dot(offset, lightRight), dot(offset, lightUp))
@@ -243,8 +246,11 @@ vec3 dojoDoorWarningSpotWebGlow(
     return vec3(0.0);
   float along = dot(offset, lightDirection);
   if (along <= 0.0) return vec3(0.0);
+  // Both source-qualified spot angles have cosHalfAngle > 0. Reject
+  // off-axis fragments before sqrt/division; Web GPU-only optimization.
+  if (along * along < distanceSquared * cosHalfAngle * cosHalfAngle)
+    return vec3(0.0);
   float radius = sqrt(distanceSquared);
-  if (along / radius < cosHalfAngle) return vec3(0.0);
   float energy = sourceIntensity
     * dojoWebWarningFalloff(radius, sourceRange, along, cosHalfAngle)
     * dojoWebWarningSurfaceFacing(offset, radius);
