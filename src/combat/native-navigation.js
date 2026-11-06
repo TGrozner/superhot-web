@@ -100,18 +100,58 @@ export function findNativeRoute(nav, start, target, { maxSnapDistance }) {
   if (!from || !to) return null;
   const count=nav.nodes.length, costs=new Float64Array(count).fill(Infinity);
   const visited=new Uint8Array(count), previous=new Array(count);
+  // Spawn eligibility and actor replans call this repeatedly in the Dojo.
+  // The old scan of every polygon per expansion was quadratic. The heap's
+  // cost then node-index ordering retains deterministic equal-cost routes.
+  const heap=[];
+  const earlier=(a,b)=>a.cost<b.cost || (a.cost===b.cost && a.node<b.node);
+  function enqueue(node,cost) {
+    const entry={node,cost};
+    let index=heap.length;
+    heap.push(entry);
+    while(index>0) {
+      const parent=(index-1)>>1;
+      if(!earlier(entry,heap[parent]))break;
+      heap[index]=heap[parent];
+      index=parent;
+    }
+    heap[index]=entry;
+  }
+  function dequeue() {
+    const first=heap[0],last=heap.pop();
+    if(heap.length>0) {
+      let index=0;
+      while(true) {
+        const left=index*2+1;
+        if(left>=heap.length)break;
+        const right=left+1;
+        const child=right<heap.length && earlier(heap[right],heap[left]) ? right : left;
+        if(!earlier(heap[child],last))break;
+        heap[index]=heap[child];
+        index=child;
+      }
+      heap[index]=last;
+    }
+    return first;
+  }
   costs[from.node]=0;
-  for (;;) {
-    let current=-1, cost=Infinity;
-    for (let i=0;i<count;i++) if (!visited[i] && costs[i]<cost) { current=i; cost=costs[i]; }
-    if (current<0) return null;
-    if (current===to.node) break;
+  enqueue(from.node,0);
+  while(heap.length>0) {
+    const {node:current,cost}=dequeue();
+    // Obsolete entries do not change predecessors after a shorter route wins.
+    if(visited[current] || cost!==costs[current])continue;
+    if(current===to.node)break;
     visited[current]=1;
-    for (const edge of nav.nodes[current].links) {
+    for(const edge of nav.nodes[current].links) {
       const next=cost+edge.cost;
-      if (next<costs[edge.to]) { costs[edge.to]=next; previous[edge.to]={ node:current, point:edge.point }; }
+      if(next<costs[edge.to]) {
+        costs[edge.to]=next;
+        previous[edge.to]={node:current,point:edge.point};
+        enqueue(edge.to,next);
+      }
     }
   }
+  if(!Number.isFinite(costs[to.node]))return null;
   const corridor=[];
   for (let n=to.node;n!==from.node;n=previous[n].node) corridor.push({ node:n, point:previous[n].point });
   corridor.reverse();
