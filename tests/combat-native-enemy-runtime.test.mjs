@@ -287,3 +287,24 @@ test('J2 Web sustained pistol recoil climbs only after delivered rounds, never d
   assert.deepEqual(straightUp.direction,p(0,1,0),
     'recoil never invents a horizontal axis for a vertical muzzle vector');
 });
+
+test('J2 uphill pistol recoil never reverses the horizontal projectile bearing',()=>{
+  // A near-vertical upward shot has a horizontal component above the 1e-6
+  // degeneracy guard, but less than the requested Web recoil pitch.
+  const pistol={...settings,family:'Pistol'};
+  const state=ready();
+  state.webPistolHeat=.06;
+  const target=p(.001,10,-.001);
+  assert.equal(runNativeEnemyGunAttack(state,pistol,{
+    ...input(),animationTarget:target,
+  },()=>.5).shot,true);
+  const [shot]=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>.5);
+  assert.ok(shot.direction.x>0 && shot.direction.z<0,
+    'near-vertical recoil cannot flip the x/z firing bearing behind the gunner');
+  assert.ok(Math.abs(shot.direction.x/shot.direction.z+1)<1e-12,
+    'the horizontal bearing remains aligned with the accepted aim');
+  assert.ok(Math.abs(Math.hypot(shot.direction.x,shot.direction.y,shot.direction.z)-1)<1e-12);
+  assert.ok(Math.abs(Math.hypot(shot.velocity.x,shot.velocity.y,shot.velocity.z)-28)<1e-12,
+    'the edge-case guard still preserves projectile speed');
+  assert.deepEqual(shot.target,target,'the accepted target is never rewritten');
+});
