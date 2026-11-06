@@ -197,3 +197,22 @@ test('midair teleports never turn into a fake landing thud after normal-looking 
   assert.equal(tick(0, 1.6, 2.2, true)?.status, 'started');
   assert.deepEqual(cues.map(cue => cue.cue), ['landing']);
 });
+
+test('ground footfalls survive 3 FPS while teleports and long frame stalls remain silent', () => {
+  // 0.333s gameplay frames previously hit the 0.3s reset on every tick.
+  // This is a Web-authored frame-continuity policy, NOT a Unity animation marker.
+  const cues = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    cues.push({cue, ...request});
+    return {status: 'started', source: 'web-original-synthesis', at: 1, spatial: true};
+  });
+  const tick = (x, timeSeconds) =>
+    gait.advance({position: p(x), grounded: true, timeSeconds});
+  assert.equal(tick(0, 0), null);
+  assert.equal(tick(1.1, 1 / 3)?.status, 'started');
+  assert.equal(tick(2.2, 2 / 3)?.status, 'started');
+  assert.equal(tick(17, 1), null, 'large one-frame teleports remain silent');
+  assert.equal(tick(0, 2), null, 'a tab stall still clears accumulated gait');
+  assert.equal(tick(0.9, 2 + 1 / 3)?.status, 'started');
+  assert.deepEqual(cues.map(({cue}) => cue), ['step', 'step', 'step']);
+});
