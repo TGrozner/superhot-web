@@ -82,6 +82,9 @@ export function createWebImpactMix(context, maxVoices = 24) {
     let shatterChain = 0;
     let lastRoomTransientAt = -Infinity;
     let roomBurstCount = 0;
+    // WEB-ORIGINAL: a landed punch should not hide behind its simultaneous air swish.
+    let lastPunchSwing = null;
+    let lastPunchSwingAt = -Infinity;
     /** Web-only output trim: 0 mutes synthetic accents, 1 preserves their original level. */
     function setMixLevel(level) {
         if (!Number.isFinite(level) || level < 0 || level > 1)
@@ -119,6 +122,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
     };
     function release(voice) {
         voices.delete(voice);
+        if (lastPunchSwing === voice)
+            lastPunchSwing = null;
         retired.delete(voice);
         for (const src of voice.sources) {
             src.onended = null;
@@ -289,6 +294,19 @@ export function createWebImpactMix(context, maxVoices = 24) {
         }
         const voice = { sources: [], effects: [], gain: out, panner, distanceFilter, pending: cue === 'shatter' ? 4 : cue === 'player-hit' ? 3 : 2, priority };
         voices.add(voice);
+        // SH-05 emits both cues on confirmed punches. Fade the overlapping swish
+        // over 8ms so the contact thud stays clear, but preserve whiff-only swings.
+        // Same existing sources/voice cap; no Unity timing, clip or new sound.
+        if (cue === 'punch-swing') {
+            lastPunchSwing = voice;
+            lastPunchSwingAt = at;
+        }
+        else if (cue === 'punch-contact' && lastPunchSwing !== null &&
+            at >= lastPunchSwingAt && at - lastPunchSwingAt <= 0.08 &&
+            voices.has(lastPunchSwing)) {
+            retire(lastPunchSwing);
+            lastPunchSwing = null;
+        }
         const track = (node) => {
             voice.effects.push(node);
             return node;
