@@ -758,6 +758,39 @@ function webSquadApproachGoal(runtime, enemy, playerFeet, localSquads) {
   return goal;
 }
 
+// J3 Web-original fair gunshot investigation: an unseen gunner can inspect a
+// real PLAYER bullet in its own unobstructed room and pursue that observed
+// position, not the shooter's CURRENT hidden coordinates. The spawn director
+// supplies a single initial dispatch position; later motion requires actual
+// personal sight, valid squad callout or visible gunfire. This is not a
+// recovered MCD hearing/AI rule and does not create attack permission.
+const WEB_VISIBLE_SHOT_CLUE=Object.freeze({rangeBodyRadii:18});
+function webVisibleShotClue(runtime,enemy,projectiles) {
+  const seen=enemy.encounter.webObservedProjectiles;
+  const eye={x:enemy.x,y:enemy.y+runtime.aimHeight,z:enemy.z};
+  let nearest=null,nearestDistance=Infinity;
+  for(const shot of projectiles) {
+    if(!shot || typeof shot!=='object' || seen.has(shot) ||
+        shot.friendly!==true || shot.type==='throw' ||
+        !(Number.isFinite(shot.ttl) && shot.ttl>0) ||
+        !(Number.isFinite(shot.speed) && shot.speed>0) ||
+        !shot.pos || ![shot.pos.x,shot.pos.y,shot.pos.z].every(Number.isFinite))continue;
+    const d=distance(eye,shot.pos);
+    if(d>runtime.body.radius*WEB_VISIBLE_SHOT_CLUE.rangeBodyRadii ||
+        nativeSegmentHit(runtime.sightCollision,eye,shot.pos)!==null)continue;
+    const navPoint=sampleNativeNavigation(runtime.nav,
+      {x:shot.pos.x,y:enemy.y,z:shot.pos.z},runtime.maxSnapDistance)?.position;
+    if(!navPoint || !findNativeRoute(runtime.nav,position(enemy),navPoint,
+      {maxSnapDistance:runtime.maxSnapDistance}))continue;
+    // Consume all currently visible bullets, including multiple pellets
+    // from one blast. A persistent in-flight object cannot repeatedly
+    // restart the bounded search across subsequent simulation frames.
+    seen.add(shot);
+    if(d<nearestDistance) {nearestDistance=d;nearest=navPoint;}
+  }
+  return nearest;
+}
+
 // J3 Web-original disarmed rush: a foe without a gun is otherwise an easy
 // straight-line target during its long approach to melee range. At visible,
 // short-to-medium distance it alternates diagonal advances while *continuing*
@@ -1109,7 +1142,7 @@ function resolveSpawnActivation(encounter, order, population) {
   }
   return { ...activation, prefabId: prefab.prefabId };
 }
-function spawnEnemy(runtime, point, order, population) {
+function spawnEnemy(runtime, point, order, population, dispatchFeet) {
   const activation = resolveSpawnActivation(runtime, order, population);
   const selected = activation.status === 'qualified';
   const settings = selected ? activation.weaponSettings : runtime.enemySettings;
@@ -1128,7 +1161,10 @@ function spawnEnemy(runtime, point, order, population) {
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
-      webLastSeenFeet:null, // Web-only investigation memory, not MCD AI evidence.
+      // Initial director dispatch is a one-time Web clue, NOT an enemy sighting.
+      // Never let never-seen enemies home on the live player's hidden position.
+      webLastSeenFeet:{...dispatchFeet},
+      webObservedProjectiles:new WeakSet(), // Live browser bullet identities only.
       webSearchRemaining:null, webSearchComplete:false,
        webSearchPass:0, webSearchPause:0,
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
@@ -1354,6 +1390,20 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       if(nativeSegmentHit(runtime.sightCollision,receiverEye,spotterEye)!==null)continue;
       allyWitnessed=true;
       break;
+    }
+    // Incoming gunfire behind cover is a clue only when the actual projectile
+    // is within view. A wall, expired bullet, throw or inaccessible nav tile
+    // cannot reveal the shooter. Callouts from an actual ally take priority.
+    const shotClue=scaledDeltaTime>0 && !allyWitnessed
+      ? webVisibleShotClue(runtime,enemy,playerProjectiles) : null;
+    if(shotClue && (!state.webLastSeenFeet ||
+        distance(state.webLastSeenFeet,shotClue)>runtime.body.radius*.7)) {
+      state.webLastSeenFeet={...shotClue};
+      state.webSearchRemaining=null;
+      state.webSearchComplete=false;
+      state.webSearchPass=0;
+      state.webSearchPause=0;
+      state.route=null;
     }
     if(allyWitnessed && (!state.webLastSeenFeet ||
         Math.hypot(state.webLastSeenFeet.x-playerFeet.x,
@@ -1831,7 +1881,7 @@ export function advanceNativeEncounter(runtime, input) {
     if (occupied(runtime,feet,feet,population) ||
         occupiedSegment(feet,feet,playerFeet,runtime.body.radius*2,runtime.body.height) ||
         nativeCapsuleHit(runtime.collision,feet,ceiling,runtime.body)) { i++; continue; }
-    const enemy=spawnEnemy(runtime,order.point,order,population);
+    const enemy=spawnEnemy(runtime,order.point,order,population,playerFeet);
     population.push(enemy);
     events.push({type:'spawn',point:order.point,enemy,activation:enemy.sourceActivation});
     runtime.arrivals.splice(i,1);
