@@ -2762,3 +2762,33 @@ test('J3 Web spawn dispatch: a never-sighted gunner searches its order, not hidd
   assert.deepEqual(enemy.encounter.webLastSeenFeet,revealed.playerFeet,
     'a genuine personal sighting takes priority over the initial dispatch');
 });
+
+test('J3 Web blind search preserves real player body even while steering by an old clue',()=>{
+  // Synthetic perception divider: the hunter searches its old order, but the
+  // player has relocated into the preferred sidestep lane. The visibility
+  // collider is deliberately independent of the physical body/nav collider.
+  const realWorld=prepareNativeCollision([]);
+  const sightWorld=prepareNativeCollision([box(4.7,1.6,5,.1,2,2)]);
+  const runtime=createNativeEncounter(scene(),realWorld,()=>0,{sightCollision:sightWorld});
+  const enemy=firstSpawn(runtime,{
+    playerFeet:p(9,0,5),playerPosition:p(9,1.6,5),
+  });
+  enemy.x=5;enemy.y=0;enemy.z=5;enemy.face=Math.PI;
+  enemy.encounter.webTacticalSide=1;
+  enemy.encounter.webDispatchFeet=p(5,0,5);
+  enemy.encounter.webSearchRemaining=1.8;
+  const relocated={playerFeet:p(4.4,0,5),playerPosition:p(4.4,1.6,5)};
+  assert.notEqual(nativeSegmentHit(sightWorld,p(5,1.6,5),relocated.playerPosition),null,
+    'real LOS remains blocked: current player feet must never steer the search');
+  const initialDistance=Math.hypot(enemy.x-relocated.playerFeet.x,enemy.z-relocated.playerFeet.z);
+  advanceNativeEncounter(runtime,input([enemy],{
+    ...relocated,scaledDeltaTime:.1,unscaledDeltaTime:.1,
+  }));
+  assert.equal(enemy.encounter.visible,false,'concealment does not grant player sight');
+  assert.deepEqual(enemy.encounter.target,p(5,0,5),
+    'blind search still uses only its old fixed order');
+  assert.ok(enemy.x>5,'the occupied preferred sweep reverses to its open opposite lane');
+  assert.ok(Math.hypot(enemy.x-relocated.playerFeet.x,enemy.z-relocated.playerFeet.z)>initialDistance,
+    'searching cannot tunnel farther into the actual player capsule');
+  assert.equal(enemy.encounter.canAttack,false,'avoiding a body must not grant a blind shot');
+});
