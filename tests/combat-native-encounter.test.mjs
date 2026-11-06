@@ -908,6 +908,35 @@ test('J3 Web steep incoming shots cross the body-height window before their plan
     'a wall after warning entry must prevent a phantom covered dodge');
 });
 
+test('J3 Web incoming bullet checks the first threatened body point before cover behind it',()=>{
+  // Synthetic straight shot: the body begins at x=2.4, while the Web warning
+  // cylinder extends behind it to x~1.08. A rear wall must not erase danger.
+  const scan=(wall=null,ttl=.6)=>{
+    const runtime=setup(scene(),wall?[wall]:[]);
+    const enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const projectile={friendly:true,pos:p(10,1,2),velocity:p(-20,0,0),ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.05,playerProjectiles:[projectile],
+    }));
+    return enemy;
+  };
+  const behind=scan(box(1.35,1,2,.2,2,.6));
+  assert.ok(behind.encounter.webDodgeRemaining>0,
+    'a wall beyond the enemy body cannot suppress a live incoming dodge');
+  assert.ok(Math.hypot(behind.x-2,behind.z-2)>.005,
+    'the danger produces an actual swept, nav-approved movement');
+
+  const inFront=scan(box(2.65,1,2,.2,2,.6));
+  assert.equal(inFront.encounter.webDodgeRemaining,0,
+    'a wall inside the warning cylinder but before the body still blocks the shot');
+
+  const expiresBeforeBody=scan(null,.365);
+  assert.equal(expiresBeforeBody.encounter.webDodgeRemaining,0,
+    'a bullet dying after warning entry but before actual contact cannot panic the enemy');
+});
+
 test('J3 Web bullets intercepted by a living ally cannot panic a downstream gunner',()=>{
   // Web-only projectile prediction on fabricated actor capsules, not native MCD AI.
   const direct={friendly:true,type:'normal',pos:p(15,1,2),
