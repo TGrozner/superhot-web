@@ -1789,6 +1789,9 @@ function drawEnemy(enemy) {
       statePlayback, transition:solvedPose?null:transition,
       action:solvedPose?null:enemy.fireAction, solvedPose,
       shaderTime: state.runClock, cameraPosition: state.camera,
+      // Feed the living actor's actual AI sight; death/unknown cannot track.
+      targetSight:enemy.alive && typeof enemy.encounter?.visible === 'boolean'
+        ? enemy.encounter.visible : null,
       hitIncomingDirection: activeHit ? (enemy.hitIncomingDirection??null) : null,
       hitEventId: activeHit ? (enemy.hitEventId??null) : null,
     })
