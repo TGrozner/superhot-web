@@ -373,7 +373,7 @@ const WEB_AIM_PRESSURE = Object.freeze({
  * world cover have been checked. Invalid/missing camera vectors fail closed.
  * Aimed movement is Web-original and never stands in for a native bullet hit.
  */
-function webPlayerIsAimingAt(runtime, enemy, playerPosition, playerForward) {
+function webPlayerIsAimingAt(runtime, enemy, playerPosition, playerForward, enemies) {
   if (!playerForward || !playerPosition ||
       ![playerForward.x,playerForward.y,playerForward.z,
         playerPosition.x,playerPosition.y,playerPosition.z].every(Number.isFinite))return false;
@@ -384,8 +384,12 @@ function webPlayerIsAimingAt(runtime, enemy, playerPosition, playerForward) {
   if (range<=EPSILON || range>runtime.body.radius*WEB_AIM_PRESSURE.maxBodyRadii ||
       forwardLength<=EPSILON)return false;
   const facing=(dx*playerForward.x+dy*playerForward.y+dz*playerForward.z)/(range*forwardLength);
+  // A live squadmate in front of this actor owns the player's actual camera
+  // ray. The rear gunner must not react to an aim that would hit that ally
+  // first. Keep wall/eye checks and the existing swept movement unchanged.
   return facing>=WEB_AIM_PRESSURE.aimDot &&
-    nativeSegmentHit(runtime.sightCollision,playerPosition,body)===null;
+    nativeSegmentHit(runtime.sightCollision,playerPosition,body)===null &&
+    !webLivingAllyIntersectsSegment(runtime,enemy,playerPosition,body,enemies);
 }
 
 /**
@@ -1275,7 +1279,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webAimRemaining=0;
   } else if (state.webAimRemaining<=0 && state.webAimCooldown<=EPSILON) {
     const threatened=state.visible &&
-      webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward);
+      webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward,enemies);
     state.webAimLock=threatened ? state.webAimLock+scaledDeltaTime : 0;
     if(state.webAimLock>=WEB_AIM_PRESSURE.lockSeconds) {
       state.webAimLock=0;
