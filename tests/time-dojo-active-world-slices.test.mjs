@@ -102,3 +102,30 @@ test('bounded hitch, frozen world and pause never advance phantom world steps', 
     simulationDt: .051, activeRealDt: .1, maximumSteps: 4,
   }), /maximum collision step/);
 });
+
+test('Dojo collision slices expose world-clock boundaries before synthetic TTL expires', () => {
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  clock.source.forcedTimeScale = 1;
+  clock.timeScale = 1;
+  clock.worldTime = 4;
+  const frameStart = clock.worldTime;
+  const tick = stepWebMcdGameplayFrame(clock, {
+    simulationDt: .05, activeRealDt: .1, maximumSteps: 4,
+    x: 0, y: 1, grounded: true,
+  });
+  assert.equal(tick.worldSteps.length, 2);
+  assert.equal(tick.worldStepOffsets.length, tick.worldSteps.length);
+  let cumulative = 0;
+  for (let index = 0; index < tick.worldSteps.length; index++) {
+    cumulative += tick.worldSteps[index];
+    assert.ok(Math.abs(tick.worldStepOffsets[index] - cumulative) < 1e-10,
+      'each offset must represent its own completed collision slice');
+  }
+  // Synthetic TTL halfway between the two slices: it must NOT expire during
+  // the first slice just because the pure clock already ticked once per RAF.
+  const expiresAt = frameStart + .075;
+  assert.ok(frameStart + tick.worldStepOffsets[0] < expiresAt);
+  assert.ok(frameStart + tick.worldStepOffsets[1] >= expiresAt);
+  assert.ok(Math.abs(frameStart + tick.worldStepOffsets.at(-1) - clock.worldTime) < 1e-8);
+});
