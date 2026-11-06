@@ -1145,7 +1145,7 @@ function resolveSpawnActivation(encounter, order, population) {
   }
   return { ...activation, prefabId: prefab.prefabId };
 }
-function spawnEnemy(runtime, point, order, population) {
+function spawnEnemy(runtime, point, order, population, playerFeet) {
   const activation = resolveSpawnActivation(runtime, order, population);
   const selected = activation.status === 'qualified';
   const settings = selected ? activation.weaponSettings : runtime.enemySettings;
@@ -1165,6 +1165,7 @@ function spawnEnemy(runtime, point, order, population) {
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
       webLastSeenFeet:null, // Personally observed player feet, never inferred from a bullet.
+      webDispatchFeet:{...playerFeet}, // Web-only initial order: snapshot once, never track hidden player.
       webBulletClueFeet:null, // Accessible location where a real bullet was seen.
       webObservedProjectiles:new Set(), // Bounded, structured-clone-safe browser identities.
       webSearchRemaining:null, webSearchComplete:false,
@@ -1365,10 +1366,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const playerRetreating=state.visible &&
     webVisiblePlayerRetreats(state.webObservedPlayerFeet,playerFeet,start,scaledDeltaTime);
   state.webObservedPlayerFeet=state.visible ? {...playerFeet} : null;
-  // Web-authored fairness: once an enemy has REALLY observed the player,
-  // losing body sight freezes its last known feet instead of letting it track
-  // live coordinates through walls. Actors that have never seen the player
-  // keep the established Dojo pursuit fallback; no new source AI claim.
+  // Web-authored fairness: a spawn gets exactly one dispatch coordinate.
+  // Neither never-seen enemies nor those who lose real sight can track
+  // subsequent hidden player motion. This is not native MCD AI behavior.
   if(state.visible) {
     state.webLastSeenFeet={...playerFeet};
     state.webBulletClueFeet=null;
@@ -1451,11 +1451,11 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webReloadCoverFeet=null;
     state.webReloadCoverSide=0;
   }
-  // An actually visible projectile may direct an unseen hunter toward a
-  // reachable bullet location. This clue NEVER changes webLastSeenFeet or
-  // targetSight/attack permissions; existing never-seen fallback remains.
+  // A visible bullet can supersede the initial dispatch without granting
+  // player sight or gun permission; real last-seen feet outrank dispatch.
+  // Legacy external actors lacking dispatch retain the old fallback.
   const pursuitFeet=!state.visible
-    ? state.webBulletClueFeet ?? state.webLastSeenFeet ?? playerFeet
+    ? state.webBulletClueFeet ?? state.webLastSeenFeet ?? state.webDispatchFeet ?? playerFeet
     : playerFeet;
   const muzzleKnown=Boolean(enemy.muzzlePosition && enemy.muzzleForward);
   const worldMuzzleClear=fireTurns.clear.has(enemy);
@@ -1647,7 +1647,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // Search starts only after genuinely reaching previously seen feet. Once
   // started it stays in search mode even when strafing away from that point.
   // After a bounded sweep, hold there until REAL line of sight reacquires.
-  if(!state.visible && (state.webLastSeenFeet || state.webBulletClueFeet) &&
+  if(!state.visible && (state.webLastSeenFeet || state.webBulletClueFeet || state.webDispatchFeet) &&
       (state.webSearchRemaining!==null || state.webSearchComplete ||
         distance(start,pursuitFeet)<=runtime.body.radius*0.8)) {
     if(state.webSearchRemaining===null && !state.webSearchComplete)
@@ -1732,7 +1732,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
     (disengaging || tactical || reloadScoot) ? 'walking' : stop ? 'standing'
       : armed && !breaching ? 'walking' : 'running',scaledDeltaTime);
-  const facing=state.visible || !state.webLastSeenFeet ? playerPosition : pursuitFeet;
+  const facing=state.visible ? playerPosition : pursuitFeet;
   const dx=facing.x-start.x, dz=facing.z-start.z;
   if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   if (stop) {
@@ -1890,7 +1890,7 @@ export function advanceNativeEncounter(runtime, input) {
     if (occupied(runtime,feet,feet,population) ||
         occupiedSegment(feet,feet,playerFeet,runtime.body.radius*2,runtime.body.height) ||
         nativeCapsuleHit(runtime.collision,feet,ceiling,runtime.body)) { i++; continue; }
-    const enemy=spawnEnemy(runtime,order.point,order,population);
+    const enemy=spawnEnemy(runtime,order.point,order,population,playerFeet);
     population.push(enemy);
     events.push({type:'spawn',point:order.point,enemy,activation:enemy.sourceActivation});
     runtime.arrivals.splice(i,1);
