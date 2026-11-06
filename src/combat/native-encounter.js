@@ -369,7 +369,7 @@ const WEB_NEAR_MISS = Object.freeze({
 
 // J3 original Web tactics (not MCD): a gunner who can ACTUALLY see the
 // player deliberately aiming at its torso may briefly leave that firing lane.
-// Aim must persist in active real time, not a single noisy pointer frame;
+// Aim must persist in world-scaled time, not a single noisy pointer frame;
 // motion still runs on the slowed world clock and through the native nav/capsule.
 // This is no warning about unseen bullets and grants no evasive invulnerability.
 const WEB_AIM_PRESSURE = Object.freeze({
@@ -377,11 +377,6 @@ const WEB_AIM_PRESSURE = Object.freeze({
   evadeSeconds: 0.44,
   cooldownSeconds: 2.4,
   maxBodyRadii: 30,
-  aimDot: 0.986,
-  // A 3 FPS frame spans longer than lockSeconds; one noisy camera sample
-  // must not grant a whole sustained-aim reaction. Two actual sightings
-  // are still enough to trigger the existing swept/nav-safe avoidance.
-  maxAimSampleFraction: 0.5,
 });
 
 /** React only to the actual camera ray, after eye visibility and current
@@ -393,18 +388,45 @@ function webPlayerIsAimingAt(runtime, enemy, playerPosition, playerForward, enem
       ![playerForward.x,playerForward.y,playerForward.z,
         playerPosition.x,playerPosition.y,playerPosition.z].every(Number.isFinite))return false;
   const body={x:enemy.x,y:enemy.y+runtime.aimHeight*0.75,z:enemy.z};
-  const dx=body.x-playerPosition.x,dy=body.y-playerPosition.y,dz=body.z-playerPosition.z;
-  const range=Math.hypot(dx,dy,dz);
+  const distanceToBody=distance(body,playerPosition);
   const forwardLength=Math.hypot(playerForward.x,playerForward.y,playerForward.z);
-  if (range<=EPSILON || range>runtime.body.radius*WEB_AIM_PRESSURE.maxBodyRadii ||
+  if (distanceToBody<=EPSILON ||
+      distanceToBody>runtime.body.radius*WEB_AIM_PRESSURE.maxBodyRadii ||
       forwardLength<=EPSILON)return false;
-  const facing=(dx*playerForward.x+dy*playerForward.y+dz*playerForward.z)/(range*forwardLength);
-  // A live squadmate in front of this actor owns the player's actual camera
-  // ray. The rear gunner must not react to an aim that would hit that ally
-  // first. Keep wall/eye checks and the existing swept movement unchanged.
-  return facing>=WEB_AIM_PRESSURE.aimDot &&
-    nativeSegmentHit(runtime.sightCollision,playerPosition,body)===null &&
-    !webLivingAllyIntersectsSegment(runtime,enemy,playerPosition,body,enemies);
+  // An angular cone reacts to a MISS more than a body width away at range.
+  // The player's actual camera ray must enter this actor's existing Web
+  // body cylinder (the same radius/height used for movement occupancy).
+  // This is Web hit geometry, NOT a recovered native MCD perception rule.
+  const vx=playerForward.x/forwardLength, vy=playerForward.y/forwardLength;
+  const vz=playerForward.z/forwardLength;
+  const dx=enemy.x-playerPosition.x,dz=enemy.z-playerPosition.z;
+  const horizontalSpeedSquared=vx*vx+vz*vz;
+  const radiusSquared=runtime.body.radius*runtime.body.radius;
+  let enter=0,exit=distanceToBody+runtime.body.radius;
+  if(horizontalSpeedSquared>EPSILON) {
+    const projection=dx*vx+dz*vz;
+    const discriminant=projection*projection-
+      horizontalSpeedSquared*(dx*dx+dz*dz-radiusSquared);
+    if(discriminant<0)return false;
+    const root=Math.sqrt(discriminant);
+    enter=Math.max(0,(projection-root)/horizontalSpeedSquared);
+    exit=Math.min(exit,(projection+root)/horizontalSpeedSquared);
+    if(enter>exit)return false;
+  } else if(dx*dx+dz*dz>radiusSquared)return false;
+  if(Math.abs(vy)>EPSILON) {
+    const lower=(enemy.y-playerPosition.y)/vy;
+    const upper=(enemy.y+runtime.body.height-playerPosition.y)/vy;
+    enter=Math.max(enter,Math.min(lower,upper));
+    exit=Math.min(exit,Math.max(lower,upper));
+    if(enter>exit)return false;
+  } else if(playerPosition.y<enemy.y ||
+      playerPosition.y>enemy.y+runtime.body.height)return false;
+  const hit={x:playerPosition.x+vx*enter,
+    y:playerPosition.y+vy*enter,z:playerPosition.z+vz*enter};
+  // An actual wall or another living actor in front of this contact point
+  // owns the ray. Neither line of sight nor an allied body may be bypassed.
+  return nativeSegmentHit(runtime.sightCollision,playerPosition,hit)===null &&
+    !webLivingAllyIntersectsSegment(runtime,enemy,playerPosition,hit,enemies);
 }
 
 /**
@@ -1334,12 +1356,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   } else if (state.webAimRemaining<=0 && state.webAimCooldown<=EPSILON) {
     const threatened=state.visible &&
       webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward,enemies);
-    // Treat a long frame as ONE measured camera sample, not continuous
-    // evidence that the reticle stayed on this actor between renders.
-    // World time remains authoritative; this only bounds Web aim evidence.
-    const aimSample=Math.min(scaledDeltaTime,
-      WEB_AIM_PRESSURE.lockSeconds*WEB_AIM_PRESSURE.maxAimSampleFraction);
-    state.webAimLock=threatened ? state.webAimLock+aimSample : 0;
+    state.webAimLock=threatened ? state.webAimLock+scaledDeltaTime : 0;
     if(state.webAimLock>=WEB_AIM_PRESSURE.lockSeconds) {
       state.webAimLock=0;
       state.webAimRemaining=WEB_AIM_PRESSURE.evadeSeconds;
