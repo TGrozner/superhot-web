@@ -219,10 +219,16 @@ export function consumeNativeEnemyVolley(state,settings,muzzlePosition,weaponFor
     if(recoilPitch>0) {
       const horizontal=Math.hypot(direction.x,direction.z);
       if(horizontal>1e-6) {
-        const elevation=Math.atan2(direction.y,horizontal)+recoilPitch;
-        const horizontalScale=Math.cos(elevation)/horizontal;
-        direction={x:direction.x*horizontalScale,y:Math.sin(elevation),
-          z:direction.z*horizontalScale};
+        const elevation=Math.atan2(direction.y,horizontal);
+        // Pitching past straight up flips the horizontal shot axis. A steep
+        // uphill ray keeps its original aim instead of reversing behind
+        // the gunner; never invent a new horizontal bearing near the pole.
+        if(elevation+recoilPitch<Math.PI/2) {
+          const pitched=elevation+recoilPitch;
+          const horizontalScale=Math.cos(pitched)/horizontal;
+          direction={x:direction.x*horizontalScale,y:Math.sin(pitched),
+            z:direction.z*horizontalScale};
+        }
       }
     }
     return [{...shot,direction,
