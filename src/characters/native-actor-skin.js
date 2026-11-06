@@ -279,7 +279,9 @@ function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTim
     return Math.abs(previous.bankPitch) + Math.abs(previous.bankRoll) >= .012
       ? describe(previous.bankPitch, previous.bankRoll) : null;
   }
-  if (!(dt > 0 && dt <= .15)) return null;
+  // A 5 FPS world frame is 0.2s: do not erase actual travel banking just
+  // because the renderer missed a frame. Larger gaps still reset history.
+  if (!(dt > 0 && dt <= .25)) return null;
   const dx = modelMatrix[12] - previous.x;
   const dz = modelMatrix[14] - previous.z;
   if (!Number.isFinite(dx) || !Number.isFinite(dz) ||
@@ -354,7 +356,9 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
   const previous = frames.get(actorId);
   if (!previous || previous.state !== identity.name || pose.time < previous.poseTime) return null;
   const dt = pose.time - previous.poseTime;
-  if (!Number.isFinite(dt) || dt > .15) return null;
+  // Keep the source head animated at five world FPS; a long scheduling gap
+  // remains discontinuous, and pause (dt=0) still freezes the exact gaze.
+  if (!Number.isFinite(dt) || dt > .25) return null;
   // The gameplay AI knows whether the player is actually visible. When an
   // occluder breaks sight, the Web head must ease back to its source pose,
   // NOT keep looking through walls at the live camera's changing position.
