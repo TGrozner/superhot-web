@@ -232,12 +232,28 @@ function webFireRightArmKick(reaction, available) {
 }
 
 /**
+ * Preserve Web-authored gaze and upper-body banking while the source GPU pass
+ * itself blends between validated idle/walk/run clips. The source transition
+ * still owns the base skeleton; we merely keep the previously applied Web
+ * offset on that same final palette. Do not carry offsets through attacks,
+ * hits, ragdolls, or any unrelated source transition.
+ */
+function permitsWebGaitBlend(transition, previousState, nextState) {
+  if (transition === null) return true;
+  const from = transition?.from?.state ?? transition?.from?.clip;
+  const gait = name => name === 'idle' || name === 'walk' || name === 'run';
+  return gait(from) && gait(nextState) && from !== nextState &&
+    (previousState === from || previousState === nextState);
+}
+
+/**
  * WEB game-feel: bank toward observed travel AND observed heading changes,
  * then ease into and out of that bank using elapsed GAME-WORLD animation
  * seconds, even when slow motion advances the Red Crystal shader on a different
  * clock. A stationary guard settles instead of snapping rigidly upright. Paused
- * world time preserves the last GPU posture; an actual action/transition,
- * teleport, clock rewind or death cancels the bank.
+ * world time preserves the last GPU posture; source gait blends retain the
+ * already-drawn Web offset without overriding their sampled clips. Actions,
+ * non-gait transitions, teleports, clock rewinds and death cancel the bank.
  *
  * Per-actor history is committed ONLY after a successful GPU draw, so an
  * invalid frame cannot alter the next frame's visual/weapon/hitbox pose.
@@ -257,11 +273,11 @@ function webFireRightArmKick(reaction, available) {
 function webLocomotionReaction(frames, actorId, identity, modelMatrix, shaderTime,
                             poseTime, solvedPose, action, transition) {
   const locomoting = identity.name === 'walk' || identity.name === 'run';
-  if (solvedPose !== null || action !== null || transition !== null ||
+  if (solvedPose !== null || action !== null ||
       (!locomoting && identity.name !== 'idle') ||
       !Number.isFinite(shaderTime) || !modelMatrix || modelMatrix.length !== 16) return null;
   const previous = frames.get(actorId);
-  if (!previous) return null;
+  if (!previous || !permitsWebGaitBlend(transition, previous.state, identity.name)) return null;
   const describe = (pitch, roll) => Object.freeze({
     kind: locomoting ? 'locomotion' : 'turn', pitch, roll,
     design: 'Web-only inertial travel and turn banking',
@@ -353,18 +369,20 @@ function webIdleReaction(actorId, pose, identity, solvedPose, action, transition
  * NOT a native head IK controller or a projectile aim vector.
  * Slow-world time damps movement; a frozen world pose freezes the gaze too.
  * Replays, teleports, attacks and death never carry a stale head transform.
+ * Valid source gait blends retain only the Web offset on the final palette.
  *
  * @param {Map<string|number, object>} frames committed GPU actor histories
  * @returns {{yaw: number, design: string} | null}
  */
 function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPosition,
                          shaderTime, action, transition, solvedPose, available) {
-  if (!available || solvedPose !== null || action !== null || transition !== null ||
+  if (!available || solvedPose !== null || action !== null ||
       !['idle', 'walk', 'run'].includes(identity.name) ||
       !Number.isFinite(pose.time) || !modelMatrix || modelMatrix.length !== 16 ||
       (!cameraPosition && pose.targetSight !== false)) return null;
   const previous = frames.get(actorId);
-  if (!previous || !['idle', 'walk', 'run'].includes(previous.state)) return null;
+  if (!previous || !['idle', 'walk', 'run'].includes(previous.state) ||
+      !permitsWebGaitBlend(transition, previous.state, identity.name)) return null;
   const sameState = previous.state === identity.name;
   if ((sameState && pose.time < previous.poseTime) ||
       !Number.isFinite(shaderTime) || shaderTime < previous.time) return null;
