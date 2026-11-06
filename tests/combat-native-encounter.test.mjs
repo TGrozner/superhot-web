@@ -1873,6 +1873,75 @@ test('J3 Web fireteams skip unalerted and re-aiming gunners without wasting a li
     'once both are really ready, the scheduled wing can fire regardless of actor iteration');
 });
 
+test('J3 Web fireteam passes the firing turn on the FIRST frame of an aim sidestep',()=>{
+  // Synthetic J3 case: squad selection precedes movement. A gunner is only
+  // 0.08 s away from its Web-authored camera-aim reaction and would otherwise
+  // be elected, begin dodging, and waste a real ready squadmate's shot.
+  const data=scene(); data.gameplay.enemy.MinimumDistanceToPlayer=20;
+  const player={playerFeet:p(9,0,4),playerPosition:p(9,1.6,4)};
+  const run=(aimed,reverse)=>{
+    const runtime=setup(data),lead=firstSpawn(runtime,player);
+    lead.clock=0;
+    lead.muzzlePosition=p(2,1.4,2);lead.muzzleForward=p(1,0,0);
+    const wing={
+      ...lead,id:'z-transition-wing',z:4,clock:0,
+      reaction:{...lead.reaction},runtime:{...lead.runtime},
+      encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1},
+      muzzlePosition:p(2,1.4,4),muzzleForward:p(1,0,0),
+    };
+    for(const actor of [lead,wing]) {
+      actor.runtime.pendingShot=null;
+      actor.runtime.targetNeedsReroll=false;
+      actor.runtime.attackDelayRemaining=-1;
+      actor.runtime.alertness=2;
+    }
+    wing.encounter.webAimLock=.2;
+    const actors=reverse?[wing,lead]:[lead,wing];
+    runtime.webVolleyClock=.7; // without a juke, the wing owns this beat
+    advanceNativeEncounter(runtime,input(actors,{
+      ...player,scaledDeltaTime:.1,unscaledDeltaTime:.1,
+      playerForward:aimed?p(-1,0,0):p(0,0,1),
+    }));
+    if(aimed) {
+      assert.equal(wing.encounter.canAttack,false,
+        'crossing the actual camera-aim threshold starts the swept movement NOW');
+      assert.ok(wing.encounter.webAimCooldown>0,
+        'the dodge was actually triggered, not merely preloaded in test state');
+      assert.ok(Math.abs(wing.z-4)>.01,'the new move changes enemy feet');
+    } else {
+      assert.equal(wing.encounter.webAimRemaining,0,
+        'camera missing the body cannot manufacture a dodge');
+      assert.equal(wing.encounter.canAttack,true);
+    }
+    const weapon={...runtime.enemySettings,family:'Pistol'};
+    const fired=[];
+    for(const actor of actors) {
+      advanceNativeEnemyWeapon(actor.runtime,weapon,.1);
+      const shot=runNativeEnemyGunAttack(actor.runtime,weapon,{
+        scaledDeltaTime:.1,unscaledDeltaTime:.1,targetSight:actor.encounter.visible,
+        sightMode:'all-directions',aimTargetInSight:actor.encounter.canAttack,
+        aimReady:true,weaponInRightPosition:actor.encounter.canAttack,
+        allowAttacking:true,canShot:true,active:true,
+        animationTarget:player.playerPosition,
+      },()=>0).shot;
+      if(shot)fired.push(actor.id);
+    }
+    assert.equal(fired.length,1,'the real Attack-Late pipeline creates exactly one shot');
+    assert.ok((aimed?lead:wing).runtime.pendingShot,
+      'the eligible teammate reaches the existing deferred muzzle stage');
+    assert.equal((aimed?wing:lead).runtime.pendingShot,null);
+    return {fired,leadId:lead.id,wingId:wing.id};
+  };
+  for(const reverse of [false,true]) {
+    const aimed=run(true,reverse);
+    assert.deepEqual(aimed.fired,[aimed.leadId],
+      'the prepared partner fires on the dodge transition frame');
+    const away=run(false,reverse);
+    assert.deepEqual(away.fired,[away.wingId],
+      'without genuine aim pressure, normal squad firing order remains intact');
+  }
+});
+
 test('J3 Web fireteam keeps shooting while its scheduled gunner is changing lanes',()=>{
   // Synthetic J3 firefight: a gunner dodging the aimed camera ray or moving
   // after a confirmed ally hit cannot fire, but remains a squad member. The
