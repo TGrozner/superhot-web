@@ -378,6 +378,10 @@ const WEB_AIM_PRESSURE = Object.freeze({
   cooldownSeconds: 2.4,
   maxBodyRadii: 30,
   aimDot: 0.986,
+  // A 3 FPS frame spans longer than lockSeconds; one noisy camera sample
+  // must not grant a whole sustained-aim reaction. Two actual sightings
+  // are still enough to trigger the existing swept/nav-safe avoidance.
+  maxAimSampleFraction: 0.5,
 });
 
 /** React only to the actual camera ray, after eye visibility and current
@@ -1330,7 +1334,12 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   } else if (state.webAimRemaining<=0 && state.webAimCooldown<=EPSILON) {
     const threatened=state.visible &&
       webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward,enemies);
-    state.webAimLock=threatened ? state.webAimLock+scaledDeltaTime : 0;
+    // Treat a long frame as ONE measured camera sample, not continuous
+    // evidence that the reticle stayed on this actor between renders.
+    // World time remains authoritative; this only bounds Web aim evidence.
+    const aimSample=Math.min(scaledDeltaTime,
+      WEB_AIM_PRESSURE.lockSeconds*WEB_AIM_PRESSURE.maxAimSampleFraction);
+    state.webAimLock=threatened ? state.webAimLock+aimSample : 0;
     if(state.webAimLock>=WEB_AIM_PRESSURE.lockSeconds) {
       state.webAimLock=0;
       state.webAimRemaining=WEB_AIM_PRESSURE.evadeSeconds;
