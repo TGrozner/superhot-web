@@ -874,6 +874,40 @@ test('J3 Web projectile evade: visible player bullets trigger a bounded swept si
   assert.equal(invalidEnemy.encounter.webDodgeRemaining,0,'enemy or invalid shots are not dodged');
 });
 
+test('J3 Web steep incoming shots cross the body-height window before their planar closest pass',()=>{
+  // Entirely synthetic staircase-like ballistics: no recovered MCD AI values.
+  // At planar closest pass (t=0.4), y=-0.2 is below the feet. At t~0.36,
+  // the same live shot still crosses the near-body lane at a valid height.
+  const scan=(velocity,ttl=.6,colliders=[])=>{
+    const runtime=setup(scene(),colliders),enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const projectile={friendly:true,pos:p(10,5,2),velocity,ttl};
+    advanceNativeEncounter(runtime,input([enemy],{
+      // A real Dojo RAF advances at most 50ms of simulated world time.
+      scaledDeltaTime:.05,playerProjectiles:[projectile],
+    }));
+    return enemy;
+  };
+  const threatened=scan(p(-20,-13,0));
+  assert.ok(threatened.encounter.webDodgeRemaining>0,
+    'a live elevated shot entering the 3D warning body triggers evasive movement');
+  assert.equal(threatened.encounter.canAttack,false,
+    'the dodge must never authorize simultaneous new fire');
+  assert.ok(Math.hypot(threatened.x-2,threatened.z-2)>.005,
+    'the enemy uses its actual swept collision and navmesh move');
+  assert.equal(scan(p(-20,0,0)).encounter.webDodgeRemaining,0,
+    'a shot travelling entirely above this floor must not warn the enemy');
+  assert.equal(scan(p(-20,-13,0),.2).encounter.webDodgeRemaining,0,
+    'an expiring shot cannot warn the enemy before reaching the lane');
+  assert.equal(scan(p(-20,-13,0),.6,[
+    // The wall is INSIDE the warning radius, after entry and before the body.
+    // A ray only to the warning entry would be clear despite this impact.
+    box(2.5,.25,2,.25,1.5,.5),
+  ]).encounter.webDodgeRemaining,0,
+    'a wall after warning entry must prevent a phantom covered dodge');
+});
+
 test('J3 Web bullets intercepted by a living ally cannot panic a downstream gunner',()=>{
   // Web-only projectile prediction on fabricated actor capsules, not native MCD AI.
   const direct={friendly:true,type:'normal',pos:p(15,1,2),
