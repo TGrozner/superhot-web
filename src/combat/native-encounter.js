@@ -799,21 +799,32 @@ function occupied(runtime, start, end, enemies, except = null) {
 // NOT a new native projectile collision, piercing or damage contract.
 function webLivingAllyIntersectsSegment(runtime, shooter, muzzle, target, enemies) {
   const dx=target.x-muzzle.x, dz=target.z-muzzle.z;
-  const lengthSquared=dx*dx+dz*dz;
-  if(!Number.isFinite(lengthSquared) || lengthSquared<=EPSILON)return false;
+  const planarSquared=dx*dx+dz*dz;
   const radiusSquared=runtime.body.radius*runtime.body.radius;
   return enemies.some(other => {
     if(other===shooter || !participating(other))return false;
-    // An animated muzzle may overlap a teammate's capsule even when that
-    // teammate's CENTER falls behind the muzzle. The old open-segment test
-    // authorized a shot starting inside a friendly body. Test the two end caps
-    // as well as the interior; a distant ally behind the gun still clears.
-    const projection=((other.x-muzzle.x)*dx+(other.z-muzzle.z)*dz)/lengthSquared;
-    const t=Math.max(0,Math.min(1,projection));
-    const y=muzzle.y+(target.y-muzzle.y)*t;
-    if(y<other.y || y>other.y+runtime.body.height)return false;
-    const sidewaysX=muzzle.x+dx*t-other.x, sidewaysZ=muzzle.z+dz*t-other.z;
-    return sidewaysX*sidewaysX+sidewaysZ*sidewaysZ<=radiusSquared;
+    const ox=muzzle.x-other.x, oz=muzzle.z-other.z;
+    let enter=0, exit=1;
+    if(planarSquared>0) {
+      const b=ox*dx+oz*dz;
+      const c=ox*ox+oz*oz-radiusSquared;
+      const discriminant=b*b-planarSquared*c;
+      if(discriminant<0)return false;
+      const root=Math.sqrt(discriminant);
+      enter=Math.max(0,(-b-root)/planarSquared);
+      exit=Math.min(1,(-b+root)/planarSquared);
+      if(enter>exit)return false;
+    } else if(ox*ox+oz*oz>radiusSquared)return false;
+    // The closest HORIZONTAL point can be above or below a teammate even
+    // when the sloping bullet ray passes through their torso at the edge of
+    // its body cylinder (e.g. different stair heights). Intersect the WHOLE
+    // planar crossing interval with the body-height interval, not one sample.
+    // This is Web muzzle safety, not a native MCD collision-layer claim.
+    const dy=target.y-muzzle.y;
+    if(dy===0)return muzzle.y>=other.y && muzzle.y<=other.y+runtime.body.height;
+    const first=(other.y-muzzle.y)/dy;
+    const last=(other.y+runtime.body.height-muzzle.y)/dy;
+    return Math.max(enter,Math.min(first,last))<=Math.min(exit,Math.max(first,last));
   });
 }
 /** Compute real muzzle clearance once before any enemy moves, then rotate
