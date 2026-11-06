@@ -61,6 +61,15 @@ const WEB_WITNESSED_LOSS = Object.freeze({
   counterPushSeconds:2.8, // Web authored: surviving witnesses close the firing ring after the shock.
   counterPushStopFraction:0.65,
 });
+// J3 Web-original ally-cover response: a gunner that actually sees both the
+// player and a LIVE teammate taking a hit briefly changes its firing lane.
+// This is a movement choice, not shared player knowledge, a new shot, or
+// recovered MCD squad AI. Death panic retains higher priority.
+const WEB_WITNESSED_HIT = Object.freeze({
+  witnessBodyRadii:14,
+  sidestepSeconds:0.48,
+  cooldownSeconds:2.2,
+});
 
 // J3 Web-authored paired pressure: one armed squadmate closes the gap while
 // others hold their firing distance. Pick by stable actor identity, not array
@@ -892,7 +901,8 @@ export function createNativeEncounter(scene, collision, rng = Math.random, {
     collision, sightCollision, nav, body, maxSnapDistance, points, spawnerPosition, spawnerSettings, enemySettings,
     sourceFactoryPlan,
     spawner:createNativeSpawnerState(spawnerSettings, rng), rng, killTarget, killed:0,
-    actors:new Map(), countedDeaths:new Set(), webObservedDeaths:new Set(), arrivals:[], nextId:0,
+    actors:new Map(), countedDeaths:new Set(), webObservedDeaths:new Set(),
+    webObservedHitRevisions:new Map(), arrivals:[], nextId:0,
     webVolleyClock:0,
     stunTime:scalar(enemy.StunTime, 'StunTime'), aimHeight:scalar(enemy.AimHeight, 'AimHeight'),
     armedStopDistance:scalar(enemy.MinimumDistanceToPlayer, 'MinimumDistanceToPlayer'),
@@ -1124,13 +1134,50 @@ function spawnEnemy(runtime, point, order, population) {
       webDodgeRemaining:0,webDodgeCooldown:0,webDodgeSideX:0,webDodgeSideZ:0,
       webHitRevision:0,webHitPending:false,webHitRemaining:0,webHitSideX:0,webHitSideZ:0,
       webLossRemaining:0,webLossFeet:null,webCounterPushRemaining:0,
+      webSupportRemaining:0,webSupportCooldown:0,
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
       webAimLock:0,webAimRemaining:0,webAimCooldown:0,
       webReloadCoverRemaining:0,webReloadCoverFeet:null,webReloadCoverSide:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
+  runtime.webObservedHitRevisions.set(enemy.id,enemy.reaction.reactionRevision ?? 0);
   return enemy;
+}
+
+// Sample accepted nonlethal contact revisions, not projectile guesses. Only a
+// live, armed observer with a direct view of the player AND struck teammate
+// takes a short lateral support step. Revisions are consumed once for the
+// whole encounter before actors move, keeping ordering and stun independent.
+// Repeated frames with the same hit cannot restart the maneuver indefinitely.
+function applyWebWitnessedHits(runtime,enemies,observers) {
+  const hitAllies=[];
+  for (const [id,actor] of runtime.actors) {
+    const revision=actor.reaction?.reactionRevision;
+    if (!Number.isSafeInteger(revision))continue;
+    const previous=runtime.webObservedHitRevisions.get(id)??0;
+    runtime.webObservedHitRevisions.set(id,revision);
+    if (revision>previous && participating(actor))hitAllies.push(actor);
+  }
+  if(hitAllies.length===0)return;
+  for(const witness of enemies) {
+    if(!observers.has(witness) || !participating(witness) ||
+        !witness.encounter || !witness.reaction?.hasWeapon ||
+        witness.reaction.stunRemaining>0 || witness.reaction.stunnedThisFrame ||
+        witness.runtime?.pendingShot ||
+        witness.encounter.webSupportCooldown>EPSILON)continue;
+    const eye={x:witness.x,y:witness.y+runtime.aimHeight,z:witness.z};
+    for(const struck of hitAllies) {
+      if(struck===witness ||
+          Math.hypot(witness.x-struck.x,witness.z-struck.z)>
+            runtime.body.radius*WEB_WITNESSED_HIT.witnessBodyRadii)continue;
+      const body={x:struck.x,y:struck.y+runtime.aimHeight*0.55,z:struck.z};
+      if(nativeSphereHit(runtime.sightCollision,eye,body,.2)!==null)continue;
+      witness.encounter.webSupportRemaining=WEB_WITNESSED_HIT.sidestepSeconds;
+      witness.encounter.webSupportCooldown=WEB_WITNESSED_HIT.cooldownSeconds;
+      break;
+    }
+  }
 }
 
 // Sample new actual death receipts before moving the squad. Keep a separate
@@ -1163,6 +1210,7 @@ function applyWebWitnessedLoss(runtime,enemies) {
     if(nearest) {
       enemy.encounter.webLossRemaining=WEB_WITNESSED_LOSS.retreatSeconds;
       enemy.encounter.webLossFeet=position(nearest);
+      enemy.encounter.webSupportRemaining=0; // A death takes precedence over an earlier hit.
       // A witnessed loss is a real local combat event. After the brief retreat,
       // an armed witness may counter-push while it can actually SEE the player.
       // No shared aggro, extra shot, blind pursuit or MCD behavior is inferred.
@@ -1181,6 +1229,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   state.webAllyBlockingShot=false;
   enemy.walking=false;
   state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
+  state.webSupportCooldown=Math.max(0,state.webSupportCooldown-scaledDeltaTime);
   state.webCounterPushRemaining=Math.max(0,
     (state.webCounterPushRemaining??0)-scaledDeltaTime);
   // An accepted hit increments the existing contact reaction revision. Save
@@ -1215,6 +1264,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     // Being stunned again cancels the counterattack, rather than preserving
     // aggression through an unrelated hit or a death.
     state.webCounterPushRemaining=0;
+    state.webSupportRemaining=0;
     state.webObservedPlayerFeet=null;
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
@@ -1262,6 +1312,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webLossFeet=null;
     state.webSuppressionRemaining=0;
     state.webSuppressionFrom=null;
+    state.webSupportRemaining=0;
   }
   const start=position(enemy);
   // This body-height cast only chooses chase versus stop. It is not a sampled
@@ -1269,6 +1320,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // Measured once for the whole squad at the start of the frame; otherwise
   // update order would change who has legitimately spotted the player.
   state.visible=observingAllies.has(enemy);
+  if(!state.visible || !armed)state.webSupportRemaining=0;
   // Per-actor consecutive REAL sightings: losing sight or suffering a stun
   // discards the velocity baseline. Paused frames may refresh the observed
   // feet but cannot accrue a movement impulse or trigger a pursuit push.
@@ -1449,6 +1501,23 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       state.webSuppressionCooldown=WEB_NEAR_MISS.recoverySeconds;
     }
     if (moved) return;
+  }
+  // A teammate actually taking a nonlethal hit triggers one short covering
+  // change of firing lane. The witness must still see the player; the actual
+  // capsule/nav sweep decides whether it can move, and no shot is created.
+  // Projectile danger, near-miss suppression and witnessed deaths go first.
+  if(state.webSupportRemaining>0 && armed && state.visible &&
+      !enemy.runtime.pendingShot) {
+    state.canAttack=false;
+    if(scaledDeltaTime>0) {
+      advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
+        'walking',scaledDeltaTime);
+      const moved=tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+        {sideOverride:state.webTacticalSide});
+      state.webSupportRemaining=Math.max(0,state.webSupportRemaining-scaledDeltaTime);
+      if(!moved)state.webSupportRemaining=0;
+      if(moved)return;
+    }
   }
   // A real sustained camera aim at a VISIBLE gunner creates a short, readable
   // side-step. This adds gunfight motion before the first bullet, but does not
@@ -1700,6 +1769,7 @@ export function advanceNativeEncounter(runtime, input) {
   // RNG draw, native claim or shared-file wiring is required.
   runtime.webVolleyClock=(runtime.webVolleyClock+scaledDeltaTime)%
     (WEB_SQUAD_VOLLEY.beatSeconds*60);
+  applyWebWitnessedHits(runtime,enemies,observingAllies);
   const localSquads=webLocalArmedSquads(runtime,enemies);
   const breachingLeaders=webSquadBreachingLeaders(runtime,localSquads,observingAllies);
   const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime,localSquads);

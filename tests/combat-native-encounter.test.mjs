@@ -2605,3 +2605,59 @@ test('J3 Web aim-pressure dodge only reacts to a ray that really enters the body
     'the dodge cannot grant an attack while the gunner is evading');
   assert.equal(enemy.runtime.pendingShot,null);
 });
+
+
+test('J3 Web ally-hit support: an actual witnessed hit changes a gunner lane once, not through cover',()=>{
+  // Synthetic Web firefight. No MCD tactics, source assets or native values.
+  const player={playerFeet:p(20,0,2),playerPosition:p(20,1.6,2)};
+  function scenario({reverse=false,blocked=false,shotLocked=false}={}) {
+    const divider=blocked ? [box(6,1,4,.6,2,.5)] : [];
+    const runtime=setup(scene(),divider),witness=firstSpawn(runtime,player);
+    witness.x=6;witness.z=2;
+    witness.muzzlePosition=p(6,1.4,2);witness.muzzleForward=p(1,0,0);
+    const ally=firstSpawn(setup(scene()),player);
+    ally.id='synthetic-struck-ally';
+    ally.x=blocked?6:7;ally.z=blocked?6:2;
+    runtime.actors.set(ally.id,ally);
+    runtime.webObservedHitRevisions.set(ally.id,0);
+    if(shotLocked)witness.runtime.pendingShot={target:player.playerPosition};
+    const actors=reverse?[ally,witness]:[witness,ally];
+    const before=p(witness.x,witness.y,witness.z);
+    // A verified accepted contact revision, NOT a projectile passing close.
+    ally.reaction.reactionRevision=1;
+    ally.reaction.stunRemaining=.3;
+    advanceNativeEncounter(runtime,input(actors,{...player,scaledDeltaTime:.05}));
+    return {runtime,witness,ally,actors,before};
+  }
+  for(const reverse of [false,true]) {
+    const fight=scenario({reverse});
+    assert.equal(fight.runtime.killed,0,'nonlethal hit cannot count toward victory');
+    assert.ok(fight.witness.encounter.webSupportRemaining>0,
+      'live visible squadmate hit starts a short support response');
+    assert.ok(Math.abs(fight.witness.z-fight.before.z)>.005,
+      'gunner really moves laterally into a new lane, not just setting a flag');
+    assert.equal(fight.witness.encounter.canAttack,false,
+      'moving support gunner cannot create a new shot while changing lane');
+    assert.ok(fight.witness.encounter.webSupportCooldown>0);
+    for(let i=0;i<12;i++)
+      advanceNativeEncounter(fight.runtime,input(fight.actors,{
+        ...player,scaledDeltaTime:.05,
+      }));
+    assert.equal(fight.witness.encounter.webSupportRemaining,0,
+      'the same contact revision cannot restart endless sidestepping');
+    assert.ok(fight.witness.encounter.webSupportCooldown>0,
+      'cooldown prevents repeated reactions to successive hits in the same burst');
+  }
+  const blocked=scenario({blocked:true});
+  assert.equal(blocked.witness.encounter.webSupportRemaining,0,
+    'an ally behind genuine solid cover is not a witnessed hit');
+  assert.equal(blocked.witness.encounter.webSupportCooldown,0,
+    'a blocked alarm must not burn the witness reaction cooldown');
+  const committed=scenario({shotLocked:true});
+  assert.equal(committed.witness.encounter.webSupportRemaining,0,
+    'an already committed shot may not be interrupted by support footwork');
+  assert.equal(committed.witness.encounter.webSupportCooldown,0,
+    'an accepted shot does not spend the new support reaction cooldown');
+  assert.ok(committed.witness.runtime.pendingShot,
+    'existing pursuit may move normally, but its already committed shot stays intact');
+});
