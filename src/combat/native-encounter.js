@@ -961,7 +961,7 @@ export function readyForVictory(runtime, enemies) {
   if (runtime.killed < runtime.killTarget) return false;
   runtime.spawner.pending.length = 0;
   runtime.arrivals.length = 0;
-  runtime.webDoorDispatch.clear();
+  runtime.webDoorDispatch?.clear();
   runtime.spawner.enemiesLeft = 0;
   return true;
 }
