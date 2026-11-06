@@ -194,3 +194,33 @@ test('Dojo low-FPS catch-up does not discard a shot pulse before one LateUpdate'
     }
   }
 });
+
+test('Dojo startup shot pulse survives delayed writes at 10 FPS without leaking past first write', () => {
+  // Web regression, not a Unity timing claim: TimeControl has two startup
+  // LateUpdates with no write. At 10 FPS the 50ms world pulse previously
+  // expired during those two frames and never changed the time scale.
+  for (const activeRealDt of [0.1, 1 / 60]) {
+    const clock = createMcdGameplayClock();
+    addMcdGameplayPulse(clock, 0.05, 0.2);
+    const tick = () => stepWebMcdGameplayFrame(clock, {
+      simulationDt: Math.min(0.05, activeRealDt),
+      activeRealDt,
+      maximumSteps: 4,
+    });
+    assert.equal(tick().timeScale, 1, 'startup delay 1 does not write timescale');
+    assert.equal(tick().timeScale, 1, 'startup delay 2 does not write timescale');
+    assert.ok(Math.abs(tick().timeScale - Math.fround(0.2)) < 1e-7,
+      'first writable LateUpdate must honor the pending shot pulse');
+    assert.ok(tick().timeScale < 0.2, 'pulse must expire after its first Web contribution');
+    assert.equal(clock.source.shifters.filter(s => s.expiresAt !== undefined).length, 0);
+  }
+
+  // The source-shaped model is intentionally not opted into this Web
+  // accessibility behavior; its native-referenced expiry order is unchanged.
+  const sourceClock = createMcdGameplayClock();
+  addMcdGameplayPulse(sourceClock, 0.05, 0.2);
+  for (let i = 0; i < 3; i++) {
+    stepMcdGameplayClock(sourceClock, {dt: 0.1, unscaledDt: 0.1});
+  }
+  assert.ok(sourceClock.timeScale < 0.2);
+});
