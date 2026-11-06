@@ -475,6 +475,27 @@ function webIncomingWarningEntry(runtime,enemy,origin,velocity,planarSpeedSquare
   return {time,exitTime:last};
 }
 
+/** End the visibility ray at the FIRST genuinely threatened point, rather
+ * than at the far edge of the warning cylinder. A wall behind a bullet's
+ * possible body contact cannot protect that body from the approaching shot.
+ * For a grazing trajectory that misses the actual body radius, use its
+ * closest point inside the 3D warning interval instead.
+ * This is Web predictive awareness, not collision/damage or MCD parity.
+ */
+function webProjectileThreatTime(runtime,enemy,origin,velocity,planarSpeedSquared,closestTime,entry) {
+  const offsetX=origin.x+velocity.x*closestTime-enemy.x;
+  const offsetZ=origin.z+velocity.z*closestTime-enemy.z;
+  const separationSquared=offsetX*offsetX+offsetZ*offsetZ;
+  const bodyRadiusSquared=runtime.body.radius*runtime.body.radius;
+  let time=Math.max(entry.time,Math.min(closestTime,entry.exitTime));
+  if(separationSquared<=bodyRadiusSquared) {
+    const bodyEntry=closestTime-Math.sqrt(
+      Math.max(0,(bodyRadiusSquared-separationSquared)/planarSpeedSquared));
+    if(bodyEntry<=entry.exitTime)time=Math.max(entry.time,bodyEntry);
+  }
+  return time;
+}
+
 /** Find the earliest observable player bullet that will pass near the body.
  * @param {object} runtime Source collision/navmesh adapter.
  * @param {object} enemy Current live enemy.
@@ -499,18 +520,19 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     const until=(dx*v.x+dz*v.z)/planarSpeedSquared;
     if(until<=0)continue; // A passing bullet moving away is no longer a threat.
     const entry=webIncomingWarningEntry(runtime,enemy,origin,v,planarSpeedSquared);
-    if(!entry || entry.time>=bestTime ||
-        !webProjectileCanReach(projectile,entry.time))continue;
-    // Trace the FULL threatening window, not just its first cylinder
-    // contact. Otherwise a real wall just inside the warning ring is missed
-    // and the gunner dodges a bullet that cannot reach it. Never trace beyond
-    // the actual projectile TTL (which can expire before the window ends).
-    const horizon=Math.min(entry.exitTime,
-      Number.isFinite(projectile.ttl)?projectile.ttl:entry.exitTime);
+    if(!entry || entry.time>=bestTime)continue;
+    const threatTime=webProjectileThreatTime(
+      runtime,enemy,origin,v,planarSpeedSquared,until,entry);
+    // Expiry and cover are evaluated up to the FIRST threatening point.
+    // Testing all the way to the cylinder exit would let a wall or ally
+    // BEHIND the enemy's body incorrectly cancel an incoming dodge.
+    // Conversely a wall AFTER warning entry but BEFORE threatened contact
+    // remains authoritative: no phantom evasions through cover.
+    if(!webProjectileCanReach(projectile,threatTime))continue;
     const contactEnd={
-      x:origin.x+v.x*horizon,
-      y:origin.y+v.y*horizon,
-      z:origin.z+v.z*horizon,
+      x:origin.x+v.x*threatTime,
+      y:origin.y+v.y*threatTime,
+      z:origin.z+v.z*threatTime,
     };
     if(nativeSegmentHit(runtime.sightCollision,origin,contactEnd)!==null ||
         webLivingAllyIntersectsSegment(runtime,enemy,origin,contactEnd,enemies))continue;
