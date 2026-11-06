@@ -2656,5 +2656,8 @@ test('J3 Web ally-hit support: an actual witnessed hit changes a gunner lane onc
   const committed=scenario({shotLocked:true});
   assert.equal(committed.witness.encounter.webSupportRemaining,0,
     'an already committed shot may not be interrupted by support footwork');
-  assert.deepEqual(p(committed.witness.x,committed.witness.y,committed.witness.z),committed.before);
+  assert.equal(committed.witness.encounter.webSupportCooldown,0,
+    'an accepted shot does not spend the new support reaction cooldown');
+  assert.ok(committed.witness.runtime.pendingShot,
+    'existing pursuit may move normally, but its already committed shot stays intact');
 });
