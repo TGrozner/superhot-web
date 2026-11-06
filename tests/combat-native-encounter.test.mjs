@@ -2350,3 +2350,47 @@ test('J2 Web angled crossfire: a teammate on lower stairs blocks a rising muzzle
   assert.equal(shooter.encounter.canAttack,true,
     'an ally beyond the target never blocks the shot');
 });
+
+
+test('J3 Web gunner shelters through reload, then re-peeks its last witnessed firing lane',()=>{
+  // Synthetic walls and Web-authored behavior, not native MCD tactics.
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=10;
+  const target={playerFeet:p(8,0,5),playerPosition:p(8,1.6,5)};
+  const runtime=setup(data,[box(5,1.2,4.6,.15,2.4,.2)]);
+  const enemy=firstSpawn(runtime,target);
+  enemy.z=5;enemy.clock=0;
+  enemy.muzzlePosition=p(2,1.4,5);enemy.muzzleForward=p(1,0,0);
+  enemy.runtime.haveBeenSeen=true;
+  enemy.runtime.attackDelayRemaining=.55;
+  const frame=(dt,overrides={})=>advanceNativeEncounter(runtime,input([enemy],{
+    ...target,scaledDeltaTime:dt,unscaledDeltaTime:dt,...overrides,
+  }));
+  frame(.5);
+  assert.ok(enemy.z<4.95,'a real swept move enters world cover');
+  assert.ok(enemy.encounter.webReloadCoverRemaining>0);
+  assert.deepEqual(enemy.encounter.webReloadCoverFeet,target.playerFeet,
+    'shelter preserves a previously SEEN coordinate, never a future hidden player');
+  const sheltered=p(enemy.x,enemy.y,enemy.z);
+  const hidden={playerFeet:p(8,0,5.1),playerPosition:p(8,1.6,5.1)};
+  enemy.runtime.attackDelayRemaining=.35;
+  frame(.1,hidden);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),sheltered,
+    'blind gunner holds actual cover during its existing weapon cooldown');
+  assert.equal(enemy.encounter.visible,false);
+  assert.equal(enemy.encounter.canAttack,false);
+  const coverClock=enemy.encounter.webReloadCoverRemaining;
+  frame(0,hidden);
+  assert.deepEqual(p(enemy.x,enemy.y,enemy.z),sheltered);
+  assert.equal(enemy.encounter.webReloadCoverRemaining,coverClock,
+    'world freeze cannot drain cover recovery or create a new shot');
+  enemy.runtime.attackDelayRemaining=.02;
+  frame(.2,hidden);
+  assert.ok(enemy.z>sheltered.z+.03,
+    'when the gun becomes ready, gunner returns toward the remembered opening');
+  assert.equal(enemy.encounter.canAttack,false,
+    'a predicted re-peek never grants a shot before fresh eye/muzzle LOS');
+  assert.deepEqual(enemy.encounter.webReloadCoverFeet,target.playerFeet,
+    'the new hidden player location cannot silently steer the peek');
+  assert.equal(enemy.runtime.attackDelayRemaining,.02,
+    'the maneuver does not advance or refill the native weapon runtime');
+});
