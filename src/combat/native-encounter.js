@@ -453,15 +453,21 @@ function webProjectileCanReach(projectile,secondsToPass) {
  */
 function webIncomingWarningEntry(runtime,enemy,origin,velocity,planarSpeedSquared) {
   const rx=origin.x-enemy.x,rz=origin.z-enemy.z;
-  const approach=rx*velocity.x+rz*velocity.z;
   const warningRadius=runtime.body.radius*WEB_PROJECTILE_EVADE.warningBodyRadii;
-  const discriminant=approach*approach-planarSpeedSquared*
-    (rx*rx+rz*rz-warningRadius*warningRadius);
-  if(discriminant<0)return null;
-  const root=Math.sqrt(discriminant);
-  let first=Math.max(0,(-approach-root)/planarSpeedSquared);
-  let last=Math.min(WEB_PROJECTILE_EVADE.lookaheadSeconds,
-    (-approach+root)/planarSpeedSquared);
+  let first=0,last=WEB_PROJECTILE_EVADE.lookaheadSeconds;
+  if(planarSpeedSquared>EPSILON) {
+    const approach=rx*velocity.x+rz*velocity.z;
+    const discriminant=approach*approach-planarSpeedSquared*
+      (rx*rx+rz*rz-warningRadius*warningRadius);
+    if(discriminant<0)return null;
+    const root=Math.sqrt(discriminant);
+    first=Math.max(0,(-approach-root)/planarSpeedSquared);
+    last=Math.min(last,(-approach+root)/planarSpeedSquared);
+  } else if(rx*rx+rz*rz>warningRadius*warningRadius) {
+    // Nearly vertical falling shots have no planar closest-pass time:
+    // their XZ footprint must already be inside the warning cylinder.
+    return null;
+  }
   if(Math.abs(velocity.y)>EPSILON) {
     const bottom=(enemy.y-origin.y)/velocity.y;
     const top=(enemy.y+runtime.body.height-origin.y)/velocity.y;
@@ -515,13 +521,14 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     };
     if (![origin.x,origin.y,origin.z,v.x,v.y,v.z].every(Number.isFinite))continue;
     const planarSpeedSquared=v.x*v.x+v.z*v.z;
-    if(planarSpeedSquared<=EPSILON)continue;
+    const vertical=planarSpeedSquared<=EPSILON;
+    if(vertical && Math.abs(v.y)<=EPSILON)continue;
     const dx=enemy.x-origin.x,dz=enemy.z-origin.z;
-    const until=(dx*v.x+dz*v.z)/planarSpeedSquared;
-    if(until<=0)continue; // A passing bullet moving away is no longer a threat.
+    const until=vertical?0:(dx*v.x+dz*v.z)/planarSpeedSquared;
+    if(!vertical && until<=0)continue; // A passing bullet moving away is no longer a threat.
     const entry=webIncomingWarningEntry(runtime,enemy,origin,v,planarSpeedSquared);
     if(!entry || entry.time>=bestTime)continue;
-    const threatTime=webProjectileThreatTime(
+    const threatTime=vertical?entry.time:webProjectileThreatTime(
       runtime,enemy,origin,v,planarSpeedSquared,until,entry);
     // Expiry and cover are evaluated up to the FIRST threatening point.
     // Testing all the way to the cylinder exit would let a wall or ally
@@ -536,11 +543,23 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     };
     if(nativeSegmentHit(runtime.sightCollision,origin,contactEnd)!==null ||
         webLivingAllyIntersectsSegment(runtime,enemy,origin,contactEnd,enemies))continue;
-    const speed=Math.sqrt(planarSpeedSquared);
-    const cross=v.x*dz-v.z*dx;
-    const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
+    let sideX,sideZ;
+    if(vertical) {
+      // Any sideways direction escapes a vertical path. Use the actor's
+      // current facing and stable tactical side, not a hidden shooter position.
+      const face=Number.isFinite(enemy.face)?enemy.face:0;
+      const side=enemy.encounter.webTacticalSide===-1?-1:1;
+      sideX=Math.cos(face)*side;
+      sideZ=Math.sin(face)*side;
+    } else {
+      const speed=Math.sqrt(planarSpeedSquared);
+      const cross=v.x*dz-v.z*dx;
+      const side=Math.abs(cross)<=EPSILON ? enemy.encounter.webTacticalSide : Math.sign(cross);
+      sideX=-v.z/speed*side;
+      sideZ=v.x/speed*side;
+    }
     bestTime=entry.time;
-    threat={sideX:-v.z/speed*side,sideZ:v.x/speed*side};
+    threat={sideX,sideZ};
   }
   return threat;
 }
@@ -566,8 +585,21 @@ function webNearMissProjectile(runtime, enemy, projectiles, enemies) {
     };
     if (![origin.x,origin.y,origin.z,velocity.x,velocity.y,velocity.z].every(Number.isFinite)) continue;
     const speedSquared=velocity.x**2+velocity.z**2;
-    if (speedSquared<=EPSILON) continue;
-    const until=((enemy.x-origin.x)*velocity.x+(enemy.z-origin.z)*velocity.z)/speedSquared;
+    let until;
+    if(speedSquared<=EPSILON) {
+      // A vertical projectile can suppress a nearby gunner without horizontal
+      // motion, but only when approaching the character's actual body height.
+      if(velocity.y< -EPSILON && origin.y>enemy.y+runtime.body.height)
+        until=(enemy.y+runtime.body.height-origin.y)/velocity.y;
+      else if(velocity.y>EPSILON && origin.y<enemy.y)
+        until=(enemy.y-origin.y)/velocity.y;
+      else if(Math.abs(velocity.y)>EPSILON &&
+          origin.y>=enemy.y && origin.y<=enemy.y+runtime.body.height)
+        until=EPSILON;
+      else continue;
+    } else {
+      until=((enemy.x-origin.x)*velocity.x+(enemy.z-origin.z)*velocity.z)/speedSquared;
+    }
     if (until<=0 || until>WEB_NEAR_MISS.lookaheadSeconds || until>=earliest ||
         !webProjectileCanReach(projectile,until)) continue;
     const closest={x:origin.x+velocity.x*until,y:origin.y+velocity.y*until,z:origin.z+velocity.z*until};
