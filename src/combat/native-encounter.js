@@ -1039,11 +1039,12 @@ function webLivingAllyIntersectsSegment(runtime, shooter, muzzle, target, enemie
  * @param {object[]} enemies Actual live actor list.
  * @param {Set<object>} observers Actors that see the player this frame.
  * @param {{x:number,y:number,z:number}} target Actual visible target point.
+ * @param {{x:number,y:number,z:number}|undefined} playerForward Actual camera direction (no guessed aim).
  * @param {number} scaledDeltaTime Current weapon Update tick, not wall time.
  * @param {Map<object,object[]>} localSquads Full armed spatial groups, including temporarily busy links.
  * @returns {{clear:Set<object>,allyBlocked:Set<object>,turn:Set<object>,eligible:Set<object>}}
  */
-function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime, localSquads) {
+function webSquadFireTurns(runtime, enemies, observers, target, playerForward, scaledDeltaTime, localSquads) {
   const clear=new Set(), allyBlocked=new Set(), ready=[];
   for(const enemy of enemies) {
     if(!participating(enemy) || !enemy.encounter || !enemy.reaction?.hasWeapon ||
@@ -1063,6 +1064,16 @@ function webSquadFireTurns(runtime, enemies, observers, target, scaledDeltaTime,
         enemy.encounter.webSuppressionRemaining>0 || enemy.encounter.webLossRemaining>0 ||
         enemy.encounter.webHitPending || enemy.encounter.webHitRemaining>0 ||
         enemy.encounter.webAimRemaining>0 || enemy.encounter.webSupportRemaining>0)continue;
+    // moveEnemy starts the aimed sidestep AFTER this squad-turn election.
+    // Exclude a gunner already crossing the same real-camera aim threshold
+    // this world tick; otherwise it steals the only turn then cannot shoot.
+    // This is a read-only prediction: movement, shot gates and collision
+    // remain owned by the later encounter/weapon phases.
+    const aimStartsThisTick=scaledDeltaTime>0 &&
+      Math.max(0,enemy.encounter.webAimCooldown-scaledDeltaTime)<=EPSILON &&
+      enemy.encounter.webAimLock+scaledDeltaTime>=WEB_AIM_PRESSURE.lockSeconds &&
+      webPlayerIsAimingAt(runtime,enemy,target,playerForward,enemies);
+    if(aimStartsThisTick)continue;
     ready.push(enemy);
   }
   ready.sort((a,b)=>String(a.id).localeCompare(String(b.id),'en'));
@@ -1879,7 +1890,7 @@ export function advanceNativeEncounter(runtime, input) {
   applyWebWitnessedHits(runtime,enemies,observingAllies);
   const localSquads=webLocalArmedSquads(runtime,enemies);
   const breachingLeaders=webSquadBreachingLeaders(runtime,localSquads,observingAllies);
-  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,scaledDeltaTime,localSquads);
+  const fireTurns=webSquadFireTurns(runtime,enemies,observingAllies,playerPosition,playerForward,scaledDeltaTime,localSquads);
   // Cover and crossfire may CHANGE as bodies move. Snapshot original feet so a
   // cached, previous-render muzzle can be translated to the new actor feet for
   // one conservative post-movement check. The true posed muzzle is still only
