@@ -17,10 +17,20 @@ const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
  * game collision path. A box's full transform (including shear/mirroring) is
  * respected. The output has no triangles, edges or generated scene geometry.
  * @param {Array<object>} colliders Source-qualified scene colliders.
+ * @param {{boxes: Array<{collider: object, enabled: boolean}>} | null} [liveCollision]
+ *   Optional shared movement/item collision state. A picked-up item's static
+ *   BoxCollider is disabled there and must no longer hide the door warning.
  * @returns {{boxes: Array<object>}}
  */
-export function prepareDoorVisibility(colliders) {
+export function prepareDoorVisibility(colliders, liveCollision = null) {
   if (!Array.isArray(colliders)) throw new TypeError('Dojo occlusion needs source colliders');
+  if (liveCollision != null && !Array.isArray(liveCollision.boxes)) {
+    throw new TypeError('Dojo occlusion needs prepared live collision boxes');
+  }
+  // The same source objects feed both adapters. Identity prevents accidental
+  // cross-scene IDs from hiding or exposing an unrelated Dojo entrance.
+  const liveBySource = liveCollision == null ? null : new Map(
+    liveCollision.boxes.map(box => [box.collider, box]));
   const boxes = [];
   for (const collider of colliders) {
     if (collider.isTrigger || collider.initial?.enabled === false ||
@@ -42,6 +52,11 @@ export function prepareDoorVisibility(colliders) {
     if (!Number.isFinite(det) || Math.abs(det) < 1e-15) {
       throw new TypeError('Singular BoxCollider: ' + (collider.id ?? 'unnamed'));
     }
+    const liveBox = liveBySource?.get(collider) ?? null;
+    if (liveBySource && !liveBox) {
+      throw new TypeError('Dojo live collision must share the same source collider: ' +
+        (collider.id ?? 'unnamed'));
+    }
     const inv = [n0, n1, n2].map(n => n.map(value => value / det));
     const half = size.map(value => Math.abs(value) / 2);
     const origin = [m[12], m[13], m[14]];
@@ -52,7 +67,7 @@ export function prepareDoorVisibility(colliders) {
       Math.abs(b1[axis]) * half[1] +
       Math.abs(b2[axis]) * half[2]);
     boxes.push({
-      origin, center: [...center], inv, half,
+      liveBox, origin, center: [...center], inv, half,
       min: worldCenter.map((value, axis) => value - extent[axis]),
       max: worldCenter.map((value, axis) => value + extent[axis]),
     });
@@ -72,6 +87,10 @@ export function doorSegmentOccluded(scene, start, end) {
   const startValues = [start.x, start.y, start.z];
   const delta = [end.x - start.x, end.y - start.y, end.z - start.z];
   for (const box of scene.boxes) {
+    // Pickups hide their original static BoxCollider after F/E; if it still
+    // occluded the light, the red warning would track an invisible obstacle.
+    // Read the existing live flag without allocating or rebuilding geometry.
+    if (box.liveBox && !box.liveBox.enabled) continue;
     // Segment bounding interval rejection: a miss can never hide a wall.
     let rejected = false;
     for (let axis = 0; axis < 3; axis++) {

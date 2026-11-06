@@ -551,8 +551,11 @@ function outcome(status, details = {}) {
  * A private scene package must expose point.source={owner:'level10',path_id}
  * and gameplay.audio.doors keyed by level10::SpawnerDoors-component-path-id.
  * Unknown or mismatched references deliberately produce no warning.
+ * @param {object} scene Prepared source-qualified Dojo scene.
+ * @param {{boxes: Array<{collider: object, enabled: boolean}>} | null} [liveCollision]
+ *   Optional collision state shared with items/movement, not a new sight mesh.
  */
-export function createDojoDoorWarningBridge(scene) {
+export function createDojoDoorWarningBridge(scene, liveCollision = null) {
   const qualified = dojoSource(scene?.source);
   const catalog = scene?.gameplay?.audio?.doors;
   const hasCatalog = catalog !== null && typeof catalog === 'object' &&
@@ -567,7 +570,7 @@ export function createDojoDoorWarningBridge(scene) {
   // prepared as compact affine slabs once, not triangle/contact meshes. No collider
   // data means no invented occlusion and retains the existing sweep behavior.
   const collision = controller && Array.isArray(scene?.colliders) && scene.colliders.length
-    ? prepareDoorVisibility(scene.colliders) : null;
+    ? prepareDoorVisibility(scene.colliders, liveCollision) : null;
   const webSweep = controller ? createWebWarningSweep(preparedCatalog, controller, collision) : null;
   const readiness = qualified ? (hasCatalog ? 'source-catalog-present' : 'missing-private-door-catalog')
     : 'not-dojo-build10-source';

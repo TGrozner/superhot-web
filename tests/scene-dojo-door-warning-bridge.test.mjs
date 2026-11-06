@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDojoDoorWarningBridge, DOJO_DOOR_SOURCE_BINDINGS } from '../src/scenes/dojo-door-warning-bridge.js';
 import { prepareDojoDoorWarningLighting } from '../src/render/lighting-model.js';
+import { prepareNativeCollision } from '../src/scenes/native-collision.js';
 
 // All fixtures are synthetic. The component IDs are non-asset Unity metadata;
 // no native AnimationCurve, texture, model, compiled shader or game output.
@@ -959,4 +960,46 @@ test('J4 frozen-world arrival moves the existing red floor wash in real time', (
   unverified.advance(0, null, 1.64);
   assert.equal(unverified.packets()[0].falseLight.position, undefined,
     'unverified world bases still cannot create a fabricated floor light');
+});
+
+
+test('J4 live pickup collider stops hiding door beacon once F/E removes the static blocker', () => {
+  // Web-only regression: the same collision adapter powers the actual pickup
+  // hideStatic() transition. Static sight snapshots must not occlude an item
+  // that the player has already removed from the world.
+  const pickup = {
+    id: 'synthetic-pickup-blocker', center: [0, 0, 0], size: [0.6, 3, 0.9],
+    worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 12, 1.7, -16.25, 1],
+    layer: { index: 0 }, isTrigger: false,
+    initial: { enabled: true, activeInHierarchy: true },
+  };
+  const sourceScene = browserScene({ colliders: [pickup] });
+  const collision = prepareNativeCollision(sourceScene.colliders);
+  const bridge = createDojoDoorWarningBridge(sourceScene, collision);
+  const noBlocker = createDojoDoorWarningBridge(browserScene({ colliders: [] }));
+  const camera = { x: 9, y: 1.8, z: -15 };
+  const warningEvent = warning(103);
+  const sample = () => {
+    bridge.accept(warningEvent);
+    noBlocker.accept(warningEvent);
+    bridge.advance(1, camera);
+    noBlocker.advance(1, camera);
+    return bridge.packets()[0].spotlight.direction[2] -
+      noBlocker.packets()[0].spotlight.direction[2];
+  };
+  assert.ok(sample() < -0.08, 'solid static pickup initially hides the camera from the door lamp');
+  assert.equal(collision.setEnabled(pickup.id, false), true,
+    'live pickup hides its source BoxCollider in the shared collision adapter');
+  bridge.reset();
+  noBlocker.reset();
+  assert.ok(Math.abs(sample()) < 1e-9,
+    'same active Dojo light tracks the player after the pickup removes solid cover');
+  assert.equal(collision.setEnabled(pickup.id, true), true);
+  bridge.reset();
+  noBlocker.reset();
+  assert.ok(sample() < -0.08, 'restoring source collider re-enables the original sight block');
+  assert.equal(bridge.packets().length, 3, 'no additional lights, meshes or draw packets');
+  const unrelated = prepareNativeCollision([{ ...pickup }]);
+  assert.throws(() => createDojoDoorWarningBridge(sourceScene, unrelated),
+    /same source collider/, 'must not inherit state from an unrelated scene with the same ID');
 });
