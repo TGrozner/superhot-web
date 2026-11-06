@@ -620,7 +620,8 @@ export function createWebImpactMix(context, maxVoices = 24) {
                 ring.stop(ringAt + tone.tail);
             }
         }
-        if (cue !== 'step' && cue !== 'landing') {
+        // WEB-ORIGINAL: a distant enemy muzzle should not pump the listener's ambient drone.
+        if (cue !== 'step' && cue !== 'landing' && !remoteEnemyShot) {
             ambient.gain.cancelScheduledValues(at);
             ambient.gain.setTargetAtTime(0.03, at, 0.015);
             ambient.gain.setTargetAtTime(0.13, at + 0.14, 0.22);

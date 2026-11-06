@@ -931,3 +931,24 @@ test('sustained Web gunfire dries shared Dojo room return without muting isolate
   assert.equal(nodes.length, before + 10); // Five cues, same two sources each.
   mix.dispose();
 });
+
+
+test('distant enemy fire keeps its spatial sound without pumping the local ambient bed', () => {
+  // Creative Web sidechain, not Unity MCD timing or proof of speaker audibility.
+  const {ctx, gains, nodes} = fakeAudio();
+  ctx.listener = {positionX: {value: 0}, positionY: {value: 0}, positionZ: {value: 0}};
+  const mix = createWebImpactMix(ctx, 4);
+  const ambient = gains[4]; // Synthetic drone bus, separate from footsteps.
+  assert.equal(mix.startAmbience(), true);
+  assert.equal(mix.emit('enemy-shot', {position: {x: 32, y: 0, z: 0}}).status, 'started');
+  assert.equal(nodes.length, 3, 'remote shot still schedules noise and body');
+  assert.equal(ambient.gain.targets.length, 0, 'distant volleys must not duck the local drone');
+  assert.equal(mix.emit('enemy-shot', {position: {x: 6, y: 0, z: 0}}).status, 'started');
+  assert.deepEqual(ambient.gain.targets.slice(-2),
+    [[0.03, ctx.currentTime, 0.015], [0.13, ctx.currentTime + 0.14, 0.22]],
+    'nearby enemy fire retains the ambient sidechain');
+  const before = ambient.gain.targets.length;
+  assert.equal(mix.emit('player-shot').status, 'started');
+  assert.equal(ambient.gain.targets.length, before + 2, 'player fire still ducks ambience');
+  mix.dispose();
+});
