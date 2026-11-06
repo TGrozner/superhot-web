@@ -224,3 +224,29 @@ test('J2 Web pistol follow-up spread rises after confirmed shots and cools only 
   assert.equal(state.webPistolHeat,0,'world-time recovery restores stationary precision');
   assert.ok(warmed>0);
 });
+
+test('J2 Web accuracy heat counts delivered requests, not interrupted attacks',()=>{
+  const pistol={...settings,family:'Pistol'};
+  const state=ready();
+  assert.equal(runNativeEnemyGunAttack(state,pistol,input(),()=>.5).shot,true);
+  assert.equal(state.webPistolHeat,0,'accepted attack is not yet a delivered round');
+  state.pendingShot=null; // A stun can cancel the request before the late pose.
+  state.attackDelayRemaining=-.01;
+  state.targetNeedsReroll=false;
+  assert.equal(runNativeEnemyGunAttack(state,pistol,input(),()=>.5).shot,true);
+  assert.equal(state.pendingShot.webPistolBloomYaw,0,
+    'the first delivered round remains precise after a canceled attempt');
+  assert.equal(state.webPistolHeat,0);
+  const [first]=consumeNativeEnemyVolley(state,pistol,p(0),null,()=>.75);
+  assert.deepEqual(first.direction,p(1));
+  assert.equal(state.webPistolHeat,.045,'successful late request is counted once');
+  assert.deepEqual(consumeNativeEnemyVolley(state,pistol,p(0),null),[],
+    'repeated late passes do not charge additional heat');
+  assert.equal(state.webPistolHeat,.045);
+
+  const invalid=ready();
+  assert.equal(runNativeEnemyGunAttack(invalid,pistol,input(),()=>.5).shot,true);
+  assert.throws(()=>consumeNativeEnemyVolley(invalid,pistol,null,null),/muzzlePosition/);
+  assert.equal(invalid.webPistolHeat,0,'missing animated socket cannot charge heat');
+  assert.ok(invalid.pendingShot,'failed delivery remains retryable');
+});
