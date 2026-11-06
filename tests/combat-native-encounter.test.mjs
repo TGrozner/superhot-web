@@ -908,6 +908,52 @@ test('J3 Web steep incoming shots cross the body-height window before their plan
     'a wall after warning entry must prevent a phantom covered dodge');
 });
 
+
+test('J3 Web overhead gunfire: vertical shots trigger real evasions and nearby suppression, never through cover',()=>{
+  // Synthetic 3D ballistics; neither a proprietary scene nor an MCD AI claim.
+  const overhead=(velocity,ttl=.6,colliders=[])=>{
+    const runtime=setup(scene(),colliders),enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.05,
+      playerProjectiles:[{friendly:true,pos:p(2,5,2),velocity,ttl}],
+    }));
+    return enemy;
+  };
+  const falling=overhead(p(0,-18,0));
+  assert.ok(falling.encounter.webDodgeRemaining>0,
+    'a vertically falling live shot at the body provokes a dodge');
+  assert.ok(Math.hypot(falling.x-2,falling.z-2)>.005,
+    'the dodge is a nav/capsule swept move, not an animation-only flag');
+  assert.equal(falling.encounter.canAttack,false,'evasion withholds a new shot');
+  assert.equal(overhead(p(0,18,0)).encounter.webDodgeRemaining,0,
+    'a bullet rising away above the head is not a threat');
+  assert.equal(overhead(p(0,-18,0),.08).encounter.webDodgeRemaining,0,
+    'a projectile expiring above the head cannot trigger a dodge');
+  assert.equal(overhead(p(0,-18,0),.6,[box(2,2.8,2,2,.2,2)])
+    .encounter.webDodgeRemaining,0,
+    'a ceiling between bullet and body blocks phantom warnings');
+
+  const passing=(colliders=[])=>{
+    const data=scene();
+    data.gameplay.enemy.MinimumDistanceToPlayer=8;
+    const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+    const runtime=setup(data,colliders),enemy=firstSpawn(runtime,player);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...player,scaledDeltaTime:.05,
+      playerProjectiles:[{friendly:true,pos:p(2,5,3.4),velocity:p(0,-18,0),ttl:.6}],
+    }));
+    return enemy.encounter;
+  };
+  assert.ok(passing().webSuppressionRemaining>0,
+    'a nearby vertical miss suppresses a gunner without claiming a direct hit');
+  assert.equal(passing([box(2,1.3,2.7,.7,2,.2)]).webSuppressionRemaining,0,
+    'cover between vertical near-miss and enemy blocks suppression');
+});
+
 test('J3 Web incoming bullet checks the first threatened body point before cover behind it',()=>{
   // Synthetic straight shot: the body begins at x=2.4, while the Web warning
   // cylinder extends behind it to x~1.08. A rear wall must not erase danger.
