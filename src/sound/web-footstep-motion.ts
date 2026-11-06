@@ -37,7 +37,8 @@ export function createWebFootstepMotion(emit: WebStepEmitter) {
   const maxGroundMetresPerSecond = 10;
   const maxAllowedTravel = (elapsedSeconds: number): number =>
     Math.min(maxFrameTravel, Math.max(0.05, elapsedSeconds * maxGroundMetresPerSecond));
-  const maxFrameGap = 0.3;
+  // WEB-ORIGINAL: maintain grounded footfalls at 3 FPS, but reset on longer tab stalls.
+  const maxFrameGap = 0.36;
   // Web-only landing weight: use the peak eye height to distinguish balcony
   // drops from short hops, while rejecting one-frame vertical snap/respawn.
   const maxLandingVerticalMetresPerSecond = 30;
