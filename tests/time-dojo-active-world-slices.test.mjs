@@ -67,6 +67,35 @@ test('Dojo 10/30/60 FPS low-FPS world steps and clock travel together', () => {
   assert.equal(sixty.lastSteps.length, 1, '60 FPS retains one step');
 });
 
+
+test('Dojo RAF 50ms numeric boundary does not schedule a phantom second collision', () => {
+  // JS timestamp subtraction may exceed an exact 50ms budget by a few
+  // picoseconds. The clock already rounds world dt to float32; a second
+  // ~1e-14s collision slice merely repeats expensive callbacks at 20 FPS.
+  const near = sampleActiveFrameDeltas(1000, 1050.00000000001, 1000);
+  assert.equal(near.simulationDt, .05);
+  assert.ok(near.activeRealDt > near.simulationDt);
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  clock.source.forcedTimeScale = 1;
+  clock.timeScale = 1;
+  const tick = stepWebMcdGameplayFrame(clock, {
+    ...near, maximumSteps: 4, x: 0, y: 1, grounded: true,
+  });
+  assert.equal(tick.worldSteps.length, 1,
+    'float32-equivalent 50ms must remain one collision step');
+  assert.equal(tick.simulationStepDeltas.length, 1);
+  assert.ok(Math.abs(tick.worldSteps[0] - tick.worldDelta) < 1e-10);
+  assert.ok(Math.abs(tick.worldStepOffsets[0] - tick.worldDelta) < 1e-10);
+
+  const beyond = sampleActiveFrameDeltas(1000, 1050.1, 1000);
+  const two = stepWebMcdGameplayFrame(clock, {
+    ...beyond, maximumSteps: 4, x: 0, y: 1, grounded: true,
+  });
+  assert.equal(two.worldSteps.length, 2,
+    'a real amount beyond the 50ms collision budget still uses catch-up');
+});
+
 test('bounded hitch, frozen world and pause never advance phantom world steps', () => {
   const clock = createMcdGameplayClock();
   clock.source.delayedUpdates = 0;
