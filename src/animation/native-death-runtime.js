@@ -639,6 +639,18 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
         for(const body of runtime.bodies)contactsFor(runtime,body,zero(),contacts);
       }
     }
+    // Each authored contact belongs to exactly one rigid bone. Group just
+    // this substep's contacts once instead of scanning every contact for
+    // every body (22 bodies x all contacts on each active ragdoll frame).
+    // Keep arrival order per bone: successive wall/floor normals must still
+    // be resolved in their original sweep order.
+    const contactsByBone=new Map();
+    for(let c=contactStart;c<contacts.length;c++) {
+      const contact=contacts[c];
+      let grouped=contactsByBone.get(contact.boneIndex);
+      if(!grouped){grouped=[];contactsByBone.set(contact.boneIndex,grouped);}
+      grouped.push(contact);
+    }
     for(let i=0;i<runtime.bodies.length;i++) {
       const body=runtime.bodies[i];
       // The angular/linear joint correction is a POSITION projection. The
@@ -647,9 +659,7 @@ export function advanceNativeDeathRuntime(runtime,scaledDelta,{limitWebFrameWork
       // corpses. Preserve source gravity/forces and admitted collision
       // impulses only; never turn solver error into kinetic energy.
       let groundedContact=false;
-      for(let c=contactStart;c<contacts.length;c++) {
-        const contact=contacts[c];
-        if(contact.boneIndex!==body.source.boneIndex)continue;
+      for(const contact of contactsByBone.get(body.source.boneIndex)??[]) {
         const inward=dot(body.velocity,contact.normal);
         if(inward<0)for(const axis of axes)body.velocity[axis]-=contact.normal[axis]*inward;
         if(contact.collider && contact.normal.y>0.55)groundedContact=true;
