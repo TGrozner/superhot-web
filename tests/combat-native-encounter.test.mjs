@@ -3505,3 +3505,53 @@ test('J3 Web crossfire composure: a grazing round cannot bait both legal dodges 
   assert.ok(Math.abs(simulate([graze,{...left,ttl:.03},{...right,ttl:.03}]).dx)>.04,
     'rounds that expire before reaching the dodge lane never force a hold');
 });
+
+
+test('J3 Web asymmetrical low-cover peek commits only toward a reachable clear firing lane',()=>{
+  // Both first short strides have a blocked muzzle. The opening lies beyond
+  // +Z while the preferred -Z side only leads deeper behind synthetic cover.
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const cover=box(5,.65,.5,.15,1.3,3.2);
+  const make=(extra=[])=>{
+    const runtime=setup(scene(),[cover,...extra]);
+    const enemy=firstSpawn(runtime,target);
+    enemy.clock=1.6; // Existing bounded peek phase, not a new behavior timer.
+    enemy.runtime.speed=2;
+    enemy.muzzlePosition=p(2,.3,2);
+    enemy.muzzleForward=p(1,0,0);
+    assert.equal(enemy.encounter.webTacticalSide,-1,'default side points away from the opening');
+    assert.ok(nativeSegmentHit(runtime.sightCollision,enemy.muzzlePosition,target.playerPosition));
+    const tick=()=>{
+      enemy.muzzlePosition=p(enemy.x,.3,enemy.z); // Actual next posed socket in this synthetic rig.
+      advanceNativeEncounter(runtime,input([enemy],{
+        ...target,scaledDeltaTime:.08,unscaledDeltaTime:.08,
+      }));
+      enemy.clock+=.08;
+    };
+    return {runtime,enemy,tick};
+  };
+  const open=make();
+  open.tick();
+  assert.ok(open.enemy.z>2.05 && open.enemy.z<2.3,
+    'choose the positive side with a reachable opening, but move only one short swept step');
+  assert.equal(open.enemy.encounter.canAttack,false,
+    'forecast muzzle clearance grants no early shot through the present wall');
+  assert.ok(nativeSegmentHit(open.runtime.sightCollision,
+    p(open.enemy.x,.3,open.enemy.z),target.playerPosition),
+    'the real new muzzle remains occluded after the first step');
+  let opened=false;
+  for(let n=0;n<16;n++) {
+    open.tick();
+    if(open.enemy.encounter.canAttack) {opened=true;break;}
+  }
+  assert.equal(opened,true,'genuine new muzzle position eventually opens the firing corridor');
+  assert.ok(open.enemy.z>2.2,'enemy physically traverses the open side');
+  assert.ok(open.enemy.x<5,'never walk through the low-cover wall');
+
+  const sealed=make([box(2,.9,2.7,1.2,1.8,.15)]);
+  sealed.tick();
+  assert.ok(sealed.enemy.z<2,
+    'a blocked future corridor is rejected by the same swept collision gate');
+  assert.equal(sealed.enemy.encounter.canAttack,false,
+    'neither lookahead nor blocked footwork authorizes a new gun attack');
+});

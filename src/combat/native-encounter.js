@@ -283,7 +283,7 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
   const direction=sideOverride ?? state.webTacticalSide*(cycle%2===0 ? 1 : -1);
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_STRAFE.speedFraction;
   if (travel<=EPSILON) return false;
-  let fallback=null, chosen=null;
+  let fallback=null, chosen=null, reachableClearMuzzle=null;
   for (const side of [direction,-direction]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:-forwardZ*travel*side,y:0,z:forwardX*travel*side,
@@ -302,7 +302,33 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
       const clear=nativeSegmentHit(runtime.sightCollision,muzzle,firingTarget)===null &&
         !webLivingAllyIntersectsSegment(runtime,enemy,muzzle,firingTarget,enemies);
       if (!clear) {
-        fallback ??= candidate; // Preserve the original safe-side choice if both remain blocked.
+        fallback ??= candidate; // Keep the old safe-side choice if neither route opens.
+        // Web-original tactical peeking: at low cover, BOTH immediate side
+        // steps can leave the muzzle blocked although only one longer, real
+        // corridor reaches the cover edge. Probe that corridor without moving
+        // the actor there. The actual short step still uses the same swept
+        // capsule/nav/ally gates and a fresh posed muzzle must authorize fire
+        // on the following tick. This is not native MCD foresight.
+        const probeDistance=runtime.body.radius*4;
+        if (!reachableClearMuzzle && probeDistance>travel+EPSILON) {
+          const offset={x:-forwardZ*probeDistance*side,y:0,
+            z:forwardX*probeDistance*side};
+          const expected={x:start.x+offset.x,z:start.z+offset.z};
+          const probe=moveNativeCharacter(runtime.collision,start,offset,runtime.body).position;
+          const nav=sampleNativeNavigation(runtime.nav,probe,runtime.body.stepOffset+EPSILON);
+          if (Math.hypot(probe.x-expected.x,probe.z-expected.z)<=EPSILON &&
+              nav && Math.hypot(nav.position.x-probe.x,nav.position.z-probe.z)<=EPSILON &&
+              !occupied(runtime,start,probe,enemies,enemy) &&
+              !occupiedSegment(start,probe,playerBodyFeet,
+                runtime.body.radius*2,runtime.body.height)) {
+            const futureMuzzle={x:enemy.muzzlePosition.x+probe.x-start.x,
+              y:enemy.muzzlePosition.y+probe.y-start.y,
+              z:enemy.muzzlePosition.z+probe.z-start.z};
+            if (nativeSegmentHit(runtime.sightCollision,futureMuzzle,firingTarget)===null &&
+                !webLivingAllyIntersectsSegment(runtime,enemy,futureMuzzle,firingTarget,enemies))
+              reachableClearMuzzle=candidate;
+          }
+        }
         continue;
       }
     }
@@ -319,7 +345,7 @@ function tryWebStrafe(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
     chosen=candidate;
     break;
   }
-  chosen ??= fallback;
+  chosen ??= reachableClearMuzzle ?? fallback;
   if (!chosen)return false;
   if (preferCover && firingTarget) {
     const eye={x:chosen.moved.x,y:chosen.moved.y+runtime.aimHeight,z:chosen.moved.z};
