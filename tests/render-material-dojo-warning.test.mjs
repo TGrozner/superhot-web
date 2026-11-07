@@ -519,7 +519,16 @@ test('J4 warning spotlights respect Concrete/Crystal surface orientation without
 });
 
 test('J4 red-crystal door warning adds a bounded grazing-facet glint without touching Concrete', () => {
-  const spot = prepareDojoDoorWarningLighting(scene, activeWarning().packets(), options).spotlights[0];
+  // Isolate the source light: an earlier bounds-culling test deliberately
+  // steers an in-place packet and must not move this synthetic pixel sample.
+  const spot = prepareDojoDoorWarningLighting(scene, [{
+    id: 'level10::7', active: true, rendererId: 'level10::71',
+    spotlight: { ...sourceDoor.spotlight, enabled: true,
+      position: [1, 2, 3], direction: [0, 0, 1],
+      right: [1, 0, 0], up: [0, 1, 0], color: [1, 0, 0],
+      range: 10, intensity: 30 },
+    falseLight: { enabled: false },
+  }], options).spotlights[0];
   const point = [1, 2, 8], frontNormal = [0, 0, -1];
   // CPU mirror of the existing mode-3 vViewNormal.z, not native MCD shading.
   const headOn = sampleDojoDoorWarningWebPreview(spot, point, .4, 3,
