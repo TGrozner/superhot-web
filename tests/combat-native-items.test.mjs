@@ -380,3 +380,45 @@ test('Dojo shatter binds source mesh-local geometry to optional collision physic
   assert.throws(()=>createNativeItems(scene,collision,{setVisible:()=>{},gravity:zero}),
     /geometry bounds provider/);
 });
+
+test('J2 Web air catch: E can recapture a flying thrown weapon under the real aim/LOS gates', () => {
+  // Web-original arcade mechanic: no MCD native mid-air catch claim.
+  const fight = setup();
+  const { runtime, item } = fight;
+  launch(runtime, item);
+  const events = advanceNativeItems(runtime, 0.03);
+  assert.deepEqual(events, []);
+  assert.equal(item.state, 'flying');
+  assert.ok(getNativeItemPosition(item).z < -0.8,
+    'the existing swept item motion, not a synthetic pickup proxy, is targeted');
+  assert.equal(nearestNativeItem(runtime, camera, forward), item,
+    'the actual E query selects an airborne item intersecting the camera ray');
+  assert.equal(pickupNativeItem(runtime, item), true);
+  assert.equal(runtime.held, item);
+  assert.equal(item.state, 'held');
+  assert.deepEqual(item.velocity, zero,
+    'a caught weapon must not keep an invisible in-flight velocity');
+  assert.deepEqual(advanceNativeItems(runtime, 0.5), [],
+    'catching cancels further world/enemy contact until the next throw');
+  assert.equal(nearestNativeItem(runtime, camera, forward), null,
+    'the held gun cannot be duplicated by another E input');
+  assert.equal(nativeItemDraws(runtime, camera).held.length, 1,
+    'the original model moves to the already-wired held render path');
+  assert.equal(throwNativeItem(runtime, camera, forward), item,
+    'the recaptured gun can be thrown again through the existing F action');
+  assert.equal(item.state, 'flying');
+
+  const covered = setup([fixture()], [box('divider', -0.5)]);
+  launch(covered.runtime);
+  covered.item.worldMatrix[14] = -1;
+  assert.equal(nearestNativeItem(covered.runtime, camera, forward), null,
+    'a catch cannot reach a flying weapon through a solid wall');
+  covered.item.worldMatrix[14] = -0.25;
+  covered.item.pendingContact = { kind: 'world' };
+  assert.equal(nearestNativeItem(covered.runtime, camera, forward), null,
+    'a collision already committed by the swept throw cannot be stolen');
+  covered.item.pendingContact = null;
+  covered.item.unpickable = true;
+  assert.equal(nearestNativeItem(covered.runtime, camera, forward), null,
+    'native unpickable restrictions remain authoritative in flight');
+});
