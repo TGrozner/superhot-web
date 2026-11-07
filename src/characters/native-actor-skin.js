@@ -717,10 +717,13 @@ export function createNativeActorSkinRuntime(skinPass) {
         gazeYaw: webHeadLook?.yaw ?? 0, gazePitch: webHeadLook?.pitch ?? 0,
         hitEventId: selected.identity.name === 'hit' ? hitEventId : null,
         hitAccentStartTime, hitSource,
+        // The Dojo neck BASE is the rotation pivot; its TERMINAL joint is
+        // the actual eye-height sample. Use the latter when aiming the
+        // next gaze pitch, without moving the head pivot or weapon socket.
         headLocal: webHeadIndex < 0 ? null : [
-          report.boneModelMatrices[webHeadIndex*16 + 12],
-          report.boneModelMatrices[webHeadIndex*16 + 13],
-          report.boneModelMatrices[webHeadIndex*16 + 14],
+          report.boneModelMatrices[skinPass.webHeadSampleBone*16 + 12],
+          report.boneModelMatrices[skinPass.webHeadSampleBone*16 + 13],
+          report.boneModelMatrices[skinPass.webHeadSampleBone*16 + 14],
         ],
       });
       if (movementFrames.size > 128) {
