@@ -3578,6 +3578,38 @@ test('J3 Web crossfire composure: a grazing round cannot bait both legal dodges 
 });
 
 
+test('J3 Web crossfire: an early bullet passage does not poison a future dodge landing',()=>{
+  // Synthetic world-time scenario: a true forward hit triggers a sideways
+  // escape. Another round crosses the +X destination at t=.025s, but the
+  // running actor can only arrive there at the END of this .12s movement.
+  // The moving body's swept capsule does not intersect that second round.
+  const urgent={friendly:true,pos:p(2,1,1.5),velocity:p(0,0,35),ttl:.5};
+  const alreadyGone={friendly:true,pos:p(2.65,1,1),velocity:p(0,0,40),ttl:.5};
+  const dodge=projectiles=>{
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.runtime.speed=5; // Existing running actor, no speed injection in the engine.
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:projectiles,
+    }));
+    return {dx:enemy.x-start.x,dz:enemy.z-start.z,
+      canAttack:enemy.encounter.canAttack,
+      remaining:enemy.encounter.webDodgeRemaining};
+  };
+  const ordinary=dodge([urgent]);
+  assert.ok(ordinary.dx>.5 && Math.abs(ordinary.dz)<1e-6,
+    'a genuinely incoming bullet still triggers the ordinary safe +X dodge');
+  const crossed=dodge([urgent,alreadyGone]);
+  assert.deepEqual(crossed,ordinary,
+    'a shot that passed the destination before arrival cannot reverse a safe dodge');
+  assert.deepEqual(dodge([alreadyGone,urgent]),ordinary,
+    'projectile input order cannot reintroduce an already-passed landing hazard');
+  assert.equal(crossed.canAttack,false,'evasion never invents a gunshot');
+  assert.ok(crossed.remaining>0,'the permitted real swept step retains its active dodge');
+});
+
 test('J3 Web asymmetrical low-cover peek commits only toward a reachable clear firing lane',()=>{
   // Both first short strides have a blocked muzzle. The opening lies beyond
   // +Z while the preferred -Z side only leads deeper behind synthetic cover.
