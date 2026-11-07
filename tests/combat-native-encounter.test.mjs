@@ -3147,3 +3147,55 @@ test('J3 Web corner escape: tangent still advances at the .005 slow-world floor'
     'sideways escape must not close the distance to the player');
   assert.equal(gunner.walking,true,'the physically achieved step drives walking animation');
 });
+
+test('J3 Web cold-start footwork accelerates from rest at the .005 slow-world floor',()=>{
+  // Synthetic Dojo navigation and two real collision paths. A pre-accelerated
+  // gunner (the prior regression) masks the genuine cold-start failure:
+  // rejecting every sub-epsilon sweep must not reset acceleration each tick.
+  const playerForward=p(0,0,1);
+  const dt=.005/60,realDt=1/60;
+  const scenarios=[
+    {label:'corner escape',stopDistance:2,player:p(3.3,0,2),clock:0,
+      rear:{id:'real-rear-ally',x:1.2,y:0,z:2,alive:true,active:true}},
+    {label:'firing-ring strafe',stopDistance:8,player:p(8,0,2),clock:1.25,
+      rear:null},
+  ];
+  for(const scenario of scenarios) {
+    const data=scene();
+    data.gameplay.enemy.MinimumDistanceToPlayer=scenario.stopDistance;
+    const {player,clock,rear}=scenario;
+    const playerPosition=p(player.x,1.6,player.z);
+    const runtime=setup(data),gunner=firstSpawn(runtime,{
+      playerFeet:player,playerPosition,
+    });
+    gunner.clock=clock;
+    gunner.runtime.speed=0;
+    gunner.muzzlePosition=p(gunner.x,1.4,gunner.z);
+    gunner.muzzleForward=p(1,0,0);
+    const enemies=rear ? [gunner,rear] : [gunner];
+    const start=p(gunner.x,gunner.y,gunner.z);
+    const tick=(worldDelta)=>advanceNativeEncounter(runtime,input(enemies,{
+      playerFeet:player,playerPosition,playerForward,
+      scaledDeltaTime:worldDelta,unscaledDeltaTime:realDt,
+    }));
+    for(let frame=0;frame<90;frame++)tick(dt);
+    assert.ok(Math.abs(gunner.z-start.z)>1e-5,
+      scenario.label+': cold gunner must actually step sideways after accumulating speed');
+    assert.ok(gunner.runtime.speed>0,
+      scenario.label+': sub-micrometre valid steps may not reset walking acceleration');
+    assert.equal(gunner.walking,true,
+      scenario.label+': actual travel, not a fake animation intent, drives walking');
+    assert.ok(Math.abs(gunner.x-start.x)<1e-4,
+      scenario.label+': no instant approach, retreat through an ally, or teleport');
+    if(rear) {
+      assert.ok(Math.hypot(gunner.x-rear.x,gunner.z-rear.z)>=
+        runtime.body.radius*2-1e-6,'cold corner escape preserves live ally spacing');
+    }
+    assert.equal(gunner.runtime.pendingShot,null,
+      scenario.label+': moving does not manufacture a shot');
+    const frozen=p(gunner.x,gunner.y,gunner.z);
+    tick(0);
+    assert.deepEqual(p(gunner.x,gunner.y,gunner.z),frozen,
+      scenario.label+': an actual frozen world still never moves the actor');
+  }
+});
