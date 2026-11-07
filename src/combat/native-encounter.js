@@ -343,6 +343,12 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
     {x,z},
     {x:x-side*z*WEB_DISENGAGE.diagonalBias,z:z+side*x*WEB_DISENGAGE.diagonalBias},
     {x:x+side*z*WEB_DISENGAGE.diagonalBias,z:z-side*x*WEB_DISENGAGE.diagonalBias},
+    // J3 Web-only corner escape: a live ally can obstruct both backward and
+    // diagonal retreat lanes. Try the two genuine tangents instead of freezing
+    // in melee range. They still pass the SAME swept capsule, actor occupancy,
+    // navmesh and player-distance gates below; no shot/attack rule changes.
+    {x:-side*z,z:side*x},
+    {x:side*z,z:-side*x},
   ];
   for(const candidate of candidates) {
     const magnitude=Math.hypot(candidate.x,candidate.z);
