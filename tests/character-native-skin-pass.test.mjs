@@ -1504,8 +1504,15 @@ test('Dojo source-named neck chain actually animates the GPU head with no Head b
     (1-Math.exp(-12*.12));
   assert.ok(Math.abs(aimNext.actorWebHeadLook.pitch-expectedPitch)<1e-5,
     'live head gaze must sample the terminal neck eye height, not neck base');
+  // Compare the same actor/clip/time to isolate the head adjustment from
+  // the independent, time-varying idle breathing and arm motion.
+  const sameTimeNeutral = createNativeActorSkinRuntime(pass).drawActor({
+    actorId:'dojo-eye-height',pose:{state:'idle',time:.12,targetSight:true},
+    modelMatrix:identity(),viewProjection:identity(),cameraPosition:null,
+    shaderTime:1.2,color:[.8,.1,.2,1],
+  });
   near(Array.from(aimNext.weaponAttachmentMatrix),
-    Array.from(aimInitial.weaponAttachmentMatrix));
+    Array.from(sameTimeNeutral.weaponAttachmentMatrix));
   pass.dispose();
 
   const noChain={...pkg,bones:pkg.bones.map((bone,i)=>
