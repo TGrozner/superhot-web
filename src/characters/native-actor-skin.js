@@ -446,7 +446,12 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
   // arbitrary left/right side. No source Animator head IK is inferred.
   const confirmedRearFlank = pose.targetSight === true && frontal <= .05 &&
     Math.abs(lateral) > .05;
-  let target = distance > 1 && (frontal > .05 || confirmedRearFlank)
+  // A positively confirmed visible opponent inside one metre is still a
+  // target for this Web head-only reaction. Keep a nonzero near-distance
+  // floor to avoid unstable directions when the camera enters the neck;
+  // unknown sight retains the existing conservative 1m gate.
+  const minGazeDistance = pose.targetSight === true ? .4 : 1;
+  let target = distance > minGazeDistance && (frontal > .05 || confirmedRearFlank)
     ? Math.max(-.33, Math.min(.33, Math.atan2(lateral, frontal))) : 0;
   if (identity.name === 'idle' && frontal > .05) {
     // Deliberately authored small scanning offset, tied to world time.
@@ -469,7 +474,7 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
     const headZ = modelMatrix[2]*head[0] + modelMatrix[6]*head[1] +
       modelMatrix[10]*head[2] + modelMatrix[14];
     const horizontal = Math.hypot(cx - headX, cz - headZ);
-    if (Number.isFinite(horizontal) && horizontal > 1) {
+    if (Number.isFinite(horizontal) && horizontal > minGazeDistance) {
       pitchTarget = Math.max(-.32, Math.min(.32, Math.atan2(cameraY - headY, horizontal)));
     }
   }
@@ -717,13 +722,12 @@ export function createNativeActorSkinRuntime(skinPass) {
         gazeYaw: webHeadLook?.yaw ?? 0, gazePitch: webHeadLook?.pitch ?? 0,
         hitEventId: selected.identity.name === 'hit' ? hitEventId : null,
         hitAccentStartTime, hitSource,
-        // The Dojo neck BASE is the rotation pivot; its TERMINAL joint is
-        // the actual eye-height sample. Use the latter when aiming the
-        // next gaze pitch, without moving the head pivot or weapon socket.
+        // This index ALREADY addresses the validated terminal sample joint;
+        // the lower pivot remains the unchanged Web rotation joint.
         headLocal: webHeadIndex < 0 ? null : [
-          report.boneModelMatrices[skinPass.webHeadSampleBone*16 + 12],
-          report.boneModelMatrices[skinPass.webHeadSampleBone*16 + 13],
-          report.boneModelMatrices[skinPass.webHeadSampleBone*16 + 14],
+          report.boneModelMatrices[webHeadIndex*16 + 12],
+          report.boneModelMatrices[webHeadIndex*16 + 13],
+          report.boneModelMatrices[webHeadIndex*16 + 14],
         ],
       });
       if (movementFrames.size > 128) {
