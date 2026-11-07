@@ -1354,7 +1354,7 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   // regardless of the new independent neck follow-through.
   const turnControlActors = createNativeActorSkinRuntime(pass);
   const turnControl = (time, turned) => turnControlActors.drawActor({
-    actorId:'turn-control',pose:{state:'idle',time,targetSight:false},
+    actorId:'turn-watchman',pose:{state:'idle',time,targetSight:false},
     modelMatrix:turned ? facingX : identity(),viewProjection:identity(),
     cameraPosition:null,shaderTime:time*10,color:[.8,.1,.2,1],
   });
