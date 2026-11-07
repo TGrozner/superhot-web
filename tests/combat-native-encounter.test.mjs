@@ -2983,7 +2983,11 @@ test('J3 Web stationary-player pressure moves a visible gunner inside its old ri
   tick(0,{unscaledDeltaTime:.2});
   assert.equal(gunner.encounter.webStationarySeconds,observedBeforePause,
     'paused world time must never charge an anti-camping response');
-  for(let n=0;n<7;n++)tick(.2);
+  tick(3);
+  assert.equal(gunner.encounter.webStationarySeconds,0,
+    'a single long catch-up frame does not prove sustained sight or stillness');
+  assert.ok(Math.abs(gunner.z-3.2)<1e-7);
+  for(let n=0;n<9;n++)tick(.2);
   assert.ok(gunner.z>3.2+.05,
     'after a sustained real sighting the same gunner advances within its old stop ring');
   assert.equal(gunner.encounter.visible,true);
