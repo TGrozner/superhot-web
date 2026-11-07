@@ -101,6 +101,12 @@ const WEB_SQUAD_PUSH = Object.freeze({
   relaySeconds: 4.8, // Web-only readable leapfrog: swap the assault lead every few seconds.
 });
 
+// J3 Web-only obstacle recovery: a baked navmesh route to an optional squad
+// flank can still hit a REAL low cover/pillar collider. Temporarily follow the
+// ordinary player-directed route rather than recomputing that same blocked
+// flank on every tick. No additional collision, shot or navigation authority.
+const WEB_BLOCKED_FLANK = Object.freeze({ directRouteSeconds: 1.4 });
+
 // J3 Web-original weapon roles, not recovered MCD AI distances: a verified
 // shotgun should actually threaten close quarters, while a verified sniper
 // preserves a long firing lane and kites when rushed. Unknown/fallback gun
@@ -1383,7 +1389,8 @@ function spawnEnemy(runtime, point, order, population, playerFeet) {
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
       webAimLock:0,webAimRemaining:0,webAimCooldown:0,
       webUnarmedAimLock:0,webUnarmedJukeRemaining:0,webUnarmedJukeCooldown:0,
-      webReloadCoverRemaining:0,webReloadCoverFeet:null,webReloadCoverSide:0},
+      webReloadCoverRemaining:0,webReloadCoverFeet:null,webReloadCoverSide:0,
+      webFlankFallbackRemaining:0},
   };
   if (selected) enemy.activeWeaponSettings = activation.weaponSettings;
   runtime.actors.set(enemy.id, enemy);
@@ -1476,6 +1483,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   enemy.walking=false;
   state.webSuppressionCooldown=Math.max(0,state.webSuppressionCooldown-scaledDeltaTime);
   state.webSupportCooldown=Math.max(0,state.webSupportCooldown-scaledDeltaTime);
+  state.webFlankFallbackRemaining=Math.max(0,(state.webFlankFallbackRemaining??0)-scaledDeltaTime);
   state.webCounterPushRemaining=Math.max(0,
     (state.webCounterPushRemaining??0)-scaledDeltaTime);
   // An accepted hit increments the existing contact reaction revision. Save
@@ -2094,7 +2102,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // When armed allies are pursuing together, seek opposite safe approach
   // lanes before resuming the normal stop-radius strafe / retreat behavior.
   // An unreachable offset is never substituted for the direct source route.
-  const flankGoal=armed && state.visible &&
+  const flankGoal=armed && state.visible && state.webFlankFallbackRemaining<=EPSILON &&
       playerDistance>stopDistance+runtime.body.radius*2
     ? webSquadApproachGoal(runtime,enemy,playerFeet,localSquads) : null;
   const desiredTarget=flankGoal ?? pursuitFeet;
@@ -2115,7 +2123,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const navigationStart=sampleNativeNavigation(runtime.nav,start,runtime.maxSnapDistance)?.position;
   if(!navigationStart) {state.route=null;enemy.runtime.speed=0;return;}
   const step=advanceNativeRoute(state.route,navigationStart,speed*scaledDeltaTime);
-  let actual=start;
+  let actual=start, blockedFlank=false;
   for (const segment of step.segments) {
     const moved=moveNativeCharacter(runtime.collision,actual,{
       x:segment.to.x-actual.x,y:Math.min(0,segment.to.y-actual.y),z:segment.to.z-actual.z,
@@ -2126,6 +2134,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
         allyBlocked ||
         occupiedSegment(actual,moved,playerFeet,runtime.body.radius*2,runtime.body.height)) {
       state.route=null;
+      // A collision-blocked optional flank is not a reason to permanently
+      // freeze or immediately retry that same speculative destination.
+      if(flankGoal)blockedFlank=true;
       // Only an actor blockage triggers the detour: a wall, disconnected
       // navmesh, unknown muzzle, or the player's capsule is never bypassed.
       if(allyBlocked && !enemy.runtime.pendingShot) {
@@ -2136,7 +2147,15 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     }
     actual=moved;
     if (Math.hypot(actual.x-segment.to.x,actual.z-segment.to.z) > EPSILON ||
-        Math.abs(actual.y-segment.to.y)>runtime.body.stepOffset+EPSILON) { state.route=null; break; }
+        Math.abs(actual.y-segment.to.y)>runtime.body.stepOffset+EPSILON) {
+      state.route=null;
+      if(flankGoal)blockedFlank=true;
+      break;
+    }
+  }
+  if(blockedFlank) {
+    state.webFlankFallbackRemaining=WEB_BLOCKED_FLANK.directRouteSeconds;
+    state.target=null; // Replan from actual feet toward the visible player next tick.
   }
   enemy.x=actual.x; enemy.y=actual.y; enemy.z=actual.z;
   enemy.walking=distance(start,actual) > EPSILON;
