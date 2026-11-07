@@ -154,16 +154,24 @@ export function nearestNativeItem(runtime, camera, forward, maxDistance = 2.2) {
   const aim = direction(forward);
   if (!Number.isFinite(maxDistance) || maxDistance < 0) throw new RangeError('maxDistance must be nonnegative');
   if (runtime.held) return null;
-  let best = null, distance = Infinity;
+  let best = null, distance = Infinity, focusedFlight = false;
   const end = add3(camera, multiply3(aim, maxDistance));
   for (const item of runtime.items) {
     if (!pickable(item)) continue;
     const center = getNativeItemPosition(item), delta = subtract3(center, camera), d = length(delta);
-    if (d > maxDistance || d >= distance || dot3(delta, aim) <= 0 ||
+    const alignment = dot3(delta, aim);
+    if (d > maxDistance || alignment <= 0 ||
         segmentSphere(camera, end, center, item.radius) === null) continue;
+    // Web arcade choice: an airborne weapon held under the actual reticle
+    // wins over loose floor weapons within the same pickup radius. A grazing
+    // flight intersection is still sorted by ordinary nearest distance.
+    // All candidates must FIRST pass the existing aim, range and LOS gates.
+    const centeredFlight = item.state === 'flying' && alignment / d >= 0.99;
+    if (best && ((focusedFlight && !centeredFlight) ||
+        (focusedFlight === centeredFlight && d >= distance))) continue;
     const wall = nativeSegmentHit(item.queryCollision, camera, center);
     if (wall && wall.t < 1) continue;
-    best = item; distance = d;
+    best = item; distance = d; focusedFlight = centeredFlight;
   }
   return best;
 }
