@@ -258,6 +258,8 @@ test('authored torque visibly spins real shards about their swept collider cente
 
 test('authored shard spin settles after a real contact, not during flight or scaled pause',()=>{
   const physics=context();
+  // A genuine landing (not a high-restitution rebound) must still damp spin.
+  physics.material={...physics.material,bounciness:0};
   physics.gravity={x:0,y:0,z:0};
   const create=(physical)=>createGunPickupShardRuntime({
     shards:[{id:'spin-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,
