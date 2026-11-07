@@ -3366,3 +3366,39 @@ test('J3 Web long-range low-cover: a distant armed witness peeks with its body, 
   assert.ok(Math.abs(slowGunner.x-slowStart.x)<.001,
     'low-time cover peeking changes the firing angle, not the wall collision');
 });
+
+test('J3 Web crossing shots: urgent body impact outranks an earlier peripheral warning, in either bullet order',()=>{
+  // Fully synthetic two-shot Web gameplay regression. The slow grazing shot
+  // is already inside the broad warning cylinder, but cannot reach the
+  // gunner's actual body before the faster perpendicular bullet.
+  const graze={friendly:true,type:'normal',pos:p(2.5,1,2.75),
+    velocity:p(-3,0,0),ttl:.5};
+  const imminent={friendly:true,type:'normal',pos:p(2,1,4),
+    velocity:p(0,0,-40),ttl:.5};
+  const simulate=projectiles=>{
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:projectiles,
+    }));
+    return {dx:enemy.x-start.x,dz:enemy.z-start.z,
+      sideX:enemy.encounter.webDodgeSideX,sideZ:enemy.encounter.webDodgeSideZ,
+      remaining:enemy.encounter.webDodgeRemaining,
+      canAttack:enemy.encounter.canAttack};
+  };
+  const grazingOnly=simulate([graze]);
+  assert.ok(Math.abs(grazingOnly.dz)>.01 && Math.abs(grazingOnly.dx)<.001,
+    'a solitary live grazing bullet still earns its original lateral response');
+  const urgentOnly=simulate([imminent]);
+  assert.ok(Math.abs(urgentOnly.dx)>.01 && Math.abs(urgentOnly.dz)<.001,
+    'the imminent torso-bound shot demands the perpendicular escape lane');
+  for(const projectiles of [[graze,imminent],[imminent,graze]]) {
+    const actual=simulate(projectiles);
+    assert.ok(actual.remaining>0,'one genuine approaching threat starts a finite dodge');
+    assert.equal(actual.canAttack,false,'dodging cannot authorize gunfire');
+    assert.deepEqual(actual,urgentOnly,
+      'the earliest real body passage wins regardless of projectile array order');
+  }
+});
