@@ -39,3 +39,33 @@ test('sub-5mm alternating camera jitter does not accumulate phantom footfalls', 
   // would not itself prove human audibility, and must not happen here.
   assert.deepEqual(cues, []);
 });
+
+test('240Hz running has the same Web footstep strength as 60Hz at equal ground speed', () => {
+  // At 240Hz, clamping the speed denominator to 1/120 halved measured
+  // velocity (3m/s -> 1.5m/s), reducing each synthetic step to the 0.45 floor.
+  // This checks emitter intensity, NOT an observed sound or a Unity gait.
+  const measure = (fps) => {
+    const cues = [];
+    const gait = createWebFootstepMotion((cue, request) => {
+      cues.push({cue, ...request});
+      return sourceReceipt;
+    });
+    for (let frame = 0; frame <= fps * 2; frame++) {
+      const timeSeconds = frame / fps;
+      gait.advance({position: {x: 3 * timeSeconds, y: 1.6, z: 0},
+        grounded: true, timeSeconds});
+    }
+    return cues;
+  };
+  const lowRefresh = measure(60);
+  const highRefresh = measure(240);
+  assert.ok(lowRefresh.length >= 3 && highRefresh.length >= 3,
+    'both refresh rates must maintain a grounded gait');
+  assert.ok(Math.abs(lowRefresh.length - highRefresh.length) <= 1,
+    'refresh rate must not change step cadence');
+  for (const {cue, intensity} of [...lowRefresh, ...highRefresh]) {
+    assert.equal(cue, 'step');
+    assert.ok(Math.abs(intensity - 2 / 3) < 1e-8,
+      '3m/s gait should retain the same intensity at 60 and 240Hz');
+  }
+});

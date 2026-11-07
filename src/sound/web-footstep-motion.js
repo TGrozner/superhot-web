@@ -225,7 +225,7 @@ export function createWebFootstepMotion(emit) {
         awaitingFirstContact = false;
         // Use the last sampled frame's distance for loudness, not a 3cm
         // micro-motion batch accumulated over many frames (Web-only tuning).
-        const speed = sampledDistance / Math.max(dt, 1 / 120);
+        const speed = sampledDistance / dt;
         const intensity = Math.min(1, Math.max(0.45, speed / 4.5));
         // Lateral offset is perpendicular to movement, never a guessed MCD bone marker.
         const side = footSide * footLateralOffset;
