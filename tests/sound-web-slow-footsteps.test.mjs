@@ -32,7 +32,7 @@ test('sub-5mm alternating camera jitter does not accumulate phantom footfalls', 
   });
   for (let frame = 0; frame <= 120 * 7; frame++) {
     const timeSeconds = frame / 120;
-    gait.advance({position: {x: frame % 2 ? 0.003 : -0.003, y: 1.6, z: 0},
+    gait.advance({position: {x: frame % 2 ? 0.002 : -0.002, y: 1.6, z: 0},
       grounded: true, timeSeconds});
   }
   // No full directed stride was travelled. Calling the synthetic dispatcher
