@@ -13,6 +13,13 @@ const BANNERS = ['stage-banner', 'chain-banner', 'dodge-banner', 'pickup-prompt'
 // Static controls paint after #pickup-prompt inside #hud; unlike feedback
 // collisions, a geometric overlap matters only when the PROMPT TEXT is hit.
 const HUD_OCCLUDERS = ['hint-bar'];
+// Text-bearing status nodes: the full-width .top-bar is mostly empty space
+// and must never be treated as painted text. Measure its actual descendants.
+const STATUS_LABELS = [
+  { id:'top-brand', selector:'.top-bar .brand' },
+  { id:'top-level', selector:'.top-bar .level-indicator' },
+  { id:'ammo', selector:'#ammo' },
+];
 const INTERSECTION_FRACTION = 0.12;
 
 function boxIntersectionFraction(a, b) {
@@ -117,6 +124,28 @@ export function assessWebVisualReadability({
         detail:'Pickup text intersects the later-painted control strip (geometric occlusion risk)'});
     }
   }
+  // Short mobile viewports can put feedback text directly across the status
+  // labels. Only compare DOM Range *text* bounds on both sides: a full-width
+  // header gradient or an empty CSS rectangle is not a text collision.
+  // These are layout-risk measurements, never WebGL pixels or screenshots.
+  const statusText = boxes.filter(box =>
+    STATUS_LABELS.some(status => status.id === box.id) &&
+    box.textBounds && [box.textBounds.left,box.textBounds.top,
+      box.textBounds.width,box.textBounds.height].every(Number.isFinite) &&
+    box.textBounds.width > 0 && box.textBounds.height > 0);
+  for (const banner of visible) {
+    const ink = banner.textBounds;
+    if (!ink || ![ink.left,ink.top,ink.width,ink.height].every(Number.isFinite) ||
+        ink.width <= 0 || ink.height <= 0) continue;
+    for (const status of statusText) {
+      const fraction = boxIntersectionFraction(ink, status.textBounds);
+      if (fraction >= INTERSECTION_FRACTION) {
+        warnings.push({kind:'feedback-over-status-text',ids:[banner.id,status.id],
+          overlapFraction:Math.round(fraction*1000)/1000,
+          detail:'Measured feedback text range intersects status text range; screenshot confirmation required'});
+      }
+    }
+  }
   for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) {
     const a = visible[i], b = visible[j];
     if (a.id === b.id) continue;
@@ -140,8 +169,13 @@ export function assessWebVisualReadability({
 
 function readVisibleBoxes(windowRef, documentRef) {
   const boxes=[];
-  for (const id of [...BANNERS,...HUD_OCCLUDERS]) {
-    const element=documentRef.getElementById(id);
+  const nodes = [
+    ...[...BANNERS,...HUD_OCCLUDERS].map(id=>({id,element:documentRef.getElementById(id)})),
+    ...STATUS_LABELS.map(({id,selector})=>({
+      id,element:documentRef.querySelector?.(selector),
+    })),
+  ];
+  for (const {id,element} of nodes) {
     if (!element || element.hidden) continue;
     const css=windowRef.getComputedStyle(element);
     if (css.display === 'none' || css.visibility === 'hidden' || Number(css.opacity) < 0.1) continue;
@@ -205,7 +239,8 @@ export function installWebVisualQa({
         observedSamples++;
         for(const w of current.warnings) {
           if(w.kind!=='overlapping-feedback' && w.kind!=='clipped-banner' &&
-             w.kind!=='text-outside-banner' && w.kind!=='pickup-text-in-controls')continue;
+             w.kind!=='text-outside-banner' && w.kind!=='pickup-text-in-controls' &&
+             w.kind!=='feedback-over-status-text')continue;
           const key=w.kind+':'+w.ids.join('/');
           const previous=transient.get(key);
           transient.set(key,{
