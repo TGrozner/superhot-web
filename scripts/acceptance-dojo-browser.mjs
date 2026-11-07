@@ -112,6 +112,24 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
   const frames = [], marks = [], uiActions = [], inputActions = [],
     pressed = new Set(), markerWarnings = [];
   let lastFrameId = -1, timer = null, stopped = false, inputActionsTruncated = false;
+  // Keep only each Web actor's first observed position IN MEMORY; serialize
+  // relative displacements, never absolute source/world spawn coordinates.
+  const actorOrigins = new Map();
+  const observedEnemyOffset = enemy => {
+    const id = asItemKey(enemy?.id);
+    const coords = [enemy?.x, enemy?.y, enemy?.z];
+    if (!id || !coords.every(v => Number.isFinite(v) && Math.abs(v) < 100000)) return null;
+    let origin = actorOrigins.get(id);
+    if (!origin) {
+      if (actorOrigins.size >= 512) return null;
+      origin = coords.slice();
+      actorOrigins.set(id, origin);
+    }
+    const offsets = coords.map((v, i) => v - origin[i]);
+    if (!offsets.every(v => Number.isFinite(v) && Math.abs(v) < 1000)) return null;
+    const round = v => Math.round(v * 100000) / 100000;
+    return {dx:round(offsets[0]), dy:round(offsets[1]), dz:round(offsets[2])};
+  };
   const recordInput = kind => {
     if (!ready || stopped) return;
     let snapshot;
@@ -226,6 +244,10 @@ export function startDojoCapture({ intervalMs = 100, maxFrames = 15000, waitForS
           killTarget: encounter.killTarget, killed: encounter.killed,
           enemies: encounter.enemies?.map(enemy => ({
             id: enemy.id, alive: enemy.alive,
+            // Motion since first observed rendered Web frame for this ID.
+            // Useful for checking actual travel after a blocked flank without
+            // serializing original/source absolute positions or hitboxes.
+            motionFromFirstSampleMeters: observedEnemyOffset(enemy),
             // The host already exposes this status. Capture the bounded Web-only
             // failure reason for real owner-browser acceptance; no native claim.
             deathPhysics: enemy.alive === false
