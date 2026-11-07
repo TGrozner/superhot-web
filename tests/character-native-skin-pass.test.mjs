@@ -1513,6 +1513,30 @@ test('Dojo source-named neck chain actually animates the GPU head with no Head b
   });
   near(Array.from(aimNext.weaponAttachmentMatrix),
     Array.from(sameTimeNeutral.weaponAttachmentMatrix));
+
+  // Regression on main: even with confirmed targetSight, the >1m gates
+  // discard BOTH head yaw and pitch near a player. This is a WEB animation
+  // polish test, not proof of native head IK or an altered combat aim.
+  const closeActors = createNativeActorSkinRuntime(pass);
+  const closeFrame = time => closeActors.drawActor({
+    actorId:'dojo-visible-near', pose:{state:'idle',time,targetSight:true},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:{x:.48,y:1.9,z:.65}, shaderTime:time*10,
+    color:[.8,.1,.2,1],
+  });
+  closeFrame(0);
+  const closeGaze = closeFrame(.12);
+  assert.ok(closeGaze.actorWebHeadLook?.yaw > .1,
+    'a confirmed visible threat inside 1m must still turn the source neck');
+  assert.ok(closeGaze.actorWebHeadLook?.pitch > .08,
+    'the terminal neck tip must still track confirmed nearby eye elevation');
+  const closeNeutral = createNativeActorSkinRuntime(pass).drawActor({
+    actorId:'dojo-visible-near', pose:{state:'idle',time:.12,targetSight:true},
+    modelMatrix:identity(), viewProjection:identity(), cameraPosition:null,
+    shaderTime:1.2, color:[.8,.1,.2,1],
+  });
+  near(Array.from(closeGaze.weaponAttachmentMatrix),
+    Array.from(closeNeutral.weaponAttachmentMatrix));
   pass.dispose();
 
   const noChain={...pkg,bones:pkg.bones.map((bone,i)=>
