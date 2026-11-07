@@ -68,10 +68,13 @@ export function advanceDojoGlobalStreak(previous: Readonly<DojoGlobalStreak> | n
     currentStreak, bestStreak, lastQuota: round.quota,
   });
   const previousStreak = previous?.currentStreak ?? 0;
-  const announcement = round.victory && currentStreak >= 2
-    ? `SÉRIE GLOBALE ${currentStreak} VICTOIRES${currentStreak > (previous?.bestStreak ?? 0) ? ' · NOUVEAU RECORD' : ''}`
-    : !round.victory && previousStreak >= 2
-      ? `SÉRIE GLOBALE ${previousStreak} BRISÉE`
-      : null;
+  // Web UX: the first win must explain that a global series has started;
+  // losing that single win must be visible, including across quota formats.
+  // SH-05 already appends this announcement to the existing result screen.
+  const announcement = round.victory
+    ? currentStreak === 1
+      ? 'SÉRIE GLOBALE 1 · ENCHAÎNE POUR PASSER À 2'
+      : `SÉRIE GLOBALE ${currentStreak} VICTOIRES${currentStreak > (previous?.bestStreak ?? 0) ? ' · NOUVEAU RECORD' : ''}`
+    : previousStreak > 0 ? `SÉRIE GLOBALE ${previousStreak} BRISÉE` : null;
   return Object.freeze({record, announcement, provenance: 'WEB_ONLY'});
 }
