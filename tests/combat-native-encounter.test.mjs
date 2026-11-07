@@ -3626,3 +3626,58 @@ test('J3 Web asymmetrical low-cover peek commits only toward a reachable clear f
   assert.equal(sealed.enemy.encounter.canAttack,false,
     'neither lookahead nor blocked footwork authorizes a new gun attack');
 });
+
+test('J3 Web fireteam: a cooling front gunner yields a real rear firing lane without ghost shots',()=>{
+  // Synthetic open Dojo corridor; original MCD squad AI is not asserted.
+  // Rear and front both see the player, but the living front capsule blocks
+  // the rear's currently posed muzzle. Front cannot finish its reload this tick.
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2),playerForward:p(0,0,1)};
+  const make=colliders=>{
+    const runtime=setup(scene(),colliders);
+    const rear=firstSpawn(runtime,player);
+    const front=structuredClone(rear);
+    front.id='synthetic-cooling-front';
+    front.x=4;front.y=0;front.z=2;
+    for(const actor of [rear,front]) {
+      actor.clock=0; // No cyclical reload scoot or tactical strafe.
+      actor.runtime.alertness=2;
+      actor.runtime.haveBeenSeen=true;
+      actor.muzzlePosition=p(actor.x,1.4,actor.z);
+      actor.muzzleForward=p(1,0,0);
+    }
+    rear.runtime.attackDelayRemaining=-1;
+    front.runtime.attackDelayRemaining=2; // Real cooldown, not a pending shot.
+    const actors=[rear,front];
+    const tick=()=> {
+      for(const actor of actors)actor.muzzlePosition=p(actor.x,1.4,actor.z);
+      advanceNativeEncounter(runtime,input(actors,{
+        ...player,scaledDeltaTime:.2,unscaledDeltaTime:.2,
+      }));
+    };
+    return {runtime,rear,front,actors,tick};
+  };
+
+  const open=make([]);
+  open.tick();
+  assert.equal(open.rear.encounter.webAllyBlockingShot,true,
+    'the original rear muzzle stays blocked for the pre-movement attack election');
+  assert.equal(open.rear.encounter.canAttack,false,
+    'sideways footwork never authorizes a ghost shot during the blocked tick');
+  assert.ok(open.rear.z<1.95 && open.front.z>2.05,
+    'two live squadmates separate instead of parallel-strafing in the same muzzle lane');
+  assert.equal(open.front.runtime.pendingShot,null,'a cooling gunner cannot invent a shot');
+  assert.ok(Math.hypot(open.front.x-open.rear.x,open.front.z-open.rear.z)>.8,
+    'both bodies retain native swept capsule spacing');
+  open.tick();
+  assert.equal(open.rear.encounter.webAllyBlockingShot,false,
+    'after real separation, the new posed rear muzzle is no longer obstructed');
+  assert.equal(open.rear.encounter.canAttack,true,
+    'the rear can only shoot after its own refreshed muzzle and eye checks');
+
+  const walled=make([box(4,.6,2.6,1,1.2,.1)]);
+  walled.tick();
+  assert.ok(walled.front.z<2.3,
+    'a real world collider prevents stepping straight through the blocked yield side');
+  assert.equal(walled.rear.encounter.canAttack,false,
+    'failed cover clearance never converts a blocked rear shot into damage');
+});
