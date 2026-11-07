@@ -895,8 +895,8 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
  *   paused?:boolean,x?:number,y?:number,grounded?:boolean,yaw?:number,
  *   pitch?:number,lookPathDegrees?:number}} frame
  * @returns {{worldSteps:number[],worldStepOffsets:number[],
- *   simulationStepDeltas:number[],unscaledStepDeltas:number[],chargedActiveDt:number,
- *   discardedActiveDt:number,worldDelta:number,appliedTimeScale:number,
+ *   simulationStepDeltas:number[],unscaledStepDeltas:number[],unscaledFrameDelta:number,
+ *   chargedActiveDt:number,discardedActiveDt:number,worldDelta:number,appliedTimeScale:number,
  *   timeScale:number,aggregate:number}}
  */
 export function stepWebMcdGameplayFrame(clock, {
@@ -935,7 +935,13 @@ export function stepWebMcdGameplayFrame(clock, {
   // multiply these real-time timers. Keep the two independent domains explicit:
   // simulationStepDeltas sum to chargedActiveDt (movement/damping budget),
   // unscaledStepDeltas sum to activeRealDt (one RAF's active elapsed time).
-  // WEB-ONLY scheduling contract; not a native Unity fixed-step cadence.
+  // A frame-scoped discontinuity guard MUST inspect the unsplit RAF delta.
+  // In #567 the Dojo encounter resets stationary sight on >0.25s real hitches.
+  // A .8s hitch sliced into 4 x .2s otherwise looks like uninterrupted LOS
+  // and charges a fake continuous observation. Do not reuse this FULL delta
+  // as a per-slice timer increment: unscaledStepDeltas owns that partition.
+  // Both rules are WEB-original, not MCD frame-scheduler evidence.
+  const unscaledFrameDelta = paused ? 0 : activeRealDt;
   const simulationStepDeltas = [];
   const unscaledStepDeltas = [];
   if (chargedActiveDt > 0 && tick.worldDelta > 0) {
@@ -974,7 +980,7 @@ export function stepWebMcdGameplayFrame(clock, {
   }
   return {
     ...tick, worldSteps, worldStepOffsets, simulationStepDeltas,
-    unscaledStepDeltas, chargedActiveDt,
+    unscaledStepDeltas, unscaledFrameDelta, chargedActiveDt,
     discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
   };
 }
