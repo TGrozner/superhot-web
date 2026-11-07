@@ -136,6 +136,14 @@ const WEB_WARNING_REAL_NOTICE_START_SECONDS = 1.5;
 const WEB_WARNING_REAL_NOTICE_FULL_SECONDS = 0.25;
 const WEB_WARNING_REAL_NOTICE_RANGE_FLOOR = 0.34;
 const WEB_WARNING_REAL_NOTICE_FILL_FLOOR = 0.22;
+// J4 Web arrival accent: at the exact accepted spawn countdown crossing,
+// briefly bloom the SAME source-qualified spot + false-light. The existing
+// real-time release envelope damps this single hit without a second clock,
+// packet, GPU slot, geometry or high-frequency flashing. Not native MCD.
+const WEB_WARNING_SPAWN_IMPACT_RANGE_BONUS = 0.25;
+const WEB_WARNING_SPAWN_IMPACT_FILL_BONUS = 0.32;
+const WEB_WARNING_SPAWN_IMPACT_SPOT_GAIN = 0.32;
+const WEB_WARNING_SPAWN_IMPACT_IRIS_FOCUS = 0.18;
 
 function smooth01(value) {
   const t = Math.max(0, Math.min(1, value));
@@ -328,12 +336,17 @@ function createWebWarningSweep(catalog, controller, collision) {
         ? smooth01((WEB_WARNING_REAL_NOTICE_START_SECONDS - base.arrivalRemaining) /
             (WEB_WARNING_REAL_NOTICE_START_SECONDS - WEB_WARNING_REAL_NOTICE_FULL_SECONDS)) : 0;
       const realNotice = realNoticeShape * base.arrivalEmphasis;
+      // The controller's real countdown reaches zero on enemy arrival.
+      // The same already-decaying emphasis holds this accent only briefly;
+      // no source-time advance or fabricated spawn event is involved.
+      const spawnImpact = base.arrivalRemaining === 0 ? realNotice : 0;
       // SH-07 has just sampled the original range; multiplication NEVER
       // compounds from the previous frame. The source envelope still fades.
       packet.spotlight.range *= 1 + WEB_WARNING_RANGE_GAIN * breathing;
       if (realNotice > 0 && Number.isFinite(base.range) && base.range > 0) {
         packet.spotlight.range = Math.max(packet.spotlight.range,
-          base.range * WEB_WARNING_REAL_NOTICE_RANGE_FLOOR * realNotice);
+          base.range * (WEB_WARNING_REAL_NOTICE_RANGE_FLOOR * realNotice +
+            WEB_WARNING_SPAWN_IMPACT_RANGE_BONUS * spawnImpact));
       }
       // SH-07 has already written this tick's source value. Never compound
       // the false light across frames, and never activate an inactive packet.
@@ -344,14 +357,17 @@ function createWebWarningSweep(catalog, controller, collision) {
         if (realNotice > 0 && Number.isFinite(base.falseLightIntensity) &&
             base.falseLightIntensity > 0) {
           packet.falseLight.intensity = Math.max(packet.falseLight.intensity,
-            base.falseLightIntensity * WEB_WARNING_REAL_NOTICE_FILL_FLOOR *
-            realNotice * base.focusGain);
+            base.falseLightIntensity *
+              (WEB_WARNING_REAL_NOTICE_FILL_FLOOR * realNotice +
+                WEB_WARNING_SPAWN_IMPACT_FILL_BONUS * spawnImpact) *
+              base.focusGain);
         }
       }
       if (Number.isFinite(base.intensity) && base.intensity >= 0) {
         packet.spotlight.intensity = base.intensity *
           (1 + WEB_WARNING_INTENSITY_GAIN * breathing +
-            WEB_WARNING_ARRIVAL_SPOT_GAIN * arrival) * base.focusGain;
+            WEB_WARNING_ARRIVAL_SPOT_GAIN * arrival +
+            WEB_WARNING_SPAWN_IMPACT_SPOT_GAIN * spawnImpact) * base.focusGain;
       }
       if (!base.direction) continue;
       // J4 Web-authored lighthouse: as the red beam sweeps sideways its
@@ -499,7 +515,8 @@ function createWebWarningSweep(catalog, controller, collision) {
         ? Math.max(worldSpill, realNoticeShape) * base.arrivalEmphasis : 0;
       packet.spotlight.spotAngle = base.spotAngle *
         (1 - WEB_WARNING_IRIS_FOCUS * breathing -
-          WEB_WARNING_ARRIVAL_IRIS_FOCUS * arrival);
+          WEB_WARNING_ARRIVAL_IRIS_FOCUS * arrival -
+          WEB_WARNING_SPAWN_IMPACT_IRIS_FOCUS * spawnImpact);
       for (let axis = 0; axis < 3; axis++) {
         const yawedDirection = base.direction[axis] * cosYaw +
           base.right[axis] * sinYaw;
