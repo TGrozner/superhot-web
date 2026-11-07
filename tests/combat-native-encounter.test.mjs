@@ -3254,3 +3254,49 @@ test('J3 Web slow-time reactions retain cold-start acceleration for real bullet,
   assert.equal(sideStepper.encounter.canAttack,false,
     'an evasive aim response never grants an extra shot');
 });
+
+test('J3 Web blind hunter accelerates through a real last-seen search at 60Hz, including slow-world .005',()=>{
+  // Synthetic geometry only: the gunner first really sees the player, then
+  // reaches the last-known feet while a wall conceals the relocated player.
+  // This is Web investigation gameplay, never a native MCD behavior claim.
+  function searcher() {
+    const visible={playerFeet:p(6,0,2),playerPosition:p(6,1.6,2)};
+    const runtime=setup(scene(),[box(8,1,5,.4,2,5)]);
+    const enemy=firstSpawn(runtime,visible);
+    advanceNativeEncounter(runtime,input([enemy],{...visible,scaledDeltaTime:0}));
+    assert.deepEqual(enemy.encounter.webLastSeenFeet,visible.playerFeet);
+    Object.assign(enemy,{x:6,y:0,z:2});
+    // Stop unrelated reinforcements while studying one real live actor.
+    runtime.spawner.enemiesLeft=0;
+    runtime.spawner.pending.length=0;
+    runtime.arrivals.length=0;
+    return {runtime,enemy};
+  }
+  const hidden={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
+  for(const [scale,frames,minTravel] of [[1,36,.12],[.005,240,.0001]]) {
+    const {runtime,enemy}=searcher();
+    const worldDt=(1/60)*scale,realDt=1/60;
+    const tick=()=>advanceNativeEncounter(runtime,input([enemy],{
+      ...hidden,scaledDeltaTime:worldDt,unscaledDeltaTime:realDt,
+    }));
+    for(let frame=0;frame<frames;frame++) {
+      tick();
+      assert.equal(enemy.encounter.visible,false,'real world wall hides player');
+      assert.deepEqual(enemy.encounter.webLastSeenFeet,p(6,0,2),
+        'a hidden player cannot update the personally witnessed search feet');
+    }
+    assert.ok(Math.hypot(enemy.x-6,enemy.z-2)>minTravel,
+      'the hunter accelerates through an actual capsule-swept search, not a stationary twitch');
+    assert.ok(enemy.runtime.speed>0.15*scale,
+      'walking speed accumulates across Update ticks rather than resetting every tick');
+    assert.ok(Math.hypot(enemy.x-6,enemy.z-2)<runtime.body.radius*3.5+1e-5,
+      'search stays within the genuine last-seen bounded investigation radius');
+    assert.equal(enemy.encounter.canAttack,false,'blind search grants no gun permission');
+    const where=p(enemy.x,enemy.y,enemy.z),beforeSpeed=enemy.runtime.speed;
+    advanceNativeEncounter(runtime,input([enemy],{
+      ...hidden,scaledDeltaTime:0,unscaledDeltaTime:realDt,
+    }));
+    assert.deepEqual(p(enemy.x,enemy.y,enemy.z),where,'paused world cannot search');
+    assert.equal(enemy.runtime.speed,beforeSpeed,'paused world does not change search acceleration');
+  }
+});
