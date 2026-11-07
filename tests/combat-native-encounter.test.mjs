@@ -3286,7 +3286,7 @@ test('J3 Web blind hunter accelerates through a real last-seen search at 60Hz, i
         'a hidden player cannot update the personally witnessed search feet');
     }
     assert.ok(Math.hypot(enemy.x-6,enemy.z-2)>minTravel,
-      'the hunter accelerates through an actual capsule-swept search, not a stationary twitch');
+      `search movement missing scale=${scale} feet=(${enemy.x},${enemy.z}) speed=${enemy.runtime.speed} searchRemaining=${enemy.encounter.webSearchRemaining} complete=${enemy.encounter.webSearchComplete} pass=${enemy.encounter.webSearchPass} seen=${JSON.stringify(enemy.encounter.webLastSeenFeet)}`);
     assert.ok(enemy.runtime.speed>0.15*scale,
       'walking speed accumulates across Update ticks rather than resetting every tick');
     assert.ok(Math.hypot(enemy.x-6,enemy.z-2)<runtime.body.radius*3.5+1e-5,
