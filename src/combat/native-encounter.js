@@ -120,6 +120,14 @@ const WEB_UNWATCHED_APPROACH=Object.freeze({stopFraction:0.72,backDot:-0.45});
 const WEB_RETREAT_PRESSURE=Object.freeze({
   minimumRetreatSpeed:1.6,stopFraction:0.78,minimumStopBodyRadii:3.2,
 });
+// J3 Web-original anti-camping: after personally watching a player hold
+// roughly the same feet for sustained WORLD time, an ordinary gunner closes
+// its firing ring. Moving, breaking sight or stunning the gunner cancels the
+// pressure; it cannot chase a player hidden behind cover or change shot gates.
+// Long-range sniper roles intentionally keep their existing spacing.
+const WEB_STATIONARY_PRESSURE=Object.freeze({
+  holdSeconds:1.6,resetBodyRadii:1.2,stopFraction:0.68,minimumStopBodyRadii:3,
+});
 function webVisiblePlayerRetreats(previous,current,enemyFeet,scaledDeltaTime) {
   if(!previous || !(scaledDeltaTime>EPSILON))return false;
   if(![previous.x,previous.z,current.x,current.z,enemyFeet.x,enemyFeet.z]
@@ -1196,6 +1204,7 @@ function spawnEnemy(runtime, point, order, population, playerFeet) {
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
+      webStationaryAnchor:null,webStationarySeconds:0, // Only genuinely observed world-time camping.
       webLastSeenFeet:null, // Personally observed player feet, never inferred from a bullet.
       webDispatchFeet:{...playerFeet}, // Web clue captured at DOOR WARNING, not hidden-player position at arrival.
       webBulletClueFeet:null, // Accessible location where a real bullet was seen.
@@ -1338,6 +1347,8 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webCounterPushRemaining=0;
     state.webSupportRemaining=0;
     state.webObservedPlayerFeet=null;
+    state.webStationaryAnchor=null;
+    state.webStationarySeconds=0;
     cancelWebProjectileEvade(state);
     state.webLossRemaining=0;
     state.webLossFeet=null;
@@ -1423,6 +1434,23 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const playerRetreating=state.visible &&
     webVisiblePlayerRetreats(state.webObservedPlayerFeet,playerFeet,start,scaledDeltaTime);
   state.webObservedPlayerFeet=state.visible ? {...playerFeet} : null;
+  // A personally witnessed *stationary* player invites a bounded close-in
+  // approach. The anchor is actual observed feet, not an ally's reported or
+  // inferred position. A real displacement beyond the body-scaled radius
+  // immediately loses the pressure, even after a long idle hold.
+  if(!state.visible || !armed) {
+    state.webStationaryAnchor=null;
+    state.webStationarySeconds=0;
+  } else if(!state.webStationaryAnchor ||
+      Math.hypot(state.webStationaryAnchor.x-playerFeet.x,
+        state.webStationaryAnchor.z-playerFeet.z)>
+          runtime.body.radius*WEB_STATIONARY_PRESSURE.resetBodyRadii) {
+    state.webStationaryAnchor={...playerFeet};
+    state.webStationarySeconds=0;
+  } else if(scaledDeltaTime>0) {
+    state.webStationarySeconds=Math.min(WEB_STATIONARY_PRESSURE.holdSeconds,
+      state.webStationarySeconds+scaledDeltaTime);
+  }
   // Web-authored fairness: a spawn gets exactly one dispatch coordinate.
   // Neither never-seen enemies nor those who lose real sight can track
   // subsequent hidden player motion. This is not native MCD AI behavior.
@@ -1689,6 +1717,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webCounterPushRemaining>EPSILON && !weaponRole?.holdRange;
   const retreatPressure=armed && state.visible && playerRetreating &&
     !enemy.runtime.pendingShot && !weaponRole?.holdRange;
+  const stationaryPressure=armed && state.visible && !enemy.runtime.pendingShot &&
+    !weaponRole?.holdRange &&
+    state.webStationarySeconds>=WEB_STATIONARY_PRESSURE.holdSeconds;
   const stopDistance=breaching
     ? Math.min(normalStopDistance,Math.max(
         runtime.body.radius*WEB_SQUAD_PUSH.minimumStopBodyRadii,
@@ -1699,6 +1730,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     : retreatPressure ? Math.min(normalStopDistance,Math.max(
         runtime.body.radius*WEB_RETREAT_PRESSURE.minimumStopBodyRadii,
         normalStopDistance*WEB_RETREAT_PRESSURE.stopFraction))
+    : stationaryPressure ? Math.min(normalStopDistance,Math.max(
+        runtime.body.radius*WEB_STATIONARY_PRESSURE.minimumStopBodyRadii,
+        normalStopDistance*WEB_STATIONARY_PRESSURE.stopFraction))
     : normalStopDistance;
   const playerDistance=distance(start,playerFeet);
   const stop=state.visible && playerDistance <= stopDistance;
