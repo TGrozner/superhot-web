@@ -1327,15 +1327,23 @@ function webSquadLaneYielders(runtime, enemies, fireTurns, localSquads, target, 
         !(shooter.runtime.alertness>settings.alertDelay*1.05) ||
         !(shooter.runtime.attackDelayRemaining<tickCost))continue;
     const squad=localSquads.get(shooter);
-    if(!squad || squad.length<2)continue;
+    if(!squad)continue;
     const muzzle=shooter.muzzlePosition;
     const rayX=target.x-muzzle.x,rayZ=target.z-muzzle.z;
     const squared=rayX*rayX+rayZ*rayZ;
     if(squared<=EPSILON)continue;
     // Move only the first *actual* obstructing member, never a distant
     // bystander or the squadmate whose already-committed shot must finish.
-    const candidates=squad.filter(ally=>ally!==shooter && !yielders.has(ally) &&
-      participating(ally) && ally.encounter && ally.reaction?.hasWeapon &&
+    // J3 Web-only: a disarmed teammate may be the *actual* blocker of a
+    // ready gunner's muzzle. It is not in an armed fireteam, but can yield
+    // when physically nearby and still outside its own melee range.
+    // The source collision, attack priority and actor-sweep gates stay intact.
+    const candidates=enemies.filter(ally=>ally!==shooter && !yielders.has(ally) &&
+      participating(ally) && ally.encounter &&
+      (squad.includes(ally) || (ally.reaction?.hasWeapon===false &&
+        Math.hypot(ally.x-shooter.x,ally.z-shooter.z)<=
+          runtime.body.radius*WEB_SQUAD_VOLLEY.rangeBodyRadii &&
+        Math.hypot(ally.x-target.x,ally.z-target.z)>runtime.body.radius*4)) &&
       !ally.runtime.pendingShot && !fireTurns.turn.has(ally) &&
       ally.reaction.stunRemaining<=0 && !ally.reaction.stunnedThisFrame &&
       ally.encounter.webDodgeRemaining<=0 &&
@@ -2004,12 +2012,13 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     }
   }
   // An actually ready teammate cannot shoot because our live capsule is in
-  // its muzzle corridor. While our own weapon is cooling down, yield a few
-  // REAL sideways footsteps to clear that lane. An existing danger reaction,
+  // its muzzle corridor. A cooling gunner OR a disarmed ally still outside
+  // melee range may yield a few REAL sideways footsteps to clear that lane.
+  // An existing danger reaction,
   // committed shot or stun always wins. This is Web-authored squad movement,
   // not an extra projectile, damage event or native MCD behavior.
   const firingLane=laneYielders.get(enemy);
-  if(firingLane && armed && state.visible && !enemy.runtime.pendingShot &&
+  if(firingLane && state.visible && !enemy.runtime.pendingShot &&
       scaledDeltaTime>0) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'walking',scaledDeltaTime);
