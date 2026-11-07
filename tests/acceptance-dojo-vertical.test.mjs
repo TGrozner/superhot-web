@@ -95,6 +95,26 @@ test('SH10 also accepts an independently completed 7-kill trace without assertin
   assert.equal(result.observed.killTarget,7);
 });
 
+test('SH10 real Web enemy-motion diagnostic distinguishes sampled travel from unknown cause',()=>{
+  const trace=complete();
+  const old=report(trace);
+  assert.equal(old.observed.enemyMotion.status,'UNKNOWN_NO_WEB_ENEMY_MOTION_TELEMETRY');
+  for (let i=10;i<=13;i++) {
+    trace.frames[i].gameplay.encounter.enemies[0].motionFromFirstSampleMeters=
+      {dx:(i-10)*.04,dy:0,dz:0};
+  }
+  const result=report(trace);
+  assert.equal(result.status,DOJO_VERTICAL_STATUS.COMPLETE,JSON.stringify(result.errors));
+  assert.equal(result.observed.enemyMotion.status,'WEB_ENEMY_MOTION_SAMPLED_OBSTACLE_CAUSE_UNKNOWN');
+  assert.equal(result.observed.enemyMotion.trackedLivingActors,1);
+  assert.equal(result.observed.enemyMotion.actorsMovingOver5cm,1);
+  assert.equal(result.observed.enemyMotion.actors[0].sampledFrames,4);
+  assert.ok(Math.abs(result.observed.enemyMotion.actors[0].cumulativeMeters-.12)<1e-8);
+  assert.ok(result.observed.enemyMotion.actors[0].maximumSampledStepMeters<.05);
+  assert.equal(result.nativeParityVerdict,'UNKNOWN');
+  assert.equal(result.browserActuallyExecutedByThisTest,false);
+});
+
 test('SH10 baseline alone does not prove pickup, gun or route',()=>{
   const data=complete();
   data.frames.forEach(f=>{f.gameplay.itemStates=[];f.gameplay.heldItem=null;});
