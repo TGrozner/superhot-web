@@ -21,7 +21,7 @@ test('slow grounded movement at 120 FPS produces a real distance-driven footfall
   assert.ok(cues.length >= 1, 'directed walking should eventually plant a foot');
   assert.ok(cues.length <= 2, 'small frame motion must not inflate the gait rate');
   assert.ok(cues.every(({cue}) => cue === 'step'));
-  assert.ok(cues.every(({request}) => request.position.y === 0.35));
+  assert.ok(cues.every(({request}) => Math.abs(request.position.y - 0.35) < 1e-9));
 });
 
 test('sub-5mm alternating camera jitter does not accumulate phantom footfalls', () => {
