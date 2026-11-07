@@ -2971,7 +2971,7 @@ test('J3 Web stationary-player pressure moves a visible gunner inside its old ri
   Object.assign(gunner,{x:2,y:0,z:3.2});
   const player=p(2,0,5),eyes=p(2,1.6,5);
   const tick=(worldDt,overrides={})=>advanceNativeEncounter(runtime,input([gunner],{
-    scaledDeltaTime:worldDt,unscaledDeltaTime:0,
+    scaledDeltaTime:worldDt,unscaledDeltaTime:worldDt,
     playerFeet:{...player},playerPosition:{...eyes},
     // Sideways camera avoids the unrelated unwatched-push and aimed-dodge rules.
     playerForward:p(1,0,0),...overrides,
@@ -3011,4 +3011,36 @@ test('J3 Web stationary-player pressure moves a visible gunner inside its old ri
   assert.equal(gunner.encounter.webStationaryAnchor,null);
   assert.equal(gunner.encounter.webStationarySeconds,0);
   assert.equal(gunner.encounter.canAttack,false);
+});
+
+
+test('J3 Web stationary player is noticed in active seconds even at the slow-world floor',()=>{
+  // Dojo-style 0.5% world speed at 60Hz: 1.6 s of actual personal sight,
+  // NOT 320 real seconds, must suffice. Geometry and timing are synthetic.
+  const runtime=setup(),gunner=firstSpawn(runtime);
+  Object.assign(gunner,{x:2,y:0,z:3.2});
+  const playerFeet=p(2,0,5),playerPosition=p(2,1.6,5);
+  const tick=(worldDt,realDt)=>advanceNativeEncounter(runtime,input([gunner],{
+    scaledDeltaTime:worldDt,unscaledDeltaTime:realDt,
+    playerFeet,playerPosition,playerForward:p(1,0,0),
+  }));
+  const realFrame=1/60,worldFrame=realFrame*0.005;
+  for(let i=0;i<85;i++)tick(worldFrame,realFrame);
+  assert.ok(gunner.encounter.webStationarySeconds<1.6);
+  assert.equal(gunner.z,3.2,'the original firing ring remains before a sustained hold');
+  for(let i=0;i<25;i++)tick(worldFrame,realFrame);
+  assert.equal(gunner.encounter.webStationarySeconds,1.6,
+    'a continuously visible stationary player triggers pressure in active real seconds');
+  assert.ok(gunner.z>3.2,
+    'slow world movement makes forward progress rather than losing sub-micrometre acceleration');
+  assert.ok(gunner.z<3.21,
+    'the Web cue does not teleport or accelerate enemy motion outside world time');
+  const previous=gunner.encounter.webStationarySeconds,previousPosition=gunner.z;
+  tick(0,realFrame);
+  assert.equal(gunner.encounter.webStationarySeconds,previous,
+    'a genuinely paused world never accrues pressure even if real time passes');
+  assert.equal(gunner.z,previousPosition,'a frozen world never advances the enemy');
+  tick(worldFrame,.4);
+  assert.equal(gunner.encounter.webStationarySeconds,0,
+    'a long suspended real-time frame cannot stand in for continuous observation');
 });
