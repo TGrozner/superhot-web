@@ -3339,4 +3339,30 @@ test('J3 Web long-range low-cover: a distant armed witness peeks with its body, 
   advanceNativeEncounter(unknown,input([unposed],{...player,scaledDeltaTime:.2}));
   assert.equal(unposed.encounter.canAttack,false,'unknown muzzle cannot fire');
   assert.ok(Math.abs(unposed.z-2)<.001,'unknown muzzle cannot invent a long-range cover peek');
+
+  // SH-15 review: a real low wall blocks forward pursuit, while the first
+  // side-step is smaller than the collision epsilon at 60Hz/TimeScale .005.
+  // The gunner must retain acceleration until an actual legal sideways move,
+  // not fall back to the blocked route and reset speed every frame.
+  const slow=setup(data,[box(5,.65,2,.15,1.3,1.4)]);
+  const slowGunner=firstSpawn(slow,player);
+  const slowStart=p(slowGunner.x,slowGunner.y,slowGunner.z);
+  const worldDt=(1/60)*.005;
+  slowGunner.muzzleForward=p(1,0,0);
+  for(let frame=0;frame<240;frame++) {
+    slowGunner.clock=1.6+frame*worldDt; // Stays in the finite world-time peek window.
+    slowGunner.muzzlePosition=p(slowGunner.x,.3,slowGunner.z);
+    advanceNativeEncounter(slow,input([slowGunner],{
+      ...player,scaledDeltaTime:worldDt,unscaledDeltaTime:1/60,
+    }));
+    assert.equal(slowGunner.encounter.canAttack,false,
+      'an initially blocked muzzle never gains speculative firing permission');
+    assert.ok(slowGunner.x<4.5,'even slow-time feet cannot cross the real low wall');
+  }
+  assert.ok(slowGunner.runtime.speed>.08,
+    'cold-start peeking accumulates walking speed instead of being repeatedly reset');
+  assert.ok(Math.abs(slowGunner.z-slowStart.z)>.0001,
+    'a legal swept lateral displacement eventually emerges at the slow-time floor');
+  assert.ok(Math.abs(slowGunner.x-slowStart.x)<.001,
+    'low-time cover peeking changes the firing angle, not the wall collision');
 });
