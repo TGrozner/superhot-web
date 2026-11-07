@@ -3469,3 +3469,39 @@ test('J3 Web swept crossfire: dodge avoids an in-flight bullet across its path e
   assert.ok(dodge([urgent,{...crossing,ttl:.03}]).dx>.5,
     'a bullet expiring before crossing the moving body cannot divert the dodge');
 });
+
+test('J3 Web crossfire composure: a grazing round cannot bait both legal dodges into bullets at 60 FPS',()=>{
+  // Synthetic Web rounds on a clear nav plane. A graze inside the 2.3-body-
+  // radius warning cylinder misses the stationary .4m body, but both lateral
+  // landing corridors would be intersected by independent live rounds.
+  const graze={friendly:true,pos:p(2.6,1,1.5),velocity:p(0,0,35),ttl:.5};
+  const left={friendly:true,pos:p(1.55,1,-1.15),velocity:p(0,0,35),ttl:.5};
+  const right={friendly:true,pos:p(2.45,1,-1.15),velocity:p(0,0,35),ttl:.5};
+  const simulate=projectiles=>{
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.runtime.speed=5; // Existing running speed: 1/60s is a realistic short tick.
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:1/60,playerProjectiles:projectiles,
+    }));
+    return {dx:enemy.x-start.x,dz:enemy.z-start.z,
+      remaining:enemy.encounter.webDodgeRemaining,
+      cooldown:enemy.encounter.webDodgeCooldown,
+      canAttack:enemy.encounter.canAttack};
+  };
+  const ordinary=simulate([graze]);
+  assert.ok(Math.abs(ordinary.dx)>.04 && Math.abs(ordinary.dz)<1e-6,
+    'a solitary warning round still provokes normal physically swept footwork');
+  const surrounded=simulate([graze,left,right]);
+  assert.ok(Math.abs(surrounded.dx)<1e-6 && Math.abs(surrounded.dz)<1e-6,
+    'holding a safer position beats both live crossfire landing corridors');
+  assert.equal(surrounded.remaining,0,'the unsafe dodge ends instead of chaining into pursuit');
+  assert.ok(surrounded.cooldown>0,'avoid triggering the same unsatisfiable dodge every frame');
+  assert.equal(surrounded.canAttack,false,'choosing to hold never manufactures an extra shot');
+  assert.deepEqual(surrounded,simulate([right,graze,left]),
+    'live bullet order cannot affect a safer static choice');
+  assert.ok(Math.abs(simulate([graze,{...left,ttl:.03},{...right,ttl:.03}]).dx)>.04,
+    'rounds that expire before reaching the dodge lane never force a hold');
+});
