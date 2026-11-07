@@ -1327,6 +1327,41 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   assert.equal(rearUnknown(.1).actorWebHeadLook, null,
     'camera-only rear position cannot invent gameplay visibility');
 
+  // Real Dojo encounter geometry: when personally visible, SH-03 rotates
+  // enemy.face to atan2(player.x-enemy.x,-(player.z-enemy.z)) in the SAME tick.
+  // Therefore a player behind the CURRENT model forward is not a reliable
+  // gameplay scenario. Verify a real first-frame +90-degree body facing snap
+  // produces an independently sampled, damped Web neck follow-through.
+  const faceSnapActors = createNativeActorSkinRuntime(pass);
+  const facingX = identity();
+  facingX[0] = 0; facingX[2] = -1;
+  facingX[8] = 1; facingX[10] = 0;
+  const snapFrame = (time, turned, sight) => faceSnapActors.drawActor({
+    actorId:'turn-watchman', pose:{state:'idle',time,targetSight:sight},
+    modelMatrix: turned ? facingX : identity(),
+    viewProjection:identity(),
+    cameraPosition:{x:5,y:1.5,z:0}, shaderTime:time*10,
+    color:[.8,.1,.2,1],
+  });
+  assert.equal(snapFrame(0,false,false).actorWebHeadLook,null);
+  const firstTurn = snapFrame(.08,true,true);
+  assert.ok(firstTurn.actorWebHeadLook?.yaw < -.2 &&
+    firstTurn.webHeadLookApplied === true,
+    'real instantaneous AI facing must produce an observable neck follow-through');
+  const sourceTurn = createNativeActorSkinRuntime(pass).drawActor({
+    actorId:'turn-control', pose:{state:'idle',time:.08,targetSight:false},
+    modelMatrix:facingX,viewProjection:identity(),
+    cameraPosition:null,shaderTime:.8,color:[.8,.1,.2,1],
+  });
+  near(Array.from(firstTurn.weaponAttachmentMatrix),
+    Array.from(sourceTurn.weaponAttachmentMatrix));
+  const easedTurn = snapFrame(.16,true,true);
+  assert.ok(easedTurn.actorWebHeadLook.yaw > firstTurn.actorWebHeadLook.yaw,
+    'settled facing must damp neck follow-through without rotating the weapon');
+  const pausedTurn = snapFrame(.16,true,true);
+  assert.equal(pausedTurn.actorWebHeadLook.yaw,easedTurn.actorWebHeadLook.yaw,
+    'a zero-world-time frame must not advance authored follow-through');
+
   const dead = draw(.50, 5, 5, {solvedPose:{
     rig:pass.rig, provenance:'authored solved pose',
     boneModelMatrices:new Float32Array([
