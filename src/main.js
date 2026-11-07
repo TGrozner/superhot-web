@@ -1219,6 +1219,11 @@ function damagePlayer() {
   // preview uses the playing screen before the first intentional START.
   if (state.screen !== 'playing' || state.health <= 0 ||
       (nativeGameplay() && !nativeCombatStarted)) return;
+  // Web Dojo rule: once its confirmed kill quota arms victory, an already
+  // flying hostile round cannot overturn the earned result during the
+  // one-second reveal. Other scenes and pre-quota combat remain lethal.
+  if (nativeGameplay() && isDojoBuild10Source(nativeScene?.source) &&
+      state.transition > 0) return;
   state.health--;
   state.damage = .48;
   state.shotPulse = 1;
