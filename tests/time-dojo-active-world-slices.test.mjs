@@ -1,0 +1,290 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  addMcdGameplayPulse, createMcdGameplayClock, mcdSourcePlayerPreConstraintMove,
+  sampleActiveFrameDeltas, stepMcdGameplayClock, stepWebMcdGameplayFrame,
+} from '../src/time.js';
+
+// Deterministic Web movement before collision resolution. This is NOT a
+// browser smoke or a native MCD fixed-step scheduler.
+const distanceForOneActiveSecond = (fps, compensate) => {
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  clock.source.forcedTimeScale = 1;
+  clock.timeScale = 1;
+  let previous = 1000;
+  let distance = 0;
+  let lastSteps = [];
+  for (let index = 1; index <= fps; index++) {
+    const now = 1000 + index * 1000 / fps;
+    const {simulationDt, activeRealDt, nextTimestampMs} =
+      sampleActiveFrameDeltas(previous, now, 1000);
+    previous = nextTimestampMs;
+    const tick = compensate
+      ? stepWebMcdGameplayFrame(clock, {
+        simulationDt, activeRealDt, maximumSteps: 4,
+        x: 0, y: 1, grounded: true, yaw: 0, pitch: 0,
+      })
+      : stepMcdGameplayClock(clock, {
+        dt: simulationDt, unscaledDt: activeRealDt,
+        x: 0, y: 1, grounded: true, yaw: 0, pitch: 0,
+      });
+    lastSteps = compensate ? tick.worldSteps : [tick.worldDelta];
+    if (compensate) {
+      assert.ok(Math.abs(lastSteps.reduce((a, b) => a + b, 0) - tick.worldDelta) < 1e-8,
+        'world slices MUST match the one world clock tick');
+    }
+    for (const scaledDeltaTime of lastSteps) {
+      const move = mcdSourcePlayerPreConstraintMove({
+        velocity: {x: 0, y: 0, z: 1},
+        directionRotation: {x: 0, y: 0, z: 0, w: 1},
+        scaledDeltaTime,
+      });
+      distance += move.z;
+    }
+  }
+  return {distance, worldTime: clock.worldTime, realTime: clock.realTime, lastSteps};
+};
+
+test('Dojo 10/30/60 FPS low-FPS world steps and clock travel together', () => {
+  const original10 = distanceForOneActiveSecond(10, false);
+  assert.ok(Math.abs(original10.distance - 0.5) < 1e-5,
+    'the previous 50ms cap loses half the player travel at 10 FPS');
+  assert.ok(Math.abs(original10.worldTime - original10.distance) < 1e-5);
+
+  for (const fps of [10, 30, 60]) {
+    const result = distanceForOneActiveSecond(fps, true);
+    assert.ok(Math.abs(result.distance - 1) < 1e-5, `${fps} FPS travel mismatch`);
+    assert.ok(Math.abs(result.worldTime - 1) < 1e-5, `${fps} FPS world clock mismatch`);
+    assert.ok(Math.abs(result.realTime - 1) < 1e-5, `${fps} FPS active real clock mismatch`);
+    assert.ok(Math.abs(result.worldTime - result.distance) < 1e-5,
+      `${fps} FPS simulation and world timers cannot diverge`);
+  }
+  const ten = distanceForOneActiveSecond(10, true);
+  const sixty = distanceForOneActiveSecond(60, true);
+  assert.equal(ten.lastSteps.length, 2, '100ms active produces two bounded 50ms steps');
+  assert.ok(ten.lastSteps.every(step => step <= .050001));
+  assert.equal(sixty.lastSteps.length, 1, '60 FPS retains one step');
+});
+
+
+test('Dojo RAF 50ms numeric boundary does not schedule a phantom second collision', () => {
+  // JS timestamp subtraction may exceed an exact 50ms budget by a few
+  // picoseconds. The clock already rounds world dt to float32; a second
+  // ~1e-14s collision slice merely repeats expensive callbacks at 20 FPS.
+  const near = sampleActiveFrameDeltas(1000, 1050.00000000001, 1000);
+  assert.equal(near.simulationDt, .05);
+  assert.ok(near.activeRealDt > near.simulationDt);
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  clock.source.forcedTimeScale = 1;
+  clock.timeScale = 1;
+  const tick = stepWebMcdGameplayFrame(clock, {
+    ...near, maximumSteps: 4, x: 0, y: 1, grounded: true,
+  });
+  assert.equal(tick.worldSteps.length, 1,
+    'float32-equivalent 50ms must remain one collision step');
+  assert.equal(tick.simulationStepDeltas.length, 1);
+  assert.ok(Math.abs(tick.worldSteps[0] - tick.worldDelta) < 1e-10);
+  assert.ok(Math.abs(tick.worldStepOffsets[0] - tick.worldDelta) < 1e-10);
+
+  const beyond = sampleActiveFrameDeltas(1000, 1050.1, 1000);
+  const two = stepWebMcdGameplayFrame(clock, {
+    ...beyond, maximumSteps: 4, x: 0, y: 1, grounded: true,
+  });
+  assert.equal(two.worldSteps.length, 2,
+    'a real amount beyond the 50ms collision budget still uses catch-up');
+});
+
+test('bounded hitch, frozen world and pause never advance phantom world steps', () => {
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  clock.source.forcedTimeScale = 1;
+  clock.timeScale = 1;
+  const hitch = stepWebMcdGameplayFrame(clock, {
+    simulationDt: .05, activeRealDt: .8, maximumSteps: 4, x: 0, y: 0,
+  });
+  assert.equal(hitch.worldSteps.length, 4);
+  assert.ok(Math.abs(hitch.chargedActiveDt - .2) < 1e-8);
+  assert.ok(Math.abs(hitch.discardedActiveDt - .6) < 1e-8);
+  assert.ok(Math.abs(hitch.worldSteps.reduce((a, b) => a + b, 0) - clock.worldTime) < 1e-8);
+  assert.ok(Math.abs(clock.worldTime - .2) < 1e-5);
+  assert.ok(Math.abs(clock.realTime - .8) < 1e-5);
+
+  const frozen = createMcdGameplayClock();
+  frozen.timeScale = 0;
+  const stoppedWorld = stepWebMcdGameplayFrame(frozen, {
+    simulationDt: .05, activeRealDt: .1, maximumSteps: 4,
+  });
+  assert.deepEqual(stoppedWorld.worldSteps, [], 'no repeated zero-dt contacts');
+  assert.equal(frozen.worldTime, 0);
+  const before = frozen.realTime;
+  const interrupted = stepWebMcdGameplayFrame(frozen, {
+    simulationDt: 0, activeRealDt: 0, maximumSteps: 4, paused: true,
+  });
+  assert.deepEqual(interrupted.worldSteps, []);
+  assert.equal(frozen.realTime, before);
+  assert.throws(() => stepWebMcdGameplayFrame(frozen, {
+    simulationDt: .05, activeRealDt: .1, maximumSteps: 0,
+  }), RangeError);
+  assert.throws(() => stepWebMcdGameplayFrame(frozen, {
+    simulationDt: .051, activeRealDt: .1, maximumSteps: 4,
+  }), /maximum collision step/);
+});
+
+test('Dojo collision slices expose world-clock boundaries before synthetic TTL expires', () => {
+  const clock = createMcdGameplayClock();
+  clock.source.delayedUpdates = 0;
+  clock.source.forcedTimeScale = 1;
+  clock.timeScale = 1;
+  clock.worldTime = 4;
+  const frameStart = clock.worldTime;
+  const tick = stepWebMcdGameplayFrame(clock, {
+    simulationDt: .05, activeRealDt: .1, maximumSteps: 4,
+    x: 0, y: 1, grounded: true,
+  });
+  assert.equal(tick.worldSteps.length, 2);
+  assert.equal(tick.worldStepOffsets.length, tick.worldSteps.length);
+  let cumulative = 0;
+  for (let index = 0; index < tick.worldSteps.length; index++) {
+    cumulative += tick.worldSteps[index];
+    assert.ok(Math.abs(tick.worldStepOffsets[index] - cumulative) < 1e-10,
+      'each offset must represent its own completed collision slice');
+  }
+  // Synthetic TTL halfway between the two slices: it must NOT expire during
+  // the first slice just because the pure clock already ticked once per RAF.
+  const expiresAt = frameStart + .075;
+  assert.ok(frameStart + tick.worldStepOffsets[0] < expiresAt);
+  assert.ok(frameStart + tick.worldStepOffsets[1] >= expiresAt);
+  assert.ok(Math.abs(frameStart + tick.worldStepOffsets.at(-1) - clock.worldTime) < 1e-8);
+});
+
+
+test('Dojo multi-slice AI never counts the same frame unscaled time twice', () => {
+  // The real Dojo main.js passes activeRealDt as unscaledDeltaTime to both
+  // encounter and gun-attack updates. A future per-slice hookup must pass
+  // per-slice deltas, not the full frame duration on EVERY collision slice.
+  for (const [activeRealDt, expectedSteps] of [[0.1, 2], [0.8, 4]]) {
+    const clock = createMcdGameplayClock();
+    clock.source.delayedUpdates = 0;
+    clock.source.forcedTimeScale = 1;
+    clock.timeScale = 1;
+    const tick = stepWebMcdGameplayFrame(clock, {
+      simulationDt: .05, activeRealDt, maximumSteps: 4,
+    });
+    assert.equal(tick.worldSteps.length, expectedSteps);
+    assert.equal(tick.simulationStepDeltas.length, expectedSteps);
+    assert.equal(tick.unscaledStepDeltas.length, expectedSteps);
+    assert.ok(tick.unscaledStepDeltas.every(dt => dt >= 0 && Number.isFinite(dt)));
+    const simulationTotal = tick.simulationStepDeltas.reduce((sum, dt) => sum + dt, 0);
+    const unscaledTotal = tick.unscaledStepDeltas.reduce((sum, dt) => sum + dt, 0);
+    assert.ok(Math.abs(simulationTotal - tick.chargedActiveDt) < 1e-10);
+    assert.ok(Math.abs(unscaledTotal - activeRealDt) < 1e-10,
+      'enemy unscaled time must advance only once per rendered frame');
+    assert.ok(activeRealDt * expectedSteps > unscaledTotal,
+      'reusing the full frame activeRealDt per slice would overcharge AI timers');
+  }
+
+  const clock = createMcdGameplayClock();
+  const paused = stepWebMcdGameplayFrame(clock, {
+    simulationDt: 0, activeRealDt: 0, maximumSteps: 4, paused: true,
+  });
+  assert.deepEqual(paused.simulationStepDeltas, []);
+  assert.deepEqual(paused.unscaledStepDeltas, []);
+});
+
+
+test('Dojo stationary observation hitch gate retains unsplit real RAF duration', () => {
+  // #567's real visible-LOS pressure resets on a >0.25s real RAF gap.
+  // Splitting .8s into four .2s unscaled AI calls must NOT disguise that
+  // gap as four continuous rendered observations. This tests a Web API
+  // integration contract; it does not run the browser encounter itself.
+  for (const [activeRealDt, expectedDiscontinuity] of [
+    [1 / 60, false], [.1, false], [.8, true],
+  ]) {
+    const clock = createMcdGameplayClock();
+    clock.source.delayedUpdates = 0;
+    clock.source.forcedTimeScale = 1;
+    clock.timeScale = 1;
+    const tick = stepWebMcdGameplayFrame(clock, {
+      simulationDt: Math.min(.05, activeRealDt),
+      activeRealDt, maximumSteps: 4,
+    });
+    assert.equal(tick.unscaledFrameDelta, activeRealDt,
+      'frame-scope LOS continuity must receive the unsplit RAF delta');
+    assert.equal(tick.unscaledFrameDelta > .25, expectedDiscontinuity);
+    assert.ok(tick.unscaledStepDeltas.every(dt => dt <= .25),
+      'per-slice deltas cannot substitute for detecting a long RAF gap');
+    assert.ok(Math.abs(
+      tick.unscaledStepDeltas.reduce((sum, dt) => sum + dt, 0) -
+      tick.unscaledFrameDelta,
+    ) < 1e-10, 'sliced unscaled time is still charged only once');
+  }
+  const clock = createMcdGameplayClock();
+  const paused = stepWebMcdGameplayFrame(clock, {
+    simulationDt: .05, activeRealDt: .8, maximumSteps: 4, paused: true,
+  });
+  assert.equal(paused.unscaledFrameDelta, 0,
+    'a paused RAF cannot qualify as active continuous observation');
+  assert.deepEqual(paused.unscaledStepDeltas, []);
+});
+
+test('Dojo low-FPS catch-up does not discard a shot pulse before one LateUpdate', () => {
+  // WEB behavior regression: shooting just after releasing movement can leave
+  // the previous scale near 1. A 100ms RAF then crosses a 50ms world pulse;
+  // the old end-of-frame expiry dropped it BEFORE it affected the next scale.
+  // This is not a claim about the executed native Unity frame order.
+  for (const activeRealDt of [0.1, 1 / 60]) {
+    const clock = createMcdGameplayClock();
+    clock.source.delayedUpdates = 0;
+    clock.timeScale = .98;
+    addMcdGameplayPulse(clock, .05, .2);
+    const tick = stepWebMcdGameplayFrame(clock, {
+      simulationDt: Math.min(.05, activeRealDt), activeRealDt,
+      maximumSteps: 4, x: 0, y: 0, grounded: true,
+    });
+    assert.ok(Math.abs(tick.timeScale - Math.fround(.2)) < 1e-7,
+      'a fresh shot pulse must influence the next Web time-scale even at 10 FPS');
+    assert.ok(tick.worldSteps.every(dt => dt <= .050001));
+    if (activeRealDt === .1) {
+      // The extra contribution lasts one RAF, not indefinitely: by the next
+      // start the world clock has crossed this pulse's world-time deadline.
+      const followup = stepWebMcdGameplayFrame(clock, {
+        simulationDt: .05, activeRealDt: .05, maximumSteps: 4,
+      });
+      assert.ok(Math.abs(followup.appliedTimeScale - Math.fround(.2)) < 1e-7);
+      assert.ok(followup.timeScale < .2, 'expired pulse must leave the registry');
+      assert.equal(clock.source.shifters.filter(s => s.expiresAt !== undefined).length, 0);
+    }
+  }
+});
+
+test('Dojo startup shot pulse survives delayed writes at 10 FPS without leaking past first write', () => {
+  // Web regression, not a Unity timing claim: TimeControl has two startup
+  // LateUpdates with no write. At 10 FPS the 50ms world pulse previously
+  // expired during those two frames and never changed the time scale.
+  for (const activeRealDt of [0.1, 1 / 60]) {
+    const clock = createMcdGameplayClock();
+    addMcdGameplayPulse(clock, 0.05, 0.2);
+    const tick = () => stepWebMcdGameplayFrame(clock, {
+      simulationDt: Math.min(0.05, activeRealDt),
+      activeRealDt,
+      maximumSteps: 4,
+    });
+    assert.equal(tick().timeScale, 1, 'startup delay 1 does not write timescale');
+    assert.equal(tick().timeScale, 1, 'startup delay 2 does not write timescale');
+    assert.ok(Math.abs(tick().timeScale - Math.fround(0.2)) < 1e-7,
+      'first writable LateUpdate must honor the pending shot pulse');
+    assert.ok(tick().timeScale < 0.2, 'pulse must expire after its first Web contribution');
+    assert.equal(clock.source.shifters.filter(s => s.expiresAt !== undefined).length, 0);
+  }
+
+  // The source-shaped model is intentionally not opted into this Web
+  // accessibility behavior; its native-referenced expiry order is unchanged.
+  const sourceClock = createMcdGameplayClock();
+  addMcdGameplayPulse(sourceClock, 0.05, 0.2);
+  for (let i = 0; i < 3; i++) {
+    stepMcdGameplayClock(sourceClock, {dt: 0.1, unscaledDt: 0.1});
+  }
+  assert.ok(sourceClock.timeScale < 0.2);
+});
