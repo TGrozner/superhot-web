@@ -453,3 +453,33 @@ test('authored fading weapon fragments shrink swept floor contacts instead of ho
   assert.ok(fading.position.y-fading.collisionRadius<0.05,
     'reduced proxy and visible shard must stay near the real floor surface');
 });
+
+test('wall ricochets preserve airborne shard torque until an actual ground contact',()=>{
+  // A real vertical source wall must not be mistaken for resting on the floor.
+  // The Web angular spin clock is continuous even when collision sweeps bounce.
+  const collisionScene=prepareNativeCollision([
+    {id:'ricochet-wall',worldMatrix:matrix(1.5,1,0),
+      center:[0,0,0],size:[0.02,4,4]},
+  ]);
+  const physics={collisionScene,gravity:{x:0,y:0,z:0},fixedDelta:1/150,
+    material:{bounciness:0.7,dynamicFriction:0,staticFriction:0,bounceThreshold:0}};
+  const runtime=createGunPickupShardRuntime({
+    shards:[{id:'spinning-ricochet',modelMatrix:matrix(0,1,0),
+      originalScale:1,collisionRadius:0.1}],
+    parentVelocity:{x:150,y:0,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:1}],fadeDelays:[1.5],
+    gravity:physics.gravity,physics,
+  });
+  const [shard]=advanceGunPickupShardRuntime(runtime,0.1);
+  assert.ok(shard.contacts.some(contact=>contact.collider?.id==='ricochet-wall'),
+    'the source-shaped fragment must actually hit the wall');
+  assert.ok(shard.velocity.x<0,'real restitution should send it back into free flight');
+  assert.equal(shard.firstStaticContactAt,0.1,
+    'any first solid contact remains independently available for diagnostics');
+  assert.equal(shard.firstWebGroundImpactAt,undefined,
+    'a side wall does not start the grounded angular damping clock');
+  advanceGunPickupShardRuntime(runtime,0.1);
+  const angle=Math.atan2(shard.modelMatrix[1],shard.modelMatrix[0]);
+  assert.ok(Math.abs(angle-2*Math.PI*0.2)<1e-9,
+    'a wall ricochet must not make the fragment stop tumbling in midair');
+});

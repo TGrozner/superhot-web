@@ -21,13 +21,14 @@ const SOURCE = Object.freeze({
 // AddTorque vector is a direction/impulse, NOT a known angular velocity:
 // translating it into one revolution/second at unit magnitude is creative.
 const WEB_SHARD_SPIN_RADIANS_PER_SECOND = 2 * Math.PI;
-// On first confirmed static-scene contact, preserve the current angular pose
-// and smoothly bleed visual spin instead of revolving forever inside the floor.
-// 12/s is Web-authored polish, NOT a recovered PhysX angular damping value.
+// A side-wall ricochet is not grounded rest: let airborne fragments keep
+// tumbling. Start the Web-only angular damping only after a real upward floor
+// contact, leaving bounce/collision response to the source-shaped sphere sweep.
+// 12/s is creative Web polish, NOT native PhysX angular damping.
 const WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND = 12;
 
 function webShardSpinTime(shard, elapsed) {
-  const contactAt = shard.firstWebImpactAt ?? shard.firstStaticContactAt;
+  const contactAt = shard.firstWebGroundImpactAt;
   if (contactAt === undefined) return elapsed;
   const sinceContact = Math.max(0, elapsed - contactAt);
   return contactAt -
@@ -345,15 +346,26 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
         ? advanceNativeFragmentBody(shard, scaledDelta, {
           ...runtime.physicsContext, limitWebFrameWork: true,
         }) : [];
-      // Only physically confirmed source-scene contacts start the Web-only
-      // angular settling. Pure ballistic shards retain absolute-time spin.
-      if (shard.firstStaticContactAt === undefined && shard.contacts.length > 0) {
-        shard.firstStaticContactAt = elapsed;
-        // Keep the observed frame boundary for existing diagnostics, but
-        // drive visible spin from the first real swept collider contact.
-        const inFrame=shard.contacts.reduce((first,contact)=>
-          Math.min(first,contact.webImpactTimeInFrame ?? scaledDelta),scaledDelta);
-        shard.firstWebImpactAt=runtime.elapsed+inFrame;
+      // Preserve any first static hit for diagnostics, including wall grazes.
+      // But a wall ricochet while airborne is NOT grounds to stop tumbling.
+      // Only an actual upward contact with an enabled authored collider starts
+      // the angular settling clock; this remains original Web game feel.
+      if (shard.contacts.length > 0) {
+        if (shard.firstStaticContactAt === undefined) {
+          shard.firstStaticContactAt = elapsed;
+          const first = shard.contacts.reduce((time, contact) =>
+            Math.min(time, contact.webImpactTimeInFrame ?? scaledDelta), scaledDelta);
+          shard.firstWebImpactAt = runtime.elapsed + first;
+        }
+        if (shard.firstWebGroundImpactAt === undefined) {
+          const upward = shard.contacts.filter(contact =>
+            contact.collider && contact.normal?.y > 0.55);
+          if (upward.length) {
+            const first = upward.reduce((time, contact) =>
+              Math.min(time, contact.webImpactTimeInFrame ?? scaledDelta), scaledDelta);
+            shard.firstWebGroundImpactAt = runtime.elapsed + first;
+          }
+        }
       }
       for (const [axis,index] of [['x',12],['y',13],['z',14]]) {
         shard.modelMatrix[index] = shard.position[axis] - shard.centerOffset[axis] * ratio;
