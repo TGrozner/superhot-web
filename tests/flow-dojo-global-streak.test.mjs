@@ -4,7 +4,7 @@ import {advanceDojoGlobalStreak, readDojoGlobalStreak} from '../src/flow/dojo-gl
 
 test('global win streak uses actual chronological rounds across 6/7 quotas', () => {
   const first = advanceDojoGlobalStreak(null, {quota:6, victory:true});
-  assert.equal(first.announcement, null);
+  assert.equal(first.announcement, 'SÉRIE GLOBALE 1 · ENCHAÎNE POUR PASSER À 2');
   const second = advanceDojoGlobalStreak(first.record, {quota:7, victory:true});
   assert.equal(second.record.currentStreak, 2);
   assert.match(second.announcement, /SÉRIE GLOBALE 2 VICTOIRES.*NOUVEAU RECORD/);
@@ -18,8 +18,20 @@ test('global win streak uses actual chronological rounds across 6/7 quotas', () 
   assert.equal(again.record.bestStreak, 2);
   assert.equal(again.record.attempts, 4);
   assert.equal(again.record.victories, 3);
-  assert.equal(again.announcement, null);
+  assert.equal(again.announcement, 'SÉRIE GLOBALE 1 · ENCHAÎNE POUR PASSER À 2');
   assert.equal(again.provenance, 'WEB_ONLY');
+});
+
+test('one win at quota six then loss at quota seven explicitly reports broken cross-format streak', () => {
+  const first = advanceDojoGlobalStreak(null, {quota:6, victory:true});
+  const loss = advanceDojoGlobalStreak(readDojoGlobalStreak(JSON.stringify(first.record)),
+    {quota:7, victory:false});
+  assert.equal(loss.record.currentStreak, 0);
+  assert.equal(loss.record.bestStreak, 1);
+  assert.equal(loss.record.lastQuota, 7);
+  assert.equal(loss.announcement, 'SÉRIE GLOBALE 1 BRISÉE');
+  const losingAgain = advanceDojoGlobalStreak(loss.record, {quota:6, victory:false});
+  assert.equal(losingAgain.announcement, null, 'repeated losses without a streak do not spam the terminal screen');
 });
 
 test('cannot rebuild global order from historical per-format records or untrusted data', () => {
