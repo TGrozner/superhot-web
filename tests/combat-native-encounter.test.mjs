@@ -3681,3 +3681,59 @@ test('J3 Web fireteam: a cooling front gunner yields a real rear firing lane wit
   assert.equal(walled.rear.encounter.canAttack,false,
     'failed cover clearance never converts a blocked rear shot into damage');
 });
+
+test('J3 Web fireteam: a disarmed frontliner clears a ready rear muzzle without losing melee priority',()=>{
+  // Web-original synthetic geometry. Unlike armed fireteam members, this
+  // frontliner has lost its gun, but still physically blocks a real shot.
+  const player={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2),playerForward:p(0,0,1)};
+  const make=(colliders=[],frontX=4)=>{
+    const runtime=setup(scene(),colliders);
+    const rear=firstSpawn(runtime,player);
+    const front=structuredClone(rear);
+    front.id='synthetic-disarmed-front';
+    front.x=frontX;front.y=0;front.z=2;
+    front.reaction.hasWeapon=false;
+    for(const actor of [rear,front]) {
+      actor.clock=0;
+      actor.runtime.alertness=2;
+      actor.runtime.haveBeenSeen=true;
+      actor.muzzlePosition=p(actor.x,1.4,actor.z);
+      actor.muzzleForward=p(1,0,0);
+    }
+    rear.runtime.attackDelayRemaining=-1;
+    const actors=[rear,front];
+    const tick=()=>{
+      for(const actor of actors)actor.muzzlePosition=p(actor.x,1.4,actor.z);
+      advanceNativeEncounter(runtime,input(actors,{
+        ...player,scaledDeltaTime:.2,unscaledDeltaTime:.2,
+      }));
+    };
+    return {runtime,rear,front,tick};
+  };
+
+  const open=make();
+  open.tick();
+  assert.equal(open.rear.encounter.webAllyBlockingShot,true,
+    'the live unarmed body blocks the original rear muzzle this tick');
+  assert.equal(open.rear.encounter.canAttack,false,
+    'yielding does not invent a shot before the gunner has a new posed muzzle');
+  assert.ok(open.rear.z>2.05 && open.front.z<1.95,
+    'disarmed frontliner moves opposite the gunner instead of blocking its corridor');
+  assert.equal(open.front.encounter.canAttack,false,
+    'a disarmed ally cannot acquire gun permissions by yielding');
+  open.tick();
+  assert.equal(open.rear.encounter.webAllyBlockingShot,false,
+    'the next tick can observe the now-clear actual muzzle corridor');
+
+  const walled=make([box(4,.6,1.5,1,1.2,.1),box(4,.6,2.5,1,1.2,.1)]);
+  walled.tick();
+  assert.ok(Math.abs(walled.front.z-2)<.15,
+    'the unarmed ally remains bound to real wall/body sweeps');
+  assert.equal(walled.rear.encounter.canAttack,false,
+    'a blocked yield cannot grant the rear gunner a projectile');
+
+  const melee=make([],8);
+  melee.tick();
+  assert.ok(Math.abs(melee.front.z-2)<.05,
+    'a disarmed attacker already in melee range keeps its own approach priority');
+});
