@@ -1782,8 +1782,13 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   if(!state.visible && (state.webLastSeenFeet || state.webBulletClueFeet || state.webDispatchFeet) &&
       (state.webSearchRemaining!==null || state.webSearchComplete ||
         distance(start,pursuitFeet)<=runtime.body.radius*0.8)) {
-    if(state.webSearchRemaining===null && !state.webSearchComplete)
+    if(state.webSearchRemaining===null && !state.webSearchComplete) {
       state.webSearchRemaining=WEB_LAST_SEEN_SWEEP.seconds;
+      // A newly reached clue begins a fresh investigation, but search footwork
+      // must ACCELERATE across successive Update ticks instead of restarting
+      // from rest on every frame (especially at slow-world TimeScale .005).
+      enemy.runtime.speed=0;
+    }
     // Search a genuinely remembered location, not the hidden player. One
     // opposite-side second pass gives the hunter a chance to check the other
     // edge of cover; after two passes it stops instead of oscillating forever.
@@ -1795,13 +1800,16 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
         state.webSearchPass++;
         state.webSearchRemaining=WEB_LAST_SEEN_SWEEP.seconds;
         state.webSearchComplete=false;
+        enemy.runtime.speed=0; // Opposite-side pass begins from rest.
       }
     }
     state.route=null;
     state.target={...pursuitFeet};
     const sx=pursuitFeet.x-start.x, sz=pursuitFeet.z-start.z;
     if(sx || sz)enemy.face=Math.atan2(sx,-sz);
-    enemy.runtime.speed=0;
+    // An idle/complete search stands still; an ACTIVE one retains its
+    // accumulated speed. Neither moves while the gameplay clock is frozen.
+    if(state.webSearchComplete)enemy.runtime.speed=0;
     if(state.webSearchRemaining>0 && scaledDeltaTime>0 && !enemy.runtime.pendingShot) {
       advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
         'walking',scaledDeltaTime);
@@ -1815,7 +1823,12 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
           sideOverride:side,maxDistance:runtime.body.radius*WEB_LAST_SEEN_SWEEP.maxBodyRadii,
            playerBodyFeet:playerFeet,
         });
-      if(!moved)enemy.runtime.speed=0;
+      // Sub-micrometre starts are below the native swept mover's resolution,
+      // not failed navigation. Retain walking acceleration until a measurable
+      // step passes the SAME world capsule, navmesh and occupancy gates.
+      if(!moved && !webTacticalStepBelowResolution(enemy,
+          scaledDeltaTime*WEB_LAST_SEEN_SWEEP.speedFraction,WEB_STRAFE.speedFraction))
+        enemy.runtime.speed=0;
       state.webSearchRemaining=Math.max(0,state.webSearchRemaining-scaledDeltaTime);
       if(state.webSearchRemaining<=EPSILON) {
         state.webSearchComplete=true;
