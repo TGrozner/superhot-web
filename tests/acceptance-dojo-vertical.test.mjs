@@ -100,8 +100,12 @@ test('SH10 real Web enemy-motion diagnostic distinguishes sampled travel from un
   const old=report(trace);
   assert.equal(old.observed.enemyMotion.status,'UNKNOWN_NO_WEB_ENEMY_MOTION_TELEMETRY');
   for (let i=10;i<=13;i++) {
-    trace.frames[i].gameplay.encounter.enemies[0].motionFromFirstSampleMeters=
-      {dx:(i-10)*.04,dy:0,dz:0};
+    // complete() reuses the same alive-object fixture in frames 11–13.
+    // Clone it per rendered frame to represent independent browser snapshots.
+    const enemy=trace.frames[i].gameplay.encounter.enemies[0];
+    trace.frames[i].gameplay.encounter.enemies[0]={
+      ...enemy, motionFromFirstSampleMeters:{dx:(i-10)*.04,dy:0,dz:0},
+    };
   }
   const result=report(trace);
   assert.equal(result.status,DOJO_VERTICAL_STATUS.COMPLETE,JSON.stringify(result.errors));
