@@ -188,6 +188,7 @@ export function createWebFootstepMotion(emit) {
         let dx = current.x - previous.x;
         let dz = current.z - previous.z;
         let distance = Math.hypot(dx, dz);
+        const sampledDistance = distance;
         previous = current;
         previousTime = timeSeconds;
         if (distance > maxAllowedTravel(dt)) {
@@ -222,8 +223,9 @@ export function createWebFootstepMotion(emit) {
             return null;
         pendingMetres = Math.max(0, pendingMetres - contactMetres);
         awaitingFirstContact = false;
-        // More movement in the same real-time interval makes a stronger Web step.
-        const speed = distance / Math.max(dt, 1 / 120);
+        // Use the last sampled frame's distance for loudness, not a 3cm
+        // micro-motion batch accumulated over many frames (Web-only tuning).
+        const speed = sampledDistance / Math.max(dt, 1 / 120);
         const intensity = Math.min(1, Math.max(0.45, speed / 4.5));
         // Lateral offset is perpendicular to movement, never a guessed MCD bone marker.
         const side = footSide * footLateralOffset;
