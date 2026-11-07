@@ -623,6 +623,46 @@ test('J3 Web blocked flank: a real low pillar suspends repeated flank routing an
   assert.equal(lead.reaction.dead,false,'routing never creates a hit or kill');
 });
 
+test('J3 Web blocked flank relays the close-range breach to an available wingman',()=>{
+  // Synthetic Dojo geometry. An actual collider-started fallback is tested
+  // above; here verify the subsequent squad leader election in the same game
+  // loop, not a made-up damage, muzzle, native MCD, or movement bypass.
+  const data=scene();
+  data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const target={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const run=(blockedSeconds)=>{
+    const runtime=setup(data), lead=firstSpawn(runtime,target);
+    lead.id='a-lead'; runtime.actors.clear(); runtime.actors.set(lead.id,lead);
+    const wing={
+      ...lead,id:'b-wing',x:2,y:0,z:4,clock:0,
+      reaction:{...lead.reaction},runtime:{...lead.runtime},
+      encounter:{...lead.encounter,route:null,target:null,webTacticalSide:-1,
+        webFlankFallbackRemaining:0,webObservedProjectiles:new Set()},
+    };
+    runtime.actors.set(wing.id,wing);
+    lead.encounter.webFlankFallbackRemaining=blockedSeconds;
+    advanceNativeEncounter(runtime,input([lead,wing],{
+      ...target,scaledDeltaTime:.2,unscaledDeltaTime:.2,
+    }));
+    return {lead,wing};
+  };
+  const ordinary=run(0);
+  assert.ok(ordinary.lead.x>2.05,'normal squad starts its usual single breacher');
+  assert.equal(ordinary.wing.x,2,'the second gunner covers at its existing stop ring');
+  const recovering=run(1.4);
+  assert.equal(recovering.lead.x,2,
+    'a gunner recovering from physically blocked flank does not retake breach duty');
+  assert.ok(recovering.wing.x>2.05,
+    'a valid, visible squadmate uses the released assault movement window');
+  assert.ok(Math.hypot(recovering.lead.x-recovering.wing.x,
+    recovering.lead.z-recovering.wing.z)>=.8-1e-6,
+    'handoff cannot cross a teammate capsule');
+  assert.equal(recovering.lead.encounter.canAttack,false);
+  assert.equal(recovering.wing.encounter.canAttack,false,
+    'assault election does not invent a posed muzzle or grant a shot');
+  assert.equal(recovering.lead.reaction.dead,false);
+});
+
 test('J3 Web three-gunner fanout: left, center and right use stable independent routes',()=>{
   // Web-only tactical layout on fabricated navmesh; no MCD AI parameters.
   const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
