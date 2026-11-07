@@ -3663,7 +3663,7 @@ test('J3 Web fireteam: a cooling front gunner yields a real rear firing lane wit
     'the original rear muzzle stays blocked for the pre-movement attack election');
   assert.equal(open.rear.encounter.canAttack,false,
     'sideways footwork never authorizes a ghost shot during the blocked tick');
-  assert.ok(open.rear.z<1.95 && open.front.z>2.05,
+  assert.ok(open.rear.z>2.05 && open.front.z<1.95,
     `two live squadmates separate: rear=(${open.rear.x},${open.rear.z}), front=(${open.front.x},${open.front.z}), rearSide=${open.rear.encounter.webTacticalSide}, frontSide=${open.front.encounter.webTacticalSide}, rearBlocked=${open.rear.encounter.webAllyBlockingShot}, frontVisible=${open.front.encounter.visible}`);
   assert.equal(open.front.runtime.pendingShot,null,'a cooling gunner cannot invent a shot');
   assert.ok(Math.hypot(open.front.x-open.rear.x,open.front.z-open.rear.z)>.8,
@@ -3674,10 +3674,10 @@ test('J3 Web fireteam: a cooling front gunner yields a real rear firing lane wit
   assert.equal(open.rear.encounter.canAttack,true,
     'the rear can only shoot after its own refreshed muzzle and eye checks');
 
-  const walled=make([box(4,.6,2.6,1,1.2,.1)]);
+  const walled=make([box(4,.6,1.5,1,1.2,.1),box(4,.6,2.5,1,1.2,.1)]);
   walled.tick();
-  assert.ok(walled.front.z<2.3,
-    'a real world collider prevents stepping straight through the blocked yield side');
+  assert.ok(Math.abs(walled.front.z-2)<.15,
+    'real enclosing walls prevent a cooling gunner from phasing out of a blocked firing lane');
   assert.equal(walled.rear.encounter.canAttack,false,
     'failed cover clearance never converts a blocked rear shot into damage');
 });
