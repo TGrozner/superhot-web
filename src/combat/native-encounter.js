@@ -837,7 +837,13 @@ function webDodgeLaneThreatScore(runtime, enemy, landing, projectiles, enemies, 
         if(nearX*nearX+nearZ*nearZ<=runtime.body.radius**2+EPSILON) {
           const threatTime=vertical ? nearestTime : webProjectileThreatTime(
             runtime,candidate,origin,velocity,planarSquared,nearestTime,window);
-          times.push(threatTime);
+          // The body's swept corridor above already checks every collision
+          // DURING this gameplay tick. A projectile that crossed the proposed
+          // landing BEFORE the enemy can reach it is no longer a landing hazard.
+          // Keep the static predictor only for bullets arriving at/after the
+          // end of this step; otherwise a harmless early crossing can make
+          // an enemy evade into the genuinely dangerous opposite lane.
+          if(threatTime+EPSILON>=scaledDeltaTime)times.push(threatTime);
         }
       }
     }
