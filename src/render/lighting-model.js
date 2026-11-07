@@ -192,7 +192,14 @@ vec3 dojoWebWarningContrast(vec3 sourceColor, float strength) {
   // Uses the already-bound world-pass uMode; no new uniform, pass or texture.
   if (uMode == 3 && dangerRed > 0.0) {
     float heat = dojoWebWarningSmooth((strength - 0.26) / 0.44);
-    graded += vec3(0.12, 0.26, 0.30) * (heat * dangerRed);
+    // Web-only facet glint: use the Red Crystal view-normal ALREADY computed
+    // in the vertex shader. Grazing facets catch a pale warning rim; front-on
+    // crystal, Concrete and all other materials keep their current response.
+    // No extra uniform, texture, pass or per-fragment normalize/sqrt.
+    float facetEdge = uHasNormals != 0
+      ? 1.0 - clamp(abs(vViewNormal.z), 0.0, 1.0) : 0.0;
+    float facetBoost = 1.0 + 0.55 * facetEdge * facetEdge;
+    graded += vec3(0.12, 0.26, 0.30) * (heat * dangerRed * facetBoost);
   }
   return graded;
 }
@@ -475,7 +482,9 @@ const dojoWebWarningSurfaceFacing = (worldNormal, delta, radius) => {
   return .2 + .8 * clamp01(towardLamp);
 };
 // Exact CPU counterpart of the shader's deliberately nonphysical red grading.
-const webWarningContrast = (color, strength, webMaterialMode = 2) => {
+// viewForward is the Web camera forward direction (not an MCD light setting).
+const webWarningContrast = (color, strength, webMaterialMode = 2,
+  worldNormal = null, viewForward = null) => {
   // Suppressed/fully transparent warnings must be exact +0 in the CPU
   // contract; multiplying a negative colour component by zero gives -0.
   if (strength === 0) return Object.freeze([0, 0, 0]);
@@ -488,15 +497,28 @@ const webWarningContrast = (color, strength, webMaterialMode = 2) => {
   // CPU counterpart of the GPU's Web-authored Red Crystal-only heat grade.
   if (webMaterialMode === 3 && dangerRed > 0) {
     const heat = dojoWebWarningSmooth((strength - .26) / .44) * dangerRed;
-    rgb[0] += .12 * heat;
-    rgb[1] += .26 * heat;
-    rgb[2] += .30 * heat;
+    // Mirrors vViewNormal.z = -dot(cameraForward, normal) on authored meshes.
+    // A null normal/direction retains the original flat Web heat response.
+    let facetBoost = 1;
+    if (worldNormal !== null && viewForward !== null) {
+      const n = unit(sourceLightVec3(worldNormal, 'crystal worldNormal'));
+      const view = unit(sourceLightVec3(viewForward, 'crystal viewForward'));
+      const facing = clamp01(Math.abs(n.reduce(
+        (sum, channel, i) => sum + channel * view[i], 0)));
+      facetBoost += .55 * (1 - facing) ** 2;
+    }
+    const facetHeat = heat * facetBoost;
+    rgb[0] += .12 * facetHeat;
+    rgb[1] += .26 * facetHeat;
+    rgb[2] += .30 * facetHeat;
   }
   return Object.freeze(rgb);
 };
 
-/** CPU mirror of the deliberately Web-styled, cookie-bearing GPU preview. */
-export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha, webMaterialMode = 2, worldNormal = null) {
+/** CPU mirror of the deliberately Web-styled, cookie-bearing GPU preview.
+ * @param {number[] | null} [viewForward] - Web camera forward for Red Crystal facet preview.
+ */
+export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookieAlpha, webMaterialMode = 2, worldNormal = null, viewForward = null) {
   const point = sourceLightVec3(worldPosition, 'warning sample worldPosition');
   if (!Number.isFinite(cookieAlpha) || cookieAlpha < 0 || cookieAlpha > 1) {
     throw new RangeError('cookie alpha must be within [0,1]');
@@ -519,7 +541,7 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
     dojoWebWarningSurfaceFacing(worldNormal, delta, radius);
   const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
+    rgb: webWarningContrast(spotlight.color, glow, webMaterialMode, worldNormal, viewForward),
     cookieUv: Object.freeze(cookieUv),
   });
 }
@@ -529,7 +551,7 @@ export function sampleDojoDoorWarningWebPreview(spotlight, worldPosition, cookie
  * It deliberately requires an explicit Web fallback packet, never a phantom
  * Unity cookie. No image, mesh, URL or runtime event is generated here.
  */
-export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMaterialMode = 2, worldNormal = null) {
+export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMaterialMode = 2, worldNormal = null, viewForward = null) {
   if (spotlight?.webPreviewMode !== 'web-procedural-no-cookie') {
     throw new TypeError('Explicit Web procedural warning packet required');
   }
@@ -543,7 +565,7 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
     dojoWebWarningSurfaceFacing(worldNormal, delta, radius);
   const glow = energy / (3 + energy);
   return Object.freeze({
-    rgb: webWarningContrast(spotlight.color, glow, webMaterialMode),
+    rgb: webWarningContrast(spotlight.color, glow, webMaterialMode, worldNormal, viewForward),
     cookieUv: null,
   });
 }
@@ -562,9 +584,10 @@ export function sampleDojoDoorWarningWebGlow(spotlight, worldPosition, webMateri
  * @param {number[]} worldPosition
  * @param {number} [webMaterialMode]
  * @param {number[] | null} [worldNormal] - optional valid world surface normal; null mirrors uHasNormals=0.
+ * @param {number[] | null} [viewForward] - Web camera forward for Red Crystal facet preview.
  * @returns {{rgb: readonly number[], cookieUv: null}}
  */
-export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMaterialMode = 2, worldNormal = null) {
+export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMaterialMode = 2, worldNormal = null, viewForward = null) {
   if (falseLight?.shaderParity !== 'unverified-no-false-light-composition') {
     throw new TypeError('Source-qualified false-light packet required');
   }
@@ -587,7 +610,7 @@ export function sampleDojoDoorFalseLightWebWash(falseLight, worldPosition, webMa
   }
   const energy = intensity * fade * fade * facing;
   return Object.freeze({
-    rgb: webWarningContrast([1, .06, .10], energy / (3 + energy), webMaterialMode),
+    rgb: webWarningContrast([1, .06, .10], energy / (3 + energy), webMaterialMode, worldNormal, viewForward),
     cookieUv: null,
   });
 }

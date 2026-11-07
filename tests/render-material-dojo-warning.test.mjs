@@ -518,6 +518,44 @@ test('J4 warning spotlights respect Concrete/Crystal surface orientation without
     /\* dojoWebWarningSurfaceFacing\(offset, radius\)/g) ?? []).length, 2);
 });
 
+test('J4 red-crystal door warning adds a bounded grazing-facet glint without touching Concrete', () => {
+  // Isolate the source light: an earlier bounds-culling test deliberately
+  // steers an in-place packet and must not move this synthetic pixel sample.
+  const spot = prepareDojoDoorWarningLighting(scene, [{
+    id: 'level10::7', active: true, rendererId: 'level10::71',
+    spotlight: { ...sourceDoor.spotlight, enabled: true,
+      position: [1, 2, 3], direction: [0, 0, 1],
+      right: [1, 0, 0], up: [0, 1, 0], color: [1, 0, 0],
+      range: 10, intensity: 30 },
+    falseLight: { enabled: false },
+  }], options).spotlights[0];
+  const point = [1, 2, 8], frontNormal = [0, 0, -1];
+  // CPU mirror of the existing mode-3 vViewNormal.z, not native MCD shading.
+  const headOn = sampleDojoDoorWarningWebPreview(spot, point, .4, 3,
+    frontNormal, [0, 0, 1]);
+  const grazing = sampleDojoDoorWarningWebPreview(spot, point, .4, 3,
+    frontNormal, [1, 0, 0]);
+  const noNormals = sampleDojoDoorWarningWebPreview(spot, point, .4, 3,
+    null, [1, 0, 0]);
+  assert.deepEqual(headOn.rgb, noNormals.rgb,
+    'front-on and unqualified normals retain the shipped crystal warning');
+  const paleDelta = grazing.rgb.map((value, index) => value - headOn.rgb[index]);
+  assert.ok(paleDelta[1] > .1 && paleDelta[2] > .1,
+    'grazing facets gain a measurable pink highlight, not only more saturated red');
+  assert.ok(paleDelta[0] > 0 && paleDelta[0] < paleDelta[1]);
+  const concreteFront = sampleDojoDoorWarningWebPreview(spot, point, .4, 2,
+    frontNormal, [0, 0, 1]);
+  const concreteEdge = sampleDojoDoorWarningWebPreview(spot, point, .4, 2,
+    frontNormal, [1, 0, 0]);
+  assert.deepEqual(concreteFront, concreteEdge, 'Concrete warning contrast is unchanged');
+  assert.deepEqual(sampleDojoDoorWarningWebPreview(spot, point, 0, 3,
+    frontNormal, [1, 0, 0]).rgb, [0, 0, 0], 'zero energy never creates a fake glint');
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+    /float facetBoost = 1\.0 \+ 0\.55 \* facetEdge \* facetEdge/);
+  assert.match(DOJO_DOOR_WARNING_WEB_PREVIEW_GLSL,
+    /1\.0 - clamp\(abs\(vViewNormal\.z\), 0\.0, 1\.0\)/);
+});
+
 // GPU shader-only optimization: angular reject must precede costly sqrt.
 // Numeric CPU cone preview coverage lives above; no browser FPS implied.
 test('J4 cookie and procedural red-warning spot reject off-axis pixels before sqrt', () => {
