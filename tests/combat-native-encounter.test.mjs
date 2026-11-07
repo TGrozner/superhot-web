@@ -3035,6 +3035,60 @@ test('J3 Web disarmed aim jukes: a visible aimed melee rush breaks the sightline
     'rearming restores existing gunner behavior immediately');
 });
 
+test('J3 Web unarmed threat reading stays responsive under active slow-motion without speeding up feet',()=>{
+  // User-authored Web behavior: only a live, visible camera ray is evidence.
+  // At 1% world speed the old world-time .20s aim lock needed 20 REAL seconds,
+  // so the melee juke was effectively absent during normal short encounters.
+  const data=scene(); data.gameplay.enemy.MeleeAttackDistance=.8;
+  const runtime=setup(data),playerFeet=p(9,0,2),playerPosition=p(9,1.6,2);
+  const enemy=firstSpawn(runtime,{playerFeet,playerPosition});
+  enemy.reaction.hasWeapon=false;
+  const start={x:enemy.x,z:enemy.z};
+  const tick=(worldDt,realDt,playerForward=p(-1,0,0))=>
+    advanceNativeEncounter(runtime,input([enemy],{
+      playerFeet,playerPosition,playerForward,
+      scaledDeltaTime:worldDt,unscaledDeltaTime:realDt,
+    }));
+
+  for(let i=0;i<5;i++)tick(.0005,.05);
+  assert.ok(enemy.encounter.webUnarmedJukeRemaining>0,
+    'direct aim starts an unarmed juke within .25s real time even at 1% TimeScale');
+  assert.ok(enemy.encounter.webUnarmedWeaveClock>=.24,
+    'independent weave phase also observes active real time');
+  assert.equal(enemy.encounter.canAttack,false,
+    'a defensive juke cannot synthesize a gunshot or melee damage');
+  assert.equal(enemy.reaction.hasWeapon,false);
+
+  for(let i=0;i<13;i++)tick(.0005,.05);
+  assert.equal(enemy.encounter.webUnarmedJukeRemaining,0,
+    'short-lived aim juke expires in active real time instead of lasting minutes');
+  assert.ok(enemy.encounter.webUnarmedJukeCooldown>0,
+    'the same active clock enforces a real recovery window');
+  assert.ok(enemy.encounter.webUnarmedWeaveClock>=.85,
+    'alternating unarmed approach directions no longer wait for .65 world seconds');
+  assert.ok(Math.hypot(enemy.x-start.x,enemy.z-start.z)<.15,
+    'tactics may react quickly but world-scaled feet never teleport or gain speed');
+
+  const clock=enemy.encounter.webUnarmedWeaveClock;
+  const cooldown=enemy.encounter.webUnarmedJukeCooldown;
+  const feet={x:enemy.x,z:enemy.z};
+  for(let i=0;i<10;i++)tick(0,.05);
+  assert.equal(enemy.encounter.webUnarmedWeaveClock,clock,
+    'a completely paused world cannot advance the weave decision');
+  assert.equal(enemy.encounter.webUnarmedJukeCooldown,cooldown,
+    'a paused world cannot silently spend the juke cooldown');
+  assert.deepEqual({x:enemy.x,z:enemy.z},feet,
+    'real-time perception is never permission to move without world time');
+
+  tick(.0005,.8);
+  assert.equal(enemy.encounter.webUnarmedWeaveClock,clock,
+    'a stalled frame must not teleport the tactical phase forward');
+  enemy.reaction.hasWeapon=true;
+  tick(.0005,.05);
+  assert.equal(enemy.encounter.webUnarmedWeaveClock,0,
+    'rearming drops the unarmed tactic instead of sharing a stale phase');
+});
+
 test('J3 Web stationary-player pressure moves a visible gunner inside its old ring without tracking hidden feet',()=>{
   // Synthetic open Dojo-sized corridor; no imported native gameplay settings.
   const runtime=setup();
