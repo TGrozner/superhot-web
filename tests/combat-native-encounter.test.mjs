@@ -3433,3 +3433,39 @@ test('J3 Web crossing-shot escape picks the truly safer legal lane, independent 
   assert.equal(first.canAttack,false,'an evasive step cannot create gunfire');
   assert.deepEqual(first,reversed,'projectile array order cannot change the safer legal escape');
 });
+
+
+test('J3 Web swept crossfire: dodge avoids an in-flight bullet across its path even when landing is clear',()=>{
+  // Synthetic bullets only. The second round crosses the default +X *travel*
+  // while the +X landing itself is outside its .4m body-radius corridor.
+  // A final-position-only predictor misses that collision and chooses +X.
+  const urgent={friendly:true,pos:p(2,1,1.5),velocity:p(0,0,35),ttl:.5};
+  const crossing={friendly:true,pos:p(2.2,1,-.8),velocity:p(0,0,35),ttl:.5};
+  function dodge(projectiles) {
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    enemy.runtime.speed=5; // Already-running enemy, not an invented speed boost.
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:projectiles,
+    }));
+    return {dx:enemy.x-start.x,dz:enemy.z-start.z,
+      sideX:enemy.encounter.webDodgeSideX,
+      canAttack:enemy.encounter.canAttack,
+      remaining:enemy.encounter.webDodgeRemaining};
+  }
+  const alone=dodge([urgent]);
+  assert.ok(alone.dx>.5 && Math.abs(alone.dz)<1e-6,
+    'existing preferred lane is +X for the primary shot');
+  const crossingFirst=dodge([urgent,crossing]);
+  const crossingReversed=dodge([crossing,urgent]);
+  assert.ok(crossingFirst.dx<-.5 && Math.abs(crossingFirst.dz)<1e-6,
+    'gunner chooses the clear -X sweep instead of moving into the live crossing round');
+  assert.equal(crossingFirst.sideX<0,true,'remaining dodge keeps its legal safe side');
+  assert.equal(crossingFirst.canAttack,false,'evasion cannot grant an extra gunshot');
+  assert.ok(crossingFirst.remaining>0,'real movement retains finite dodge time');
+  assert.deepEqual(crossingFirst,crossingReversed,'projectile input order cannot change the safe lane');
+  assert.ok(dodge([urgent,{...crossing,ttl:.03}]).dx>.5,
+    'a bullet expiring before crossing the moving body cannot divert the dodge');
+});
