@@ -2963,3 +2963,48 @@ test('J3 Web disarmed aim jukes: a visible aimed melee rush breaks the sightline
   assert.equal(frozen.enemy.encounter.webUnarmedJukeRemaining,0,
     'rearming restores existing gunner behavior immediately');
 });
+
+test('J3 Web stationary-player pressure moves a visible gunner inside its old ring without tracking hidden feet',()=>{
+  // Synthetic open Dojo-sized corridor; no imported native gameplay settings.
+  const runtime=setup();
+  const gunner=firstSpawn(runtime);
+  Object.assign(gunner,{x:2,y:0,z:3.2});
+  const player=p(2,0,5),eyes=p(2,1.6,5);
+  const tick=(worldDt,overrides={})=>advanceNativeEncounter(runtime,input([gunner],{
+    scaledDeltaTime:worldDt,unscaledDeltaTime:0,
+    playerFeet:{...player},playerPosition:{...eyes},
+    // Sideways camera avoids the unrelated unwatched-push and aimed-dodge rules.
+    playerForward:p(1,0,0),...overrides,
+  }));
+  for(let n=0;n<5;n++)tick(.2);
+  assert.ok(Math.abs(gunner.z-3.2)<1e-7,
+    'a fresh gunner keeps its original 2m stop radius before actual stationary observation');
+  const observedBeforePause=gunner.encounter.webStationarySeconds;
+  tick(0,{unscaledDeltaTime:.2});
+  assert.equal(gunner.encounter.webStationarySeconds,observedBeforePause,
+    'paused world time must never charge an anti-camping response');
+  for(let n=0;n<7;n++)tick(.2);
+  assert.ok(gunner.z>3.2+.05,
+    'after a sustained real sighting the same gunner advances within its old stop ring');
+  assert.equal(gunner.encounter.visible,true);
+  assert.equal(gunner.encounter.canAttack,false,
+    'a missing animated muzzle is still not permission to fire');
+
+  // A genuinely moving player resets the pressure instead of being followed
+  // by a fictitious fixed target. The guard is computed BEFORE the move.
+  player.x+=.75;eyes.x+=.75;
+  tick(.2);
+  assert.equal(gunner.encounter.webStationarySeconds,0);
+  assert.equal(gunner.encounter.webStationaryAnchor.x,player.x);
+
+  // An actual occluding divider immediately invalidates even a fully charged
+  // stationarity clue, regardless of where a blind route may subsequently go.
+  runtime.sightCollision=prepareNativeCollision([
+    box(2,1,4.1,2,2,.2),
+  ]);
+  tick(.2);
+  assert.equal(gunner.encounter.visible,false);
+  assert.equal(gunner.encounter.webStationaryAnchor,null);
+  assert.equal(gunner.encounter.webStationarySeconds,0);
+  assert.equal(gunner.encounter.canAttack,false);
+});
