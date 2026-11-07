@@ -572,9 +572,14 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
     const until=vertical?0:(dx*v.x+dz*v.z)/planarSpeedSquared;
     if(!vertical && until<=0)continue; // A passing bullet moving away is no longer a threat.
     const entry=webIncomingWarningEntry(runtime,enemy,origin,v,planarSpeedSquared);
-    if(!entry || entry.time>=bestTime)continue;
+    if(!entry)continue;
     const threatTime=vertical?entry.time:webProjectileThreatTime(
       runtime,enemy,origin,v,planarSpeedSquared,until,entry);
+    // Choose the next genuinely threatened BODY passage, not the first broad
+    // warning-cylinder entry. A slow grazing bullet can enter that outer
+    // radius earlier while another shot reaches the body much sooner.
+    // This is a Web threat-priority choice, not native MCD AI.
+    if(threatTime>=bestTime)continue;
     // Expiry and cover are evaluated up to the FIRST threatening point.
     // Testing all the way to the cylinder exit would let a wall or ally
     // BEHIND the enemy's body incorrectly cancel an incoming dodge.
@@ -603,7 +608,7 @@ function webIncomingProjectile(runtime, enemy, projectiles, enemies) {
       sideX=-v.z/speed*side;
       sideZ=v.x/speed*side;
     }
-    bestTime=entry.time;
+    bestTime=threatTime;
     threat={sideX,sideZ};
   }
   return threat;
