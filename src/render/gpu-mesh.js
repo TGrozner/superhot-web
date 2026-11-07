@@ -1,4 +1,4 @@
-import { MESH_VERTEX_STRIDE } from './mesh-format.js';
+import { MESH_VERTEX_STRIDE, meshModelMatrices } from './mesh-format.js';
 
 /**
  * Upload a validated interleaved indexed mesh to WebGL2. Does not own shaders,
@@ -57,10 +57,259 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
   }
   const type = mesh.indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
   let disposed = false;
+  const batches = new Set();
   return {
     vao, indexCount: mesh.indexCount, triangleCount: mesh.triangleCount,
     uvAttributeBound: uv >= 0,
     indexType: type, bounds: mesh.bounds,
+
+    /**
+     * Opt-in WebGL2 instancing for RIGID copies of one indexed mesh. Same
+     * material, shader, depth state and winding required; living/dead actors
+     * with different bone palettes stay on SH-14's animated skin pass.
+     *
+     * Instanced shader: aPosition/aNormal/[aUV] plus
+     * aInstanceModel0..3 (vec4 columns), aInstanceNormal0..2 (vec3 columns).
+     * Instance stride: 16+9 float32 = 100 bytes, column-major model and
+     * inverse-transpose normal. SH-05 owns the matching shader and draw order.
+     *
+     * @param {WebGLProgram} instancedProgram Linked instance-aware shader.
+     * @param {{capacity?:number,requireUV?:boolean,inheritAttributes?:string[]}} [options]
+     */
+    createInstancedBatch(instancedProgram, {
+      capacity = 128, requireUV: instanceRequireUV = false, inheritAttributes = [],
+    } = {}) {
+      if (disposed) throw new Error('Cannot instance a disposed mesh');
+      if (!instancedProgram) throw new TypeError('Instancing requires a linked shader');
+      if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 8192) {
+        throw new RangeError('Instance capacity must be within 1..8192');
+      }
+      if (typeof instanceRequireUV !== 'boolean') throw new TypeError('requireUV must be boolean');
+      if (typeof gl.drawElementsInstanced !== 'function' ||
+          typeof gl.vertexAttribDivisor !== 'function' ||
+          typeof gl.bufferSubData !== 'function') {
+        throw new Error('WebGL2 instanced drawing and dynamic buffer uploads are required');
+      }
+      const attrNames = ['aPosition', 'aNormal', 'aUV',
+        'aInstanceModel0', 'aInstanceModel1', 'aInstanceModel2', 'aInstanceModel3',
+        'aInstanceNormal0', 'aInstanceNormal1', 'aInstanceNormal2'];
+      const locations = attrNames.map(name => gl.getAttribLocation(instancedProgram, name));
+      const required = [0, 1, 3, 4, 5, 6, 7, 8, 9];
+      if (instanceRequireUV) required.push(2);
+      for (const index of required) {
+        if (locations[index] < 0) throw new Error('Instanced shader must expose ' + attrNames[index]);
+      }
+      // Source-owned UV2/COLOR0/TANGENT0 are attached to the original VAO
+      // after uploadIndexedMesh() returns. Clone enabled bindings by shader
+      // name; do not silently lose them on the instanced VAO. Disabled or
+      // optimized-out source channels must be kept on the regular draw path.
+      if (!Array.isArray(inheritAttributes) || inheritAttributes.length > 6 ||
+          inheritAttributes.some(name => typeof name !== 'string' ||
+            !/^a[A-Za-z0-9_]+$/.test(name) || attrNames.includes(name)) ||
+          new Set(inheritAttributes).size !== inheritAttributes.length) {
+        throw new TypeError('inheritAttributes must contain distinct supplemental attribute names');
+      }
+      const inherited = inheritAttributes.map(name => {
+        const source = gl.getAttribLocation(program, name);
+        const target = gl.getAttribLocation(instancedProgram, name);
+        if (source < 0 || target < 0) {
+          throw new Error('Instancing requires active source and target attribute ' + name);
+        }
+        return { name, source, target };
+      });
+      const active = [...locations, ...inherited.map(attr => attr.target)]
+        .filter(location => location >= 0);
+      if (new Set(active).size !== active.length) {
+        throw new Error('Instanced shader has overlapping attribute locations');
+      }
+      const savedVao = gl.getParameter(gl.VERTEX_ARRAY_BINDING);
+      const savedArray = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+      const batchVao = gl.createVertexArray(), instanceBuffer = gl.createBuffer();
+      if (!batchVao || !instanceBuffer) {
+        if (batchVao) gl.deleteVertexArray(batchVao);
+        if (instanceBuffer) gl.deleteBuffer(instanceBuffer);
+        throw new Error('WebGL2 could not allocate instance buffers');
+      }
+      try {
+        gl.bindVertexArray(batchVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+        for (const [index, size, offset] of [[0,3,0],[1,3,12],[2,2,24]]) {
+          if (locations[index] < 0) continue;
+          gl.enableVertexAttribArray(locations[index]);
+          gl.vertexAttribPointer(locations[index], size, gl.FLOAT, false, MESH_VERTEX_STRIDE, offset);
+        }
+        if (inherited.length) {
+          // The base mesh VAO can include extra float attribute buffers owned
+          // by the scene pass (COLOR0, UV2, TANGENT0). Query its actual VAO
+          // state instead of guessing source format/stride/buffer identity.
+          gl.bindVertexArray(vao);
+          const bindings = inherited.map(({ name, source, target }) => {
+            if (!gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_ENABLED)) {
+              throw new Error('Cannot instance missing source mesh channel ' + name);
+            }
+            const buffer = gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING);
+            const type = gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_TYPE);
+            const divisor = gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_DIVISOR);
+            if (!buffer || divisor !== 0 || type !== gl.FLOAT ||
+                gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_INTEGER)) {
+              throw new Error('Instancing requires per-vertex float channel ' + name);
+            }
+            return {
+              target, buffer, type,
+              size: gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_SIZE),
+              normalized: gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_NORMALIZED),
+              stride: gl.getVertexAttrib(source, gl.VERTEX_ATTRIB_ARRAY_STRIDE),
+              offset: gl.getVertexAttribOffset(source, gl.VERTEX_ATTRIB_ARRAY_POINTER),
+            };
+          });
+          gl.bindVertexArray(batchVao);
+          for (const item of bindings) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, item.buffer);
+            gl.enableVertexAttribArray(item.target);
+            gl.vertexAttribPointer(item.target, item.size, item.type,
+              item.normalized, item.stride, item.offset);
+            gl.vertexAttribDivisor(item.target, 0);
+          }
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, capacity * 100, gl.DYNAMIC_DRAW);
+        for (let col = 0; col < 7; col++) {
+          const location = locations[3 + col];
+          gl.enableVertexAttribArray(location);
+          gl.vertexAttribPointer(location, col < 4 ? 4 : 3, gl.FLOAT, false,
+            100, col < 4 ? col * 16 : 64 + (col - 4) * 12);
+          gl.vertexAttribDivisor(location, 1);
+        }
+      } catch (error) {
+        gl.deleteVertexArray(batchVao);
+        gl.deleteBuffer(instanceBuffer);
+        throw error;
+      } finally {
+        gl.bindVertexArray(savedVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, savedArray);
+      }
+      // Keep the last committed GPU payload separate from the next validated set.
+      // A repeated static set can skip bufferSubData entirely; a single moved
+      // rigid body uploads just its 100-byte record rather than all instances.
+      const staging = new Float32Array(capacity * 25);
+      const pending = new Float32Array(capacity * 25);
+      let count = 0, mirrored = false, batchDisposed = false;
+      const batch = {
+        get instanceCount() { return count; },
+        get mirrored() { return mirrored; },
+        /**
+         * Upload only when transforms change, so static groups cost one GPU
+         * upload over their lifetime. Reject mixed handedness before upload.
+         * @param {ReadonlyArray<ReadonlyArray<number>|Float32Array>} matrices
+         */
+        setMatrices(matrices) {
+          if (batchDisposed || disposed) throw new Error('Cannot update a disposed instance batch');
+          if (!Array.isArray(matrices) || matrices.length > capacity) {
+            throw new RangeError('Instance matrices exceed capacity');
+          }
+          let nextMirror = false;
+          const dirtyIndices = [];
+          for (let i = 0; i < matrices.length; i++) {
+            const item = meshModelMatrices(matrices[i]);
+            if (i && nextMirror !== item.mirrored) {
+              throw new RangeError('Mixed mirrored instances require separate batches');
+            }
+            if (!i) nextMirror = item.mirrored;
+            const start = i * 25;
+            pending.set(item.model, start);
+            pending.set(item.normal, start + 16);
+            let changed = i >= count;
+            if (!changed) {
+              for (let component = 0; component < 25; component++) {
+                if (!Object.is(pending[start + component], staging[start + component])) {
+                  changed = true;
+                  break;
+                }
+              }
+            }
+            if (changed) {
+              dirtyIndices.push(i);
+            }
+          }
+          // Avoid uploading unchanged instances between two distant moving
+          // rigid objects. Coalesce nearby dirty records (<=2 clean records
+          // between them) to limit WebGL calls; cap at 8 uploads per update,
+          // falling back to one span when highly fragmented. Shrink/unchanged
+          // sets still submit zero bytes.
+          if (dirtyIndices.length) {
+            const runs = [];
+            let start = dirtyIndices[0], end = start;
+            for (let j = 1; j < dirtyIndices.length; j++) {
+              const index = dirtyIndices[j];
+              if (index - end <= 3) {
+                end = index;
+              } else {
+                runs.push([start, end]);
+                start = end = index;
+              }
+            }
+            runs.push([start, end]);
+            const ranges = runs.length <= 8 ? runs :
+              [[dirtyIndices[0], dirtyIndices[dirtyIndices.length - 1]]];
+            const previous = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+            try {
+              gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
+              for (const [first, last] of ranges) {
+                // A lone rigid body moving without rotation/scale changes
+                // touches only mat4 column 3.xyz (12 bytes), not its full
+                // 100-byte model + normal record. This keeps the same number
+                // of GL submissions; combined/dense runs still use one upload.
+                let translationOnly = first === last && first < count;
+                const record = first * 25;
+                for (let component = 0; translationOnly && component < 25; component++) {
+                  if (component !== 12 && component !== 13 && component !== 14 &&
+                      !Object.is(pending[record + component], staging[record + component])) {
+                    translationOnly = false;
+                  }
+                }
+                if (translationOnly) {
+                  gl.bufferSubData(gl.ARRAY_BUFFER, first * 100 + 48,
+                    pending.subarray(record + 12, record + 15));
+                } else {
+                  gl.bufferSubData(gl.ARRAY_BUFFER, first * 100,
+                    pending.subarray(first * 25, (last + 1) * 25));
+                }
+              }
+            } finally {
+              gl.bindBuffer(gl.ARRAY_BUFFER, previous);
+            }
+          }
+          staging.set(pending.subarray(0, matrices.length * 25));
+          count = matrices.length;
+          mirrored = nextMirror;
+          return batch;
+        },
+        draw(range = null) {
+          if (batchDisposed || disposed) throw new Error('Cannot draw a disposed instance batch');
+          if (!count) return { drawCalls: 0, instances: 0, triangles: 0 };
+          const firstIndex = range?.firstIndex ?? 0, indexCount = range?.indexCount ?? mesh.indexCount;
+          if (!Number.isSafeInteger(firstIndex) || !Number.isSafeInteger(indexCount) ||
+              firstIndex < 0 || indexCount <= 0 || indexCount % 3 !== 0 ||
+              firstIndex + indexCount > mesh.indexCount) {
+            throw new RangeError('Invalid instanced triangle draw range');
+          }
+          gl.bindVertexArray(batchVao);
+          gl.drawElementsInstanced(gl.TRIANGLES, indexCount, type,
+            firstIndex * (type === gl.UNSIGNED_INT ? 4 : 2), count);
+          return { drawCalls: 1, instances: count, triangles: count * indexCount / 3 };
+        },
+        dispose() {
+          if (batchDisposed) return;
+          batchDisposed = true;
+          batches.delete(batch);
+          gl.deleteVertexArray(batchVao);
+          gl.deleteBuffer(instanceBuffer);
+        },
+      };
+      batches.add(batch);
+      return batch;
+    },
     draw(range = null) {
       if (disposed) throw new Error('Cannot draw a disposed mesh');
       const firstIndex = range?.firstIndex ?? 0;
@@ -76,6 +325,7 @@ export function uploadIndexedMesh(gl, program, mesh, { usage = gl.STATIC_DRAW, r
     dispose() {
       if (disposed) return;
       disposed = true;
+      for (const batch of batches) batch.dispose();
       gl.deleteVertexArray(vao);
       gl.deleteBuffer(vbo);
       gl.deleteBuffer(ebo);
