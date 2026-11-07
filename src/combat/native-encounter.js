@@ -232,6 +232,11 @@ function webSquadBreachingLeaders(runtime,localSquads,observingAllies) {
         candidate.encounter.webDodgeRemaining>0 ||
         candidate.encounter.webSuppressionRemaining>0 ||
         candidate.encounter.webLossRemaining>0 ||
+        // A real collider just rejected this gunner's optional squad flank.
+        // While it takes the ordinary direct route, let a visible wingman
+        // become the breacher instead of sending the same blocked leader.
+        // This changes movement duty only; no shot or collision authority.
+        candidate.encounter.webFlankFallbackRemaining>EPSILON ||
         candidate.encounter.webHitPending || candidate.encounter.webHitRemaining>0 ||
         candidate.runtime?.pendingShot);
     });
