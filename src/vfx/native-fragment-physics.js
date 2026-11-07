@@ -133,7 +133,8 @@ function recoverPenetration(scene,position,velocity,radius,contacts) {
       // This is a conservative Web depenetration rule, not native PhysX.
       const inward=dot(velocity,normal);
       if(inward<0)for(const axis of axes)velocity[axis]-=normal[axis]*inward;
-      contacts.push({t:0,point,normal,collider:box.collider,penetration:depth});
+      contacts.push({t:0,point,normal,collider:box.collider,penetration:depth,
+        webOutwardNormalSpeed:Math.max(0,dot(velocity,normal))});
       changed=true;
     }
     if(!changed)break;
@@ -187,6 +188,10 @@ export function moveNativeFragmentSphere(scene, position, velocity, displacement
       for (const axis of axes) velocity[axis] -= tangent[axis] * friction;
       tangentRetention = 1 - friction;
     }
+    // Web-only post-contact normal speed: distinguish an actual upward
+    // rebound from a shard settling on its source collision surface. This
+    // describes our sphere sweep response, not a sampled Unity/PhysX event.
+    hit.webOutwardNormalSpeed = Math.max(0, dot(velocity, hit.normal));
     const into = dot(remaining, hit.normal);
     // Friction and restitution change velocity AT the hit, not one frame
     // later. Spend the remaining swept time on the retained tangent AND the
