@@ -3044,3 +3044,34 @@ test('J3 Web stationary player is noticed in active seconds even at the slow-wor
   assert.equal(gunner.encounter.webStationarySeconds,0,
     'a long suspended real-time frame cannot stand in for continuous observation');
 });
+
+
+test('J3 Web crossfire at long range: blocked rear gunner side-steps before stacking behind the ally',()=>{
+  // Synthetic player, actor and open navmesh. A rear gunner outside the usual
+  // firing ring must not advance straight into a teammate who blocks its real
+  // muzzle. The move is not a shot or evidence of native MCD squad behavior.
+  const near={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const runtime=setup(),rear=firstSpawn(runtime,near);
+  const ally={id:'lane-blocker',x:4,y:0,z:2,alive:true,active:true};
+  rear.clock=.4;
+  rear.muzzlePosition=p(rear.x,1.4,rear.z);
+  rear.muzzleForward=p(1,0,0);
+  const group=[rear,ally];
+  assert.ok(Math.hypot(rear.x-near.playerFeet.x,rear.z-near.playerFeet.z)>
+    runtime.armedStopDistance+runtime.body.radius*2,
+    'gunner begins outside its firing ring, not in the existing close-range peek');
+  advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:.2}));
+  assert.equal(rear.encounter.webAllyBlockingShot,true);
+  assert.equal(rear.encounter.canAttack,false,'the ally still blocks this tick\'s shot');
+  assert.ok(Math.abs(rear.z-2)>.05,'rear gunner moves into a swept lateral lane instead of tailgating');
+  assert.ok(Math.hypot(rear.x-ally.x,rear.z-ally.z)>runtime.body.radius*2,
+    'movement never crosses another actor\'s capsule');
+  let clear=false;
+  for(let frame=0;frame<16;frame++){
+    rear.muzzlePosition=p(rear.x,1.4,rear.z); // actual next-frame socket in the game
+    advanceNativeEncounter(runtime,input(group,{...near,scaledDeltaTime:.2}));
+    if(rear.encounter.canAttack){ clear=true; break; }
+  }
+  assert.ok(clear,'physical side steps eventually uncover a real firing corridor');
+  assert.ok(rear.encounter.visible,'the actor never gained permission from hidden player coordinates');
+});
