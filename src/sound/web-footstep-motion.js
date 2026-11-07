@@ -12,6 +12,9 @@ export function createWebFootstepMotion(emit) {
     const firstContactMetres = 0.75;
     const idleRearmSeconds = 0.4;
     const idleTravelTolerance = 0.005;
+    // Web-only: cumulative NET travel across tiny high-FPS walking frames;
+    // small back-and-forth camera jitter is not footfall motion.
+    const minGroundDriftMetres = 0.03;
     // Web gait policy: valid grounded movement can exceed 1 m in a slow frame.
     // A speed cap preserves strides while rejecting implausible teleports.
     // These are creative Web limits, not recovered MCD movement constants.
@@ -34,6 +37,7 @@ export function createWebFootstepMotion(emit) {
     let pendingMetres = 0;
     let awaitingFirstContact = true;
     let idleSeconds = 0;
+    let subtleGroundOrigin = null;
     let groundedBaseline = false;
     let airborneSince = null;
     let airborneFrames = 0;
@@ -47,6 +51,7 @@ export function createWebFootstepMotion(emit) {
         pendingMetres = 0;
         awaitingFirstContact = true;
         idleSeconds = 0;
+        subtleGroundOrigin = null;
         groundedBaseline = false;
         airborneSince = null;
         airborneFrames = 0;
@@ -65,6 +70,10 @@ export function createWebFootstepMotion(emit) {
         // Callers often move a single camera object in place each frame.
         // Never retain that reference: the next frame must compare two snapshots.
         const current = { x: position.x, y: position.y, z: position.z };
+        // Reset only this Web micro-motion history on pause, rewind or jump.
+        if (!grounded || previousTime === null || timeSeconds < previousTime ||
+            timeSeconds - previousTime > maxFrameGap)
+            subtleGroundOrigin = null;
         // A landing needs an established grounded baseline and consecutive air
         // samples. One-frame contact jitter or a fresh run must stay silent.
         if (previousTime === null || timeSeconds < previousTime ||
@@ -175,26 +184,37 @@ export function createWebFootstepMotion(emit) {
             return null;
         }
         const dt = timeSeconds - previousTime;
-        const dx = current.x - previous.x;
-        const dz = current.z - previous.z;
-        const distance = Math.hypot(dx, dz);
+        const lastGroundPosition = previous;
+        let dx = current.x - previous.x;
+        let dz = current.z - previous.z;
+        let distance = Math.hypot(dx, dz);
         previous = current;
         previousTime = timeSeconds;
         if (distance > maxAllowedTravel(dt)) {
             pendingMetres = 0; // Spawn, fast-travel or focus recovery, not a stride.
+            subtleGroundOrigin = null;
             awaitingFirstContact = true;
             idleSeconds = 0;
             return null;
         }
-        // Rest/jitter cannot fake a shoe contact; rearm after sustained stillness.
+        // WEB-ORIGINAL: very slow movement can be <5mm per frame at high FPS.
+        // Credit directed NET displacement without accumulating jitter path length.
         if (distance <= idleTravelTolerance) {
-            idleSeconds += dt;
-            if (idleSeconds >= idleRearmSeconds) {
-                pendingMetres = 0;
-                awaitingFirstContact = true;
+            subtleGroundOrigin ??= lastGroundPosition;
+            dx = current.x - subtleGroundOrigin.x;
+            dz = current.z - subtleGroundOrigin.z;
+            distance = Math.hypot(dx, dz);
+            if (distance < minGroundDriftMetres) {
+                idleSeconds += dt;
+                if (idleSeconds >= idleRearmSeconds) {
+                    pendingMetres = 0;
+                    awaitingFirstContact = true;
+                    subtleGroundOrigin = current;
+                }
+                return null;
             }
-            return null;
         }
+        subtleGroundOrigin = null;
         idleSeconds = 0;
         pendingMetres += distance;
         const contactMetres = awaitingFirstContact ? firstContactMetres : metresPerStep;
