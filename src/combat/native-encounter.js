@@ -1900,9 +1900,16 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // GunAttack still decide whether a projectile can actually be fired.
   if (!stop && armed && state.visible &&
       (state.webAllyBlockingShot || rangeCoverPeek) &&
-      !enemy.runtime.pendingShot && scaledDeltaTime>0 &&
-      tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+      !enemy.runtime.pendingShot && scaledDeltaTime>0) {
+    if (tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
         {preferClearMuzzle:true,firingTarget:playerPosition}))return;
+    // A cold-start ranged peek may produce a sub-micrometre side-step at
+    // SUPERHOT's slow-time floor. Do not immediately switch to a blocked
+    // forward route (which resets speed) before the side-step is resolvable.
+    // Once measurable, ordinary sweep/nav/occupancy still decide the move.
+    if (rangeCoverPeek && webTacticalStepBelowResolution(enemy,
+        scaledDeltaTime,WEB_STRAFE.speedFraction))return;
+  }
   if (stop) {
     if(disengaging && scaledDeltaTime>0) {
       if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime)) {
