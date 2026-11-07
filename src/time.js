@@ -487,11 +487,15 @@ export function addMcdGameplayPulse(clock, duration, amount) {
  * shaped input shifter rates and Web look-sampling clock. At low FPS, using
  * capped physics dt for both made a 0.5s WASD acceleration take ~1s at 10 FPS.
  * Omission preserves the existing behavior for callers without active wall dt.
+ * `pulseExpiryAtFrameStart` is a WEB-only opt-in for bounded low-FPS catch-up:
+ * a hit/shot pulse posted between RAFs gets one LateUpdate contribution if
+ * live at RAF start, even when the charged collision budget crosses its TTL.
+ * Regular/source-shaped ticks still evaluate expiry at frame end.
  * This is a WEB playability fix, NOT a claim about Unity's frame scheduler.
  */
 export function stepMcdGameplayClock(clock, {
   dt, unscaledDt = dt, x = 0, y = 0, grounded = true, yaw = clock.yaw, pitch = clock.pitch, paused = false,
-  sourceLookSample, lookPathDegrees,
+  sourceLookSample, lookPathDegrees, pulseExpiryAtFrameStart = false,
 }) {
   if (![dt, x, y, yaw, pitch].every(Number.isFinite) || dt < 0) {
     throw new RangeError('Gameplay time input must be finite with nonnegative dt');
@@ -529,6 +533,7 @@ export function stepMcdGameplayClock(clock, {
   // Update consumes the previously applied scale; LateUpdate writes the next.
   const appliedTimeScale = clock.timeScale;
   const worldDelta = Math.fround(Math.fround(dt) * appliedTimeScale);
+  const worldTimeAtFrameStart = clock.worldTime;
   clock.worldTime += worldDelta;
   const targets = mcdSourcePlayerTimeTargets({
     processedX: x, processedY: y, isGrounded: grounded,
@@ -601,7 +606,22 @@ export function stepMcdGameplayClock(clock, {
     }
   }
   for (const pulse of clock.source.shifters) {
-    if (pulse.expiresAt !== undefined) pulse.terminated = clock.worldTime > pulse.expiresAt;
+    if (pulse.expiresAt === undefined) continue;
+    // WEB-only startup protection: a source-delayed LateUpdate cannot
+    // consume a just-added shot pulse. Retain an eligible pulse until the
+    // first writable tick, even when low FPS crosses its world-time TTL.
+    // The default source-shaped expiry path remains untouched.
+    if (pulseExpiryAtFrameStart && clock.source.delayedUpdates > 0
+        && worldTimeAtFrameStart <= pulse.expiresAt) {
+      pulse.webDeferredFirstWrite = true;
+    }
+    if (pulseExpiryAtFrameStart && pulse.webDeferredFirstWrite) {
+      pulse.terminated = false;
+      if (clock.source.delayedUpdates === 0) delete pulse.webDeferredFirstWrite;
+    } else {
+      pulse.terminated =
+        (pulseExpiryAtFrameStart ? worldTimeAtFrameStart : clock.worldTime) > pulse.expiresAt;
+    }
   }
   const next = advanceMcdSourceTime(clock.source);
   clock.source = next.state;
@@ -846,4 +866,121 @@ export function createSceneQualifiedMcdGameplayClock({ sceneSource, yaw = 0, pit
     qualification,
     clock: qualification.sourceQualified ? createMcdGameplayClock({ yaw, pitch }) : null,
   });
+}
+
+/**
+ * WEB-ONLY clock-consistent Dojo catch-up scheduler for SH-05 integration.
+ *
+ * The legacy slice helper above is post-clock and CANNOT safely be connected
+ * on its own: it can advance actor movement more than clock.worldTime. This
+ * adapter runs the existing MCD-shaped WEB clock exactly ONCE with the bounded
+ * amount of active time that will actually be simulated, then partitions that
+ * SAME worldDelta into short collision/world steps. Thus:
+ *   sum(worldSteps) === tick.worldDelta === clock.worldTime increment
+ * for a live frame, up to floating-point accumulation. worldStepOffsets are
+ * cumulative world-time offsets FROM THIS FRAME'S START for TTL checks during
+ * each collision slice; never use the final frame time for every slice.
+ *
+ * This is a WEB feel correction for the 50ms capped frame-time at low FPS,
+ * NOT a recovered Unity fixed-step scheduler. maximumSteps is an explicit
+ * Web performance budget, not an inferred MCD constant.
+ * Input pulses already present at RAF start retain one Web LateUpdate
+ * contribution across a long catch-up tick; no native TTL cadence is inferred. SH-05 must arrange
+ * input edges and active-time effects once/RAF, with world systems sharing
+ * the slices; the ragdoll bridge ALREADY compensates capped frame time and
+ * must never be compensated a second time.
+ *
+ * @param {ReturnType<typeof createMcdGameplayClock>} clock Mutable Web clock.
+ * @param {{simulationDt:number,activeRealDt:number,maximumSteps:number,
+ *   paused?:boolean,x?:number,y?:number,grounded?:boolean,yaw?:number,
+ *   pitch?:number,lookPathDegrees?:number}} frame
+ * @returns {{worldSteps:number[],worldStepOffsets:number[],
+ *   simulationStepDeltas:number[],unscaledStepDeltas:number[],unscaledFrameDelta:number,
+ *   chargedActiveDt:number,discardedActiveDt:number,worldDelta:number,appliedTimeScale:number,
+ *   timeScale:number,aggregate:number}}
+ */
+export function stepWebMcdGameplayFrame(clock, {
+  simulationDt, activeRealDt, maximumSteps, paused = false, ...clockInputs
+} = {}) {
+  for (const [label, value] of Object.entries({simulationDt, activeRealDt})) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new RangeError(`${label} must be finite and nonnegative`);
+    }
+  }
+  // A collision-sized slice must retain the existing Web 50ms upper bound.
+  // Charged active time MAY exceed this per RAF, but each slice must not.
+  if (simulationDt > PROTOTYPE_FRAME_RULES.maximumDeltaSeconds) {
+    throw new RangeError('simulationDt exceeds the maximum collision step');
+  }
+  if (activeRealDt < simulationDt) {
+    throw new RangeError('activeRealDt must cover simulationDt');
+  }
+  if (!Number.isSafeInteger(maximumSteps) || maximumSteps < 1 || maximumSteps > 16) {
+    throw new RangeError('maximumSteps must be an integer from 1 to 16');
+  }
+  if (typeof paused !== 'boolean') throw new TypeError('paused must be boolean');
+
+  // No accumulated debt: a very long hitch can discard excess world time,
+  // while the clock's unscaled input/aim shifters still see actual active dt.
+  const chargedActiveDt = paused ? 0 : Math.min(activeRealDt, simulationDt * maximumSteps);
+  const tick = stepMcdGameplayClock(clock, {
+    ...clockInputs, dt: chargedActiveDt, unscaledDt: paused ? 0 : activeRealDt, paused,
+    pulseExpiryAtFrameStart: true,
+  });
+  const worldSteps = [];
+  const worldStepOffsets = [];
+  // Dojo caller currently passes unscaledDeltaTime: activeRealDt to both the
+  // encounter and enemy attack systems. When a future SH-05 hookup iterates
+  // worldSteps, repeating the FULL frame's activeRealDt for every slice would
+  // multiply these real-time timers. Keep the two independent domains explicit:
+  // simulationStepDeltas sum to chargedActiveDt (movement/damping budget),
+  // unscaledStepDeltas sum to activeRealDt (one RAF's active elapsed time).
+  // A frame-scoped discontinuity guard MUST inspect the unsplit RAF delta.
+  // In #567 the Dojo encounter resets stationary sight on >0.25s real hitches.
+  // A .8s hitch sliced into 4 x .2s otherwise looks like uninterrupted LOS
+  // and charges a fake continuous observation. Do not reuse this FULL delta
+  // as a per-slice timer increment: unscaledStepDeltas owns that partition.
+  // Both rules are WEB-original, not MCD frame-scheduler evidence.
+  const unscaledFrameDelta = paused ? 0 : activeRealDt;
+  const simulationStepDeltas = [];
+  const unscaledStepDeltas = [];
+  if (chargedActiveDt > 0 && tick.worldDelta > 0) {
+    // The Web clock rounds its charged dt to float32. At an exact 50ms RAF
+    // boundary, a double-precision timestamp difference can exceed 50ms by
+    // mere picoseconds; ceil(double ratio) then invents a near-zero second
+    // collision slice and repeats collision/AI work. Round the ratio to the
+    // same float32 precision as the tick before counting its collision slices.
+    // This is numeric scheduler hygiene, not a new MCD cadence constant.
+    const count = Math.min(maximumSteps, Math.ceil(Math.fround(chargedActiveDt / simulationDt)));
+    let previousActive = 0;
+    let previousWorld = 0;
+    let previousUnscaled = 0;
+    for (let i = 0; i < count; i++) {
+      const nextActive = Math.min(chargedActiveDt, (i + 1) * simulationDt);
+      const simulationStep = nextActive - previousActive;
+      const nextUnscaled = i === count - 1
+        ? activeRealDt : activeRealDt * (nextActive / chargedActiveDt);
+      const unscaledStep = nextUnscaled - previousUnscaled;
+      if (!Number.isFinite(unscaledStep) || unscaledStep < 0) {
+        throw new RangeError('invalid unscaled slice');
+      }
+      simulationStepDeltas.push(simulationStep);
+      unscaledStepDeltas.push(unscaledStep);
+      previousUnscaled = nextUnscaled;
+      const step = i === count - 1
+        ? tick.worldDelta - previousWorld
+        : tick.worldDelta * ((nextActive - previousActive) / chargedActiveDt);
+      if (!Number.isFinite(step) || step < 0) throw new RangeError('invalid world slice');
+      worldSteps.push(step);
+      previousActive = nextActive;
+      previousWorld += step;
+      // Last boundary uses the exact tick delta, avoiding accumulated drift.
+      worldStepOffsets.push(i === count - 1 ? tick.worldDelta : previousWorld);
+    }
+  }
+  return {
+    ...tick, worldSteps, worldStepOffsets, simulationStepDeltas,
+    unscaledStepDeltas, unscaledFrameDelta, chargedActiveDt,
+    discardedActiveDt: Math.max(0, activeRealDt - chargedActiveDt),
+  };
 }
