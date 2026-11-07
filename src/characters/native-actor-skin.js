@@ -392,8 +392,14 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
   const heading = currentForwardLength > 1e-6 ? Math.atan2(
     previous.fx * modelMatrix[10] - previous.fz * modelMatrix[8],
     previous.fx * modelMatrix[8] + previous.fz * modelMatrix[10]) : NaN;
+  // The live Dojo encounter immediately faces a sighted player with
+  // enemy.face = atan2(dx,-dz). A visible guard therefore rarely has the
+  // player behind its CURRENT model forward axis. Retain a short, bounded
+  // Web-only neck follow-through when that real actor transform snaps to a
+  // freshly seen flank. Unseen turns still use the original reset guard.
+  const witnessedTurn = pose.targetSight === true && Number.isFinite(heading);
   if (!Number.isFinite(travel) || travel > 1.5 ||
-      !Number.isFinite(heading) || Math.abs(heading) > .7) return null;
+      !Number.isFinite(heading) || (!witnessedTurn && Math.abs(heading) > .7)) return null;
   const dt = sameState ? pose.time - previous.poseTime : 0;
   if (!Number.isFinite(dt) || dt > .15 ||
       (!sameState && shaderTime - previous.time > .15)) return null;
@@ -468,7 +474,15 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
     }
   }
   const blend = dt === 0 ? 0 : 1 - Math.exp(-12 * dt);
-  const yaw = (previous.gazeYaw ?? 0) * (1 - blend) + target * blend;
+  // Real encounter facing snaps on the same tick as the sight verdict.
+  // Keep the sampled neck briefly oriented toward its PREVIOUS forward when
+  // that transform turns, then let source-clock damping settle it. No head
+  // turn is inferred from the live camera alone or from lost sight; the
+  // weapon socket, root and source action remain untouched.
+  const followThrough = witnessedTurn && Math.abs(heading) > .12
+    ? Math.max(-.33, Math.min(.33, heading * .22)) : 0;
+  const yaw = Math.max(-.35, Math.min(.35,
+    (previous.gazeYaw ?? 0) * (1 - blend) + target * blend + followThrough));
   const pitch = (previous.gazePitch ?? 0) * (1 - blend) + pitchTarget * blend;
   return Number.isFinite(yaw) && Number.isFinite(pitch) &&
     (Math.abs(yaw) + Math.abs(pitch) >= .008)
