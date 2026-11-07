@@ -1349,7 +1349,15 @@ function webSquadLaneYielders(runtime, enemies, fireTurns, localSquads, target, 
       return da-db || String(a.id).localeCompare(String(b.id),'en');
     });
     const front=candidates[0];
-    if(front)yielders.set(front,{muzzle:{...muzzle},target:{...target},shooter});
+    if(front) {
+      // Snapshot the rear gunner's actual tactical STRAFE phase, not only
+      // its persistent side. The -1 pre-warmup cycle reverses that side.
+      // A live teammate must avoid mirroring the same lateral direction.
+      const cycle=Math.floor((shooter.clock-WEB_STRAFE.warmupSeconds)/WEB_STRAFE.cycleSeconds);
+      const rearSide=shooter.encounter.webTacticalSide*(cycle%2===0 ? 1 : -1);
+      yielders.set(front,{muzzle:{...muzzle},target:{...target},shooter,
+        preferredSide:-rearSide});
+    }
   }
   return yielders;
 }
@@ -1368,10 +1376,11 @@ function tryWebSquadLaneYield(runtime, enemy, lane, playerFeet, enemies, scaledD
   const laneOffset=p=>(p.x-muzzle.x)*rayZ-(p.z-muzzle.z)*rayX;
   const original=Math.abs(laneOffset(start));
   let best=null;
-  // Counter-move relative to the waiting shooter's preferred sidestep.
-  // Otherwise both teammates can parallel-strafe forever, staying in line.
-  const opposite=-shooter.encounter.webTacticalSide;
-  for(const side of [opposite,-opposite]) {
+  // Counter-move relative to the WAITING shooter's frame-snapshotted
+  // tactical step. Reading its mutable side AFTER its move would create
+  // ordering-dependent parallel strafing.
+  const preferred=lane.preferredSide;
+  for(const side of [preferred,-preferred]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:-rayZ/rayLength*travel*side,y:0,z:rayX/rayLength*travel*side,
     },runtime.body).position;
