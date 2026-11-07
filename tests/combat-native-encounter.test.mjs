@@ -3199,3 +3199,58 @@ test('J3 Web cold-start footwork accelerates from rest at the .005 slow-world fl
       scenario.label+': an actual frozen world still never moves the actor');
   }
 });
+
+
+test('J3 Web slow-time reactions retain cold-start acceleration for real bullet, near miss and aimed gunner',()=>{
+  // Entirely fabricated Dojo/nav/collision and projectile inputs. This is a
+  // Web gameplay rule, not an MCD source claim or a real browser smoke.
+  const world=(1/60)*.005,real=1/60;
+  function proveSlowStep(runtime,enemy,first,following,remaining) {
+    const start=p(enemy.x,enemy.y,enemy.z);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:world,unscaledDeltaTime:real,...first,
+    }));
+    assert.ok(enemy.encounter[remaining]>0,
+      'a first sub-micrometre movement attempt must not cancel a real threat');
+    assert.ok(Math.hypot(enemy.x-start.x,enemy.z-start.z)<.001,
+      'no teleport or synthetic unscaled-time movement');
+    for(let i=0;i<120;i++) advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:world,unscaledDeltaTime:real,...following,
+    }));
+    const moved=Math.hypot(enemy.x-start.x,enemy.z-start.z);
+    assert.ok(moved>1e-5,
+      'accumulated world-time acceleration eventually generates a swept physical step');
+    assert.ok(moved<.01,'the very slow world still bounds total movement');
+    assert.equal(enemy.reaction.dead,false,'footwork never creates a damage receipt');
+  }
+
+  const direct=setup(),dodger=firstSpawn(direct);
+  dodger.muzzlePosition=p(2,1.4,2);dodger.muzzleForward=p(1,0,0);
+  const approaching={friendly:true,type:'normal',pos:p(15,1,2),
+    direction:p(-1,0,0),speed:35};
+  proveSlowStep(direct,dodger,{playerProjectiles:[approaching]},
+    {playerProjectiles:[]},'webDodgeRemaining');
+  assert.equal(dodger.encounter.webDodgeRemaining>0,true,
+    'physical reaction persists for world-scaled duration');
+  
+  const data=scene();data.gameplay.enemy.MinimumDistanceToPlayer=8;
+  const near={playerFeet:p(9,0,2),playerPosition:p(9,1.6,2)};
+  const suppressed=setup(data),gunner=firstSpawn(suppressed,near);
+  gunner.muzzlePosition=p(2,1.4,2);gunner.muzzleForward=p(1,0,0);
+  const grazing={friendly:true,pos:p(7,1,3.4),direction:p(-1,0,0),speed:22};
+  proveSlowStep(suppressed,gunner,{...near,playerProjectiles:[grazing]},
+    {...near,playerProjectiles:[]},'webSuppressionRemaining');
+  assert.equal(gunner.encounter.webDodgeRemaining,0,
+    'a near miss stays a suppression reaction, not an invented direct hit');
+
+  const aimed=setup(data),sideStepper=firstSpawn(aimed,near);
+  sideStepper.clock=0; // not ordinary periodic strafing
+  // Aim acquisition itself is covered by the dedicated camera-ray test.
+  // Seed its already-accepted Web reaction to isolate cold-start movement.
+  sideStepper.encounter.webAimRemaining=.44;
+  sideStepper.runtime.speed=0;
+  proveSlowStep(aimed,sideStepper,{...near,playerForward:p(-1,0,0)},
+    {...near,playerForward:p(-1,0,0)},'webAimRemaining');
+  assert.equal(sideStepper.encounter.canAttack,false,
+    'an evasive aim response never grants an extra shot');
+});
