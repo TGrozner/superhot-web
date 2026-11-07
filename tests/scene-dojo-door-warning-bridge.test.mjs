@@ -1003,3 +1003,44 @@ test('J4 live pickup collider stops hiding door beacon once F/E removes the stat
   assert.throws(() => createDojoDoorWarningBridge(sourceScene, unrelated),
     /same source collider/, 'must not inherit state from an unrelated scene with the same ID');
 });
+
+test('J4 accepted enemy arrival briefly blooms the existing Dojo doorway lights, then releases', () => {
+  // Creative Web-only arrival cue, using real elapsed spawn time. The Unity
+  // source warning curve remains completely frozen in this scenario.
+  const bridge = createDojoDoorWarningBridge(browserScene());
+  const event = warning(103);
+  event.delay = 1;
+  assert.equal(bridge.accept(event).status, 'triggered');
+  const packets = bridge.packets();
+  const packet = packets[0];
+  const spot = packet.spotlight;
+  const fill = packet.falseLight;
+
+  bridge.advance(0, null, 0.5);
+  const beforeArrival = spot.range;
+  assert.ok(beforeArrival > 2.9 && beforeArrival < 3.2);
+  bridge.advance(0, null, 0.5); // Accepted spawn arrives now.
+  assert.equal(packet.elapsed, 0, 'arrival bloom must not advance the source world clock');
+  assert.ok(spot.range > 5.8 && spot.range < 6, 'a single visible red doorway bloom marks the spawn');
+  assert.ok(fill.intensity > 2.1 && fill.intensity < 2.2, 'reuse existing red floor light');
+  assert.ok(spot.intensity > 39 && spot.intensity < 40);
+  assert.ok(spot.spotAngle > 80 && spot.spotAngle < 82, 'arrival briefly tightens the cone');
+  assert.equal(bridge.packets(), packets, 'no new light packets, passes or draw calls');
+  assert.deepEqual(packets.map(p => p.active), [true, false, false]);
+
+  bridge.advance(0, null, 0.4); // The accent must disappear after a short real-time tail.
+  assert.ok(spot.range < 0.1 && fill.intensity < 0.03, 'no persistent phantom doorway light');
+  assert.ok(Math.abs(spot.intensity - 30) < 0.1);
+  assert.ok(Math.abs(spot.spotAngle - 99) < 0.2);
+  bridge.reset();
+  assert.equal(packet.active, false);
+  assert.equal(spot.range, 0);
+  assert.equal(fill.intensity, 0);
+  assert.equal(fill.slot, -1);
+
+  const noVerifiedClock = createDojoDoorWarningBridge(browserScene());
+  noVerifiedClock.accept(event);
+  noVerifiedClock.advance(0);
+  assert.equal(noVerifiedClock.packets()[0].spotlight.range, 0,
+    'never invent an arrival when SH-05 supplies no real-time countdown');
+});
