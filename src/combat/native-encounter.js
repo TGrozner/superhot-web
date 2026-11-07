@@ -1871,6 +1871,17 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     enemy.runtime.attackDelayRemaining>weaponSettings.attackDelay*WEB_RELOAD_SCOOT.beginDelayFraction &&
     enemy.runtime.attackDelayRemaining<=weaponSettings.attackDelay*WEB_RELOAD_SCOOT.endDelayFraction;
   const tacticalTime=enemy.clock-WEB_STRAFE.warmupSeconds;
+  // J3 Web-only ranged cover reposition: outside the ordinary firing ring,
+  // a gunner with a genuinely visible target but an OCCLUDED posed muzzle
+  // should seek a safe lateral shooting corridor instead of walking blindly
+  // into low cover. Reuse the existing finite peek window to avoid permanent
+  // sideways orbiting; the actual next-frame muzzle ray still gates firing.
+  // Missing muzzle evidence never triggers this move.
+  const rangeCoverPeek=!stop && armed && state.visible && muzzleKnown &&
+    !worldMuzzleClear && !state.webAllyBlockingShot &&
+    !enemy.runtime.pendingShot &&
+    Number.isFinite(tacticalTime) && tacticalTime>=0 &&
+    tacticalTime%WEB_STRAFE.cycleSeconds<WEB_STRAFE.peekSeconds;
   const tactical=stop && armed && (state.canAttack || needsFiringLane) &&
     !enemy.runtime.pendingShot && Number.isFinite(tacticalTime) && tacticalTime>=0 &&
     tacticalTime%WEB_STRAFE.cycleSeconds<
@@ -1887,10 +1898,18 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // works only after reaching the stop ring; this handles a blocked approach.
   // This is movement only: next-frame posed muzzle, LOS, ally capsules and
   // GunAttack still decide whether a projectile can actually be fired.
-  if (!stop && armed && state.visible && state.webAllyBlockingShot &&
-      !enemy.runtime.pendingShot && scaledDeltaTime>0 &&
-      tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
+  if (!stop && armed && state.visible &&
+      (state.webAllyBlockingShot || rangeCoverPeek) &&
+      !enemy.runtime.pendingShot && scaledDeltaTime>0) {
+    if (tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
         {preferClearMuzzle:true,firingTarget:playerPosition}))return;
+    // A cold-start ranged peek may produce a sub-micrometre side-step at
+    // SUPERHOT's slow-time floor. Do not immediately switch to a blocked
+    // forward route (which resets speed) before the side-step is resolvable.
+    // Once measurable, ordinary sweep/nav/occupancy still decide the move.
+    if (rangeCoverPeek && webTacticalStepBelowResolution(enemy,
+        scaledDeltaTime,WEB_STRAFE.speedFraction))return;
+  }
   if (stop) {
     if(disengaging && scaledDeltaTime>0) {
       if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime)) {
