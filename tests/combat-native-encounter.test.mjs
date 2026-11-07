@@ -592,6 +592,37 @@ test('J3 Web squad approach: armed allies take distinct navmesh lanes, solo and 
     'an unarmed neighbor cannot force the ranged squad tactic');
 });
 
+test('J3 Web blocked flank: a real low pillar suspends repeated flank routing and falls back to the player',()=>{
+  // Synthetic waist-high solid obstacle blocks only one optional side corridor;
+  // the baked tile alone cannot encode this detailed physics collider.
+  const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
+  const runtime=setup(scene(),[box(8,.55,2.85,.25,1.1,.3)]);
+  const lead=firstSpawn(runtime,target);
+  lead.encounter.webTacticalSide=-1; // Expected lower-Z flank of this actor.
+  const wing={...lead,id:'other-gunner',x:2,y:0,z:8,clock:0,
+    reaction:{...lead.reaction},runtime:{...lead.runtime},
+    encounter:{...lead.encounter,route:null,target:null,webTacticalSide:1}};
+  runtime.actors.set(wing.id,wing);
+  const start=p(lead.x,lead.y,lead.z);
+  let blocked=false, direct=false;
+  for(let i=0;i<75;i++) {
+    advanceNativeEncounter(runtime,input([lead,wing],{
+      ...target,scaledDeltaTime:.12,unscaledDeltaTime:.12,
+    }));
+    blocked ||= lead.encounter.webFlankFallbackRemaining>0;
+    if(blocked && lead.encounter.target?.x===target.playerFeet.x &&
+        lead.encounter.target?.z===target.playerFeet.z) {
+      direct=true;
+      break;
+    }
+  }
+  assert.ok(blocked,'the optional offset route really encountered the body-height cover');
+  assert.ok(direct,'the gunner replans to the actual visible player rather than retrying that wall');
+  assert.ok(lead.x>start.x+1,'the gunner approached before reaching the obstructed flank');
+  assert.equal(lead.encounter.canAttack,false,'route recovery cannot authorize a shot without posed muzzle');
+  assert.equal(lead.reaction.dead,false,'routing never creates a hit or kill');
+});
+
 test('J3 Web three-gunner fanout: left, center and right use stable independent routes',()=>{
   // Web-only tactical layout on fabricated navmesh; no MCD AI parameters.
   const target={playerFeet:p(14,0,5),playerPosition:p(14,1.6,5)};
