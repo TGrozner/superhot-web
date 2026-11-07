@@ -127,6 +127,8 @@ const WEB_RETREAT_PRESSURE=Object.freeze({
 // Long-range sniper roles intentionally keep their existing spacing.
 const WEB_STATIONARY_PRESSURE=Object.freeze({
   holdSeconds:1.6,resetBodyRadii:1.2,stopFraction:0.68,minimumStopBodyRadii:3,
+  // Huge one-off catch-up deltas do not prove CONTINUOUS sight and stillness.
+  maxObservationStepSeconds:0.25,
 });
 function webVisiblePlayerRetreats(previous,current,enemyFeet,scaledDeltaTime) {
   if(!previous || !(scaledDeltaTime>EPSILON))return false;
@@ -1442,6 +1444,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webStationaryAnchor=null;
     state.webStationarySeconds=0;
   } else if(!state.webStationaryAnchor ||
+      scaledDeltaTime>WEB_STATIONARY_PRESSURE.maxObservationStepSeconds ||
       Math.hypot(state.webStationaryAnchor.x-playerFeet.x,
         state.webStationaryAnchor.z-playerFeet.z)>
           runtime.body.radius*WEB_STATIONARY_PRESSURE.resetBodyRadii) {
