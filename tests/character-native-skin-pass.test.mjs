@@ -1283,6 +1283,50 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
     'only restored gameplay LOS may turn the head toward the opposite side');
   assert.throws(() => visibility(.4, 5, 1.5, 'unknown'), /actual boolean AI sight/);
 
+  // A live guard must acknowledge an ACTUALLY SEEN rear-flank threat without
+  // omniscient camera tracking when sight is unknown or the target hides.
+  // This is authored Web readability; the sampled head, GPU palette and
+  // socket still share one pose, with no extra draw or native-IK claim.
+  const rearActors = createNativeActorSkinRuntime(pass);
+  const rearControlActors = createNativeActorSkinRuntime(pass);
+  const rear = (time, x, sight) => rearActors.drawActor({
+    actorId:'rear-watchman', pose:{state:'idle', time, targetSight:sight},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:{x,y:1.5,z:-5}, shaderTime:time*10,
+    color:[.8,.1,.2,1],
+  });
+  const rearSource = time => rearControlActors.drawActor({
+    actorId:'rear-watchman', pose:{state:'idle',time,targetSight:false},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:null, shaderTime:time*10,
+    color:[.8,.1,.2,1],
+  });
+  assert.equal(rear(0, 5, true).actorWebHeadLook, null);
+  const rearRight = rear(.1, 5, true);
+  assert.ok(rearRight.actorWebHeadLook?.yaw > .1,
+    'source-visible right-rear threat gets an isolated neck glance');
+  const rearLeft = rear(.22, -5, true);
+  assert.ok(rearLeft.actorWebHeadLook?.yaw < 0,
+    'visible opposite rear flank reverses the glance with world-time damping');
+  assert.equal(rearLeft.webHeadLookApplied, true);
+  near(Array.from(rearLeft.weaponAttachmentMatrix),
+    Array.from(rearSource(.22).weaponAttachmentMatrix));
+  const rearOccluded = rear(.32, 5, false);
+  assert.ok(rearOccluded.actorWebHeadLook.yaw < 0 &&
+    rearOccluded.actorWebHeadLook.yaw > rearLeft.actorWebHeadLook.yaw,
+    'a rear camera cannot turn the head after true AI sight is lost');
+  const rearUnknownActors = createNativeActorSkinRuntime(pass);
+  const rearUnknown = (time, sight) => rearUnknownActors.drawActor({
+    actorId:'unknown-watchman', pose:{state:'idle',time,
+      ...(sight === undefined ? {} : {targetSight:sight})},
+    modelMatrix:identity(), viewProjection:identity(),
+    cameraPosition:{x:5,y:1.5,z:-5}, shaderTime:time*10,
+    color:[.8,.1,.2,1],
+  });
+  rearUnknown(0);
+  assert.equal(rearUnknown(.1).actorWebHeadLook, null,
+    'camera-only rear position cannot invent gameplay visibility');
+
   const dead = draw(.50, 5, 5, {solvedPose:{
     rig:pass.rig, provenance:'authored solved pose',
     boneModelMatrices:new Float32Array([
