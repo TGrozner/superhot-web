@@ -821,7 +821,7 @@ function webDodgeLaneThreatScore(runtime, enemy, landing, projectiles, enemies, 
 }
 
 /** Shift feet laterally without tunneling, teleportation or fake shooting.
- * @returns {boolean} Whether a real nav/capsule-approved step occurred.
+ * @returns {boolean|'hold'} A real moved step, a deliberately safe hold, or a blocked move.
  */
 function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime,projectiles=[]) {
   const start=position(enemy),state=enemy.encounter;
@@ -845,6 +845,15 @@ function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
     if(!safest || risk<safest.risk-EPSILON)safest={moved,direction,risk};
   }
   if(!safest)return false;
+  // J3 Web-only composure: a grazing round can trigger a dodge although
+  // neither lateral corridor is safe from other live shots. Compare the
+  // existing, physically valid escape lanes against the same risk forecast
+  // at the current feet. If remaining still is genuinely safer, do not
+  // voluntarily sidestep into crossfire. Actual projectile collisions and
+  // damage are unchanged; this grants no immunity, free shot or movement.
+  const holdingRisk=webDodgeLaneThreatScore(
+    runtime,enemy,start,projectiles,enemies,scaledDeltaTime);
+  if(holdingRisk<safest.risk-EPSILON)return 'hold';
   enemy.x=safest.moved.x;enemy.y=safest.moved.y;enemy.z=safest.moved.z;
   enemy.walking=true;
   state.route=null;
@@ -1719,7 +1728,19 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   if(state.webDodgeRemaining>0 && !enemy.runtime.pendingShot && scaledDeltaTime>0) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'running',scaledDeltaTime);
-    const moved=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime,playerProjectiles);
+    const step=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime,playerProjectiles);
+    if(step==='hold') {
+      // All legal steps are predictively worse than the same live body
+      // staying put. End this attempted dodge with the normal recovery;
+      // do not fall through into an unrelated pursuit/strafe this frame.
+      // Projectile hit authority still runs in the shared late phase.
+      state.webDodgeRemaining=0;
+      state.webDodgeCooldown=WEB_PROJECTILE_EVADE.recoverySeconds;
+      enemy.runtime.speed=0;
+      enemy.walking=false;
+      return;
+    }
+    const moved=step===true;
     state.webDodgeRemaining=Math.max(0,state.webDodgeRemaining-scaledDeltaTime);
     const starting=!moved && webTacticalStepBelowResolution(
       enemy,scaledDeltaTime,WEB_PROJECTILE_EVADE.speedFraction);
