@@ -3664,7 +3664,7 @@ test('J3 Web fireteam: a cooling front gunner yields a real rear firing lane wit
   assert.equal(open.rear.encounter.canAttack,false,
     'sideways footwork never authorizes a ghost shot during the blocked tick');
   assert.ok(open.rear.z<1.95 && open.front.z>2.05,
-    'two live squadmates separate instead of parallel-strafing in the same muzzle lane');
+    `two live squadmates separate: rear=(${open.rear.x},${open.rear.z}), front=(${open.front.x},${open.front.z}), rearSide=${open.rear.encounter.webTacticalSide}, frontSide=${open.front.encounter.webTacticalSide}, rearBlocked=${open.rear.encounter.webAllyBlockingShot}, frontVisible=${open.front.encounter.visible}`);
   assert.equal(open.front.runtime.pendingShot,null,'a cooling gunner cannot invent a shot');
   assert.ok(Math.hypot(open.front.x-open.rear.x,open.front.z-open.rear.z)>.8,
     'both bodies retain native swept capsule spacing');
