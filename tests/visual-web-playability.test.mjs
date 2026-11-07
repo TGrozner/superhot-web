@@ -221,3 +221,68 @@ test('Dojo preview is not counted as live combat visual evidence before canvas S
   qa.stop();
   assert.equal(timers.size,0);
 });
+
+test('Real text ink overlaps are detected against brand and ammo, not empty header backgrounds',()=>{
+  const frame={...playing,frameId:23};
+  const chain={id:'chain-banner',left:96,top:42,width:110,height:34,
+    textBounds:{left:102,top:50,width:96,height:23}};
+  const pickup={id:'pickup-prompt',left:95,top:153,width:175,height:48,
+    textBounds:{left:110,top:168,width:148,height:21}};
+  const brand={id:'top-brand',left:22,top:20,width:220,height:85,
+    textBounds:{left:145,top:50,width:92,height:24}};
+  const ammo={id:'ammo',left:235,top:158,width:70,height:47,
+    textBounds:{left:235,top:170,width:60,height:27}};
+  const assess=boxes=>assessWebVisualReadability({
+    frame,width:320,height:261,boxes,
+  }).warnings.filter(w=>w.kind==='feedback-over-status-text');
+  const warnings=assess([chain,pickup,brand,ammo]);
+  assert.deepEqual(warnings.map(w=>w.ids),[
+    ['chain-banner','top-brand'],['pickup-prompt','ammo'],
+  ]);
+  assert.ok(warnings.every(w=>w.overlapFraction>=0.12));
+
+  // The broad header gradient overlaps the banner geometrically, but text
+  // is outside: do not turn a background collision into a visual claim.
+  assert.deepEqual(assess([chain,{...brand,textBounds:{
+    left:22,top:21,width:70,height:18}}]),[]);
+  assert.deepEqual(assess([pickup,{...ammo,textBounds:undefined}]),[]);
+});
+
+test('Live sampler reads actual HUD status text and retains brief collisions',()=>{
+  const timers=new Map();
+  const nodes={
+    'chain-banner':{hidden:false,textContent:'COMBO +100',getBoundingClientRect:()=>({
+      left:102,top:47,width:130,height:32})},
+  };
+  const status={hidden:false,textContent:'FRAME//BREAK',getBoundingClientRect:()=>({
+    left:20,top:20,width:230,height:76})};
+  const documentRef={
+    body:{append(){}},
+    createElement:()=>({style:{},setAttribute(){},remove(){}}),
+    getElementById:id=>id==='scene-controls'?{hidden:true}:nodes[id]??null,
+    querySelector:selector=>selector==='.top-bar .brand'?status:null,
+    createRange:()=>({
+      selectNodeContents(element){this.element=element;},
+      getBoundingClientRect(){
+        return this.element===status?
+          {left:142,top:53,width:85,height:20}:
+          {left:110,top:52,width:115,height:21};
+      },
+    }),
+  };
+  const windowRef={
+    innerWidth:320,innerHeight:261,
+    __superhotGetRenderedFrameSnapshot:()=>playing,
+    __superhotSceneMetrics:{p95FrameMs:16},
+    getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
+    setInterval:(fn,ms)=>{timers.set(ms,fn);return ms;},
+    clearInterval:ms=>timers.delete(ms),
+  };
+  const qa=installWebVisualQa({windowRef,documentRef});
+  const r=qa.getReport();
+  assert.equal(r.transientWarnings.length,1);
+  assert.equal(r.transientWarnings[0].kind,'feedback-over-status-text');
+  assert.deepEqual(r.transientWarnings[0].ids,['chain-banner','top-brand']);
+  qa.stop();
+  assert.equal(timers.size,0);
+});
