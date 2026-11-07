@@ -12,6 +12,16 @@ const participating = enemy => living(enemy) && enemy.active !== false;
 const fromMatrix = matrix => ({ x:matrix[12], y:matrix[13], z:matrix[14] });
 const EPSILON = 1e-6;
 
+// J3 Web slow-time reactive footwork: a running/walking actor accelerates
+// across world ticks, but its first physical step can be below the 1µm
+// collision resolution. This is NOT a failed nav/capsule sweep. Keep the
+// already-authorized reaction alive until its first measurable step; once
+// the requested step exceeds EPSILON, a rejected move is a real blockage.
+// No elapsed real time, extra movement budget or shot permission is added.
+function webTacticalStepBelowResolution(enemy, scaledDeltaTime, speedFraction=1) {
+  return enemy.runtime.speed*scaledDeltaTime*speedFraction<=EPSILON;
+}
+
 // J3 Web gameplay tuning, NOT MCD timing: staggered short lateral moves make
 // armed enemies less static without changing the source navmesh or gun gates.
 // J3 Web-only shoot-and-scoot: a gunner that has actually fired moves
@@ -1390,8 +1400,10 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
         'running',scaledDeltaTime);
       const moved=tryWebHitSidestep(runtime,enemy,playerFeet,playerPosition,enemies,scaledDeltaTime);
       state.webHitRemaining=Math.max(0,state.webHitRemaining-scaledDeltaTime);
-      if(!moved)state.webHitRemaining=0;
-      if(moved)return;
+      const starting=!moved && webTacticalStepBelowResolution(
+        enemy,scaledDeltaTime,WEB_HIT_RECOVERY.speedFraction);
+      if(!moved && !starting)state.webHitRemaining=0;
+      if(moved || starting)return;
     } else return;
   }
   const armed=enemy.reaction.hasWeapon;
@@ -1604,11 +1616,13 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       'running',scaledDeltaTime);
     const moved=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime);
     state.webDodgeRemaining=Math.max(0,state.webDodgeRemaining-scaledDeltaTime);
-    if(!moved || state.webDodgeRemaining===0) {
+    const starting=!moved && webTacticalStepBelowResolution(
+      enemy,scaledDeltaTime,WEB_PROJECTILE_EVADE.speedFraction);
+    if((!moved && !starting) || state.webDodgeRemaining===0) {
       state.webDodgeCooldown=WEB_PROJECTILE_EVADE.recoverySeconds;
-      if(!moved)state.webDodgeRemaining=0;
+      if(!moved && !starting)state.webDodgeRemaining=0;
     }
-    if(moved)return;
+    if(moved || starting)return;
   }
   // Witnessed teammate losses produce one brief, geometry-constrained retreat
   // away from the ACTUAL corpse, not the player's hidden/current location.
@@ -1621,11 +1635,13 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       {playerBodyFeet:playerFeet});
     state.webLossRemaining=Math.max(0,state.webLossRemaining-scaledDeltaTime);
     state.canAttack=false;
-    if(!moved || state.webLossRemaining<=EPSILON) {
+    const starting=!moved && webTacticalStepBelowResolution(
+      enemy,scaledDeltaTime,WEB_DISENGAGE.speedFraction);
+    if((!moved && !starting) || state.webLossRemaining<=EPSILON) {
       state.webLossRemaining=0;
       state.webLossFeet=null;
     }
-    if(moved)return;
+    if(moved || starting)return;
   }
   // Genuine near-misses create a brief opportunity to reposition, but direct
   // threats retain priority in the existing dodge. Preserve committed shots.
@@ -1658,12 +1674,14 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
         {sideOverride:state.webTacticalSide,playerBodyFeet:playerFeet});
     state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
     state.canAttack=false;
-    if (!moved || state.webSuppressionRemaining<=EPSILON) {
+    const starting=!moved && webTacticalStepBelowResolution(
+      enemy,scaledDeltaTime,Math.min(WEB_DISENGAGE.speedFraction,WEB_STRAFE.speedFraction));
+    if ((!moved && !starting) || state.webSuppressionRemaining<=EPSILON) {
       state.webSuppressionRemaining=0;
       state.webSuppressionFrom=null;
       state.webSuppressionCooldown=WEB_NEAR_MISS.recoverySeconds;
     }
-    if (moved) return;
+    if (moved || starting) return;
   }
   // A teammate actually taking a nonlethal hit triggers one short covering
   // change of firing lane. The witness must still see the player; the actual
@@ -1678,8 +1696,10 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       const moved=tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
         {sideOverride:state.webTacticalSide});
       state.webSupportRemaining=Math.max(0,state.webSupportRemaining-scaledDeltaTime);
-      if(!moved)state.webSupportRemaining=0;
-      if(moved)return;
+      const starting=!moved && webTacticalStepBelowResolution(
+        enemy,scaledDeltaTime,WEB_STRAFE.speedFraction);
+      if(!moved && !starting)state.webSupportRemaining=0;
+      if(moved || starting)return;
     }
   }
   // A real sustained camera aim at a VISIBLE gunner creates a short, readable
@@ -1709,8 +1729,10 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       const moved=tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
         {sideOverride:state.webTacticalSide});
       state.webAimRemaining=Math.max(0,state.webAimRemaining-scaledDeltaTime);
-      if(!moved)state.webAimRemaining=0;
-      if(moved)return;
+      const starting=!moved && webTacticalStepBelowResolution(
+        enemy,scaledDeltaTime,WEB_STRAFE.speedFraction);
+      if(!moved && !starting)state.webAimRemaining=0;
+      if(moved || starting)return;
     }
   }
   // A single, stable armed squadmate pressures the player while its allies
