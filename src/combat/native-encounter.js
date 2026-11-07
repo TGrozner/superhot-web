@@ -347,15 +347,20 @@ function tryWebDisengage(runtime, enemy, playerFeet, enemies, scaledDeltaTime,
     // diagonal retreat lanes. Try the two genuine tangents instead of freezing
     // in melee range. They still pass the SAME swept capsule, actor occupancy,
     // navmesh and player-distance gates below; no shot/attack rule changes.
-    {x:-side*z,z:side*x},
-    {x:side*z,z:-side*x},
+    {x:-side*z,z:side*x,tangent:true},
+    {x:side*z,z:-side*x,tangent:true},
   ];
   for(const candidate of candidates) {
     const magnitude=Math.hypot(candidate.x,candidate.z);
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:candidate.x/magnitude*travel,y:0,z:candidate.z/magnitude*travel,
     },runtime.body).position;
-    if(distance(moved,playerFeet)<=distance(start,playerFeet)+EPSILON ||
+    // True retreat vectors must gain measurable player distance; a tangent's
+    // gain is quadratic in its step length, so at SUPERHOT's slow-time floor
+    // it is often < EPSILON despite valid sideways movement. A tangent may
+    // remain level (within the same tolerance), but never approach the player.
+    const radialGain=distance(moved,playerFeet)-distance(start,playerFeet);
+    if((candidate.tangent ? radialGain < -EPSILON : radialGain <= EPSILON) ||
         (avoidApproaching && distance(moved,avoidApproaching)<distance(start,avoidApproaching)-EPSILON))continue;
     if(Math.hypot(moved.x-start.x,moved.z-start.z)<=EPSILON)continue;
     const sample=sampleNativeNavigation(runtime.nav,moved,runtime.body.stepOffset+EPSILON);

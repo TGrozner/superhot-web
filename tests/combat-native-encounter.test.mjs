@@ -3118,3 +3118,32 @@ test('J3 Web corner escape: a gunner with both retreat diagonals blocked takes o
   assert.deepEqual(p(sealed.gunner.x,sealed.gunner.y,sealed.gunner.z),before,
     'no legal tangent means hold position: never phase through a teammate');
 });
+
+test('J3 Web corner escape: tangent still advances at the .005 slow-world floor',()=>{
+  // Fabricated open Dojo navigation with a live actor touching the rear
+  // capsule. At a 60 Hz / .005 world step the tangential radial gain is
+  // <1e-6; requiring a strictly radial retreat incorrectly freezes it.
+  const player={playerFeet:p(3.3,0,2),playerPosition:p(3.3,1.6,2)};
+  const runtime=setup(),gunner=firstSpawn(runtime,player);
+  gunner.clock=0;
+  gunner.runtime.speed=5; // Pre-accelerated: isolate the angle gate, not a start from rest.
+  gunner.muzzlePosition=p(2,1.4,2);
+  gunner.muzzleForward=p(1,0,0);
+  gunner.encounter.webTacticalSide=1;
+  const blocker={id:'rear-contact',x:1.2,y:0,z:2,alive:true,active:true};
+  const start=p(gunner.x,gunner.y,gunner.z);
+  const dt=(1/60)*.005;
+  advanceNativeEncounter(runtime,input([gunner,blocker],{
+    ...player,scaledDeltaTime:dt,unscaledDeltaTime:1/60,
+  }));
+  assert.ok(Math.abs(gunner.z-start.z)>1e-5,
+    'a legal lateral step must not be discarded as an immeasurable radial gain');
+  assert.ok(Math.abs(gunner.x-start.x)<1e-6,
+    'contact with the rear ally still blocks all three radial retreat vectors');
+  assert.ok(Math.hypot(gunner.x-blocker.x,gunner.z-blocker.z)>=runtime.body.radius*2-1e-6,
+    'the tangent preserves capsule spacing at the minimum game time scale');
+  assert.ok(Math.hypot(gunner.x-player.playerFeet.x,gunner.z-player.playerFeet.z)>=
+    Math.hypot(start.x-player.playerFeet.x,start.z-player.playerFeet.z)-1e-6,
+    'sideways escape must not close the distance to the player');
+  assert.equal(gunner.walking,true,'the physically achieved step drives walking animation');
+});
