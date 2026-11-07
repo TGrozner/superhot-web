@@ -9,7 +9,12 @@ const ZERO = { x: 0, y: 0, z: 0 };
 const vector = a => ({ x: a[0], y: a[1], z: a[2] });
 const length = v => Math.hypot(v.x, v.y, v.z);
 const sharp = item => item.stickable || item.isKnife || item.isKatana;
-const pickable = item => !item.unpickable && ['static', 'resting', 'attached'].includes(item.state);
+// J2 Web arcade catch: the existing E aim-ray can grab an actually airborne
+// thrown item. A pending wall/enemy contact is never preempted by a catch.
+const pickable = item => !item.unpickable && (
+  ['static', 'resting', 'attached'].includes(item.state) ||
+  (item.state === 'flying' && item.pendingContact === null)
+);
 
 function point(value, name) {
   if (!value || !['x', 'y', 'z'].every(k => Number.isFinite(value[k])))
