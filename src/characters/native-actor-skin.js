@@ -431,7 +431,16 @@ function webHeadTracking(frames, actorId, identity, pose, modelMatrix, cameraPos
   const lateral = (dx * modelMatrix[0] + dz * modelMatrix[2]) / rightLength;
   const frontal = (dx * modelMatrix[8] + dz * modelMatrix[10]) / forwardLength;
   const distance = Math.hypot(lateral, frontal);
-  let target = distance > 1 && frontal > .05
+  // WEB-only peripheral reaction: if gameplay has positively confirmed
+  // line-of-sight to a threat behind this actor, angle the actual sampled
+  // neck/head toward the exposed rear flank while the body catches up.
+  // Merely having a camera position is NOT permission to see behind walls:
+  // unknown sight keeps the prior frontal-only behavior, false sight already
+  // decays above, and an exactly centered rear target does not choose an
+  // arbitrary left/right side. No source Animator head IK is inferred.
+  const confirmedRearFlank = pose.targetSight === true && frontal <= .05 &&
+    Math.abs(lateral) > .05;
+  let target = distance > 1 && (frontal > .05 || confirmedRearFlank)
     ? Math.max(-.33, Math.min(.33, Math.atan2(lateral, frontal))) : 0;
   if (identity.name === 'idle' && frontal > .05) {
     // Deliberately authored small scanning offset, tied to world time.
