@@ -1348,11 +1348,18 @@ test('Web head gaze turns the sampled Head subtree without turning the real weap
   assert.ok(firstTurn.actorWebHeadLook?.yaw < -.2 &&
     firstTurn.webHeadLookApplied === true,
     'real instantaneous AI facing must produce an observable neck follow-through');
-  const sourceTurn = createNativeActorSkinRuntime(pass).drawActor({
-    actorId:'turn-control', pose:{state:'idle',time:.08,targetSight:false},
-    modelMatrix:facingX,viewProjection:identity(),
-    cameraPosition:null,shaderTime:.8,color:[.8,.1,.2,1],
+  // A real 90-degree facing snap also invokes the EXISTING Web torso bank.
+  // Compare against that same per-actor previous-frame motion with sight
+  // disabled; otherwise a different torso bank changes the weapon socket
+  // regardless of the new independent neck follow-through.
+  const turnControlActors = createNativeActorSkinRuntime(pass);
+  const turnControl = (time, turned) => turnControlActors.drawActor({
+    actorId:'turn-control',pose:{state:'idle',time,targetSight:false},
+    modelMatrix:turned ? facingX : identity(),viewProjection:identity(),
+    cameraPosition:null,shaderTime:time*10,color:[.8,.1,.2,1],
   });
+  turnControl(0,false);
+  const sourceTurn = turnControl(.08,true);
   near(Array.from(firstTurn.weaponAttachmentMatrix),
     Array.from(sourceTurn.weaponAttachmentMatrix));
   const easedTurn = snapFrame(.16,true,true);
