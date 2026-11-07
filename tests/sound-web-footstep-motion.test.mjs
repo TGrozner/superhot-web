@@ -216,3 +216,27 @@ test('ground footfalls survive 3 FPS while teleports and long frame stalls remai
   assert.equal(tick(0.9, 2 + 1 / 3)?.status, 'started');
   assert.deepEqual(cues.map(({cue}) => cue), ['step', 'step', 'step']);
 });
+
+test('batched 120Hz slow travel stays quiet; brisk ground travel remains stronger', () => {
+  // WEB-ONLY: the 3cm anti-jitter accumulator corrects cadence, but should
+  // not make a 0.24m/s footstep sound like a 3.6m/s sprint.
+  const observed = [];
+  const gait = createWebFootstepMotion((cue, request) => {
+    observed.push({cue, ...request});
+    return {status:'started', source:'web-original-synthesis', at:1, spatial:true};
+  });
+  for (let frame = 0; frame <= 600; frame++) {
+    gait.advance({position:p(frame * 0.002), grounded:true, timeSeconds:frame / 120});
+  }
+  assert.ok(observed.length > 0, 'high-refresh slow walking must still emit steps');
+  assert.ok(observed.every(({cue, intensity}) => cue === 'step' && intensity === 0.45),
+    'slow-step loudness must use per-frame speed, not batched 3cm displacement');
+
+  gait.reset();
+  observed.length = 0;
+  for (let frame = 0; frame <= 60; frame++) {
+    gait.advance({position:p(frame * 0.05), grounded:true, timeSeconds:frame / 60});
+  }
+  assert.ok(observed.some(({cue, intensity}) => cue === 'step' && intensity > 0.6),
+    'brisk running must still sound stronger');
+});
