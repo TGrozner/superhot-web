@@ -1368,7 +1368,10 @@ function tryWebSquadLaneYield(runtime, enemy, lane, playerFeet, enemies, scaledD
   const laneOffset=p=>(p.x-muzzle.x)*rayZ-(p.z-muzzle.z)*rayX;
   const original=Math.abs(laneOffset(start));
   let best=null;
-  for(const side of [enemy.encounter.webTacticalSide,-enemy.encounter.webTacticalSide]) {
+  // Counter-move relative to the waiting shooter's preferred sidestep.
+  // Otherwise both teammates can parallel-strafe forever, staying in line.
+  const opposite=-shooter.encounter.webTacticalSide;
+  for(const side of [opposite,-opposite]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:-rayZ/rayLength*travel*side,y:0,z:rayX/rayLength*travel*side,
     },runtime.body).position;
