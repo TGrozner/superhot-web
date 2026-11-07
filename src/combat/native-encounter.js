@@ -1675,7 +1675,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webSuppressionRemaining=Math.max(0,state.webSuppressionRemaining-scaledDeltaTime);
     state.canAttack=false;
     const starting=!moved && webTacticalStepBelowResolution(
-      enemy,scaledDeltaTime,Math.min(WEB_DISENGAGE.speedFraction,WEB_STRAFE.speedFraction));
+      enemy,scaledDeltaTime,Math.max(WEB_DISENGAGE.speedFraction,WEB_STRAFE.speedFraction));
     if ((!moved && !starting) || state.webSuppressionRemaining<=EPSILON) {
       state.webSuppressionRemaining=0;
       state.webSuppressionFrom=null;
