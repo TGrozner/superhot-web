@@ -723,17 +723,65 @@ function tryWebHitSidestep(runtime,enemy,playerFeet,playerPosition,enemies,scale
   return true;
 }
 
+// J3 Web-only crossing-shot escape: choose between TWO genuinely legal capsule
+// steps using only already-launched, observable bullets. A fallback toward a
+// second incoming round may be worse than holding the original dodge side.
+// Predict the near-future body corridor solely to RANK movement, never to
+// erase a hit, create invulnerability or change real projectile collision.
+// Cover, finite TTL and living interceptors must hide unobservable bullets.
+function webDodgeLaneThreatScore(runtime, enemy, landing, projectiles, enemies) {
+  if (!Array.isArray(projectiles) || projectiles.length === 0) return 0;
+  const candidate={...enemy,x:landing.x,y:landing.y,z:landing.z};
+  let risk=0;
+  for(const bullet of projectiles) {
+    if(bullet?.friendly!==true || !bullet.pos)continue;
+    const origin=bullet.pos;
+    const velocity=bullet.velocity ?? {
+      x:bullet.direction?.x*bullet.speed,
+      y:bullet.direction?.y*bullet.speed,
+      z:bullet.direction?.z*bullet.speed,
+    };
+    if(![origin.x,origin.y,origin.z,velocity.x,velocity.y,velocity.z]
+      .every(Number.isFinite))continue;
+    const planarSquared=velocity.x*velocity.x+velocity.z*velocity.z;
+    const vertical=planarSquared<=EPSILON;
+    if(vertical && Math.abs(velocity.y)<=EPSILON)continue;
+    const until=vertical ? 0 :
+      ((landing.x-origin.x)*velocity.x+(landing.z-origin.z)*velocity.z)/planarSquared;
+    if(!vertical && until<=0)continue;
+    const window=webIncomingWarningEntry(runtime,candidate,origin,velocity,planarSquared);
+    if(!window)continue;
+    const nearestTime=vertical ? window.time :
+      Math.max(window.time,Math.min(window.exitTime,until));
+    const nearX=origin.x+velocity.x*nearestTime-landing.x;
+    const nearZ=origin.z+velocity.z*nearestTime-landing.z;
+    if(nearX*nearX+nearZ*nearZ>runtime.body.radius**2+EPSILON)continue;
+    const threatTime=vertical ? nearestTime : webProjectileThreatTime(
+      runtime,candidate,origin,velocity,planarSquared,nearestTime,window);
+    if(!webProjectileCanReach(bullet,threatTime))continue;
+    const end={x:origin.x+velocity.x*threatTime,
+      y:origin.y+velocity.y*threatTime,z:origin.z+velocity.z*threatTime};
+    if(nativeSegmentHit(runtime.sightCollision,origin,end)!==null ||
+        webLivingAllyIntersectsSegment(runtime,enemy,origin,end,enemies))continue;
+    // The earliest avoidable contact carries the most weight. This is a
+    // conservative one-step predictor, not an alternative hit authority.
+    risk+=1/(0.1+threatTime);
+  }
+  return risk;
+}
+
 /** Shift feet laterally without tunneling, teleportation or fake shooting.
  * @returns {boolean} Whether a real nav/capsule-approved step occurred.
  */
-function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
+function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime,projectiles=[]) {
   const start=position(enemy),state=enemy.encounter;
   const travel=enemy.runtime.speed*scaledDeltaTime*WEB_PROJECTILE_EVADE.speedFraction;
   if(!Number.isFinite(travel) || travel<=EPSILON)return false;
-  // A teammate or wall can close the first evasion lane while the opposite
-  // perpendicular lane remains safe. Try both using the SAME swept capsule,
-  // navmesh and live-actor gates; never teleport through the blocker. Remember
-  // the successful side for the remainder of this dodge to avoid oscillation.
+  // Both candidates must FIRST pass the unchanged swept capsule, navmesh,
+  // player and live-ally checks. Only then prefer the side exposed to fewer
+  // observable, still-live bullet corridors. Equal risk keeps the existing
+  // preferred direction; an actually blocked side is never selected.
+  let safest=null;
   for(const direction of [1,-1]) {
     const moved=moveNativeCharacter(runtime.collision,start,{
       x:state.webDodgeSideX*travel*direction,y:0,z:state.webDodgeSideZ*travel*direction,
@@ -743,14 +791,16 @@ function tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime)
     if(!sample || Math.hypot(sample.position.x-moved.x,sample.position.z-moved.z)>EPSILON ||
         occupied(runtime,start,moved,enemies,enemy) ||
         occupiedSegment(start,moved,playerFeet,runtime.body.radius*2,runtime.body.height))continue;
-    enemy.x=moved.x;enemy.y=moved.y;enemy.z=moved.z;
-    enemy.walking=true;
-    state.route=null;
-    state.webDodgeSideX*=direction;
-    state.webDodgeSideZ*=direction;
-    return true;
+    const risk=webDodgeLaneThreatScore(runtime,enemy,moved,projectiles,enemies);
+    if(!safest || risk<safest.risk-EPSILON)safest={moved,direction,risk};
   }
-  return false;
+  if(!safest)return false;
+  enemy.x=safest.moved.x;enemy.y=safest.moved.y;enemy.z=safest.moved.z;
+  enemy.walking=true;
+  state.route=null;
+  state.webDodgeSideX*=safest.direction;
+  state.webDodgeSideZ*=safest.direction;
+  return true;
 }
 
 /** Interrupt a live Web dodge instead of pausing its remaining time across a
@@ -1619,7 +1669,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   if(state.webDodgeRemaining>0 && !enemy.runtime.pendingShot && scaledDeltaTime>0) {
     advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
       'running',scaledDeltaTime);
-    const moved=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime);
+    const moved=tryWebProjectileEvade(runtime,enemy,playerFeet,enemies,scaledDeltaTime,playerProjectiles);
     state.webDodgeRemaining=Math.max(0,state.webDodgeRemaining-scaledDeltaTime);
     const starting=!moved && webTacticalStepBelowResolution(
       enemy,scaledDeltaTime,WEB_PROJECTILE_EVADE.speedFraction);

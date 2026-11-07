@@ -3402,3 +3402,34 @@ test('J3 Web crossing shots: urgent body impact outranks an earlier peripheral w
       'the earliest real body passage wins regardless of projectile array order');
   }
 });
+
+test('J3 Web crossing-shot escape picks the truly safer legal lane, independent of bullet order',()=>{
+  // Entirely synthetic Web bullets. The first shot heads directly down the
+  // gunner's centerline; the later parallel shot intersects ONLY its default
+  // +X escape, not the equally legal -X lane. No native AI parity is claimed.
+  const center={friendly:true,pos:p(2,1,-2),velocity:p(0,0,36),ttl:.5};
+  const flank={friendly:true,pos:p(2.54,1,-3),velocity:p(0,0,12),ttl:.55};
+  function dodge(bullets) {
+    const runtime=setup(),enemy=firstSpawn(runtime);
+    const start=p(enemy.x,enemy.y,enemy.z);
+    enemy.muzzlePosition=p(enemy.x,1.4,enemy.z);
+    enemy.muzzleForward=p(1,0,0);
+    advanceNativeEncounter(runtime,input([enemy],{
+      scaledDeltaTime:.12,playerProjectiles:bullets,
+    }));
+    return {dx:enemy.x-start.x,dz:enemy.z-start.z,
+      sideX:enemy.encounter.webDodgeSideX,remaining:enemy.encounter.webDodgeRemaining,
+      canAttack:enemy.encounter.canAttack};
+  }
+  const solo=dodge([center]);
+  assert.ok(solo.dx>.08 && Math.abs(solo.dz)<.001,
+    'the direct shot alone preserves the existing preferred +X escape');
+  const first=dodge([center,flank]);
+  const reversed=dodge([flank,center]);
+  assert.ok(first.dx<-.08 && Math.abs(first.dz)<.001,
+    'the same real capsule/navmesh mover chooses -X instead of dodging into the crossing bullet');
+  assert.ok(first.remaining>0 && first.sideX<0,
+    'the safer selected side is retained for the active dodge');
+  assert.equal(first.canAttack,false,'an evasive step cannot create gunfire');
+  assert.deepEqual(first,reversed,'projectile array order cannot change the safer legal escape');
+});
