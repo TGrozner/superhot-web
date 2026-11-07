@@ -1858,12 +1858,23 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
         {preferClearMuzzle:true,firingTarget:playerPosition}))return;
   if (stop) {
     if(disengaging && scaledDeltaTime>0) {
-      if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
+      if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime)) {
+        // At the .005 world-time floor, a gunner starting from rest may
+        // accelerate by less than one sweep epsilon per frame. Retain that
+        // acceleration until a physical step becomes measurable. A genuinely
+        // blocked attempt still stops as before once its step exceeds epsilon.
+        if(enemy.runtime.speed*scaledDeltaTime*WEB_DISENGAGE.speedFraction>EPSILON)
+          enemy.runtime.speed=0;
+      }
     } else if((reloadScoot || tactical) && scaledDeltaTime>0 &&
         !tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
           needsFiringLane ? {preferClearMuzzle:true,firingTarget:playerPosition}
-             : reloadScoot ? {preferCover:true,firingTarget:playerPosition} : {}))
-      enemy.runtime.speed=0;
+             : reloadScoot ? {preferCover:true,firingTarget:playerPosition} : {})) {
+      // The same tiny-step stall affects Web reload/peek footwork at low time
+      // scale: do not repeatedly reset a legal strafe before it can start.
+      if(enemy.runtime.speed*scaledDeltaTime*WEB_STRAFE.speedFraction>EPSILON)
+        enemy.runtime.speed=0;
+    }
     return;
   }
   if (scaledDeltaTime === 0) return;
