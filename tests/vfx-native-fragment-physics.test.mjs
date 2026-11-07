@@ -258,6 +258,8 @@ test('authored torque visibly spins real shards about their swept collider cente
 
 test('authored shard spin settles after a real contact, not during flight or scaled pause',()=>{
   const physics=context();
+  // A genuine landing (not a high-restitution rebound) must still damp spin.
+  physics.material={...physics.material,bounciness:0};
   physics.gravity={x:0,y:0,z:0};
   const create=(physical)=>createGunPickupShardRuntime({
     shards:[{id:'spin-shard',modelMatrix:matrix(0,0.2,0),originalScale:1,
@@ -482,4 +484,35 @@ test('wall ricochets preserve airborne shard torque until an actual ground conta
   const angle=Math.atan2(shard.modelMatrix[1],shard.modelMatrix[0]);
   assert.ok(Math.abs(angle-2*Math.PI*0.2)<1e-9,
     'a wall ricochet must not make the fragment stop tumbling in midair');
+});
+
+test('a strong real floor bounce keeps authored shard tumbling in the air',()=>{
+  // The previous contact-only rule damped spin at the first floor hit even
+  // when the source-shaped sphere sweep had already bounced the shard upward.
+  const physics={
+    collisionScene:prepareNativeCollision([
+      {id:'rebound-floor',worldMatrix:matrix(0,-0.5,0),
+        center:[0,0,0],size:[30,1,30]},
+    ]),
+    gravity:{x:0,y:0,z:0},fixedDelta:1/150,
+    material:{bounciness:0.8,dynamicFriction:0,staticFriction:0,bounceThreshold:0},
+  };
+  const runtime=createGunPickupShardRuntime({
+    shards:[{id:'airborne-floor-bounce',modelMatrix:matrix(0,0.3,0),
+      originalScale:1,collisionRadius:0.1}],
+    parentVelocity:{x:0,y:-90,z:0},attachedToEnemy:false,
+    torqueSamples:[{x:0,y:0,z:1}],fadeDelays:[1.5],
+    gravity:physics.gravity,physics,
+  });
+  const [shard]=advanceGunPickupShardRuntime(runtime,0.1);
+  const rebound=shard.contacts.find(c=>c.collider?.id==='rebound-floor' &&
+    c.normal?.y>0.55 && c.webOutwardNormalSpeed>1);
+  assert.ok(rebound,'the real collider sweep must produce a fast upward rebound');
+  assert.ok(shard.velocity.y>1,'fragment is visibly flying upward again');
+  assert.equal(shard.firstWebGroundImpactAt,undefined,
+    'an upward bounce must not be mistaken for a settled floor contact');
+  advanceGunPickupShardRuntime(runtime,0.1);
+  assert.ok(Math.abs(Math.atan2(shard.modelMatrix[1],shard.modelMatrix[0])-
+    2*Math.PI*.2)<1e-9,
+  'the actual authored shard must continue its airborne spin at the Web angular rate');
 });

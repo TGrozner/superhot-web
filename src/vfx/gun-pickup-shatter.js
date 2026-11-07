@@ -26,6 +26,10 @@ const WEB_SHARD_SPIN_RADIANS_PER_SECOND = 2 * Math.PI;
 // contact, leaving bounce/collision response to the source-shaped sphere sweep.
 // 12/s is creative Web polish, NOT native PhysX angular damping.
 const WEB_SHARD_CONTACT_SPIN_DECAY_PER_SECOND = 12;
+// A strong upward rebound remains airborne, even if it first touched the
+// floor. Dampen spin only after a slow source-collider landing. Deliberate
+// Web game-feel threshold in world units/second, NOT native PhysX sleep.
+const WEB_SHARD_SETTLING_NORMAL_SPEED = 0.6;
 
 function webShardSpinTime(shard, elapsed) {
   const contactAt = shard.firstWebGroundImpactAt;
@@ -348,8 +352,9 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
         }) : [];
       // Preserve any first static hit for diagnostics, including wall grazes.
       // But a wall ricochet while airborne is NOT grounds to stop tumbling.
-      // Only an actual upward contact with an enabled authored collider starts
-      // the angular settling clock; this remains original Web game feel.
+      // Only a low-rebound upward contact with an enabled authored collider
+      // starts angular settling. Fast floor bounces still tumble in flight;
+      // this is original Web game feel, never a native PhysX assertion.
       if (shard.contacts.length > 0) {
         if (shard.firstStaticContactAt === undefined) {
           shard.firstStaticContactAt = elapsed;
@@ -359,7 +364,8 @@ export function advanceGunPickupShardRuntime(runtime, scaledDelta) {
         }
         if (shard.firstWebGroundImpactAt === undefined) {
           const upward = shard.contacts.filter(contact =>
-            contact.collider && contact.normal?.y > 0.55);
+            contact.collider && contact.normal?.y > 0.55 &&
+            (contact.webOutwardNormalSpeed ?? 0) <= WEB_SHARD_SETTLING_NORMAL_SPEED);
           if (upward.length) {
             const first = upward.reduce((time, contact) =>
               Math.min(time, contact.webImpactTimeInFrame ?? scaledDelta), scaledDelta);
