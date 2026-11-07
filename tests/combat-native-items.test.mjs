@@ -422,3 +422,33 @@ test('J2 Web air catch: E can recapture a flying thrown weapon under the real ai
   assert.equal(nearestNativeItem(covered.runtime, camera, forward), null,
     'native unpickable restrictions remain authoritative in flight');
 });
+
+test('J2 Web crowded catch: reticle-centered flying weapon beats closer floor loot, not a grazing flyby', () => {
+  // Synthetic weapons, Web-only UI/game-feel choice; no MCD selection claim.
+  for (const reversed of [false, true]) {
+    const air = fixture('airborne');
+    const floor = fixture('floor', { worldMatrix: matrix(0,1,-0.35) });
+    const { runtime } = setup(reversed ? [floor, air] : [air, floor]);
+    const flying = runtime.items.find(item => item.id === 'airborne');
+    const ground = runtime.items.find(item => item.id === 'floor');
+    assert.equal(nearestNativeItem(runtime, camera, forward), ground,
+      'before the throw, ordinary nearest-on-ray pickup remains unchanged');
+    launch(runtime, flying);
+    advanceNativeItems(runtime, 0.04);
+    assert.equal(flying.state, 'flying');
+    assert.ok(getNativeItemPosition(flying).z < -1);
+    assert.equal(nearestNativeItem(runtime, camera, forward), flying,
+      'a centered in-flight catch wins despite nearer available floor loot');
+
+    // A body-radius grazing ray is not intentional reticle focus: keep the
+    // nearer static pickup instead of magnetically stealing the flying gun.
+    flying.worldMatrix[12] = 0.095;
+    flying.worldMatrix[14] = -0.55;
+    assert.equal(nearestNativeItem(runtime, camera, forward), ground);
+    flying.worldMatrix[12] = 0;
+    assert.equal(nearestNativeItem(runtime, camera, forward), flying);
+    assert.equal(pickupNativeItem(runtime, flying), true);
+    assert.equal(runtime.held, flying,
+      'existing E -> held transition applies only to the chosen physical item');
+  }
+});
