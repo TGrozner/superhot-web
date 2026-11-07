@@ -994,7 +994,11 @@ function webVisibleShotClue(runtime,enemy,projectiles) {
 // by the actual animation/contact event, never by this approach decision.
 // A swept body, baked navmesh and other live characters remain authoritative.
 const WEB_UNARMED_WEAVE=Object.freeze({
+  // Tactics are decided on bounded, ACTIVE wall-time observations. Movement
+  // still uses world-scaled delta; at SUPERHOT slow time a melee attacker
+  // should not take minutes to notice the player's aim or change its approach.
   switchSeconds:0.65,
+  maxObservationStepSeconds:0.25,
   rangeBodyRadii:20,
   lateralBias:0.65,
 });
@@ -1015,7 +1019,7 @@ function tryWebUnarmedWeave(runtime,enemy,playerFeet,enemies,scaledDeltaTime) {
   const travel=Math.min(enemy.runtime.speed*scaledDeltaTime,remaining);
   if(!Number.isFinite(travel) || travel<=EPSILON || planar<=EPSILON)return false;
   const forwardX=dx/planar,forwardZ=dz/planar;
-  const phase=Math.floor(runtime.webVolleyClock/WEB_UNARMED_WEAVE.switchSeconds);
+  const phase=Math.floor(state.webUnarmedWeaveClock/WEB_UNARMED_WEAVE.switchSeconds);
   const pressured=state.webUnarmedJukeRemaining>EPSILON;
   const lateralBias=pressured?WEB_UNARMED_AIM_JUKE.lateralBias:WEB_UNARMED_WEAVE.lateralBias;
   const preferred=pressured ? -state.webTacticalSide
@@ -1510,7 +1514,8 @@ function spawnEnemy(runtime, point, order, population, playerFeet) {
       webSupportRemaining:0,webSupportCooldown:0,
       webSuppressionRemaining:0,webSuppressionCooldown:0,webSuppressionFrom:null,
       webAimLock:0,webAimRemaining:0,webAimCooldown:0,
-      webUnarmedAimLock:0,webUnarmedJukeRemaining:0,webUnarmedJukeCooldown:0,
+      webUnarmedWeaveClock:0,webUnarmedAimLock:0,
+      webUnarmedJukeRemaining:0,webUnarmedJukeCooldown:0,
       webReloadCoverRemaining:0,webReloadCoverFeet:null,webReloadCoverSide:0,
       webFlankFallbackRemaining:0},
   };
@@ -1651,6 +1656,7 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webSuppressionFrom=null;
     state.webAimLock=0;
     state.webAimRemaining=0;
+    state.webUnarmedWeaveClock=0;
     state.webUnarmedAimLock=0;
     state.webUnarmedJukeRemaining=0;
     enemy.runtime.pendingShot=null;
@@ -1707,22 +1713,36 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   // corridor for several world ticks. A disarmed foe then weaves harder while
   // STILL closing melee distance. Occlusion, a stun or rearming cancels it;
   // frozen world time never charges an aim reaction or spends its cooldown.
+  // The real camera aiming at a visible unarmed runner is information the AI
+  // may react to in active REAL time. Its running feet and collisions still
+  // advance exclusively with scaledDeltaTime. A paused world or a stalled tab
+  // must neither charge a juke nor silently spend its recovery window.
+  const unarmedThinkStep=scaledDeltaTime>0 && unscaledDeltaTime>0 &&
+    unscaledDeltaTime<=WEB_UNARMED_WEAVE.maxObservationStepSeconds
+    ? unscaledDeltaTime : 0;
   state.webUnarmedJukeCooldown=Math.max(0,
-    (state.webUnarmedJukeCooldown??0)-scaledDeltaTime);
+    (state.webUnarmedJukeCooldown??0)-unarmedThinkStep);
   if(armed || !state.visible) {
+    state.webUnarmedWeaveClock=0;
     state.webUnarmedAimLock=0;
     state.webUnarmedJukeRemaining=0;
-  } else if(state.webUnarmedJukeRemaining>0) {
-    state.webUnarmedJukeRemaining=Math.max(0,
-      state.webUnarmedJukeRemaining-scaledDeltaTime);
-  } else if(state.webUnarmedJukeCooldown<=EPSILON && scaledDeltaTime>0) {
-    const aimed=webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward,enemies);
-    state.webUnarmedAimLock=aimed
-      ? (state.webUnarmedAimLock??0)+scaledDeltaTime : 0;
-    if(state.webUnarmedAimLock>=WEB_UNARMED_AIM_JUKE.lockSeconds) {
+  } else {
+    state.webUnarmedWeaveClock=(state.webUnarmedWeaveClock+unarmedThinkStep)%
+      (WEB_UNARMED_WEAVE.switchSeconds*4);
+    if(unscaledDeltaTime>WEB_UNARMED_WEAVE.maxObservationStepSeconds)
       state.webUnarmedAimLock=0;
-      state.webUnarmedJukeRemaining=WEB_UNARMED_AIM_JUKE.durationSeconds;
-      state.webUnarmedJukeCooldown=WEB_UNARMED_AIM_JUKE.cooldownSeconds;
+    if(state.webUnarmedJukeRemaining>0) {
+      state.webUnarmedJukeRemaining=Math.max(0,
+        state.webUnarmedJukeRemaining-unarmedThinkStep);
+    } else if(state.webUnarmedJukeCooldown<=EPSILON && unarmedThinkStep>0) {
+      const aimed=webPlayerIsAimingAt(runtime,enemy,playerPosition,playerForward,enemies);
+      state.webUnarmedAimLock=aimed
+        ? state.webUnarmedAimLock+unarmedThinkStep : 0;
+      if(state.webUnarmedAimLock>=WEB_UNARMED_AIM_JUKE.lockSeconds) {
+        state.webUnarmedAimLock=0;
+        state.webUnarmedJukeRemaining=WEB_UNARMED_AIM_JUKE.durationSeconds;
+        state.webUnarmedJukeCooldown=WEB_UNARMED_AIM_JUKE.cooldownSeconds;
+      }
     }
   }
   // Per-actor consecutive REAL sightings: losing sight or suffering a stun
