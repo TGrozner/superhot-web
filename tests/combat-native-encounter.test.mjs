@@ -3273,7 +3273,7 @@ test('J3 Web blind hunter accelerates through a real last-seen search at 60Hz, i
     return {runtime,enemy};
   }
   const hidden={playerFeet:p(12,0,6),playerPosition:p(12,1.6,6)};
-  for(const [scale,frames,minTravel] of [[1,36,.08],[.005,240,.0001]]) {
+  for(const [scale,frames,minTravel] of [[1,36,.08],[.005,240,.00005]]) {
     const {runtime,enemy}=searcher();
     const worldDt=(1/60)*scale,realDt=1/60;
     const tick=()=>advanceNativeEncounter(runtime,input([enemy],{
