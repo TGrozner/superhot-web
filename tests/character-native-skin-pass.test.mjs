@@ -1487,6 +1487,25 @@ test('Dojo source-named neck chain actually animates the GPU head with no Head b
     Array.from(neutral.boneModelMatrices.slice(3*16,4*16)));
   assert.equal(calls.filter(c=>c[0]==='draw').length,3,
     'do not add a second draw or material pass for Dojo head motion');
+
+  // Rotation pivots at neck_01, but sight pitch must use the *terminal*
+  // neck position, not the lower pivot (a visibly wrong angle up close).
+  const aimActors = createNativeActorSkinRuntime(pass);
+  const aimAt = time => aimActors.drawActor({
+    actorId:'dojo-eye-height', pose:{state:'idle',time,targetSight:true},
+    modelMatrix:identity(),viewProjection:identity(),
+    cameraPosition:{x:0,y:1.7,z:2.5},shaderTime:time*10,
+    color:[.8,.1,.2,1],
+  });
+  const aimInitial = aimAt(0);
+  const aimNext = aimAt(.12);
+  const authoredTerminalY = aimInitial.boneModelMatrices[2*16+13];
+  const expectedPitch = Math.atan2(1.7-authoredTerminalY,2.5) *
+    (1-Math.exp(-12*.12));
+  assert.ok(Math.abs(aimNext.actorWebHeadLook.pitch-expectedPitch)<1e-5,
+    'live head gaze must sample the terminal neck eye height, not neck base');
+  near(Array.from(aimNext.weaponAttachmentMatrix),
+    Array.from(aimInitial.weaponAttachmentMatrix));
   pass.dispose();
 
   const noChain={...pkg,bones:pkg.bones.map((bone,i)=>
