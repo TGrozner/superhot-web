@@ -194,6 +194,41 @@ test('Dojo multi-slice AI never counts the same frame unscaled time twice', () =
 });
 
 
+test('Dojo stationary observation hitch gate retains unsplit real RAF duration', () => {
+  // #567's real visible-LOS pressure resets on a >0.25s real RAF gap.
+  // Splitting .8s into four .2s unscaled AI calls must NOT disguise that
+  // gap as four continuous rendered observations. This tests a Web API
+  // integration contract; it does not run the browser encounter itself.
+  for (const [activeRealDt, expectedDiscontinuity] of [
+    [1 / 60, false], [.1, false], [.8, true],
+  ]) {
+    const clock = createMcdGameplayClock();
+    clock.source.delayedUpdates = 0;
+    clock.source.forcedTimeScale = 1;
+    clock.timeScale = 1;
+    const tick = stepWebMcdGameplayFrame(clock, {
+      simulationDt: Math.min(.05, activeRealDt),
+      activeRealDt, maximumSteps: 4,
+    });
+    assert.equal(tick.unscaledFrameDelta, activeRealDt,
+      'frame-scope LOS continuity must receive the unsplit RAF delta');
+    assert.equal(tick.unscaledFrameDelta > .25, expectedDiscontinuity);
+    assert.ok(tick.unscaledStepDeltas.every(dt => dt <= .25),
+      'per-slice deltas cannot substitute for detecting a long RAF gap');
+    assert.ok(Math.abs(
+      tick.unscaledStepDeltas.reduce((sum, dt) => sum + dt, 0) -
+      tick.unscaledFrameDelta,
+    ) < 1e-10, 'sliced unscaled time is still charged only once');
+  }
+  const clock = createMcdGameplayClock();
+  const paused = stepWebMcdGameplayFrame(clock, {
+    simulationDt: .05, activeRealDt: .8, maximumSteps: 4, paused: true,
+  });
+  assert.equal(paused.unscaledFrameDelta, 0,
+    'a paused RAF cannot qualify as active continuous observation');
+  assert.deepEqual(paused.unscaledStepDeltas, []);
+});
+
 test('Dojo low-FPS catch-up does not discard a shot pulse before one LateUpdate', () => {
   // WEB behavior regression: shooting just after releasing movement can leave
   // the previous scale near 1. A 100ms RAF then crosses a 50ms world pulse;
