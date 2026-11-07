@@ -945,6 +945,20 @@ function nearbyPickup() {
   const axes=cameraAxes(state.camera.yaw,state.camera.pitch);
   let nearest = nativeGameplay() ? nearestNativeItem(nativeItems,state.camera,axes.forward) : null;
   let best = nearest ? distance3(getNativeItemPosition(nearest),state.camera) : 2.2;
+  // J2 Web arcade pickup: the native-item pool already resolves reticle-focused
+  // airborne catches. Preserve that explicit choice against the separate enemy
+  // weapon drop pool, which otherwise overrides it solely by center distance.
+  // Existing range, aim-ray intersection and line-of-sight admission remain
+  // enforced by nearestNativeItem; never prioritize a grazing flyby.
+  let focusedNativeFlight = false;
+  if (nativeGameplay() && nearest?.state === 'flying' && best > 0) {
+    const position = getNativeItemPosition(nearest);
+    const dx = position.x - state.camera.x;
+    const dy = position.y - state.camera.y;
+    const dz = position.z - state.camera.z;
+    focusedNativeFlight = (dx * axes.forward.x + dy * axes.forward.y +
+      dz * axes.forward.z) / best >= 0.99;
+  }
   for (const drop of state.drops) {
     if (drop.unpickable) continue;
     const distance = nativeGameplay() ? distance3(drop,state.camera) : distanceXZ(drop,state.camera);
@@ -952,7 +966,7 @@ function nearbyPickup() {
       const delta=normalize3(vec(drop.x-state.camera.x,drop.y-state.camera.y,drop.z-state.camera.z));
       if(delta.x*axes.forward.x+delta.y*axes.forward.y+delta.z*axes.forward.z<.8 || nativeSegmentHit(nativeSightCollision,state.camera,drop))continue;
     }
-    if (distance < best) { nearest = drop; best = distance; }
+    if (distance < best && !focusedNativeFlight) { nearest = drop; best = distance; }
   }
   return nearest;
 }
