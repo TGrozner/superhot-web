@@ -121,9 +121,11 @@ const WEB_RETREAT_PRESSURE=Object.freeze({
   minimumRetreatSpeed:1.6,stopFraction:0.78,minimumStopBodyRadii:3.2,
 });
 // J3 Web-original anti-camping: after personally watching a player hold
-// roughly the same feet for sustained WORLD time, an ordinary gunner closes
-// its firing ring. Moving, breaking sight or stunning the gunner cancels the
-// pressure; it cannot chase a player hidden behind cover or change shot gates.
+// roughly the same feet for sustained ACTIVE REAL time, an ordinary gunner
+// closes its firing ring. The world-time movement is still scaled, but the
+// warning cannot take minutes just because the player stopped moving.
+// Moving, breaking sight or stunning the gunner cancels the pressure;
+// it cannot chase a player hidden behind cover or change shot gates.
 // Long-range sniper roles intentionally keep their existing spacing.
 const WEB_STATIONARY_PRESSURE=Object.freeze({
   holdSeconds:1.6,resetBodyRadii:1.2,stopFraction:0.68,minimumStopBodyRadii:3,
@@ -1206,7 +1208,7 @@ function spawnEnemy(runtime, point, order, population, playerFeet) {
     encounter:{route:null, target:null, visible:false, canAttack:false, webAllyBlockingShot:false, spawnPointId:point.id,
       webTacticalSide:runtime.nextId%2===0 ? 1 : -1,
       webObservedPlayerFeet:null, // Consecutive personal sighting for Web anti-kiting; never an unseen velocity.
-      webStationaryAnchor:null,webStationarySeconds:0, // Only genuinely observed world-time camping.
+      webStationaryAnchor:null,webStationarySeconds:0, // Genuine active real-time sight; movement stays world-scaled.
       webLastSeenFeet:null, // Personally observed player feet, never inferred from a bullet.
       webDispatchFeet:{...playerFeet}, // Web clue captured at DOOR WARNING, not hidden-player position at arrival.
       webBulletClueFeet:null, // Accessible location where a real bullet was seen.
@@ -1444,15 +1446,17 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
     state.webStationaryAnchor=null;
     state.webStationarySeconds=0;
   } else if(!state.webStationaryAnchor ||
-      scaledDeltaTime>WEB_STATIONARY_PRESSURE.maxObservationStepSeconds ||
+      unscaledDeltaTime>WEB_STATIONARY_PRESSURE.maxObservationStepSeconds ||
       Math.hypot(state.webStationaryAnchor.x-playerFeet.x,
         state.webStationaryAnchor.z-playerFeet.z)>
           runtime.body.radius*WEB_STATIONARY_PRESSURE.resetBodyRadii) {
     state.webStationaryAnchor={...playerFeet};
     state.webStationarySeconds=0;
-  } else if(scaledDeltaTime>0) {
+  } else if(scaledDeltaTime>0 && unscaledDeltaTime>0) {
+    // Only active frames advance: a frozen/paused world must not charge this
+    // cue, while a slow-motion world still counts sustained actual observation.
     state.webStationarySeconds=Math.min(WEB_STATIONARY_PRESSURE.holdSeconds,
-      state.webStationarySeconds+scaledDeltaTime);
+      state.webStationarySeconds+unscaledDeltaTime);
   }
   // Web-authored fairness: a spawn gets exactly one dispatch coordinate.
   // Neither never-seen enemies nor those who lose real sight can track
@@ -1898,7 +1902,11 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   }
   enemy.x=actual.x; enemy.y=actual.y; enemy.z=actual.z;
   enemy.walking=distance(start,actual) > EPSILON;
-  if (!enemy.walking) enemy.runtime.speed=0;
+  // At the native slow-time floor, acceleration may yield <1µm of travel in
+  // one render tick. Preserve accrued speed until a real swept step is large
+  // enough to register, instead of resetting acceleration every frame.
+  // Genuine blocked routes above that threshold still stop normally.
+  if (!enemy.walking && speed*scaledDeltaTime>EPSILON) enemy.runtime.speed=0;
 }
 
 /** Return door-warning/spawn events; parent APPENDS each event.enemy to its list.
