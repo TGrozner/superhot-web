@@ -871,3 +871,53 @@ Compare two builds only at matching browser, resolution, DPR, GPU, workload
 and capture rules; do not fabricate an FPS or assume that app-reported draw
 counts measure all GPU work. During a restart, mark a new segment after
 the next combat begins. Keep the existing SH-10 full-run recorder separate.
+
+
+## SH-10 — enemy displacement receipt for blocked flank / breach baton (7 November 2026)
+
+**Web gameplay-first diagnostic, not a MCD parity gate.** After PR #588 and
+#589, the actual browser render snapshot already exposes live enemy
+`x/y/z`, but the SH-10 full-run recorder previously dropped them. It could
+witness kills/restart without distinguishing stationary enemies from an
+enemy actually travelling after a failed flank. The v2 recorder now records
+`motionFromFirstSampleMeters: {dx,dy,dz}` per actor on every rendered sample
+when the host supplies finite Web coordinates. Each vector is **relative to
+the first sampled Web position of the same actor ID**; absolute/world/source
+spawn transforms are deliberately never serialized. Missing/unreasonable
+coordinates are `null`, not zero. Precision is 0.00001 Web world unit; no
+claim of native-unit calibration is made.
+
+Use the **already documented** Start → F/E → 6/7 kills → win → REJOUER
+capture on Pages/localhost. In the local validator output:
+
+```bash
+node scripts/acceptance-dojo-vertical.mjs --trace private/dojo-full-run.json
+```
+
+`observed.enemyMotion` now gives, for up to 12 actors, live-frame sample
+count, cumulative sampled path length in Web world metres, maximum
+single-sample step and net displacement from their first observation.
+`actorsMovingOver5cm` is a **Web-only descriptive threshold**, not a
+physics or MCD requirement. The diagnostic is also emitted for incomplete
+full-run traces after the basic schema validates, making a blocked Dojo run
+inspectable without forging a win. Missing telemetry gives the explicit
+`UNKNOWN_NO_WEB_ENEMY_MOTION_TELEMETRY` status; available traces report
+`WEB_ENEMY_MOTION_SAMPLED_OBSTACLE_CAUSE_UNKNOWN`.
+
+**P0 SH-03 / SH-05 / Thomas:** in the real Dojo, place two equipped gunners
+near an actual low pillar or cover, witness a failed optional flank and then
+follow the **same enemy IDs**. Confirm one recovering gunner relinquishes
+movement leadership and an eligible wingman visibly translates; check the
+same situation at normal speed and TimeScale 0.005. A nonzero displacement
+can demonstrate **Web translation occurred** but cannot identify the
+obstacle, prove the fall-back algorithm caused it, certify muzzle
+occlusion, collision safety or MCD-native behaviour. Pair this telemetry
+with an operator-observed video/scene context, and treat lack of a viable
+two-gunner scenario or sparse sampling as **INCONNU**, never native
+refutation. SH-05 exclusively owns runtime repairs; this PR changes no
+gameplay module, source geometry, commercial asset, renderer or CI config.
+
+**Verification boundary:** Node tests for this diagnostic use authored
+snapshots and are not actual browser execution. The opt-in owner WebGL
+playthrough and FPS/draw-call measurements remain independently required
+before any visible success claim.

@@ -5,7 +5,7 @@ import { startDojoCapture, inspectDojoCaptureReadiness, DOJO_ROUTE_HOTKEYS, dojo
 function mockBrowser() {
   const listeners = new Map();
   let seq=1, intervalCallback=null, cleared=false, screen='playing';
-  let controlsHidden=true, killed=0, pointerLocked=false, deathPhysics=null;
+  let controlsHidden=true, killed=0, pointerLocked=false, deathPhysics=null, liveEnemyPosition=null;
   const sceneCanvas = {id:'scene'};
   const documentListeners = new Map();
   const source={scenePath:'Assets/Scenes/SHRL_Dojo2.unity',sceneBuildIndex:10,serializedOwner:'level10'};
@@ -17,10 +17,11 @@ function mockBrowser() {
     gameplay:{doorWarning:{readiness:'source-catalog-present',
       lastEventStatus:'triggered',activeEnvelopes:1,renderedSpotlights:0,
       privateDoorKey:'DO_NOT_SERIALIZE'},
-      encounter:{killed,killTarget:6,enemies:deathPhysics===null?[]:[{
-        id:'native-encounter-0',alive:false,deathPhysics,
-        privateSourcePath:'DO_NOT_SERIALIZE',
-      }]},
+      encounter:{killed,killTarget:6,enemies:deathPhysics===null
+        ? (liveEnemyPosition ? [{id:'native-encounter-0',alive:true,
+          ...liveEnemyPosition,privateSourcePath:'DO_NOT_SERIALIZE'}] : [])
+        : [{id:'native-encounter-0',alive:false,deathPhysics,
+          privateSourcePath:'DO_NOT_SERIALIZE'}]},
       weapon:true,ammo:6,heldItem:null,items:[{id:'cup-1',name:'PRIVATE_NAME',state:'static'},
         {id:'cup-2',name:'PRIVATE_NAME',state:'held'}],originalFragmentCount:2,
       audio:{sceneAmbienceSources:3,assets:{PRIVATE:'not serialized'}},
@@ -46,6 +47,7 @@ function mockBrowser() {
     setFrame(n){seq=n;}, setScreen(value){screen=value;},
     setControlsHidden(value){controlsHidden=value;}, setKilled(value){killed=value;},
     setDeathPhysics(value){deathPhysics=value;},
+    setLiveEnemyPosition(value){liveEnemyPosition=value;},
     setPointerLock(value){pointerLocked=value;},
     mouse(button=0,trusted=true,target=sceneCanvas){
       documentListeners.get('mousedown')?.({button,isTrusted:trusted,target});
@@ -70,7 +72,8 @@ test('SH10 captures existing host PBD failure status but strips unknown fields a
     mock.setDeathPhysics('PRIVATE_RIG_ID_404'); mock.setFrame(3); mock.tick();
     const data=recorder.stop();
     assert.deepEqual(data.frames[1].gameplay.encounter.enemies,[{
-      id:'native-encounter-0',alive:false,deathPhysics:'web-pbd-step-rejected',
+      id:'native-encounter-0',alive:false,motionFromFirstSampleMeters:null,
+      deathPhysics:'web-pbd-step-rejected',
     }]);
     assert.equal(data.frames[2].gameplay.encounter.enemies[0].deathPhysics,null);
     assert.equal(JSON.stringify(data).includes('DO_NOT_SERIALIZE'),false);
@@ -104,6 +107,26 @@ test('SH10 browser recorder samples rendered frame telemetry without private ite
     assert.equal(JSON.stringify(data).includes('not serialized'),false);
     assert.equal(JSON.stringify(data).includes('DO_NOT_SERIALIZE'),false);
     assert.equal(mock.listenerCount,0);assert.equal(mock.cleared,true);
+  } finally {mock.teardown();}
+});
+
+test('SH10 records actual per-enemy displacement, never original absolute Web positions',()=>{
+  const mock=mockBrowser();
+  try {
+    mock.setLiveEnemyPosition({x:103.5,y:2,z:-41.75});
+    const recorder=startDojoCapture();
+    mock.setLiveEnemyPosition({x:103.5375,y:2,z:-41.755});
+    mock.setFrame(2);mock.tick();
+    mock.setLiveEnemyPosition({x:Infinity,y:2,z:0}); // refuse nonfinite input
+    mock.setFrame(3);mock.tick();
+    const actors=recorder.stop().frames.map(frame => frame.gameplay.encounter.enemies[0]);
+    assert.deepEqual(actors.map(a=>a.motionFromFirstSampleMeters),[
+      {dx:0,dy:0,dz:0},{dx:.0375,dy:0,dz:-.005},null,
+    ]);
+    const serialized=JSON.stringify(actors);
+    assert.equal(serialized.includes('103.5'),false);
+    assert.equal(serialized.includes('-41.75'),false);
+    assert.equal(serialized.includes('DO_NOT_SERIALIZE'),false);
   } finally {mock.teardown();}
 });
 

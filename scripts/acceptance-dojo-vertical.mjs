@@ -89,6 +89,54 @@ function checkRoute(trace, frames, beforeWinIndex) {
   return { errors, observed };
 }
 
+/**
+ * Informational motion diagnostic from ACTUALLY SAMPLED Web enemy positions.
+ * Relative coordinates contain no original spawn/world positions. This cannot
+ * infer why an actor moved (blocked flank, shove, pathfind, etc.) and is not a
+ * collision or native-physics parity verdict. Available even on incomplete runs.
+ */
+function summarizeEnemyMotion(frames) {
+  const movement = new Map();
+  for (const frame of frames) {
+    if (frame.activeScreen === 'win') break;
+    if (frame.activeScreen !== 'playing') continue;
+    for (const enemy of frame.gameplay.encounter?.enemies ?? []) {
+      if (enemy?.alive !== true) continue;
+      const id = itemKey(enemy.id), point = enemy.motionFromFirstSampleMeters;
+      if (!id || !isRecord(point) ||
+          ![point.dx, point.dy, point.dz].every(n => Number.isFinite(n) && Math.abs(n) < 1000)) continue;
+      let record = movement.get(id);
+      if (!record) {
+        record = {id, sampledFrames:0, cumulativeMeters:0,
+          maximumSampledStepMeters:0, netMeters:0, previous:null, first:null};
+        movement.set(id, record);
+      }
+      const vector = [point.dx, point.dy, point.dz];
+      if (!record.first) record.first = vector;
+      if (record.previous) {
+        const step = Math.hypot(...vector.map((v, i) => v - record.previous[i]));
+        record.cumulativeMeters += step;
+        record.maximumSampledStepMeters = Math.max(record.maximumSampledStepMeters, step);
+      }
+      record.previous = vector;
+      record.netMeters = Math.hypot(...vector.map((v, i) => v - record.first[i]));
+      record.sampledFrames++;
+    }
+  }
+  const actors = [...movement.values()]
+    .map(({id, sampledFrames, cumulativeMeters, maximumSampledStepMeters, netMeters}) =>
+      ({id, sampledFrames, cumulativeMeters, maximumSampledStepMeters, netMeters}))
+    .sort((a, b) => b.cumulativeMeters - a.cumulativeMeters)
+    .slice(0, 12);
+  return {
+    status: actors.length ? 'WEB_ENEMY_MOTION_SAMPLED_OBSTACLE_CAUSE_UNKNOWN'
+      : 'UNKNOWN_NO_WEB_ENEMY_MOTION_TELEMETRY',
+    trackedLivingActors: movement.size,
+    actorsMovingOver5cm: [...movement.values()].filter(a => a.cumulativeMeters >= 0.05).length,
+    actors,
+  };
+}
+
 /** Entire user-observed run: start, spawn, gun, pickup/throw, 6–7 kills, win,
  *  reset cleanup, and three operator-labelled route measurements.
  *  Never trusts JSON or route labels as independently authenticated evidence.
@@ -130,6 +178,7 @@ export function assessDojoVertical(trace) {
       return report(DOJO_VERTICAL_STATUS.INVALID);
     }
   }
+  observed.enemyMotion = summarizeEnemyMotion(frames);
   const start = frames.findIndex(f => f.activeScreen === 'playing' && get(f).encounter.killed === 0);
   const win = frames.findIndex(f => f.activeScreen === 'win' &&
     get(f).encounter.killed >= get(f).encounter.killTarget);
