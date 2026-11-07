@@ -3075,3 +3075,46 @@ test('J3 Web crossfire at long range: blocked rear gunner side-steps before stac
   assert.ok(clear,'physical side steps eventually uncover a real firing corridor');
   assert.ok(rear.encounter.visible,'the actor never gained permission from hidden player coordinates');
 });
+
+
+test('J3 Web corner escape: a gunner with both retreat diagonals blocked takes only a legal tangent',()=>{
+  // Synthetic navigation/actors. Existing Dojo encounter consumes this; Web
+  // authored footwork is never described as native MCD enemy intelligence.
+  const player={playerFeet:p(3.3,0,2),playerPosition:p(3.3,1.6,2)};
+  const make=()=>{
+    const runtime=setup(),gunner=firstSpawn(runtime,player);
+    gunner.clock=0; // exclude cyclic close-range strafing
+    gunner.muzzlePosition=p(2,1.4,2);
+    gunner.muzzleForward=p(1,0,0);
+    gunner.encounter.webTacticalSide=1;
+    const rear={id:'rear-blocker',x:.95,y:0,z:2,alive:true,active:true};
+    return {runtime,gunner,rear};
+  };
+  const frame=(fight,others=[])=>advanceNativeEncounter(fight.runtime,input(
+    [fight.gunner,fight.rear,...others],{...player,scaledDeltaTime:.2,unscaledDeltaTime:.2},
+  ));
+  const escaped=make();
+  const start=p(escaped.gunner.x,escaped.gunner.y,escaped.gunner.z);
+  frame(escaped);
+  assert.ok(Math.abs(escaped.gunner.z-start.z)>.1,
+    'blocked backward and diagonal steps should yield a genuine lateral escape');
+  assert.ok(Math.abs(escaped.gunner.x-start.x)<.001,
+    'the gunner cannot tunnel through the ally in its retreat lane');
+  assert.ok(Math.hypot(escaped.gunner.x-escaped.rear.x,escaped.gunner.z-escaped.rear.z)>.8,
+    'tangential movement retains the live-ally capsule exclusion');
+  assert.ok(Math.hypot(escaped.gunner.x-player.playerFeet.x,escaped.gunner.z-player.playerFeet.z)>
+    Math.hypot(start.x-player.playerFeet.x,start.z-player.playerFeet.z),
+  'a corner escape must not charge into the player');
+  assert.equal(escaped.gunner.walking,true,'real movement still drives the animation flag');
+  assert.equal(escaped.gunner.encounter.canAttack,true,
+    'retreat never grants or revokes an otherwise genuine muzzle corridor');
+
+  const sealed=make();
+  const before=p(sealed.gunner.x,sealed.gunner.y,sealed.gunner.z);
+  frame(sealed,[
+    {id:'left-blocker',x:2,y:0,z:1.1,alive:true,active:true},
+    {id:'right-blocker',x:2,y:0,z:2.9,alive:true,active:true},
+  ]);
+  assert.deepEqual(p(sealed.gunner.x,sealed.gunner.y,sealed.gunner.z),before,
+    'no legal tangent means hold position: never phase through a teammate');
+});
