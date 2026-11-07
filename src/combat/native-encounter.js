@@ -1832,6 +1832,9 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
   const speed=advanceNativeEnemySpeed(enemy.runtime,enemy.activeWeaponSettings ?? runtime.enemySettings,
     (disengaging || tactical || reloadScoot) ? 'walking' : stop ? 'standing'
       : armed && !breaching ? 'walking' : 'running',scaledDeltaTime);
+  const facing=state.visible ? playerPosition : pursuitFeet;
+  const dx=facing.x-start.x, dz=facing.z-start.z;
+  if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   // J3 Web-only crossfire release beyond the firing ring: an approaching
   // gunner with a real ally physically in its muzzle lane should seek a safe
   // side corridor BEFORE marching into that ally's back. The existing peek
@@ -1842,9 +1845,6 @@ function moveEnemy(runtime, enemy, input, observingAllies, fireTurns, localSquad
       !enemy.runtime.pendingShot && scaledDeltaTime>0 &&
       tryWebStrafe(runtime,enemy,playerFeet,enemies,scaledDeltaTime,
         {preferClearMuzzle:true,firingTarget:playerPosition}))return;
-  const facing=state.visible ? playerPosition : pursuitFeet;
-  const dx=facing.x-start.x, dz=facing.z-start.z;
-  if (dx || dz) enemy.face=Math.atan2(dx,-dz);
   if (stop) {
     if(disengaging && scaledDeltaTime>0) {
       if(!tryWebDisengage(runtime,enemy,playerFeet,enemies,scaledDeltaTime))enemy.runtime.speed=0;
